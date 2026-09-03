@@ -81,3 +81,16 @@ describe("commercial calculation", () => {
     expect(approvedCommission("1000000", "sent").commissionAmount).toBeNull();
   });
 });
+
+describe("multi-SKU film aggregation", () => {
+  it("aggregates rounded SKU order lengths, losses, and priceable quantities", () => {
+    const result = calculatePouchCost({
+      spec: { ...baseSpec, skuRequiredLengthsM: ["500", "500"] },
+      quantity: "1000",
+      printingMethod: "digital",
+    });
+    expect(result.film.orderLengthM).toBe("1000");
+    expect(result.film.pricingQuantity).toBe("22000");
+    expect(result.audit.componentReconciliationDifference).toBe("0");
+  });
+});

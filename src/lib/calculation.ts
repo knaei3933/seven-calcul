@@ -85,7 +85,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters 
   );
   if (!digitalValidation.valid) throw new QuotationValidationError("digital_film_order_invalid", digitalValidation);
 
-  const film = calculateFilmCost(size, spec, quantityD, printingMethod, params);
+  const film = calculateFilmCost(size, printingMethod, params, digitalValidation);
   const initialCharge = initialChargeMl(spec, params);
   const testFill = D(params.fillTestRuns).times(spec.fillingLanes).times(spec.fillMlPerChamber);
   const chamberCount = quantityD.times(spec.connectedChambers);
@@ -170,21 +170,38 @@ export function getSizeMaster(spec: PouchSpec): SizeMaster {
   return size;
 }
 
-function calculateFilmCost(size: SizeMaster, spec: PouchSpec, quantity: Decimal, printingMethod: PrintingMethod, params: CostParameters): FilmCostResult {
+function calculateFilmCost(
+  size: SizeMaster,
+  printingMethod: PrintingMethod,
+  params: CostParameters,
+  digitalValidation: ReturnType<typeof validateDigitalFilmOrder>,
+): FilmCostResult {
   if (printingMethod !== "digital") throw validationError("gravure_not_configured");
   const pitch = D(size.lengthMm).plus(size.pitchAddMm);
-  const required = quantity.div(D(1).minus(params.lossRate)).div(size.lanes).times(pitch).div(1000);
-  const orderLength = ceilTo(maxD(required, 100), 100);
-  const loss = maxD(params.lossMinM, orderLength.times(params.lossRate));
-  const effective = orderLength.minus(loss);
-  const actual = effective.times(1000).div(pitch).floor().times(size.lanes);
-  const pricing = actual.div(500).floor().times(500);
-  if (pricing.lte(0)) throw validationError("no_priceable_quantity");
+  const skuResults = digitalValidation.orderLengths.map((sku) => {
+    const required = D(sku.requiredLengthM);
+    const orderLength = D(sku.orderLengthM);
+    const loss = maxD(params.lossMinM, orderLength.times(params.lossRate));
+    const effective = orderLength.minus(loss);
+    const actual = effective.times(1000).div(pitch).floor().times(size.lanes);
+    const pricing = actual.div(500).floor().times(500);
+    if (pricing.lte(0)) throw validationError("no_priceable_quantity");
+    const unitPrice = filmUnitPrice(size.priceBand, orderLength, params);
+    const baseCost = orderLength.times(unitPrice);
+    return { required, orderLength, loss, effective, actual, pricing, unitPrice, baseCost };
+  });
+
+  const required = sum(skuResults.map((sku) => sku.required));
+  const orderLength = sum(skuResults.map((sku) => sku.orderLength));
+  const loss = sum(skuResults.map((sku) => sku.loss));
+  const effective = sum(skuResults.map((sku) => sku.effective));
+  const actual = sum(skuResults.map((sku) => sku.actual));
+  const pricing = sum(skuResults.map((sku) => sku.pricing));
+  const baseCost = sum(skuResults.map((sku) => sku.baseCost));
+  const unitPrice = orderLength.eq(0) ? D(0) : baseCost.div(orderLength);
 
   const useLargeLot = Boolean(size.largeLotWebWidthMm) && orderLength.gte(1000);
   const webWidth = useLargeLot ? size.largeLotWebWidthMm! : size.webWidthMm;
-  const unitPrice = filmUnitPrice(size.priceBand, orderLength, params);
-  const baseCost = orderLength.times(unitPrice);
   const shippingUnit = params.shippingUnitsM["500"].includes(webWidth) ? 500 : 400;
   const shippingTrips = ceilTo(orderLength.times(size.prodMultiplier), shippingUnit);
   const domestic = shippingTrips.times(params.domesticShippingPerTrip);
