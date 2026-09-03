@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { calculatePouchCost } from "@/lib/calculation";
+import { QuotationValidationError } from "@/lib/digital-film";
 
 export const runtime = "nodejs";
 
@@ -9,6 +10,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!input?.spec || !input?.quantity || !input?.printingMethod) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     return NextResponse.json({ result: calculatePouchCost(input) });
   } catch (error) {
+    if (error instanceof QuotationValidationError) {
+      return NextResponse.json({ error: error.code, digitalValidation: error.digitalValidation }, { status: 400 });
+    }
     const code = error instanceof Error ? error.message : "calculation_failed";
     return NextResponse.json({ error: code }, { status: 400 });
   }

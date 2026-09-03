@@ -83,6 +83,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters 
     spec.skuRequiredLengthsM.map((requiredLengthM, index) => ({ skuCode: `SKU-${index + 1}`, requiredLengthM })),
     params,
   );
+  if (!digitalValidation.valid) throw new QuotationValidationError("digital_film_order_invalid", digitalValidation);
 
   const film = calculateFilmCost(size, spec, quantityD, printingMethod, params);
   const initialCharge = initialChargeMl(spec, params);
