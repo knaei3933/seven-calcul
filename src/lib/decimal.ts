@@ -1,0 +1,24 @@
+import DecimalConstructor from "decimal.js";
+
+const Decimal = DecimalConstructor.clone({ precision: 40, rounding: DecimalConstructor.ROUND_HALF_UP });
+
+export { Decimal };
+export type Decimal = DecimalConstructor;
+
+export const D = (value: DecimalValueInput): Decimal =>
+  value instanceof Decimal ? value : new Decimal(value ?? 0);
+
+export const sum = (values: DecimalValueInput[]): Decimal =>
+  values.reduce<Decimal>((total, value) => total.plus(D(value)), D(0));
+
+export const ceilTo = (value: DecimalValueInput, unit: DecimalValueInput): Decimal => {
+  const amount = D(value);
+  const step = D(unit);
+  if (step.lte(0)) throw new Error("Ceiling unit must be positive");
+  return amount.div(step).ceil().times(step);
+};
+
+export const maxD = (...values: DecimalValueInput[]): Decimal => values.reduce<Decimal>((a, b) => Decimal.max(a, D(b)), D(0));
+export const eq = (a: DecimalValueInput, b: DecimalValueInput): boolean => D(a).eq(D(b));
+
+type DecimalValueInput = string | number | DecimalConstructor.Instance | null | undefined;

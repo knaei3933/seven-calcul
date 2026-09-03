@@ -1,0 +1,14 @@
+{
+  "worker": "worker-2",
+  "messages": [
+    {
+      "message_id": "68454767-c00f-4553-b085-855aa8083ea7",
+      "from_worker": "leader-fixed",
+      "to_worker": "worker-2",
+      "body": "Assignment: You own verification. Wait until shared calculation core and UI exist, then add unit tests and browser smoke tests. Do not modify implementation except minimal direct test fixes. Report commands and outputs via mailbox, then transition task 2 completed.",
+      "created_at": "2026-09-03T01:34:07.840Z",
+      "notified_at": "2026-09-03T01:34:10.688Z",
+      "delivered_at": "2026-09-03T01:34:38.785Z"
+    }
+  ]
+}

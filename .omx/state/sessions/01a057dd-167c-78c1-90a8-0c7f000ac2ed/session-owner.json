@@ -1,0 +1,17 @@
+{
+  "session_id": "01a057dd-167c-78c1-90a8-0c7f000ac2ed",
+  "native_session_id": "01a057dd-167c-78c1-90a8-0c7f000ac2ed",
+  "started_at": "2026-08-31T12:49:11.597Z",
+  "cwd": "/root/pouch-clacul",
+  "state_root": "/root/pouch-clacul/.omx/state/sessions/01a057dd-167c-78c1-90a8-0c7f000ac2ed",
+  "pid": 55015,
+  "platform": "linux",
+  "identity_schema_version": 2,
+  "process_identity": {
+    "platform": "linux",
+    "birth": "4114364",
+    "cmdline_hash": "55a1840b59a024e67542370c386f22e9d07f450d2d1adcf410ad7403cc9b410c"
+  },
+  "pid_start_ticks": 4114364,
+  "pid_cmdline": "/root/.nvm/versions/node/v24.18.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"
+}

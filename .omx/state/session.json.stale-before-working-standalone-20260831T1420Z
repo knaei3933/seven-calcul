@@ -1,0 +1,20 @@
+{
+  "session_id": "omx-1788184355102-9wsycq",
+  "owner_omx_session_id": "omx-1788184355102-9wsycq",
+  "started_at": "2026-08-31T13:52:35.306Z",
+  "launch_lineage_token": "e0e223c3-e7b6-4330-b24e-2b767ebc7c23",
+  "cwd": "/root/pouch-clacul",
+  "state_root": "/root/pouch-clacul/.omx/state",
+  "pid": 83598,
+  "platform": "linux",
+  "identity_schema_version": 2,
+  "process_identity": {
+    "platform": "linux",
+    "birth": "4499705",
+    "cmdline_hash": "7745091af81ade24ced43e033a06727b0ac94250d037bafdf8dcb95432b1e879"
+  },
+  "pid_start_ticks": 4499705,
+  "pid_cmdline": "/root/.nvm/versions/node/v24.18.0/bin/node /root/.nvm/versions/node/v24.18.0/lib/node_modules/oh-my-codex/dist/cli/omx.js __detached-session-leader eyJjd2QiOiIvcm9vdC9wb3VjaC1jbGFjdWwiLCJzZXNzaW9uTmFtZSI6Im9teC1wb3VjaC1jbGFjdWwtZGV0YWNoZWQtMTc4ODE4NDM1NTEwMi05d3N5Y3EiLCJzZXNzaW9uSWQiOiJvbXgtMTc4ODE4NDM1NTEwMi05d3N5Y3EiLCJjb2RleENtZCI6IicvYmluL2Jhc2gnIC1jICdleGVjICdcIidcIidjb2RleCdcIidcIicgJ1wiJ1wiJy1jJ1wiJ1wiJyAnXCInXCInbW9kZWxfaW5zdHJ1Y3Rpb25zX2ZpbGU9XCIvcm9vdC9wb3VjaC1jbGFjdWwvLm9teC9zdGF0ZS9zZXNzaW9ucy9vbXgtMTc4ODE4NDM1NTEwMi05d3N5Y3EvQUdFTlRTLm1kXCInXCInXCInJyIsImNvZGV4SG9tZU92ZXJyaWRlIjoiL3Jvb3QvLmxvY2FsL3NoYXJlL29yY2EvY29kZXgtcnVudGltZS1ob21lL2hvbWUiLCJwYXJlbnRFbnZGaWxlUGF0aCI6Ii9yb290L3BvdWNoLWNsYWN1bC8ub214L3J1bnRpbWUvdG11eC1lbnYvb214LTE3ODgxODQzNTUxMDItOXdzeWNxLmVudiIsInJlYWR5UGF0aCI6Ii9yb290L3BvdWNoLWNsYWN1bC8ub214L3J1bnRpbWUvZGV0YWNoZWQtcmVsZWFzZS9vbXgtMTc4ODE4NDM1NTEwMi05d3N5Y3EuZjhjNjYxZDMtMzczZi00ZTc0LWFiZGItZmJlM2JlNWZkOTY3LnJlbGVhc2UiLCJwcmVMYXVuY2hPcHRpb25zIjp7ImVuYWJsZU5vdGlmeUZhbGxiYWNrQXV0aG9yaXR5IjpmYWxzZSwid29ya3RyZWVEaXJ0eSI6ZmFsc2UsInNob3VsZEF0dGFjaCI6dHJ1ZX19",
+  "tmux_session_name": "omx-pouch-clacul-detached-1788184355102-9wsycq",
+  "tmux_pane_id": "%0"
+}

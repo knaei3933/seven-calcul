@@ -1,0 +1,13 @@
+{
+  "owner": "hud",
+  "pid": 55883,
+  "cwd": "/root/pouch-clacul",
+  "heartbeat_at": "2026-09-03T01:51:55.453Z",
+  "cooldown_ms": 5000,
+  "jitter_ms": 225,
+  "skip_count": 157293,
+  "last_status": "spawned",
+  "last_reason": "spawned",
+  "last_spawn_at": "2026-09-03T01:51:55.453Z",
+  "next_allowed_at": "2026-09-03T01:52:00.678Z"
+}

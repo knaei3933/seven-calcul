@@ -1,0 +1,384 @@
+{
+  "records": [
+    {
+      "request_id": "2fdf0e31-744a-4982-b602-8bf6486c871f",
+      "target": "worker-2",
+      "status": "notified",
+      "created_at": "2026-09-03T01:32:46.220Z",
+      "notified_at": "2026-09-03T01:32:50.583Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "tmux_send_keys_sent",
+      "metadata": {
+        "kind": "inbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 2,
+        "pane_id": "%5",
+        "trigger_message": "Read .omx/state/team/implement-the-approve-57483222/workers/worker-2/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.",
+        "inbox_correlation_key": "startup-direct:worker-2",
+        "transport_preference": "transport_direct",
+        "fallback_allowed": false,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "d8ae3aa3-786c-47e2-ad37-f90b01c6254d",
+      "target": "worker-3",
+      "status": "notified",
+      "created_at": "2026-09-03T01:32:46.308Z",
+      "notified_at": "2026-09-03T01:32:50.763Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "tmux_send_keys_sent",
+      "metadata": {
+        "kind": "inbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 3,
+        "pane_id": "%6",
+        "trigger_message": "Read .omx/state/team/implement-the-approve-57483222/workers/worker-3/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.",
+        "inbox_correlation_key": "startup-direct:worker-3",
+        "transport_preference": "transport_direct",
+        "fallback_allowed": false,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "2dabe9df-818a-4fb5-b2b3-545dc68f523a",
+      "target": "worker-1",
+      "status": "notified",
+      "created_at": "2026-09-03T01:32:46.435Z",
+      "notified_at": "2026-09-03T01:32:50.688Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "tmux_send_keys_sent",
+      "metadata": {
+        "kind": "inbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 1,
+        "pane_id": "%4",
+        "trigger_message": "Read .omx/state/team/implement-the-approve-57483222/workers/worker-1/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.",
+        "inbox_correlation_key": "startup-direct:worker-1",
+        "transport_preference": "transport_direct",
+        "fallback_allowed": false,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "c4d27bb8-e6c2-48fb-a9b9-bbddb1d930a3",
+      "target": "worker-4",
+      "status": "notified",
+      "created_at": "2026-09-03T01:32:46.594Z",
+      "notified_at": "2026-09-03T01:32:50.854Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "tmux_send_keys_sent",
+      "metadata": {
+        "kind": "inbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 4,
+        "pane_id": "%7",
+        "trigger_message": "Read .omx/state/team/implement-the-approve-57483222/workers/worker-4/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.",
+        "inbox_correlation_key": "startup-direct:worker-4",
+        "transport_preference": "transport_direct",
+        "fallback_allowed": false,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "56784f5b-1818-4fe8-a3aa-61297d310bf4",
+      "target": "worker-2",
+      "status": "notified",
+      "created_at": "2026-09-03T01:32:50.632Z",
+      "notified_at": "2026-09-03T01:32:57.645Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "fallback_confirmed:tmux_send_keys_sent",
+      "metadata": {
+        "kind": "inbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 2,
+        "pane_id": "%5",
+        "trigger_message": "Read .omx/state/team/implement-the-approve-57483222/workers/worker-2/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.",
+        "inbox_correlation_key": "startup:worker-2",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 2
+      }
+    },
+    {
+      "request_id": "9c50fcf3-fb2d-453a-ac36-104a5207c252",
+      "target": "worker-1",
+      "status": "notified",
+      "created_at": "2026-09-03T01:32:50.714Z",
+      "notified_at": "2026-09-03T01:32:57.522Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "fallback_confirmed:tmux_send_keys_sent",
+      "metadata": {
+        "kind": "inbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 1,
+        "pane_id": "%4",
+        "trigger_message": "Read .omx/state/team/implement-the-approve-57483222/workers/worker-1/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.",
+        "inbox_correlation_key": "startup:worker-1",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "c337697b-356f-4f62-a3a3-42505a9d36d8",
+      "target": "worker-3",
+      "status": "notified",
+      "created_at": "2026-09-03T01:32:50.790Z",
+      "notified_at": "2026-09-03T01:32:57.620Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "fallback_confirmed:tmux_send_keys_sent",
+      "metadata": {
+        "kind": "inbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 3,
+        "pane_id": "%6",
+        "trigger_message": "Read .omx/state/team/implement-the-approve-57483222/workers/worker-3/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.",
+        "inbox_correlation_key": "startup:worker-3",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "d3b965ea-58be-4ba6-9d45-06b62df9adfb",
+      "target": "worker-4",
+      "status": "notified",
+      "created_at": "2026-09-03T01:32:50.877Z",
+      "notified_at": "2026-09-03T01:32:57.634Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "fallback_confirmed:tmux_send_keys_sent",
+      "metadata": {
+        "kind": "inbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 4,
+        "pane_id": "%7",
+        "trigger_message": "Read .omx/state/team/implement-the-approve-57483222/workers/worker-4/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.",
+        "inbox_correlation_key": "startup:worker-4",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "dfa918c9-3cfa-4eb4-9e9b-2b53a3f8e740",
+      "target": "leader-fixed",
+      "status": "notified",
+      "created_at": "2026-09-03T01:33:03.659Z",
+      "notified_at": "2026-09-03T01:33:06.153Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "fallback_confirmed:leader_mailbox_notified",
+      "metadata": {
+        "kind": "mailbox",
+        "team_name": "implement-the-approve-57483222",
+        "pane_id": "%3",
+        "trigger_message": "Read /root/pouch-clacul/.omx/state/team/implement-the-approve-57483222/mailbox/leader-fixed.json; new msg from worker-1. Review it; decide next step.",
+        "message_id": "e70039b0-9690-4cae-a2d8-b4e745607302",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "5e6f22e5-d57f-4347-8700-f9b78a878c09",
+      "target": "worker-1",
+      "status": "notified",
+      "created_at": "2026-09-03T01:34:04.755Z",
+      "notified_at": "2026-09-03T01:34:07.614Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "fallback_confirmed:tmux_send_keys_sent",
+      "metadata": {
+        "kind": "mailbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 1,
+        "pane_id": "%4",
+        "trigger_message": "You have 1 new message(s). Read .omx/state/team/implement-the-approve-57483222/mailbox/worker-1.json, act now, reply with concrete progress, then continue assigned work or next feasible task.",
+        "message_id": "db5ad7fc-a0f2-467f-9321-5251668b5b41",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "c5b3e5e5-7147-472a-8b83-76726955cacb",
+      "target": "worker-2",
+      "status": "delivered",
+      "created_at": "2026-09-03T01:34:07.850Z",
+      "notified_at": "2026-09-03T01:34:10.717Z",
+      "delivered_at": "2026-09-03T01:34:38.814Z",
+      "failed_at": null,
+      "reason": "fallback_confirmed:tmux_send_keys_sent",
+      "metadata": {
+        "kind": "mailbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 2,
+        "pane_id": "%5",
+        "trigger_message": "You have 1 new message(s). Read .omx/state/team/implement-the-approve-57483222/mailbox/worker-2.json, act now, reply with concrete progress, then continue assigned work or next feasible task.",
+        "message_id": "68454767-c00f-4553-b085-855aa8083ea7",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 2
+      }
+    },
+    {
+      "request_id": "0dfbe425-5fa2-4224-99dc-7bf879377e48",
+      "target": "worker-3",
+      "status": "delivered",
+      "created_at": "2026-09-03T01:34:11.000Z",
+      "notified_at": "2026-09-03T01:34:13.971Z",
+      "delivered_at": "2026-09-03T01:51:29.109Z",
+      "failed_at": null,
+      "reason": "fallback_confirmed:tmux_send_keys_sent",
+      "metadata": {
+        "kind": "mailbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 3,
+        "pane_id": "%6",
+        "trigger_message": "You have 1 new message(s). Read .omx/state/team/implement-the-approve-57483222/mailbox/worker-3.json, act now, reply with concrete progress, then continue assigned work or next feasible task.",
+        "message_id": "5b78973b-4b14-4364-b899-5b566e4705f1",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 2
+      }
+    },
+    {
+      "request_id": "5ff9ab76-4b0c-4c13-9442-5f0bd92d3125",
+      "target": "worker-4",
+      "status": "delivered",
+      "created_at": "2026-09-03T01:34:14.205Z",
+      "notified_at": "2026-09-03T01:34:17.101Z",
+      "delivered_at": "2026-09-03T01:38:40.575Z",
+      "failed_at": null,
+      "reason": "fallback_confirmed:tmux_send_keys_sent",
+      "metadata": {
+        "kind": "mailbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 4,
+        "pane_id": "%7",
+        "trigger_message": "You have 1 new message(s). Read .omx/state/team/implement-the-approve-57483222/mailbox/worker-4.json, act now, reply with concrete progress, then continue assigned work or next feasible task.",
+        "message_id": "98178ebc-5279-4ca5-9c2c-d5d061b45448",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 2
+      }
+    },
+    {
+      "request_id": "0f2aaa64-7e7d-4ad7-a1d8-f6034681e62e",
+      "target": "worker-1",
+      "status": "notified",
+      "created_at": "2026-09-03T01:50:36.419Z",
+      "notified_at": "2026-09-03T01:50:43.087Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "fallback_confirmed:tmux_send_keys_sent",
+      "metadata": {
+        "kind": "inbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 1,
+        "pane_id": "%4",
+        "trigger_message": "Read .omx/state/team/implement-the-approve-57483222/workers/worker-1/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.",
+        "inbox_correlation_key": "assign:1:worker-1",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 2
+      }
+    },
+    {
+      "request_id": "42ec9ed4-ef30-4510-809c-3bf6329ed817",
+      "target": "worker-4",
+      "status": "notified",
+      "created_at": "2026-09-03T01:50:43.108Z",
+      "notified_at": "2026-09-03T01:50:49.724Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "fallback_confirmed:tmux_send_keys_sent",
+      "metadata": {
+        "kind": "inbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 4,
+        "pane_id": "%7",
+        "trigger_message": "Read .omx/state/team/implement-the-approve-57483222/workers/worker-4/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.",
+        "intent": "followup-relaunch",
+        "inbox_correlation_key": "assign:2:worker-4",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "b4fa4033-65fa-4736-b152-7951a333499c",
+      "target": "worker-1",
+      "status": "notified",
+      "created_at": "2026-09-03T01:50:49.748Z",
+      "notified_at": "2026-09-03T01:50:56.372Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "fallback_confirmed:tmux_send_keys_sent",
+      "metadata": {
+        "kind": "inbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 1,
+        "pane_id": "%4",
+        "trigger_message": "Read .omx/state/team/implement-the-approve-57483222/workers/worker-1/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.",
+        "intent": "followup-relaunch",
+        "inbox_correlation_key": "assign:3:worker-1",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "08787c31-ffdc-4730-9ed3-c807f92277c5",
+      "target": "leader-fixed",
+      "status": "notified",
+      "created_at": "2026-09-03T01:51:00.770Z",
+      "notified_at": "2026-09-03T01:51:03.284Z",
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": "fallback_confirmed:leader_mailbox_notified",
+      "metadata": {
+        "kind": "mailbox",
+        "team_name": "implement-the-approve-57483222",
+        "pane_id": "%3",
+        "trigger_message": "Read /root/pouch-clacul/.omx/state/team/implement-the-approve-57483222/mailbox/leader-fixed.json; new msg from worker-4. Review it; decide next step.",
+        "intent": "pending-mailbox-review",
+        "message_id": "ffbba9d6-b287-4402-8670-2b93b66ad4e4",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 1
+      }
+    },
+    {
+      "request_id": "798b6fe2-2d9d-4c81-ae45-cf6ff5cfbcef",
+      "target": "worker-1",
+      "status": "pending",
+      "created_at": "2026-09-03T01:51:55.397Z",
+      "notified_at": null,
+      "delivered_at": null,
+      "failed_at": null,
+      "reason": null,
+      "metadata": {
+        "kind": "mailbox",
+        "team_name": "implement-the-approve-57483222",
+        "worker_index": 1,
+        "pane_id": "%4",
+        "trigger_message": "You have 1 new message(s). Read .omx/state/team/implement-the-approve-57483222/mailbox/worker-1.json, act now, reply with concrete progress, then continue assigned work or next feasible task.",
+        "intent": "pending-mailbox-review",
+        "message_id": "bd9aa504-4210-4807-accd-a72b573359a8",
+        "transport_preference": "hook_preferred_with_fallback",
+        "fallback_allowed": true,
+        "attempt_count": 0
+      }
+    }
+  ]
+}

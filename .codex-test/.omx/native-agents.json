@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "files": {
+    "analyst.toml": {
+      "sha256": "cbe7107e22b81a74f38d4dd2b9c21fc11db55ae3ddb0463bd0be8fe40a729c5d"
+    },
+    "architect.toml": {
+      "sha256": "267490f8e12451adb66fd4409f20f9f649858791553f4e0cf6654f9cb2ef9e80"
+    },
+    "code-reviewer.toml": {
+      "sha256": "f364bc95a70fd8205ac2d88a35e24a74ac8dc958bf6b1e1b1b9171676abe86e1"
+    },
+    "code-simplifier.toml": {
+      "sha256": "3ff1f52aeebe84d59e0aea894af5ca0c321b235f3c9c564a7ca21905c3f5bed0"
+    },
+    "critic.toml": {
+      "sha256": "5b1fe71a5cc3ba52311424def5eb0a30e52fdec571d29f926ed835e3472684b1"
+    },
+    "debugger.toml": {
+      "sha256": "bad2b1d7f9c1a83ad6c6ebcb1d2e60d428ad9a99a20ef08afc3fe490326fdc99"
+    },
+    "dependency-expert.toml": {
+      "sha256": "74d39eb7f49f013c670c71ce0666b27fbfd631f6173cfa96bc8e2922f59c8d13"
+    },
+    "designer.toml": {
+      "sha256": "d48dfbbb762ef6f0dedd2704f8e6880a8b6919f5de703610ac4d8f93e261a69d"
+    },
+    "executor.toml": {
+      "sha256": "ccdb90a1f64f887f4a7569b0d318f0016bc34bd9091782ce98a3179a4401eb58"
+    },
+    "explore.toml": {
+      "sha256": "8fdf619fab2e9611880f8287815dd332ce4ee1e58f26c444f154dd4be94e4e48"
+    },
+    "git-master.toml": {
+      "sha256": "d4f26bdd8f91b7340d50b3edf3fe74d568030e38a1cdcb15cfa16d1f67899930"
+    },
+    "planner.toml": {
+      "sha256": "8b1f281dbdc436429cc3dc9be7c67f52f08a49929b40f88c1cfc9acea8bd7624"
+    },
+    "researcher.toml": {
+      "sha256": "109de194bdb3d9188c61d1325a02b2a1897b57646681bd5f0d66dfec2e86d861"
+    },
+    "team-executor.toml": {
+      "sha256": "c98948f614c31cb386b4fc463367720d816d31b5f4befdb69dacebc629cf2f85"
+    },
+    "test-engineer.toml": {
+      "sha256": "a59ef69ccaed0e6daf47ac33b5c2ecf43768f643761d635bb19de8f229f3d552"
+    },
+    "verifier.toml": {
+      "sha256": "ba08073c018736258c67bb06a3d6790c4f5032cd0092bbf110bf8e1f025b84b0"
+    },
+    "vision.toml": {
+      "sha256": "b1d29261102b14e27d15c772eef72b4460984dcf38f7a6e2c14faddd5213613d"
+    },
+    "writer.toml": {
+      "sha256": "e92618b199c24b2fae7a0c835ec2e00876943b9f844a73c95c852615f0a35235"
+    }
+  }
+}

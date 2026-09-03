@@ -1,0 +1,17 @@
+{
+  "session_id": "01a05999-4fff-7852-b78f-7ea20f96d6e1",
+  "native_session_id": "01a05999-4fff-7852-b78f-7ea20f96d6e1",
+  "started_at": "2026-08-31T20:55:48.275Z",
+  "cwd": "/root/pouch-clacul",
+  "state_root": "/root/pouch-clacul/.omx/state/sessions/01a05999-4fff-7852-b78f-7ea20f96d6e1",
+  "pid": 24975,
+  "platform": "linux",
+  "identity_schema_version": 2,
+  "process_identity": {
+    "platform": "linux",
+    "birth": "7024071",
+    "cmdline_hash": "c6f1d1c40877e882579f5cecdeacd39cf3f2872b89775cecdbf8d6462d32c444"
+  },
+  "pid_start_ticks": 7024071,
+  "pid_cmdline": "codex -c model_instructions_file=\"/root/pouch-clacul/.omx/state/sessions/omx-1788209597093-u47vif/AGENTS.md\""
+}

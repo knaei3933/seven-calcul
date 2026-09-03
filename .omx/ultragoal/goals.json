@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "createdAt": "2026-09-03T00:15:32.814Z",
+  "updatedAt": "2026-09-03T00:28:26.041Z",
+  "briefPath": ".omx/ultragoal/brief.md",
+  "goalsPath": ".omx/ultragoal/goals.json",
+  "ledgerPath": ".omx/ultragoal/ledger.jsonl",
+  "codexGoalMode": "aggregate",
+  "goals": [
+    {
+      "id": "G001-planning-handoff-omx-plans-execution",
+      "title": "Planning handoff: `.omx/plans/execution-handoff-pouch-quotation-desig...",
+      "objective": "Planning handoff: `.omx/plans/execution-handoff-pouch-quotation-design-update.md`",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-09-03T00:15:32.814Z",
+      "updatedAt": "2026-09-03T00:16:10.177Z",
+      "startedAt": "2026-09-03T00:15:41.596Z",
+      "completedAt": "2026-09-03T00:16:10.177Z",
+      "evidence": "Verified durable handoff artifact and matching session state: .omx/plans/execution-handoff-pouch-quotation-design-update.md; ralplan terminal complete with architect/critic APPROVE and bound user-source handoff."
+    },
+    {
+      "id": "G002-prd-omx-plans-prd-pouch-quotation-de",
+      "title": "PRD: `.omx/plans/prd-pouch-quotation-design-update.md`",
+      "objective": "PRD: `.omx/plans/prd-pouch-quotation-design-update.md`",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-09-03T00:15:32.814Z",
+      "updatedAt": "2026-09-03T00:20:02.881Z",
+      "startedAt": "2026-09-03T00:19:49.996Z",
+      "completedAt": "2026-09-03T00:20:02.881Z",
+      "evidence": "Applied PRD implementation passes to pouch-quotation-system-design.md: approved-only commission, canonical inputs/terms, exact bulk formulas, digital/custom/color rules, quotation records/output, data-engine alignment, scenarios, and unverified-input boundaries."
+    },
+    {
+      "id": "G003-verification-contract-omx-plans-test",
+      "title": "Verification contract: `.omx/plans/test-spec-pouch-quotation-design-u...",
+      "objective": "Verification contract: `.omx/plans/test-spec-pouch-quotation-design-update.md`",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-09-03T00:15:32.814Z",
+      "updatedAt": "2026-09-03T00:21:20.218Z",
+      "startedAt": "2026-09-03T00:21:00.960Z",
+      "completedAt": "2026-09-03T00:21:20.218Z",
+      "evidence": "Implemented static checks and TC-01..TC-11 anchors in target: 722000/728000 ml pressure examples, 300+300 validity, SKU/total rejects, 3-connection 90ml, custom 400000, approved-only 200000 commission, revision and 100m recalculation scenarios."
+    },
+    {
+      "id": "G004-interview-specification-omx-specs-de",
+      "title": "Interview specification: `.omx/specs/deep-interview-pouch-quotation-s...",
+      "objective": "Interview specification: `.omx/specs/deep-interview-pouch-quotation-system.md`",
+      "status": "complete",
+      "attempt": 0,
+      "createdAt": "2026-09-03T00:15:32.814Z",
+      "updatedAt": "2026-09-03T00:23:07.107Z",
+      "completedAt": "2026-09-03T00:23:07.107Z",
+      "evidence": "Spec residues reconciled: connected-pouch quantity, custom-size no-quote guard, explicit filling lanes, color fallback audit, structured digital corrections, audit hashes, and Japanese-only requirement."
+    },
+    {
+      "id": "G005-existing-target-pouch-quotation-syst",
+      "title": "Existing target: `pouch-quotation-system-design.md`",
+      "objective": "Existing target: `pouch-quotation-system-design.md`",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-09-03T00:15:32.814Z",
+      "updatedAt": "2026-09-03T00:24:00.103Z",
+      "startedAt": "2026-09-03T00:23:10.649Z",
+      "completedAt": "2026-09-03T00:24:00.103Z",
+      "evidence": "Existing Japanese target updated in place with syntax cleanup, explicit filling-lane input, general bulk formula, custom-size guard, digital validation/corrections, color fallback mode, audit metadata, and quotation revision fields."
+    },
+    {
+      "id": "G006-is-a-sellable-connected-pouch-is-one",
+      "title": "「枚」 is a sellable connected pouch; 「室」 is one fill chamber; fill volu...",
+      "objective": "「枚」 is a sellable connected pouch; 「室」 is one fill chamber; fill volume is ml/室.",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-09-03T00:15:32.814Z",
+      "updatedAt": "2026-09-03T00:24:10.983Z",
+      "startedAt": "2026-09-03T00:24:05.372Z",
+      "completedAt": "2026-09-03T00:24:10.983Z",
+      "evidence": "Terminology invariant represented at pouch-quotation-system-design.md:46 and :61: quantity is connected sellable pouches, chambers are independent fill compartments, fill volume is ml/chamber, and lanes are separate."
+    },
+    {
+      "id": "G007-hopper-and-pressure-both-include-500",
+      "title": "Hopper and pressure both include `500 × filling lanes × fill`; initia...",
+      "objective": "Hopper and pressure both include `500 × filling lanes × fill`; initial charges are 2,000ml and 8,000ml respectively.",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-09-03T00:15:32.814Z",
+      "updatedAt": "2026-09-03T00:24:23.468Z",
+      "startedAt": "2026-09-03T00:24:16.648Z",
+      "completedAt": "2026-09-03T00:24:23.468Z",
+      "evidence": "Bulk invariant captured in general formula and worked examples at pouch-quotation-system-design.md:113; hopper result 722000 ml, pressure result 728000 ml, same 60000 ml test term, initial charges 2000/8000 ml."
+    },
+    {
+      "id": "G008-digital-film-requires-total-500m-and",
+      "title": "Digital film requires total >=500m and every SKU >=300m; 300m+300m is...",
+      "objective": "Digital film requires total >=500m and every SKU >=300m; 300m+300m is valid.",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-09-03T00:15:32.814Z",
+      "updatedAt": "2026-09-03T00:24:37.083Z",
+      "startedAt": "2026-09-03T00:24:29.114Z",
+      "completedAt": "2026-09-03T00:24:37.083Z",
+      "evidence": "Digital invariant represented at pouch-quotation-system-design.md:378 and implemented in validation contract/pseudocode at :831; parameters at :523, valid 300+300 and invalid total/SKU scenarios at :1058."
+    },
+    {
+      "id": "G009-custom-pouch-adds-jpy-400-000-per-sp",
+      "title": "Custom pouch adds JPY 400,000 per specification.",
+      "objective": "Custom pouch adds JPY 400,000 per specification.",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-09-03T00:15:32.814Z",
+      "updatedAt": "2026-09-03T00:24:51.700Z",
+      "startedAt": "2026-09-03T00:24:41.925Z",
+      "completedAt": "2026-09-03T00:24:51.700Z",
+      "evidence": "Custom invariant represented at pouch-quotation-system-design.md:204, :486, and :805; target now distinguishes the one-time JPY400000 specification charge from fixed lot cost and includes explicit standard/custom scenarios."
+    },
+    {
+      "id": "G010-commission-defaults-to-20-of-tax-exc",
+      "title": "Commission defaults to 20% of tax-exclusive subtotal and is internal-...",
+      "objective": "Commission defaults to 20% of tax-exclusive subtotal and is internal-only, calculated only after approval.",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-09-03T00:15:32.814Z",
+      "updatedAt": "2026-09-03T00:25:01.990Z",
+      "startedAt": "2026-09-03T00:24:54.989Z",
+      "completedAt": "2026-09-03T00:25:01.990Z",
+      "evidence": "Commission invariant represented at pouch-quotation-system-design.md:23, :1019, :1022, and :1069; internal-only fields, approved-only transaction, tax-exclusive 20% default, and non-approved/revision scenarios are explicit."
+    },
+    {
+      "id": "G011-unverified-seven-template-metadata-t",
+      "title": "Unverified Seven template metadata, tax/rounding, digital color price...",
+      "objective": "Unverified Seven template metadata, tax/rounding, digital color prices, and custom-size mappings remain confirmation/configuration inputs.",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-09-03T00:15:32.814Z",
+      "updatedAt": "2026-09-03T00:28:26.041Z",
+      "startedAt": "2026-09-03T00:25:08.826Z",
+      "evidence": "Final strict gate: changed-file cleaner no-op audit, post-edit verification of TC-01..TC-11 and PRD trace, architecture retention, confidentiality boundary, balanced fences, and documentation-only scope. Unverified Seven metadata, tax/rounding, color prices, and custom-size mappings remain explicit confirmation/configuration inputs.",
+      "completedAt": "2026-09-03T00:28:26.041Z"
+    }
+  ],
+  "codexObjective": "Complete the durable ultragoal plan in .omx/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .omx/ultragoal/ledger.jsonl as the audit trail.",
+  "aggregateCompletion": {
+    "status": "complete",
+    "completedAt": "2026-09-03T00:28:26.041Z",
+    "evidence": "Final strict gate: changed-file cleaner no-op audit, post-edit verification of TC-01..TC-11 and PRD trace, architecture retention, confidentiality boundary, balanced fences, and documentation-only scope. Unverified Seven metadata, tax/rounding, color prices, and custom-size mappings remain explicit confirmation/configuration inputs.",
+    "codexGoal": {
+      "available": true,
+      "objective": "Complete the durable ultragoal plan in .omx/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .omx/ultragoal/ledger.jsonl as the audit trail.",
+      "status": "complete",
+      "remainingTokens": null,
+      "raw": {
+        "goal": {
+          "threadId": "01a05aee-b925-7423-9601-7e4912fca9e8",
+          "objective": "Complete the durable ultragoal plan in .omx/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .omx/ultragoal/ledger.jsonl as the audit trail.",
+          "status": "complete",
+          "tokensUsed": 7690878,
+          "timeUsedSeconds": 608,
+          "createdAt": 1788394546,
+          "updatedAt": 1788395154
+        },
+        "remainingTokens": null,
+        "completionBudgetReport": null
+      }
+    }
+  }
+}

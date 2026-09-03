@@ -1,0 +1,86 @@
+{
+  "name": "implement-the-approve-57483222",
+  "task": "Implement the approved pouch quotation system. Use .omx/context/pouch-quotation-implementation-20260903T013212Z.md and pouch-quotation-system-design.md. Build UI, calculation core, tests, and browser verification. Follow AGENTS.md.",
+  "agent_type": "executor",
+  "worker_launch_mode": "interactive",
+  "lifecycle_profile": "default",
+  "worker_count": 4,
+  "max_workers": 20,
+  "workers": [
+    {
+      "name": "worker-1",
+      "index": 1,
+      "role": "executor",
+      "assigned_tasks": [
+        "1"
+      ],
+      "pane_id": "%4",
+      "pid": 54779,
+      "worker_cli": "codex",
+      "working_dir": "/root/pouch-clacul",
+      "team_state_root": "/root/pouch-clacul/.omx/state"
+    },
+    {
+      "name": "worker-2",
+      "index": 2,
+      "role": "executor",
+      "assigned_tasks": [
+        "2"
+      ],
+      "pane_id": "%5",
+      "pid": 54819,
+      "worker_cli": "codex",
+      "working_dir": "/root/pouch-clacul",
+      "team_state_root": "/root/pouch-clacul/.omx/state"
+    },
+    {
+      "name": "worker-3",
+      "index": 3,
+      "role": "executor",
+      "assigned_tasks": [
+        "3"
+      ],
+      "pane_id": "%6",
+      "pid": 54861,
+      "worker_cli": "codex",
+      "working_dir": "/root/pouch-clacul",
+      "team_state_root": "/root/pouch-clacul/.omx/state"
+    },
+    {
+      "name": "worker-4",
+      "index": 4,
+      "role": "executor",
+      "assigned_tasks": [
+        "4"
+      ],
+      "pane_id": "%7",
+      "pid": 54903,
+      "worker_cli": "codex",
+      "working_dir": "/root/pouch-clacul",
+      "team_state_root": "/root/pouch-clacul/.omx/state"
+    }
+  ],
+  "created_at": "2026-09-03T01:32:44.762Z",
+  "tmux_session": "pouch-team-launcher:0",
+  "tmux_session_id": "$2",
+  "tmux_session_created": "1788399164",
+  "next_task_id": 1,
+  "leader_cwd": "/root/pouch-clacul",
+  "team_state_root": "/root/pouch-clacul/.omx/state",
+  "workspace_mode": "single",
+  "worktree_mode": {
+    "enabled": false
+  },
+  "leader_pane_id": "%3",
+  "leader_pane_pid": 54697,
+  "hud_pane_pid": 55116,
+  "hud_pane_id": "%8",
+  "tmux_pane_owner_id": "team:implement-the-approve-57483222",
+  "resize_hook_name": "omx_resize_implement-the-approve-57483222_pouch-team-launcher_0_8",
+  "resize_hook_target": "pouch-team-launcher:0",
+  "next_worker_index": 5,
+  "display_name": "implement-the-approved-pouch-q",
+  "requested_name": "implement-the-approved-pouch-q",
+  "identity_source": "env-session",
+  "config_generation": 2
+}

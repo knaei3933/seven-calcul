@@ -1,0 +1,13 @@
+{
+  "name": "worker-3",
+  "index": 3,
+  "role": "executor",
+  "worker_cli": "codex",
+  "assigned_tasks": [
+    "3"
+  ],
+  "working_dir": "/root/pouch-clacul",
+  "team_state_root": "/root/pouch-clacul/.omx/state",
+  "pid": 54861,
+  "pane_id": "%6"
+}

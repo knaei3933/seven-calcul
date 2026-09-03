@@ -1,0 +1,12 @@
+{"event":"session_start_reconciled","session_id":"01a057dd-167c-78c1-90a8-0c7f000ac2ed","native_session_id":"01a057dd-167c-78c1-90a8-0c7f000ac2ed","pid":55015,"timestamp":"2026-08-31T12:49:11.606Z","_ts":"2026-08-31T12:49:11.606Z"}
+{"event":"session_start_reconciled","session_id":"01a057ec-dd61-7c93-9ad3-b0b63aa89ca7","native_session_id":"01a057ec-dd61-7c93-9ad3-b0b63aa89ca7","pid":64684,"timestamp":"2026-08-31T13:16:43.340Z","_ts":"2026-08-31T13:16:43.340Z"}
+{"event":"prompt_session_provenance_rejected","reason":"legacy_adoption_denied","producer":"native","selected_root_status":"preflight","relation":"pointer-alias","timestamp":"2026-08-31T13:19:04.685Z","_ts":"2026-08-31T13:19:04.685Z"}
+{"event":"prompt_session_provenance_rejected","reason":"legacy_adoption_denied","producer":"native","selected_root_status":"preflight","relation":"pointer-alias","timestamp":"2026-08-31T13:20:07.236Z","_ts":"2026-08-31T13:20:07.236Z"}
+{"event":"session_start","session_id":"omx-1788184191240-lvrnj4","pid":77839,"timestamp":"2026-08-31T13:49:51.472Z","_ts":"2026-08-31T13:49:51.475Z"}
+{"event":"session_start","session_id":"omx-1788184311113-i0zv4x","pid":82030,"timestamp":"2026-08-31T13:51:51.324Z","_ts":"2026-08-31T13:51:51.329Z"}
+{"event":"session_start","session_id":"omx-1788184355102-9wsycq","pid":83598,"timestamp":"2026-08-31T13:52:35.306Z","_ts":"2026-08-31T13:52:35.309Z"}
+{"event":"session_start","session_id":"omx-1788184510784-urnowa","pid":90164,"timestamp":"2026-08-31T13:55:10.978Z","_ts":"2026-08-31T13:55:10.982Z"}
+{"event":"session_start","session_id":"omx-1788209597093-u47vif","pid":24895,"timestamp":"2026-08-31T20:53:17.301Z","_ts":"2026-08-31T20:53:17.304Z"}
+{"event":"session_start_reconciled","session_id":"omx-1788209597093-u47vif","native_session_id":"01a05999-4fff-7852-b78f-7ea20f96d6e1","pid":24975,"timestamp":"2026-08-31T20:55:48.291Z","_ts":"2026-08-31T20:55:48.291Z"}
+{"event":"session_start","session_id":"omx-1788209881049-tx0zsx","pid":30696,"timestamp":"2026-08-31T20:58:01.248Z","_ts":"2026-08-31T20:58:01.252Z"}
+{"event":"session_start_reconciled","session_id":"omx-1788209881049-tx0zsx","native_session_id":"01a0599d-6263-7f02-a4ba-2360b0e9b7a5","pid":30800,"timestamp":"2026-08-31T21:00:21.380Z","_ts":"2026-08-31T21:00:21.380Z"}

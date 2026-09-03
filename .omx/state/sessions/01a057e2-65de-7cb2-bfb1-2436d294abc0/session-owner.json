@@ -1,0 +1,17 @@
+{
+  "session_id": "01a057e2-65de-7cb2-bfb1-2436d294abc0",
+  "native_session_id": "01a057e2-65de-7cb2-bfb1-2436d294abc0",
+  "started_at": "2026-08-31T12:54:10.359Z",
+  "cwd": "/root/pouch-clacul",
+  "state_root": "/root/pouch-clacul/.omx/state/sessions/01a057e2-65de-7cb2-bfb1-2436d294abc0",
+  "pid": 58826,
+  "platform": "linux",
+  "identity_schema_version": 2,
+  "process_identity": {
+    "platform": "linux",
+    "birth": "4149172",
+    "cmdline_hash": "2344be2264f7732868bbdfcaf9e007187bc13ce09b0636ae6bcce643fffd6a09"
+  },
+  "pid_start_ticks": 4149172,
+  "pid_cmdline": "/root/.nvm/versions/node/v24.18.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex exec --ephemeral --skip-git-repo-check --json -m glm-5.3 Respond with exactly MODEL_OK and do not use tools."
+}

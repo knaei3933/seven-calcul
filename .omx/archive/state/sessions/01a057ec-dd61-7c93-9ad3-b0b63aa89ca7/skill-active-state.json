@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "active": false,
+  "skill": "ralplan",
+  "keyword": "$ralplan",
+  "phase": "starting",
+  "activated_at": "2026-08-31T13:32:55.718Z",
+  "updated_at": "2026-08-31T13:43:59.711Z",
+  "source": "keyword-detector",
+  "session_id": "01a057ec-dd61-7c93-9ad3-b0b63aa89ca7",
+  "thread_id": "01a057ec-dd61-7c93-9ad3-b0b63aa89ca7",
+  "turn_id": "01a05804-e618-7182-8479-d20e968ba11e",
+  "active_skills": [],
+  "input_lock": {
+    "active": false,
+    "scope": "deep-interview-auto-approval",
+    "acquired_at": "2026-08-31T13:16:43.487Z",
+    "released_at": "2026-08-31T13:32:55.718Z",
+    "blocked_inputs": [
+      "yes",
+      "y",
+      "proceed",
+      "continue",
+      "ok",
+      "sure",
+      "go ahead",
+      "next i should"
+    ],
+    "message": "Deep interview is active; auto-approval shortcuts are blocked until the interview finishes.",
+    "exit_reason": "handoff"
+  },
+  "owner_codex_session_id": "01a057ec-dd61-7c93-9ad3-b0b63aa89ca7",
+  "initialized_mode": "ralplan",
+  "initialized_state_path": ".omx/state/sessions/01a057ec-dd61-7c93-9ad3-b0b63aa89ca7/ralplan-state.json"
+}

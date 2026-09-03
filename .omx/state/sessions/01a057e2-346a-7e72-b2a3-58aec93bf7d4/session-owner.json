@@ -1,0 +1,17 @@
+{
+  "session_id": "01a057e2-346a-7e72-b2a3-58aec93bf7d4",
+  "native_session_id": "01a057e2-346a-7e72-b2a3-58aec93bf7d4",
+  "started_at": "2026-08-31T12:53:57.693Z",
+  "cwd": "/root/pouch-clacul",
+  "state_root": "/root/pouch-clacul/.omx/state/sessions/01a057e2-346a-7e72-b2a3-58aec93bf7d4",
+  "pid": 57541,
+  "platform": "linux",
+  "identity_schema_version": 2,
+  "process_identity": {
+    "platform": "linux",
+    "birth": "4147903",
+    "cmdline_hash": "f6ad9ecff5b173e4dbf0c50266243c8def97470876b4d601a4997cd8400e029e"
+  },
+  "pid_start_ticks": 4147903,
+  "pid_cmdline": "/root/.nvm/versions/node/v24.18.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex exec --ephemeral --skip-git-repo-check --json -m glm-5.3-flash Respond with exactly MODEL_OK and do not use tools."
+}

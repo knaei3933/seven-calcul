@@ -1,0 +1,50 @@
+# oh-my-codex top-level settings (must be before any [table])
+notify = ["node", "/root/.nvm/versions/node/v24.18.0/lib/node_modules/oh-my-codex/dist/scripts/notify-hook.js"]
+model_reasoning_effort = "medium"
+developer_instructions = "You have oh-my-codex installed. AGENTS.md is the orchestration brain and main control surface. Follow AGENTS.md for skill/keyword routing, $name workflow invocation, and role-specialized subagents; when the native surface exposes `agent_type` role routing, set `agent_type` to an installed role and never omit it for OMX work. When it reports `role_routing_unavailable` and adapted Ralplan authority is requested, do not fabricate `agent_type`; run `omx ralplan preflight --json` and stop on `unsupported_documented_leader_proof`. Ordinary work remains under its own workflow gates. Never fake the role via a prompt label or infer authority from session/thread/pointer/transcript/cwd state. Use outcome-first, concise progress updates: state the target result, constraints, validation evidence, and stop condition before adding process detail. Native subagents live in .codex/agents and may handle independent parallel subtasks within one Codex session or team pane. Skills load from .codex/skills, not native-agent TOMLs. Treat installed prompts as narrower execution surfaces under AGENTS.md authority."
+model = "gpt-5.6-sol"
+
+[features]
+child_agents_md = true
+hooks = true
+goals = true
+
+[shell_environment_policy.set]
+USE_OMX_EXPLORE_CMD = "0"
+
+# ============================================================
+# oh-my-codex (OMX) Configuration
+# Managed by omx setup - manual edits preserved on next setup
+# ============================================================
+
+# OMX-owned Codex hook trust state
+# Trusts only setup-managed native hook wrappers.
+[hooks.state."/root/pouch-clacul/.codex-test/hooks.json:post_compact:0:0"]
+trusted_hash = "sha256:af7d4263f6f0efcb615aae5963c611b09169503e96836cca98a00ee4f15c95e5"
+
+[hooks.state."/root/pouch-clacul/.codex-test/hooks.json:post_tool_use:0:0"]
+trusted_hash = "sha256:58cbb8109de22f1150e374c35fa3ad3d823f4e7a34641e425a97ade9b45e0a8b"
+
+[hooks.state."/root/pouch-clacul/.codex-test/hooks.json:pre_compact:0:0"]
+trusted_hash = "sha256:0e935417667ec6fb5171f7fecfc22075c176d1a8ff7ddb620691b8f70f09b116"
+
+[hooks.state."/root/pouch-clacul/.codex-test/hooks.json:pre_tool_use:0:0"]
+trusted_hash = "sha256:3dd014edc684238b70be6604aa6acdff3dcd577b327fd8ebbc9917f114bcda8a"
+
+[hooks.state."/root/pouch-clacul/.codex-test/hooks.json:session_start:0:0"]
+trusted_hash = "sha256:a6e8dfa903753bab35948a598634b23bc638b69e0a6aab9db504b9708d40ac84"
+
+[hooks.state."/root/pouch-clacul/.codex-test/hooks.json:stop:0:0"]
+trusted_hash = "sha256:eac2dc549acbb0e6f4d34922deb5d1ee82d0c8ac1e85a49a3643702f265374c6"
+
+[hooks.state."/root/pouch-clacul/.codex-test/hooks.json:user_prompt_submit:0:0"]
+trusted_hash = "sha256:68a6b5c1cb2c32ebbc17fd081d35439f889df9d46cdb5aa6551655a32baeea64"
+# End OMX-owned Codex hook trust state
+
+# OMX TUI StatusLine (Codex CLI v0.101.0+)
+[tui]
+# omx:managed-status-line
+status_line = ["model-with-reasoning", "git-branch", "context-remaining", "total-input-tokens", "total-output-tokens", "five-hour-limit", "weekly-limit"]
+
+# ============================================================
+# End oh-my-codex
