@@ -2,7 +2,6 @@ export type Design = "round" | "circle" | "tube" | "bottle" | "xraRound" | "mout
 export type SizeKey =
   | "round-50x60"
   | "round-50x80"
-  | "round-50x90"
   | "round-60x80"
   | "round-60x100"
   | "round-60x120"
@@ -51,7 +50,11 @@ export interface PouchSpec {
   isCustom: boolean;
   colorCount: number;
   bulkUnitPrice: DecimalValue;
-  skuRequiredLengthsM: DecimalValue[];
+  skuCount: number;
+  skuQuantities?: DecimalValue[];
+  skuNames?: string[];
+  skuFillMlPerChamber?: DecimalValue[];
+  skuColorCounts?: DecimalValue[];
 }
 
 export interface CostParameters {
@@ -66,7 +69,7 @@ export interface CostParameters {
   fillTestRuns: DecimalValue;
   laborPerHour: DecimalValue;
   machineChargePerHour: DecimalValue;
-  productionSpeed: DecimalValue;
+  productionSpeedPerMinute: DecimalValue;
   inspectionSpeed: DecimalValue;
   setupTime: DecimalValue;
   cleanupTime: DecimalValue;

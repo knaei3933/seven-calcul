@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { CALCULATION_VERSION, defaultParameters, sizeMaster } from "./constants";
-import { D, Decimal, ceilTo, eq, maxD, sum } from "./decimal";
-import { QuotationValidationError, validateDigitalFilmOrder } from "./digital-film";
-import type { CostParameters, FilmPriceMode, PouchSpec, PrintingMethod, QuotationStatus, SizeMaster } from "./types";
+import { D, Decimal, ceilTo, eq, maxD, roundTo2, sum } from "./decimal";
+import { normalizeDigitalFilmOrder, QuotationValidationError, type FilmOrderAdjustment, type FilmSkuOrder } from "./digital-film";
+import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
+import type { CostParameters, FilmPriceMode, PriceBand, PouchSpec, PrintingMethod, QuotationStatus, SizeMaster } from "./types";
 
 export interface CostResult {
   quantity: string;
@@ -12,6 +13,12 @@ export interface CostResult {
   totalFillMlPerPouch: string;
   fillingMethod: PouchSpec["fillingMethod"];
   fillingLanes: number;
+  baseProductionSpeedPerMinute: string;
+  effectiveProductionSpeed: string;
+  lanesPerCycle: number;
+  productionRunQuantity: string;
+  productionHours: string;
+  inspectionHours: string;
   bulkLossRate: string;
   initialChargeMl: string;
   testFillMl: string;
@@ -64,6 +71,24 @@ export interface FilmCostResult {
   customs: string;
   filmTotal: string;
   filmCostPerPiece: string;
+  shippingTrips: string;
+  orderAdjustment: FilmOrderAdjustment;
+  skuCosts: FilmSkuCostResult[];
+}
+
+export interface FilmSkuCostResult {
+  skuCode: string;
+  name: string;
+  quantity: string;
+  fillMlPerChamber: string;
+  colorCount: string;
+  requiredLengthM: string;
+  orderLengthM: string;
+  filmCost: string;
+  multiplier: number;
+  consideredLengthM: string;
+  appliedBand: PriceBand;
+  webWidthMm: number;
 }
 
 export interface CalculationInput {
@@ -71,68 +96,132 @@ export interface CalculationInput {
   quantity: string;
   printingMethod: PrintingMethod;
   parameters?: Partial<CostParameters>;
+  targetMargins?: string[];
 }
 
-export function calculatePouchCost({ spec, quantity, printingMethod, parameters }: CalculationInput): CostResult {
+const DEFAULT_TARGET_MARGINS = ["0.4", "0.5"] as const;
+
+function resolveTargetMargins(targetMargins?: string[]): string[] {
+  if (!targetMargins || targetMargins.length === 0) return [...DEFAULT_TARGET_MARGINS];
+  const seen = new Set<string>();
+  const valid: { value: string; numeric: number }[] = [];
+  for (const margin of targetMargins) {
+    const numeric = Number(margin);
+    if (!Number.isFinite(numeric) || numeric <= 0 || numeric >= 1) throw validationError("invalid_target_margin");
+    const key = numeric.toString();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    valid.push({ value: margin, numeric });
+  }
+  return valid.sort((a, b) => a.numeric - b.numeric).map((item) => item.value);
+}
+
+export function calculatePouchCost({ spec, quantity, printingMethod, parameters, targetMargins }: CalculationInput): CostResult {
   const params = { ...defaultParameters, ...parameters } as CostParameters;
   const quantityD = D(quantity);
   if (quantityD.lte(0) || D(spec.fillMlPerChamber).lte(0) || spec.fillingLanes <= 0) throw validationError("invalid_positive_input");
+  const margins = resolveTargetMargins(targetMargins);
 
   const size = getSizeMaster(spec);
-  const digitalValidation = validateDigitalFilmOrder(
-    spec.skuRequiredLengthsM.map((requiredLengthM, index) => ({ skuCode: `SKU-${index + 1}`, requiredLengthM })),
+  if (!Number.isInteger(spec.skuCount) || spec.skuCount <= 0) throw validationError("invalid_sku_count");
+  const useSkuQuantities = Array.isArray(spec.skuQuantities);
+  if (useSkuQuantities && spec.skuQuantities!.length !== spec.skuCount) throw validationError("invalid_sku_quantities");
+  const skuQuantitiesList: Decimal[] = useSkuQuantities
+    ? spec.skuQuantities!.map((value) => {
+        const skuQuantity = D(value);
+        if (skuQuantity.lte(0)) throw validationError("invalid_positive_input");
+        return skuQuantity;
+      })
+    : Array.from({ length: spec.skuCount }, () => quantityD);
+  if (useSkuQuantities && !eq(sum(skuQuantitiesList), quantityD)) throw validationError("invalid_sku_quantity_sum");
+  const useSkuFills = Array.isArray(spec.skuFillMlPerChamber);
+  if (useSkuFills && spec.skuFillMlPerChamber!.length !== spec.skuCount) throw validationError("invalid_sku_fill_ml");
+  const skuFills: Decimal[] = useSkuFills
+    ? spec.skuFillMlPerChamber!.map((value) => {
+        const fill = D(value);
+        if (fill.lte(0)) throw validationError("invalid_positive_input");
+        return fill;
+      })
+    : Array.from({ length: spec.skuCount }, () => D(spec.fillMlPerChamber));
+  const skuRequiredLengths = skuQuantitiesList.map((skuQuantity) => calculateRequiredProductionLength(size, skuQuantity, params.lossRate));
+  const { orders: digitalOrders, adjustment: orderAdjustment } = normalizeDigitalFilmOrder(
+    skuRequiredLengths.map((requiredLength, index) => ({
+      skuCode: `SKU-${index + 1}`,
+      requiredLengthM: requiredLength.toString(),
+    })),
     params,
   );
-  if (!digitalValidation.valid) throw new QuotationValidationError("digital_film_order_invalid", digitalValidation);
-
-  const film = calculateFilmCost(size, printingMethod, params, digitalValidation);
+  const film = calculateFilmCost(size, quantityD, printingMethod, params, digitalOrders, orderAdjustment);
+  const skuCosts = film.skuCosts.map((skuCost, index) => ({
+    ...skuCost,
+    name: (spec.skuNames?.[index] ?? "").trim() || `充填物${index + 1}`,
+    quantity: skuQuantitiesList[index].toString(),
+    fillMlPerChamber: skuFills[index].toString(),
+    colorCount: (spec.skuColorCounts?.[index] ?? spec.colorCount).toString(),
+  }));
+  const filmWithSkus: FilmCostResult = { ...film, skuCosts };
   const initialCharge = initialChargeMl(spec, params);
-  const testFill = D(params.fillTestRuns).times(spec.fillingLanes).times(spec.fillMlPerChamber);
   const chamberCount = quantityD.times(spec.connectedChambers);
-  const bulkUsage = chamberCount.times(spec.fillMlPerChamber).times(D(1).plus(params.bulkLossRate)).plus(initialCharge).plus(testFill);
+  const weightedAvgFill = sum(skuQuantitiesList.map((skuQuantity, index) => skuQuantity.times(skuFills[index]))).div(sum(skuQuantitiesList));
+  const testFill = D(params.fillTestRuns).times(spec.fillingLanes).times(weightedAvgFill);
+  const bulkUsage = chamberCount.times(weightedAvgFill).times(D(1).plus(params.bulkLossRate)).plus(initialCharge).plus(testFill);
   const bulkCost = bulkUsage.times(spec.bulkUnitPrice);
   const bulkPerPiece = bulkCost.div(quantityD);
 
-  const variableLabor = D(params.laborPerHour).div(params.productionSpeed).plus(D(params.laborPerHour).div(params.inspectionSpeed));
-  const machineVariable = D(params.machineChargePerHour).div(params.productionSpeed);
+  const lanesPerCycle = Math.max(1, Math.floor(spec.fillingLanes / spec.connectedChambers));
+  const effectiveProductionSpeed = D(params.productionSpeedPerMinute).times(60).times(lanesPerCycle).div(spec.fillingLanes);
+  const productionRunQuantity = quantityD.div(D(1).minus(params.lossRate));
+  const productionHours = productionRunQuantity.div(effectiveProductionSpeed);
+  const inspectionHours = productionRunQuantity.div(params.inspectionSpeed);
+  const variableLabor = D(params.laborPerHour).times(productionHours).plus(D(params.laborPerHour).times(inspectionHours));
+  const machineVariable = D(params.machineChargePerHour).times(productionHours);
   const variableProcessing = variableLabor.plus(machineVariable);
-  const variableTotal = variableProcessing.times(quantityD);
+  const variableTotal = variableProcessing;
+  const variableLaborPerPiece = variableLabor.div(quantityD);
+  const machineVariablePerPiece = machineVariable.div(quantityD);
+  const variableProcessingPerPiece = variableProcessing.div(quantityD);
   const fixedLot = D(params.setupTime).plus(params.cleanupTime).times(D(params.laborPerHour).plus(params.machineChargePerHour));
   const fixedPerPiece = fixedLot.div(quantityD);
   const customCharge = spec.isCustom ? D(params.customPouchCharge) : D(0);
 
-  const costComponents = { film: film.filmTotal, bulk: bulkCost, variableProcessing: variableTotal, fixedLot, custom: customCharge };
+  const costComponents = { film: filmWithSkus.filmTotal, bulk: bulkCost, variableProcessing: variableTotal, fixedLot, custom: customCharge };
   const costTotal = sum(Object.values(costComponents));
   const totalPerPiece = D(costTotal).div(quantityD);
   const reconciliation = costTotal.minus(sum(Object.values(costComponents)));
 
-  const sellingPrices = [0.15, 0.2, 0.3].map((margin) => {
+  const sellingPrices = margins.map((margin) => {
     const price = totalPerPiece.div(D(1).minus(margin));
-    return { margin: String(margin), pricePerPiece: price.toString(), totalSales: price.times(quantityD).toString(), profit: D(price).minus(totalPerPiece).times(quantityD).toString() };
+    return { margin, pricePerPiece: price.toString(), totalSales: price.times(quantityD).toString(), profit: price.minus(totalPerPiece).times(quantityD).toString() };
   });
 
   const warnings = unresolvedWarnings(spec, size, params);
-  const serializedInput = JSON.stringify({ spec, quantity, printingMethod, params });
+  const serializedInput = JSON.stringify({ spec, quantity, printingMethod, targetMargins: targetMargins ?? null, parameters: parameters ?? null });
   const result = { quantity: quantityD.toString(), chamberCount: chamberCount.toString(), bulkUsageMl: bulkUsage.toString(), costComponents, costTotal: costTotal.toString(), sellingPrices };
 
   return {
     quantity: quantityD.toString(),
     connectedChambers: spec.connectedChambers,
     chamberCount: chamberCount.toString(),
-    fillMlPerChamber: spec.fillMlPerChamber,
-    totalFillMlPerPouch: D(spec.fillMlPerChamber).times(spec.connectedChambers).toString(),
+    fillMlPerChamber: weightedAvgFill.toString(),
+    totalFillMlPerPouch: weightedAvgFill.times(spec.connectedChambers).toString(),
     fillingMethod: spec.fillingMethod,
     fillingLanes: spec.fillingLanes,
+    baseProductionSpeedPerMinute: params.productionSpeedPerMinute,
+    effectiveProductionSpeed: effectiveProductionSpeed.toString(),
+    lanesPerCycle,
+    productionRunQuantity: productionRunQuantity.toString(),
+    productionHours: productionHours.toString(),
+    inspectionHours: inspectionHours.toString(),
     bulkLossRate: params.bulkLossRate,
     initialChargeMl: initialCharge.toString(),
     testFillMl: testFill.toString(),
     bulkUsageMl: bulkUsage.toString(),
     bulkCost: bulkCost.toString(),
     bulkCostPerPiece: bulkPerPiece.toString(),
-    materialCostPerPiece: D(film.filmCostPerPiece).plus(bulkPerPiece).toString(),
-    variableLaborPerPiece: variableLabor.toString(),
-    machineVariablePerPiece: machineVariable.toString(),
-    variableProcessingPerPiece: variableProcessing.toString(),
+    materialCostPerPiece: D(filmWithSkus.filmCostPerPiece).plus(bulkPerPiece).toString(),
+    variableLaborPerPiece: variableLaborPerPiece.toString(),
+    machineVariablePerPiece: machineVariablePerPiece.toString(),
+    variableProcessingPerPiece: variableProcessingPerPiece.toString(),
     variableProcessingTotal: variableTotal.toString(),
     fixedLotCost: fixedLot.toString(),
     fixedCostPerPiece: fixedPerPiece.toString(),
@@ -142,7 +231,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters 
     costComponents: mapValues(costComponents, String),
     costPerPieceComponents: mapValues(costComponents, (value) => D(value).div(quantityD).toString()),
     sellingPrices,
-    film,
+    film: filmWithSkus,
     warnings,
     audit: {
       calculationVersion: CALCULATION_VERSION,
@@ -160,35 +249,53 @@ export function approvedCommission(amount: string, status: QuotationStatus, para
   return { eligible: true, commissionAmount: D(amount).times(parameters.commissionRate ?? defaultParameters.commissionRate).toString() };
 }
 
+export function displayAmount(value: string): string {
+  return roundTo2(value);
+}
+
 export function getSizeMaster(spec: PouchSpec): SizeMaster {
-  if (spec.isCustom && (!spec.customWidthMm || !spec.customLengthMm)) throw validationError("custom_size_mapping_unconfirmed");
-  const size = sizeMaster[spec.sizeKey];
-  if (!size) throw validationError("size_not_found");
-  if (!eq(size.widthMm, spec.customWidthMm ?? size.widthMm) || !eq(size.lengthMm, spec.customLengthMm ?? size.lengthMm)) {
-    throw validationError("standard_size_dimensions_mismatch");
+  const base = sizeMaster[spec.sizeKey];
+  if (!base) throw validationError("size_not_found");
+  if (!spec.isCustom) {
+    const width = spec.customWidthMm ?? base.widthMm;
+    const length = spec.customLengthMm ?? base.lengthMm;
+    if (!eq(base.widthMm, width) || !eq(base.lengthMm, length)) throw validationError("standard_size_dimensions_mismatch");
+    return base;
   }
-  return size;
+  if (!spec.customWidthMm || !spec.customLengthMm) throw validationError("custom_size_mapping_unconfirmed");
+  if (D(spec.customWidthMm).lte(0) || D(spec.customLengthMm).lte(0)) throw validationError("invalid_positive_input");
+  return deriveCustomSizeMaster(base, spec.customWidthMm, spec.customLengthMm);
 }
 
 function calculateFilmCost(
   size: SizeMaster,
+  quantity: Decimal,
   printingMethod: PrintingMethod,
   params: CostParameters,
-  digitalValidation: ReturnType<typeof validateDigitalFilmOrder>,
+  digitalOrders: FilmSkuOrder[],
+  orderAdjustment: FilmOrderAdjustment,
 ): FilmCostResult {
   if (printingMethod !== "digital") throw validationError("gravure_not_configured");
   const pitch = D(size.lengthMm).plus(size.pitchAddMm);
-  const skuResults = digitalValidation.orderLengths.map((sku) => {
+  const skuResults = digitalOrders.map((sku) => {
     const required = D(sku.requiredLengthM);
-    const orderLength = D(sku.orderLengthM);
-    const loss = maxD(params.lossMinM, orderLength.times(params.lossRate));
-    const effective = orderLength.minus(loss);
-    const actual = effective.times(1000).div(pitch).floor().times(size.lanes);
+    // Excel規則: 35mm幅品・Xraラウンドは必要長が900m超で736mm幅・2倍生産に切替（検討長さ＝発注×2・200m刻み）
+    const useLargeLot = Boolean(size.largeLotWebWidthMm) && required.gt(900);
+    const orderLength = useLargeLot
+      ? Decimal.max(500, ceilTo(required.div(2), 100))
+      : D(sku.orderLengthM);
+    const multiplier = useLargeLot ? 2 : 1;
+    const considered = orderLength.times(multiplier);
+    const loss = maxD(params.lossMinM, considered.times(params.lossRate));
+    const effective = considered.minus(loss);
+    const actual = effective.times(1000).div(pitch).times(size.lanes).floor();
     const pricing = actual.div(500).floor().times(500);
     if (pricing.lte(0)) throw validationError("no_priceable_quantity");
-    const unitPrice = filmUnitPrice(size.priceBand, orderLength, params);
+    const appliedBand: PriceBand = useLargeLot ? "571to740" : size.priceBand;
+    const unitPrice = filmUnitPrice(appliedBand, orderLength, params);
     const baseCost = orderLength.times(unitPrice);
-    return { required, orderLength, loss, effective, actual, pricing, unitPrice, baseCost };
+    const webWidthMm = useLargeLot ? size.largeLotWebWidthMm! : size.webWidthMm;
+    return { skuCode: sku.skuCode, required, orderLength, multiplier, considered, appliedBand, webWidthMm, loss, effective, actual, pricing, unitPrice, baseCost };
   });
 
   const required = sum(skuResults.map((sku) => sku.required));
@@ -200,13 +307,16 @@ function calculateFilmCost(
   const baseCost = sum(skuResults.map((sku) => sku.baseCost));
   const unitPrice = orderLength.eq(0) ? D(0) : baseCost.div(orderLength);
 
-  const useLargeLot = Boolean(size.largeLotWebWidthMm) && orderLength.gte(1000);
-  const webWidth = useLargeLot ? size.largeLotWebWidthMm! : size.webWidthMm;
-  const shippingUnit = params.shippingUnitsM["500"].includes(webWidth) ? 500 : 400;
-  const shippingTrips = ceilTo(orderLength.times(size.prodMultiplier), shippingUnit);
+  const anyLargeLot = skuResults.some((sku) => sku.multiplier === 2);
+  const webWidth = anyLargeLot ? size.largeLotWebWidthMm ?? size.webWidthMm : size.webWidthMm;
+  const shippingUnit = D(shippingUnitForWidth(webWidth, params));
+  const productionEquivalentLength = sum(skuResults.map((sku) => sku.orderLength.times(sku.multiplier)));
+  const shippingTrips = productionEquivalentLength.div(shippingUnit).ceil();
   const domestic = shippingTrips.times(params.domesticShippingPerTrip);
   const overseas = shippingTrips.times(params.overseasShippingPerTrip);
-  const customs = baseCost.gt(params.customsThreshold) ? D(params.customsHighCharge) : shippingTrips.times(params.customsPerTrip);
+  const customs = baseCost.gt(params.customsThreshold)
+    ? D(params.customsHighCharge)
+    : shippingTrips.times(params.customsPerTrip);
   const total = baseCost.plus(domestic).plus(overseas).plus(customs);
   const perPiece = total.div(pricing);
 
@@ -214,6 +324,13 @@ function calculateFilmCost(
     requiredLengthM: required.toString(), orderLengthM: orderLength.toString(), lossM: loss.toString(), effectiveLengthM: effective.toString(),
     actualQuantity: actual.toString(), pricingQuantity: pricing.toString(), unitPrice: unitPrice.toString(), filmBaseCost: baseCost.toString(),
     domesticShipping: domestic.toString(), overseasShipping: overseas.toString(), customs: customs.toString(), filmTotal: total.toString(), filmCostPerPiece: perPiece.toString(),
+    shippingTrips: shippingTrips.toString(),
+    orderAdjustment,
+    skuCosts: skuResults.map(({ skuCode, required, orderLength, multiplier, considered, appliedBand, webWidthMm, baseCost }) => ({
+      skuCode, name: "", quantity: "", fillMlPerChamber: "", colorCount: "",
+      requiredLengthM: required.toString(), orderLengthM: orderLength.toString(), filmCost: baseCost.toString(),
+      multiplier, consideredLengthM: considered.toString(), appliedBand, webWidthMm,
+    })),
   };
 }
 

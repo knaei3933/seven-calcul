@@ -1,8 +1,0 @@
-{
-  "last_notified_at_ms": 1788399410321,
-  "last_notified_at": "2026-09-03T01:36:50.321Z",
-  "prev_state": "unknown",
-  "orchestration_intent": "followup-reuse",
-  "delivery": "deferred_shell",
-  "pane_current_command": "bash"
-}

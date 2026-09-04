@@ -1,11 +1,30 @@
 import type { CostParameters, SizeMaster, SizeKey } from "./types";
+import { D } from "./decimal";
 
 export const CALCULATION_VERSION = "2026-09.1";
+
+/**
+ * 機械チャージの算定基準（設計ドキュメント 6.3 機械関連）。
+ * 機械チャージ/時間 = (取得価額÷耐用年数 + 年間電力量×電力単価) ÷ 年間稼働時間
+ * ※ 月額賃借料（74,100円/月）は計算から除外（2026-09 仕様変更）。
+ */
+export const machineChargeBasis = {
+  acquisitionCostYen: "25000000",
+  usefulLifeYears: "7",
+  annualElectricityKwh: "10800",
+  electricityUnitPriceYen: "32",
+  annualOperatingHours: "1800",
+} as const;
+
+export function machineChargePerHourFromBasis(basis: typeof machineChargeBasis = machineChargeBasis): string {
+  const annualDepreciation = D(basis.acquisitionCostYen).div(basis.usefulLifeYears);
+  const annualElectricity = D(basis.annualElectricityKwh).times(basis.electricityUnitPriceYen);
+  return annualDepreciation.plus(annualElectricity).div(basis.annualOperatingHours).toString();
+}
 
 export const sizeMaster: Record<SizeKey, SizeMaster> = {
   "round-50x60": base("round-50x60", "round", "ラウンド 50×60", 50, 60, 4, 476, "lte570", 6, 1),
   "round-50x80": base("round-50x80", "round", "ラウンド 50×80", 50, 80, 4, 476, "lte570", 8, 1),
-  "round-50x90": base("round-50x90", "round", "ラウンド 50×90", 50, 90, 4, 476, "lte570", 6, 1),
   "round-60x80": base("round-60x80", "round", "ラウンド 60×80", 60, 80, 4, 556, "lte570", 6, 1),
   "round-60x100": base("round-60x100", "round", "ラウンド 60×100", 60, 100, 4, 580, "571to740", 6, 1),
   "round-60x120": base("round-60x120", "round", "ラウンド 60×120", 60, 120, 4, 556, "lte570", 6, 1),
@@ -21,7 +40,7 @@ export const sizeMaster: Record<SizeKey, SizeMaster> = {
   "bottle-35x80": switchable("bottle-35x80", "bottle", "ボトル型 35×80", 35, 80),
   "bottle-50x90": base("bottle-50x90", "bottle", "ボトル型 50×90", 50, 90, 4, 476, "lte570", 6, 1),
   "bottle-70x120": base("bottle-70x120", "bottle", "ボトル型 70×120", 70, 120, 4, 620, "571to740", 6, 1),
-  "xra-38.5x90": switchable("xra-38.5x90", "xraRound", "Xraラウンド 38.5×90", 38.5, 90),
+  "xra-38.5x90": switchableWeb("xra-38.5x90", "xraRound", "Xraラウンド 38.5×90", 38.5, 90, 368),
   "mouthwash-45x145": base("mouthwash-45x145", "mouthWash", "マウスウォッシュ用 45×145", 45, 145, 4, 396, "lte570", 6, 1),
 };
 
@@ -33,11 +52,11 @@ export const defaultParameters: CostParameters = {
   customsThreshold: "200000",
   customsHighCharge: "6600",
   customsPerTrip: "200",
-  bulkLossRate: "0.10",
+  bulkLossRate: "0.1",
   fillTestRuns: "500",
   laborPerHour: "2500",
-  machineChargePerHour: "2670.629629629629629629629629629629629630",
-  productionSpeed: "3600",
+  machineChargePerHour: machineChargePerHourFromBasis(),
+  productionSpeedPerMinute: "60",
   inspectionSpeed: "1500",
   setupTime: "3",
   cleanupTime: "2",
@@ -74,4 +93,8 @@ function base(
 
 function switchable(key: SizeKey, design: SizeMaster["design"], label: string, widthMm: number, lengthMm: number): SizeMaster {
   return { ...base(key, design, label, widthMm, lengthMm, 4, 356, "lte570", 6, 1), largeLotWebWidthMm: 736 };
+}
+
+function switchableWeb(key: SizeKey, design: SizeMaster["design"], label: string, widthMm: number, lengthMm: number, webWidthMm: number): SizeMaster {
+  return { ...base(key, design, label, widthMm, lengthMm, 4, webWidthMm, "lte570", 6, 1), largeLotWebWidthMm: 736 };
 }

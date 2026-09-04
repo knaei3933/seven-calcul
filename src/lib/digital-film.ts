@@ -29,6 +29,30 @@ export interface DigitalFilmValidation {
 
 const round100 = (value: Decimal | string | number): Decimal => ceilTo(value.toString(), 100);
 
+export function normalizeDigitalFilmOrder(skus: FilmSkuOrderInput[], params: CostParameters): { orders: FilmSkuOrder[]; adjustment: FilmOrderAdjustment } {
+  if (skus.length === 0) throw validationError("digital_film_skus_required");
+  const rounded = skus.map((sku) => {
+    const required = D(sku.requiredLengthM);
+    if (required.lte(0)) throw validationError("digital_film_positive_length_required");
+    return { ...sku, requiredLengthM: required.toString(), orderLengthM: round100(required).toString() };
+  });
+  const minTotal = D(params.digitalFilmMinTotalM);
+  const minSku = D(params.digitalFilmMinSkuM);
+  const raised = rounded.map((sku) => ({ ...sku, orderLengthM: Decimal.max(D(sku.orderLengthM), minSku).toString() }));
+  let adjusted = raised.map((sku) => ({ ...sku }));
+  const raisedTotal = sum(adjusted.map((sku) => D(sku.orderLengthM)));
+  if (raisedTotal.lt(minTotal)) {
+    adjusted = minimumViable(adjusted.map((sku) => D(sku.orderLengthM)), minTotal).map((orderLengthM, index) => ({ ...adjusted[index], orderLengthM: orderLengthM.toString() }));
+  }
+  const orderLengths = adjusted.map((sku) => D(sku.orderLengthM));
+  const total = sum(orderLengths);
+  const changed = adjusted.some((sku, index) => !D(sku.orderLengthM).eq(rounded[index].orderLengthM));
+  const adjustment: FilmOrderAdjustment = !changed ? "none" : raisedTotal.lt(minTotal) ? "minimum_total_allocation" : "minimum_sku_allocation";
+  return { orders: adjusted, adjustment };
+}
+
+export type FilmOrderAdjustment = "none" | "minimum_sku_allocation" | "minimum_total_allocation";
+
 export function validateDigitalFilmOrder(skus: FilmSkuOrderInput[], params: CostParameters): DigitalFilmValidation {
   if (skus.length === 0) throw validationError("digital_film_skus_required");
 

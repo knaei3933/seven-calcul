@@ -15,8 +15,11 @@ export const ceilTo = (value: DecimalValueInput, unit: DecimalValueInput): Decim
   const amount = D(value);
   const step = D(unit);
   if (step.lte(0)) throw new Error("Ceiling unit must be positive");
+  if (amount.lt(0)) throw new Error("Ceiling amount must not be negative");
   return amount.div(step).ceil().times(step);
 };
+
+export const roundTo2 = (value: DecimalValueInput): string => D(value).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString();
 
 export const maxD = (...values: DecimalValueInput[]): Decimal => values.reduce<Decimal>((a, b) => Decimal.max(a, D(b)), D(0));
 export const eq = (a: DecimalValueInput, b: DecimalValueInput): boolean => D(a).eq(D(b));

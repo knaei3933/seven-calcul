@@ -1,6 +1,0 @@
-{
-  "last_turn_at": "2026-08-31T12:54:52.745Z",
-  "turn_count": 4,
-  "last_progress_at": "2026-08-31T12:54:52.745Z",
-  "last_agent_output": "**진단 결과:** OMX 설치와 Team 진단은 정상입니다. `omx doctor --team` → `[OK] team diagnostics: no issues`.\n\n**라우팅 "
-}

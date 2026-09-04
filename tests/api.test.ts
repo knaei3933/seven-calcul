@@ -3,7 +3,7 @@ import { POST } from "@/app/api/calculate/route";
 
 describe("POST /api/calculate", () => {
   it("returns deterministic Decimal result", async () => {
-    const body = { spec: { sizeKey: "mouthwash-45x145", customWidthMm: "45", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 2, fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0.37", skuRequiredLengthsM: ["500"] }, quantity: "10000", printingMethod: "digital" };
+    const body = { spec: { sizeKey: "mouthwash-45x145", customWidthMm: "45", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 2, fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0.37", skuCount: 1 }, quantity: "10000", printingMethod: "digital" };
     const response = POST(new Request("http://localhost/api/calculate", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } }) as unknown as Request);
     const payload = await response;
     expect(payload.status).toBe(200);
@@ -17,17 +17,15 @@ describe("POST /api/calculate", () => {
     expect(await response.json()).toEqual({ error: "invalid_request" });
   });
 
-  it("rejects digital film orders that fail SKU minimum validation", async () => {
+  it("succeeds when a short parallel order is raised to the 500m minimum", async () => {
     const body = {
-      spec: { sizeKey: "mouthwash-45x145", customWidthMm: "45", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 2, fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0.37", skuRequiredLengthsM: ["100", "100"] },
+      spec: { sizeKey: "mouthwash-45x145", customWidthMm: "45", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 2, fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0.37", skuCount: 1 },
       quantity: "10000",
       printingMethod: "digital",
     };
     const response = await POST(new Request("http://localhost/api/calculate", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } }));
     const payload = await response.json();
-    expect(response.status).toBe(400);
-    expect(payload.error).toBe("digital_film_order_invalid");
-    expect(payload.digitalValidation.valid).toBe(false);
-    expect(payload.digitalValidation.corrections[0].kind).toBe("raise_each_sku_to_minimum");
+    expect(response.status).toBe(200);
+    expect(payload.result.film.orderLengthM).toBe("500");
   });
 });
