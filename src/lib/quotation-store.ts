@@ -39,7 +39,8 @@ interface DatabaseRow {
   updated_at: string;
 }
 
-const databasePath = process.env.POUCH_QUOTATION_DB ?? resolve(process.cwd(), ".data/quotations.db");
+const databasePath = process.env.POUCH_QUOTATION_DB
+  ?? (process.env.VERCEL === "1" ? "/tmp/pouch-quotations.db" : resolve(process.cwd(), ".data/quotations.db"));
 let database: DatabaseSync | null = null;
 
 async function getDatabase(): Promise<DatabaseSync> {

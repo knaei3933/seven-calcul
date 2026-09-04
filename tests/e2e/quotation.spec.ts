@@ -55,3 +55,18 @@ test("A4 quotation page imports simulator costs and prepares PDF printing", asyn
   await expect(page.getByTestId("history-table")).toContainText("E2E株式会社");
   await expect(page.getByTestId("history-table")).toContainText("税込合計");
 });
+
+test("PDF output continues when test history storage fails", async ({ page }) => {
+  await page.route("**/api/quotations", (route) => route.abort());
+  await page.goto("/quote");
+  await page.evaluate(() => {
+    (window as Window & { printCalls?: number }).printCalls = 0;
+    window.print = () => {
+      const scopedWindow = window as Window & { printCalls?: number };
+      scopedWindow.printCalls = (scopedWindow.printCalls ?? 0) + 1;
+    };
+  });
+  await page.getByTestId("print-pdf").click();
+  await expect.poll(() => page.evaluate(() => (window as Window & { printCalls?: number }).printCalls)).toBe(1);
+  await expect(page.getByTestId("save-error")).toContainText("テスト環境ではデータが保持されない場合があります");
+});
