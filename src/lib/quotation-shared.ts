@@ -1,4 +1,5 @@
 export const QUOTATION_RESTORE_KEY = "pouch-quotation-restore-v1";
+export const DEFAULT_FILM_COMPOSITION = "PET12+AL7+PET12+LLDPE50μ";
 
 export type QuotationStatus = "draft" | "sent" | "approved" | "rejected" | "expired";
 
@@ -37,3 +38,5 @@ export interface QuotationRecord extends QuotationRecordInput {
   createdAt: string;
   updatedAt: string;
 }
+
+export type { QuotationPayload } from "./quotation-history-types";

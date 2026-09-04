@@ -11,7 +11,7 @@ import {
   sevenChemical,
   type QuotationDraft,
 } from "@/lib/quotation-draft";
-import { QUOTATION_RESTORE_KEY } from "@/lib/quotation-shared";
+import { DEFAULT_FILM_COMPOSITION, QUOTATION_RESTORE_KEY } from "@/lib/quotation-shared";
 
 type QuoteForm = {
   quotationNumber: string;
@@ -37,6 +37,7 @@ type QuoteForm = {
   fillingAmountDisplay: string;
   filmItemName: string;
   filmItemDescription: string;
+  filmComposition: string;
   filmUnitDisplay: string;
   filmPouchUnitDisplay: string;
   filmAmountDisplay: string;
@@ -88,6 +89,7 @@ const defaultQuote: QuoteForm = {
   fillingAmountDisplay: "",
   filmItemName: "フィルム費用",
   filmItemDescription: "パウチフィルム製作・物流に必要な一式",
+  filmComposition: DEFAULT_FILM_COMPOSITION,
   filmUnitDisplay: "",
   filmPouchUnitDisplay: "",
   filmAmountDisplay: "",
@@ -421,6 +423,7 @@ export default function PrintableQuotationPage() {
                     <td>
                       <strong>{form.filmItemName}</strong>
                       <small>{form.filmItemDescription}</small>
+                      <small className="film-composition" data-testid="film-composition">構成：{form.filmComposition || DEFAULT_FILM_COMPOSITION}</small>
                     </td>
                     <td>
                       <strong data-testid="film-meter-price">{formatCurrency(shownTotals.filmUnit, 0)} /m</strong>
@@ -556,6 +559,7 @@ export default function PrintableQuotationPage() {
           <label>充填・加工 金額（空欄=自動）<input inputMode="decimal" value={form.fillingAmountDisplay} onChange={(event) => update("fillingAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>フィルム 項目名<input value={form.filmItemName} onChange={(event) => update("filmItemName", event.target.value)} /></label>
           <label className="wide">フィルム 説明<textarea rows={2} value={form.filmItemDescription} onChange={(event) => update("filmItemDescription", event.target.value)} /></label>
+          <label className="wide">フィルム構成<input value={form.filmComposition} onChange={(event) => update("filmComposition", event.target.value)} placeholder={DEFAULT_FILM_COMPOSITION} /></label>
           <label>フィルム 原価 / 枚<input inputMode="decimal" value={form.filmCostPerPiece} onChange={(event) => update("filmCostPerPiece", event.target.value)} /></label>
           <label>フィルム m単価<input inputMode="decimal" value={form.filmMeterPrice} onChange={(event) => update("filmMeterPrice", event.target.value)} /></label>
           <label>フィルム発注長さ (m)<input inputMode="decimal" value={form.filmOrderLengthM} onChange={(event) => update("filmOrderLengthM", event.target.value)} /></label>

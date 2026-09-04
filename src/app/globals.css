@@ -166,6 +166,31 @@ header .version-badge { display: none; }
 .history-table select { min-height: 36px; padding: 5px 7px; font-size: 12px; }
 .history-actions { white-space: nowrap; }
 .history-actions .button + .button { margin-left: 5px; }
+.history-detail-layer { position: fixed; inset: 0; z-index: 90; display: grid; grid-template-columns: 1fr min(94vw, 920px) 1fr; }
+.history-detail-overlay { position: absolute; inset: 0; background: rgba(15, 23, 42, .45); backdrop-filter: blur(2px); }
+.history-detail-panel { position: relative; z-index: 1; grid-column: 2; display: flex; flex-direction: column; margin: 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: #f8fafc; box-shadow: 0 20px 60px rgba(15, 23, 42, .25); }
+.history-detail-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); background: white; padding: 14px; }
+.history-detail-header h2 { margin: 2px 0; font-size: 20px; }
+.history-detail-header p { margin: 0; color: var(--muted); font-size: 12px; }
+.detail-scroll { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.profit-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.profit-kpis article { display: grid; gap: 3px; border: 1px solid #cbd5e1; border-radius: 10px; background: white; padding: 10px; }
+.profit-kpis span { color: var(--muted); font-size: 11px; font-weight: 800; }
+.profit-kpis strong { font-size: clamp(17px, 2vw, 23px); }
+.profit-kpis small { color: var(--muted); font-size: 11px; }
+.detail-table-wrap { overflow-x: auto; }
+.detail-table-wrap table { min-width: 760px; }
+.detail-total-row td { font-weight: 900; background: #eef2ff; }
+.formula-note { margin-top: 8px; border-left: 3px solid var(--primary); background: white; padding: 8px 10px; color: #374151; font-size: 12px; line-height: 1.6; }
+.detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.detail-grid > div { display: grid; gap: 3px; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: white; padding: 9px; }
+.detail-grid span { color: var(--muted); font-size: 11px; font-weight: 800; }
+.detail-grid strong { overflow-wrap: anywhere; font-size: 13px; }
+.raw-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.raw-grid > div { min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: white; padding: 8px; }
+.raw-grid span { display: block; color: var(--muted); font-size: 10px; font-weight: 800; }
+.raw-grid strong { display: block; overflow-wrap: anywhere; font-size: 12px; font-weight: 600; }
+.payload-json { width: 100%; margin-top: 8px; font: 11px/1.5 ui-monospace, monospace; }
 
 /* 見積書画面：中央プレビュー＋左右エッジ編集 */
 .quote-page { max-width: 1720px; display: flex; flex-direction: column; gap: 16px; }
@@ -230,6 +255,7 @@ header .version-badge { display: none; }
 .quote-table th:nth-child(1), .quote-table td:nth-child(1) { width: 42%; text-align: left; }
 .quote-table th:not(:first-child), .quote-table td:not(:first-child) { text-align: right; }
 .quote-table small { display: block; margin-top: 1mm; color: #6b7280; font-size: 8.6pt; font-weight: 400; }
+.film-composition { letter-spacing: .01em; }
 .total-block { margin-left: auto; width: min(88mm, 100%); margin-top: 5mm; font-size: 10.5pt; }
 .total-block > div { display: flex; justify-content: space-between; gap: 5mm; padding: 2.3mm 0; border-bottom: 1px solid #d1d5db; }
 .total-block span { color: #4b5563; }
@@ -290,6 +316,11 @@ header .version-badge { display: none; }
 @media (max-width: 720px) {
   .history-toolbar { align-items: start; flex-direction: column; }
   .history-controls { width: 100%; grid-template-columns: 1fr; }
+  .history-detail-layer { grid-template-columns: 1fr; }
+  .history-detail-panel { grid-column: 1; margin: 0; height: 100dvh; border-radius: 0; }
+  .profit-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .raw-grid { grid-template-columns: 1fr; }
 }
 
 @media print {

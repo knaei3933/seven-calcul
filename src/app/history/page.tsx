@@ -4,7 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
-import { QUOTATION_RESTORE_KEY, quotationStatuses, type QuotationRecord, type QuotationStatus } from "@/lib/quotation-shared";
+import { analyzeQuotation, filmCompositionOf } from "@/lib/quotation-history";
+import {
+  DEFAULT_FILM_COMPOSITION,
+  QUOTATION_RESTORE_KEY,
+  quotationStatuses,
+  type QuotationRecord,
+  type QuotationStatus,
+} from "@/lib/quotation-shared";
 
 const statusLabels: Record<QuotationStatus, string> = {
   draft: "下書き",
@@ -21,7 +28,9 @@ export default function QuotationHistoryPage() {
   const [records, setRecords] = useState<QuotationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const requestOrder = useRef(0);
+  const selectedRecord = records.find((record) => record.id === selectedId) ?? null;
 
   const load = useCallback(async (search: string, statusFilter: string) => {
     const order = ++requestOrder.current;
@@ -47,6 +56,15 @@ export default function QuotationHistoryPage() {
     const timer = setTimeout(() => void load(query, status), 180);
     return () => clearTimeout(timer);
   }, [load, query, status]);
+
+  useEffect(() => {
+    if (!selectedRecord) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectedId(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedRecord]);
 
   const restore = (record: QuotationRecord) => {
     sessionStorage.setItem(QUOTATION_RESTORE_KEY, JSON.stringify(record.payload));
@@ -147,6 +165,7 @@ export default function QuotationHistoryPage() {
                     </select>
                   </td>
                   <td className="history-actions">
+                    <button className="button small" type="button" onClick={() => setSelectedId(record.id)}>詳細</button>
                     <button className="button secondary small" type="button" onClick={() => restore(record)}>復元</button>
                     <button className="button danger small" type="button" onClick={() => void remove(record)}>削除</button>
                   </td>
@@ -156,6 +175,138 @@ export default function QuotationHistoryPage() {
           </table>
         </div>
       </section>
+
+      {selectedRecord ? (
+        <QuotationDetailModal record={selectedRecord} onClose={() => setSelectedId(null)} />
+      ) : null}
     </main>
+  );
+}
+
+function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; onClose: () => void }) {
+  const analysis = analyzeQuotation(record);
+  const composition = filmCompositionOf(record);
+  const payloadEntries = Object.entries(record.payload);
+  const recordEntries = Object.entries(record).filter(([key]) => key !== "payload");
+  const amountDifference = analysis.grandTotal.minus(analysis.subtotal.plus(analysis.tax));
+
+  const rows = [
+    { name: "充填・加工", cost: analysis.fillingCostUnit, selling: analysis.fillingUnit, profit: analysis.fillingUnit.minus(analysis.fillingCostUnit), quantity: `${formatNumber(analysis.quantity.toNumber(), 0)} 枚`, amount: analysis.fillingAmount },
+    { name: "フィルム", cost: analysis.filmCostUnit, selling: analysis.filmUnit, profit: analysis.filmUnit.minus(analysis.filmCostUnit), quantity: `${formatNumber(analysis.filmOrderLength.toNumber(), 0)} m`, amount: analysis.filmAmount },
+  ];
+
+  return (
+    <div className="history-detail-layer no-print" role="dialog" aria-modal="true" aria-labelledby="history-detail-title">
+      <div className="history-detail-panel">
+        <header className="history-detail-header">
+          <div>
+            <span className="side-kicker">QUOTATION DETAIL</span>
+            <h2 id="history-detail-title">{record.quotationNumber}</h2>
+            <p data-testid="history-film-composition">{record.customerName || "得意先未設定"} / {record.productName} / フィルム構成 {composition || DEFAULT_FILM_COMPOSITION}</p>
+          </div>
+          <button className="button secondary small" type="button" onClick={onClose}>閉じる</button>
+        </header>
+
+        <div className="detail-scroll">
+          <section className="profit-kpis" aria-label="利益再計算">
+            <article><span>表示見積単価</span><strong>{formatCurrency(analysis.sellingUnit.toFixed(0), 0)}</strong><small>/枚</small></article>
+            <article><span>総原価</span><strong>{formatCurrency(analysis.costUnit.toFixed(2), 2)}</strong><small>/枚</small></article>
+            <article><span>利益 / 枚</span><strong>{formatCurrency(analysis.profitUnit.toFixed(2), 2)}</strong><small>{formatNumber(analysis.profitRate.toNumber(), 2)}%</small></article>
+            <article><span>総利益（税抜）</span><strong>{formatCurrency(analysis.totalProfit.toFixed(0), 0)}</strong><small>{formatNumber(analysis.quantity.toNumber(), 0)}枚</small></article>
+          </section>
+
+          <details className="editor-group" open>
+            <summary>原価・見積・利益の逆算明細</summary>
+            <div className="detail-table-wrap">
+              <table className="table">
+                <thead>
+                  <tr><th>項目</th><th>原価 /枚</th><th>見積単価</th><th>利益 /枚</th><th>利益率</th><th>数量</th><th>見積金額</th></tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={row.name}>
+                      <td>{row.name}</td>
+                      <td>{formatCurrency(row.cost.toFixed(4), 4)}</td>
+                      <td>{formatCurrency(row.selling.toFixed(4), 4)}</td>
+                      <td>{formatCurrency(row.profit.toFixed(4), 4)}</td>
+                      <td>{row.selling.gt(0) ? `${formatNumber(row.profit.div(row.selling).times(100).toNumber(), 2)}%` : "-"}</td>
+                      <td>{row.quantity}</td>
+                      <td>{formatCurrency(row.amount.toFixed(0), 0)}</td>
+                    </tr>
+                  ))}
+                  <tr className="detail-total-row">
+                    <td>合計</td>
+                    <td>{formatCurrency(analysis.costUnit.toFixed(4), 4)}</td>
+                    <td>{formatCurrency(analysis.sellingUnit.toFixed(4), 4)}</td>
+                    <td>{formatCurrency(analysis.profitUnit.toFixed(4), 4)}</td>
+                    <td>{formatNumber(analysis.profitRate.toNumber(), 2)}%</td>
+                    <td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td>
+                    <td>{formatCurrency(analysis.totalRevenue.toFixed(0), 0)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="formula-note">
+              利益 / 枚 ＝ 表示見積単価 − 総原価 ＝ {formatCurrency(analysis.sellingUnit.toFixed(4), 4)} − {formatCurrency(analysis.costUnit.toFixed(4), 4)} ＝ {formatCurrency(analysis.profitUnit.toFixed(4), 4)}<br />
+              利益率 ＝ 利益 ÷ 表示見積単価 × 100 ＝ {formatNumber(analysis.profitRate.toNumber(), 2)}％／ 総利益 ＝ 利益 × 数量 ＝ {formatCurrency(analysis.totalProfit.toFixed(2), 2)}
+            </div>
+          </details>
+
+          <details className="editor-group" open>
+            <summary>表示金額・税・調整</summary>
+            <div className="detail-grid">
+              <div><span>原価 / 枚（充填＋フィルム）</span><strong>{formatCurrency(analysis.costUnit.toFixed(4), 4)}</strong></div>
+              <div><span>自動目標利益率</span><strong>{formatNumber(analysis.targetMargin.times(100).toNumber(), 2)}%</strong></div>
+              <div><span>端数調整</span><strong>{formatCurrency(analysis.adjustment.toFixed(0), 0)}</strong></div>
+              <div><span>小計（税抜）</span><strong>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</strong></div>
+              <div><span>消費税（{formatNumber(analysis.taxRate.toNumber(), 2)}%）</span><strong>{formatCurrency(analysis.tax.toFixed(0), 0)}</strong></div>
+              <div><span>税込合計</span><strong>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</strong></div>
+              <div><span>マークアップ率</span><strong>{formatNumber(analysis.markupRate.toNumber(), 2)}%</strong></div>
+              <div><span>合計整合差</span><strong>{formatCurrency(amountDifference.toFixed(0), 0)}</strong></div>
+            </div>
+            <p className="help">保存済みDB値の逆算：単価 {formatCurrency(analysis.storedSellingUnit.toFixed(4), 4)} / 利益 {formatCurrency(analysis.storedProfitUnit.toFixed(4), 4)} / 利益率 {formatNumber(analysis.storedProfitRate.toNumber(), 2)}%。上段は見積書の表示override値を優先した実表示金額です。</p>
+          </details>
+
+          <details className="editor-group">
+            <summary>見積条件・フィルム構成</summary>
+            <div className="detail-grid">
+              <div><span>見積番号</span><strong>{record.quotationNumber}</strong></div>
+              <div><span>発行日</span><strong>{record.issueDate}</strong></div>
+              <div><span>有効期限</span><strong>{record.validUntil || "-"}</strong></div>
+              <div><span>得意先</span><strong>{record.customerName || "-"}</strong></div>
+              <div><span>担当</span><strong>{record.customerContact || "-"}</strong></div>
+              <div><span>品名</span><strong>{record.productName}</strong></div>
+              <div><span>仕様</span><strong>{record.sizeSummary}</strong></div>
+              <div><span>フィルム構成</span><strong>{composition || DEFAULT_FILM_COMPOSITION}</strong></div>
+              <div><span>フィルム m単価</span><strong>{formatCurrency(analysis.filmMeterPrice.toFixed(0), 0)} /m</strong></div>
+              <div><span>フィルム発注長</span><strong>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</strong></div>
+              <div><span>納期</span><strong>{record.deliveryDate || "-"}</strong></div>
+              <div><span>支払条件</span><strong>{record.paymentTerms || "-"}</strong></div>
+            </div>
+            <p className="help">備考：{record.notes || "-"}</p>
+          </details>
+
+          <details className="editor-group">
+            <summary>DBレコード全項目</summary>
+            <div className="raw-grid">
+              {recordEntries.map(([key, value]) => (
+                <div key={key}><span>{key}</span><strong>{String(value ?? "-")}</strong></div>
+              ))}
+            </div>
+          </details>
+
+          <details className="editor-group">
+            <summary>保存payload全項目（編集内容含む）</summary>
+            <div className="raw-grid">
+              {payloadEntries.map(([key, value]) => (
+                <div key={key}><span>{key}</span><strong>{typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "-")}</strong></div>
+              ))}
+            </div>
+            <textarea className="payload-json" readOnly rows={10} value={JSON.stringify(record.payload, null, 2)} aria-label="保存payload JSON" />
+          </details>
+        </div>
+      </div>
+      <div className="history-detail-overlay" onClick={onClose} aria-hidden="true" />
+    </div>
   );
 }
