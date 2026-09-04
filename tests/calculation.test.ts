@@ -55,9 +55,9 @@ describe("digital film", () => {
     const single = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 1 }, quantity: "10000", printingMethod: "digital" });
     const twin = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 2 }, quantity: "10000", printingMethod: "digital" });
     const quad = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 4 }, quantity: "10000", printingMethod: "digital" });
-    expect(single.effectiveProductionSpeed).toBe("3600");
-    expect(twin.effectiveProductionSpeed).toBe("1800");
-    expect(quad.effectiveProductionSpeed).toBe("900");
+    expect(single.effectiveProductionSpeed).toBe("6000");
+    expect(twin.effectiveProductionSpeed).toBe("3000");
+    expect(quad.effectiveProductionSpeed).toBe("1500");
     expect(Number(twin.variableProcessingPerPiece)).toBeGreaterThan(Number(single.variableProcessingPerPiece));
     expect(Number(quad.variableProcessingPerPiece)).toBeGreaterThan(Number(twin.variableProcessingPerPiece));
   });
@@ -65,7 +65,7 @@ describe("digital film", () => {
   it("runs the machine for the loss-inclusive quantity when computing production time", () => {
     const result = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 1 }, quantity: "10000", printingMethod: "digital" });
     expect(Number(result.productionRunQuantity)).toBeCloseTo(10000 / 0.9, 6);
-    expect(Number(result.productionHours)).toBeCloseTo(10000 / 0.9 / 3600, 6);
+    expect(Number(result.productionHours)).toBeCloseTo(10000 / 0.9 / 6000, 6);
     expect(Number(result.inspectionHours)).toBeCloseTo(10000 / 0.9 / 1500, 6);
   });
 

@@ -56,7 +56,7 @@ export const defaultParameters: CostParameters = {
   fillTestRuns: "500",
   laborPerHour: "2500",
   machineChargePerHour: machineChargePerHourFromBasis(),
-  productionSpeedPerMinute: "60",
+  productionSpeedPerMinute: "100",
   inspectionSpeed: "1500",
   setupTime: "3",
   cleanupTime: "2",
