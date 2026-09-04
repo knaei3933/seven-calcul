@@ -512,7 +512,7 @@ export default function QuotationPage() {
                     <p className="chain">生産時間＝稼働生産数 ÷ 実効速度 ＝ {formatNumber(resultShown.productionRunQuantity)}枚 ÷ {formatNumber(resultShown.effectiveProductionSpeed)}枚/h ＝ {formatNumber(resultShown.productionHours)}h。稼働生産数は発注 {formatNumber(resultShown.quantity)}枚 ÷ (1−ロス{formatNumber(Number(parameters.lossRate) * 100, 3)}%)＝ロス分のパウチも実際に機械へ流すための数です。</p>
                   </details>
                   <details className="cost-block" data-testid="cost-fixed" open>
-                    <summary><h3>② 段取り・清掃費（ロット固定費）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.fixedLot))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.fixedLot))} /枚）</small></span></summary>
+                    <summary><h3>② 段取り・清掃費（ロット1回ごとの固定費）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.fixedLot))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.fixedLot))} /枚）</small></span></summary>
                     <table className="table breakdown-table">
                       <thead><tr><th scope="col">項目</th><th scope="col">時間</th><th scope="col">単価</th><th scope="col">金額</th></tr></thead>
                       <tbody>
@@ -522,10 +522,10 @@ export default function QuotationPage() {
                         <tr><td>合計（ロット1回）</td><td>{formatNumber(D(parameters.setupTime).plus(parameters.cleanupTime).toString())}h</td><td>—</td><td>{formatCurrency(displayAmount(resultShown.costComponents.fixedLot))}</td></tr>
                       </tbody>
                     </table>
-                    <p className="chain">設計書3.2.3のルール：段取り・清掃の{formatNumber(D(parameters.setupTime).plus(parameters.cleanupTime).toString())}時間は作業員の人件費に加え、機械も占有稼働するため機械費（減価償却・電気代）が時間比例で発生します。数量に関係なくロット1回ごとに固定で発生します。</p>
+                    <p className="chain">この費用は、ロットを始めるときの準備と終わったあとの清掃にかかる費用です。{formatNumber(D(parameters.setupTime).plus(parameters.cleanupTime).toString())}時間のあいだ、作業員の人件費がかかり、機械も占有して動くため、機械費（減価償却と電気代）も時間に比例して加算します。発注数量に関係なく、ロット1回ごとに固定で発生します。</p>
                     {resultShown ? (
                       <p className="chain" data-testid="machine-time-chain">
-                        機械費は稼働時間に正比例：このロットの機械占有時間＝段取り・清掃 {formatNumber(D(parameters.setupTime).plus(parameters.cleanupTime).toString())}h ＋ 生産 {formatNumber(resultShown.productionHours)}h（稼働生産数 {formatNumber(resultShown.productionRunQuantity)}枚 ÷ 実効{formatNumber(resultShown.effectiveProductionSpeed)}枚/h）＝{formatNumber(Number(resultShown.productionHours) + Number(parameters.setupTime) + Number(parameters.cleanupTime))}h → 機械費合計 {formatCurrency(displayAmount(D(resultShown.productionHours).plus(D(parameters.setupTime).plus(parameters.cleanupTime)).times(parameters.machineChargePerHour).toString()))}（生産分は①の機械費行、段取り・清掃分はこの表に計上）
+                        機械費は稼働時間に比例します。このロットで機械を占有する時間は、段取り・清掃 {formatNumber(D(parameters.setupTime).plus(parameters.cleanupTime).toString())}時間と生産 {formatNumber(resultShown.productionHours)}時間（稼働生産数 {formatNumber(resultShown.productionRunQuantity)}枚 ÷ 実効速度 {formatNumber(resultShown.effectiveProductionSpeed)}枚/時）を合わせた {formatNumber(Number(resultShown.productionHours) + Number(parameters.setupTime) + Number(parameters.cleanupTime))}時間です。よって機械費合計は {formatCurrency(displayAmount(D(resultShown.productionHours).plus(D(parameters.setupTime).plus(parameters.cleanupTime)).times(parameters.machineChargePerHour).toString()))} になります。生産分は①の機械費の行に、段取り・清掃分はこの表に含めています。
                       </p>
                     ) : null}
                   </details>
@@ -546,14 +546,14 @@ export default function QuotationPage() {
                         const sumRounded = f.skuCosts.reduce((total, sku) => total + Math.ceil(Number(sku.requiredLengthM) / 100) * 100, 0);
                         return (
                           <>
-                            <p>① 必要生産長さ 合計 {formatNumber(f.requiredLengthM)}m ＝ 発注枚数 ÷ (1−ロス率) × ピッチ ÷ 生産列数</p>
-                            <p>② SKU別に 100m単位へ切上げ → 合計 {formatNumber(String(sumRounded))}m</p>
-                            <p>③ 最低発注ルール（各SKU≥{formatNumber(parameters.digitalFilmMinSkuM)}m・合計≥{formatNumber(parameters.digitalFilmMinTotalM)}m）を適用 → 発注 {formatNumber(f.orderLengthM)}m{Number(f.orderLengthM) > sumRounded ? "（最低値を満たすまで上方修正）" : "（切上げのままで最低値を満たす）"}</p>
-                            <p>④ ロス −{formatNumber(f.lossM)}m（{f.skuCosts.some((sku) => sku.multiplier === 2) ? "検討長さ（発注×2倍）" : "発注"}の{formatNumber(Number(parameters.lossRate) * 100, 3)}%・最低{formatNumber(parameters.lossMinM)}m）→ 有効 {formatNumber(f.effectiveLengthM)}m</p>
-                            <p>⑤ 参考: 有効長から作れる枚数 {formatNumber(f.actualQuantity)}枚（有効 {formatNumber(f.effectiveLengthM)}m ÷ ピッチ × 列数・500枚単位 {formatNumber(f.pricingQuantity)}枚）</p>
-                            <p>⑥ <strong>見積のフィルム単価は発注枚数基準</strong>＝フィルム費用合計 ÷ 発注枚数 {formatNumber(resultShown.quantity)}枚。⑤−発注枚数の余剰分（約{formatNumber(String(Math.max(0, Number(f.actualQuantity) - Number(resultShown.quantity))))}枚）は発注者負担の余剰生産です。</p>
+                            <p>① 必要な生産長さは合計 {formatNumber(f.requiredLengthM)}m です。計算式は「発注枚数 ÷ (1−ロス率) × ピッチ ÷ 生産列数」です。</p>
+                            <p>② SKUごとに 100m単位へ切り上げます。切り上げ後の合計は {formatNumber(String(sumRounded))}m です。</p>
+                            <p>③ 最低発注ルールを適用します。各SKUは {formatNumber(parameters.digitalFilmMinSkuM)}m 以上、合計は {formatNumber(parameters.digitalFilmMinTotalM)}m 以上のため、発注長さは {formatNumber(f.orderLengthM)}m{Number(f.orderLengthM) > sumRounded ? " になります（最低値を満たすまで切り上げました）" : " です（切り上げ後の長さがそのまま使えます）"}。</p>
+                            <p>④ フィルムのロス {formatNumber(f.lossM)}m を差し引きます。ロスは{f.skuCosts.some((sku) => sku.multiplier === 2) ? "生産検討長さ（発注×2倍）" : "発注長さ"}の {formatNumber(Number(parameters.lossRate) * 100, 3)}% で、最低 {formatNumber(parameters.lossMinM)}m を保証します。差し引いたあとの有効長は {formatNumber(f.effectiveLengthM)}m です。</p>
+                            <p>⑤ 参考として、有効なフィルム長から作れる枚数は {formatNumber(f.actualQuantity)}枚 です。計算は「有効 {formatNumber(f.effectiveLengthM)}m ÷ ピッチ × 列数」で、価格計算は500枚単位の {formatNumber(f.pricingQuantity)}枚 を使います。</p>
+                            <p>⑥ <strong>見積書のフィルム単価は発注枚数基準</strong>です。計算式は「フィルム費用合計 ÷ 発注枚数 {formatNumber(resultShown.quantity)}枚」です。実際に作れる枚数との差（約{formatNumber(String(Math.max(0, Number(f.actualQuantity) - Number(resultShown.quantity))))}枚）は、発注者が負担する余剰生産分です。</p>
                             {f.skuCosts.some((sku) => sku.multiplier === 2) ? (
-                              <p>⑦ 35mm・Xra幅の大ロット切替：必要長900m超 → 736mm幅・2倍生産（検討長さ＝発注×2・200m刻み・価格帯571〜740mm・ロスは検討長さの10%）に自動切替しました。</p>
+                              <p>⑦ 幅35mmおよびXraラウンドで必要長さが900mを超えたため、幅736mm・2倍生産へ自動的に切り替えました。この場合の生産検討長さは「発注×2倍」、送り単位は200m、価格帯は571〜740mm、ロスは検討長さの10%で計算します。</p>
                             ) : null}
                           </>
                         );
@@ -561,11 +561,11 @@ export default function QuotationPage() {
                     </div>
                   </details>
                   <details className="cost-block" data-testid="cost-bulk" open>
-                    <summary><h3>④ バルク費用（液内容）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.bulk))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.bulk))} /枚）</small></span></summary>
+                    <summary><h3>④ バルク費用（液体材料）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.bulk))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.bulk))} /枚）</small></span></summary>
                     <table className="table breakdown-table">
                       <thead><tr><th scope="col">項目</th><th scope="col">単価</th><th scope="col">数量</th><th scope="col">金額</th></tr></thead>
                       <tbody>
-                        <tr><td>充填分（SKU別充填量の合計・ロス{formatNumber(Number(parameters.bulkLossRate) * 100, 3)}%込・{formatNumber(resultShown.chamberCount)}室）</td><td>{formatCurrency(displayAmount(form.bulkPrice))} /ml</td><td>{formatNumber(bulkFillMlOf(resultShown).toString())} ml</td><td>{formatCurrency(displayAmount(bulkFillMlOf(resultShown).times(form.bulkPrice).toString()))}</td></tr>
+                        <tr><td>充填分（SKUごとの充填量を合計し、ロス{formatNumber(Number(parameters.bulkLossRate) * 100, 3)}%を含みます・{formatNumber(resultShown.chamberCount)}室）</td><td>{formatCurrency(displayAmount(form.bulkPrice))} /ml</td><td>{formatNumber(bulkFillMlOf(resultShown).toString())} ml</td><td>{formatCurrency(displayAmount(bulkFillMlOf(resultShown).times(form.bulkPrice).toString()))}</td></tr>
                         <tr><td>初期投入（{form.method === "hopper" ? "ホッパ" : "加圧"}）</td><td>{formatCurrency(displayAmount(form.bulkPrice))} /ml</td><td>{formatNumber(resultShown.initialChargeMl)} ml</td><td>{formatCurrency(displayAmount(D(resultShown.initialChargeMl).times(form.bulkPrice).toString()))}</td></tr>
                         <tr><td>テスト充填</td><td>{formatCurrency(displayAmount(form.bulkPrice))} /ml</td><td data-testid="test-fill">{formatNumber(resultShown.testFillMl)} ml</td><td>{formatCurrency(displayAmount(D(resultShown.testFillMl).times(form.bulkPrice).toString()))}</td></tr>
                         <tr><td>使用量合計</td><td>—</td><td data-testid="bulk-usage">{formatNumber(resultShown.bulkUsageMl)} ml</td><td>{formatCurrency(displayAmount(resultShown.costComponents.bulk))}</td></tr>
@@ -574,7 +574,7 @@ export default function QuotationPage() {
                   </details>
                   <details className="cost-block" data-testid="cost-custom" open>
                     <summary><h3>⑤ カスタム費用</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.custom))}</span></summary>
-                    <p className="chain">カスタム区分（自由寸法）を選択したとき、ロットに1回だけ {formatCurrency(displayAmount(parameters.customPouchCharge))} を加算します。標準サイズは ¥0。</p>
+                    <p className="chain">カスタム区分（自由なサイズ）を選択したときは、ロット1回あたり {formatCurrency(displayAmount(parameters.customPouchCharge))} を加算します。標準サイズの場合は ¥0 です。</p>
                   </details>
                 </div>
                 {resultShown.film.skuCosts.length > 1 ? (
@@ -592,39 +592,39 @@ export default function QuotationPage() {
                 ) : null}
                 <table className="table"><caption className="help">利益率別 販売単価・売上・利益</caption><thead><tr><th scope="col">利益率</th><th scope="col">販売単価</th><th scope="col">売上計</th><th scope="col">利益額</th></tr></thead><tbody>{resultShown.sellingPrices.map((p) => <tr key={p.margin} className={Number(p.margin) === Number(effectiveMargin) ? "selected-margin" : undefined}><td>{formatNumber(Number(p.margin) * 100, 0)}%{Number(p.margin) === Number(effectiveMargin) ? "（適用中）" : ""}</td><td>{formatCurrency(displayAmount(p.pricePerPiece))}</td><td>{formatCurrency(displayAmount(p.totalSales))}</td><td>{formatCurrency(displayAmount(p.profit))}</td></tr>)}</tbody></table>
                 <details className="formula-panel" data-testid="calculation-formula">
-                  <summary>計算式を表示</summary>
+                  <summary>計算のしくみを表示</summary>
                   <div className="formula-group">
-                    <h4>共通</h4>
+                    <h4>すべての費用に共通する値</h4>
                     <table className="table formula-vars"><tbody>
-                      <tr><th scope="row">発注枚数</th><td>{formatNumber(form.quantity)} 枚</td><td>連結後パウチ「枚」単位の販売数量です。</td></tr>
-                      <tr><th scope="row">連結形式</th><td>{form.connected} 連</td><td>1枚の区画（室）数です。室数＝発注枚数×連結数で計算します。</td></tr>
-                      <tr><th scope="row">充填量</th><td>SKU別設定（平均 {formatNumber(weightedAvgFill)} ml/室）</td><td>1室あたりのバルク投入量です。SKUごとに変えられ、バルク使用量は数量加重平均で計算します。</td></tr>
-                      <tr><th scope="row">充填列数</th><td>{form.lanes} 列</td><td>1回の同時充填列数です。テスト充填の倍率としても使います。</td></tr>
-                      <tr><th scope="row">テスト充填回数</th><td>{formatNumber(parameters.fillTestRuns)} 回</td><td>ロット開始時の試験充填回数です。生産枚数には含めません。</td></tr>
-                      <tr><th scope="row">初期投入量</th><td>{form.method === "hopper" ? formatNumber(parameters.hopperInitialChargeMl) : formatNumber(parameters.pressureInitialChargeMl)} ml</td><td>{form.method === "hopper" ? "ホッパ充填のライン初期投入量です。" : "加圧充填のライン初期投入量です。"}</td></tr>
-                      <tr><th scope="row">バルクロス率</th><td>{formatNumber(Number(parameters.bulkLossRate) * 100, 3)}%</td><td>充填時のバルクロス率です。</td></tr>
-                      <tr><th scope="row">バルク単価</th><td>{formatCurrency(displayAmount(form.bulkPrice))} /ml</td><td>液内容（バルク）の仕入単価です。</td></tr>
+                      <tr><th scope="row">発注枚数</th><td>{formatNumber(form.quantity)} 枚</td><td>連結したあとのパウチ1個を「1枚」として数えた発注数です。</td></tr>
+                      <tr><th scope="row">連結形式</th><td>{form.connected} 連</td><td>パウチ1個の中にある室（区画）の数です。室数は「発注枚数 × 連結数」で計算します。</td></tr>
+                      <tr><th scope="row">充填量</th><td>SKU別設定（平均 {formatNumber(weightedAvgFill)} ml/室）</td><td>1室に入れる液体材料の量です。SKUごとに変えられます。使用量の計算には、発注枚数で重みづけした平均値を使います。</td></tr>
+                      <tr><th scope="row">充填列数</th><td>{form.lanes} 列</td><td>1回に同時に充填できる列の数です。試験充填の量を計算するときにも使います。</td></tr>
+                      <tr><th scope="row">テスト充填回数</th><td>{formatNumber(parameters.fillTestRuns)} 回</td><td>ロットを始める前に行う試験充填の回数です。実際の生産枚数には数えません。</td></tr>
+                      <tr><th scope="row">初期投入量</th><td>{form.method === "hopper" ? formatNumber(parameters.hopperInitialChargeMl) : formatNumber(parameters.pressureInitialChargeMl)} ml</td><td>{form.method === "hopper" ? "ホッパ充填のラインに、生産前に投入しておく液体の量です。" : "加圧充填のラインに、生産前に投入しておく液体の量です。"}</td></tr>
+                      <tr><th scope="row">バルクロス率</th><td>{formatNumber(Number(parameters.bulkLossRate) * 100, 3)}%</td><td>充填作業で出る液体材料のロスの割合です。</td></tr>
+                      <tr><th scope="row">バルク単価</th><td>{formatCurrency(displayAmount(form.bulkPrice))} /ml</td><td>液体材料1mlあたりの仕入れ価格です。</td></tr>
                     </tbody></table>
                     <p>室数＝発注枚数×{form.connected}</p>
                     <p>テスト充填＝{formatNumber(parameters.fillTestRuns)}回×{form.lanes}列×平均充填量{formatNumber(weightedAvgFill)}ml</p>
-                    <p>バルク使用量＝Σ(SKU別充填分: 発注枚数×{form.connected}室×各SKU充填量)×(1＋{formatNumber(Number(parameters.bulkLossRate) * 100, 3)}%)＋初期投入＋テスト充填</p>
+                    <p>バルク使用量＝（すべてのSKUの充填分を合計）×(1＋{formatNumber(Number(parameters.bulkLossRate) * 100, 3)}%)＋初期投入量＋試験充填量。1SKUの充填分は「発注枚数×{form.connected}室×そのSKUの充填量」で計算します。</p>
                   </div>
                   <div className="formula-group">
-                    <h4>加工費（人件費・機械）・販売</h4>
+                    <h4>加工費（人件費・機械）と販売価格</h4>
                     <table className="table formula-vars"><tbody>
-                      <tr><th scope="row">人件費</th><td>{formatCurrency(displayAmount(parameters.laborPerHour))} /時間</td><td>生産・検品の両工程の人件費単価です。各工程の処理速度で1枚あたりに配賦します。</td></tr>
-                      <tr><th scope="row">機械チャージ</th><td>{formatCurrency(displayAmount(parameters.machineChargePerHour))} /時間</td><td>充填機1時間の稼働単価です。月額機械費÷月間稼働時間で算出し、変動費（生産速度で1枚配賦）とロット固定費（段取り・清掃時間で乗算）の両方に使います。</td></tr>
-                      <tr><th scope="row">生産速度</th><td>{formatNumber(parameters.productionSpeedPerMinute)} 枚/分（1連基準・時給換算 {formatNumber(Number(parameters.productionSpeedPerMinute) * 60)} 枚/h）</td><td>1分に作れる1連パウチの枚数です。×60で時給換算し、連結形式で実効速度が変わります。</td></tr>
-                      <tr><th scope="row">稼働生産数</th><td>{resultShown ? formatNumber(resultShown.productionRunQuantity) : "-"} 枚</td><td>発注枚数÷(1−ロス率)。ロス分のパウチも実際に機械へ流すため、生産時間はこの数で計算します。</td></tr>
-                      <tr><th scope="row">実効生産速度</th><td>{resultShown ? `${formatNumber(Number(resultShown.effectiveProductionSpeed) / 60)} 枚/分（${formatNumber(resultShown.effectiveProductionSpeed)} 枚/h）` : "-"}</td><td>{form.lanes}列÷{form.connected}連＝1回に{lanesPerCycle}枚 → 基準速度×{lanesPerCycle}／{form.lanes}で計算。{form.connected}連は1枚の充填に必要な室数ぶん列を占有します。</td></tr>
-                      <tr><th scope="row">検品速度</th><td>{formatNumber(parameters.inspectionSpeed)} 枚/h</td><td>検品工程の人件費1枚配賦の分母です。</td></tr>
-                      <tr><th scope="row">段取り・清掃時間</th><td>{formatNumber(parameters.setupTime)}h ＋ {formatNumber(parameters.cleanupTime)}h</td><td>ロット開始の段取りと終了後の清掃時間です。数量に関係なくロットごとに固定発生します。</td></tr>
-                      <tr><th scope="row">カスタム費用</th><td>{formatCurrency(displayAmount(parameters.customPouchCharge))}</td><td>カスタム区分を選択したときロットに1回だけ加算する金額です。</td></tr>
+                      <tr><th scope="row">人件費</th><td>{formatCurrency(displayAmount(parameters.laborPerHour))} /時間</td><td>生産と検品の両方にかかる人件費の単価です。それぞれの工程にかかる時間に応じて、1枚あたりに割り当てます。</td></tr>
+                      <tr><th scope="row">機械チャージ</th><td>{formatCurrency(displayAmount(parameters.machineChargePerHour))} /時間</td><td>充填機を1時間動かすための単価です。年間の減価償却費と電気代を年間稼働時間で割って計算します。生産時間に応じた1枚あたりの費用と、段取り・清掃時間の固定費の両方に使います。</td></tr>
+                      <tr><th scope="row">生産速度</th><td>{formatNumber(parameters.productionSpeedPerMinute)} 枚/分（1連基準・時給換算 {formatNumber(Number(parameters.productionSpeedPerMinute) * 60)} 枚/h）</td><td>1分あたりに作れる1連パウチの枚数です。60倍すると1時間あたりの枚数になり、連結形式によって実効速度が変わります。</td></tr>
+                      <tr><th scope="row">稼働生産数</th><td>{resultShown ? formatNumber(resultShown.productionRunQuantity) : "-"} 枚</td><td>「発注枚数 ÷ (1−ロス率)」で計算します。ロス分のパウチも実際には機械へ流すため、生産時間はこの数で計算します。</td></tr>
+                      <tr><th scope="row">実効生産速度</th><td>{resultShown ? `${formatNumber(Number(resultShown.effectiveProductionSpeed) / 60)} 枚/分（${formatNumber(resultShown.effectiveProductionSpeed)} 枚/h）` : "-"}</td><td>{form.lanes}列÷{form.connected}連＝1回に{lanesPerCycle}枚作れるため、「基準速度×{lanesPerCycle}／{form.lanes}」で計算します。{form.connected}連は、1個を充填するために必要な室数ぶん列を占有します。</td></tr>
+                      <tr><th scope="row">検品速度</th><td>{formatNumber(parameters.inspectionSpeed)} 枚/h</td><td>検品にかかる人件費を1枚あたりに割り当てるときの分母です。</td></tr>
+                      <tr><th scope="row">段取り・清掃時間</th><td>{formatNumber(parameters.setupTime)}h ＋ {formatNumber(parameters.cleanupTime)}h</td><td>ロット開始前の準備と、終了後の清掃にかかる時間です。発注数量に関係なく、ロットごとに固定で発生します。</td></tr>
+                      <tr><th scope="row">カスタム費用</th><td>{formatCurrency(displayAmount(parameters.customPouchCharge))}</td><td>カスタム区分を選択したときに、ロット1回だけ加算する費用です。</td></tr>
                     </tbody></table>
                     <p>① 年間減価償却費＝設備取得価額÷耐用年数＝{formatCurrency(displayAmount(machineBreakdown.acquisitionCostYen))}÷{formatNumber(machineBreakdown.usefulLifeYears)}年＝{annualDepreciation ? formatCurrency(displayAmount(annualDepreciation.toString())) : "-"} /年（定額法・残存価額0）</p>
                     <p>② 年間電気代＝年間使用電力量×電力単価＝{formatNumber(machineBreakdown.annualElectricityKwh)}kWh×{formatNumber(machineBreakdown.electricityUnitPriceYen)}円/kWh＝{annualElectricity ? formatCurrency(displayAmount(annualElectricity.toString())) : "-"} /年（月{annualElectricity ? formatCurrency(displayAmount(annualElectricity.div(12).toString())) : "-"}）</p>
                     <p>機械チャージ＝(①＋②)÷年間稼働時間＝({annualDepreciation ? formatCurrency(displayAmount(annualDepreciation.toString())) : "-"}＋{annualElectricity ? formatCurrency(displayAmount(annualElectricity.toString())) : "-"})÷{formatNumber(machineBreakdown.annualOperatingHours)}h/年＝<strong>{formatCurrency(displayAmount(parameters.machineChargePerHour))} /時間</strong></p>
-                    <p>基準値は設計ドキュメント6.3「機械関連」の初期値（取得25,000,000円・耐用7年・電力10,800kWh/年×32円/kWh・1,800h/年）。※月額賃借料74,100円/月は計算から除外。金額は「計算パラメータ調整＞加工・固定費＞機械チャージ内訳」で変更でき、変更すると機械チャージと原価へ自動反映します。</p>
+                    <p>初期値は「設備取得価額2,500万円・耐用年数7年・年間使用電力量10,800kWh×電力単価32円・年間稼働時間1,800時間」です。月額賃借料74,100円/月はこの計算には含めません。金額は「計算パラメータ調整＞加工・固定費＞機械チャージ内訳」で変更でき、変更すると機械チャージと原価へ自動的に反映されます。</p>
                     <p>生産時間＝稼働生産数÷実効速度＝{resultShown ? formatNumber(resultShown.productionRunQuantity) : "-"}枚÷{formatNumber(resultShown ? Number(resultShown.effectiveProductionSpeed) : 0)}枚/h＝{resultShown ? formatNumber(resultShown.productionHours) : "-"}h（検品時間＝稼働生産数{formatNumber(resultShown ? resultShown.productionRunQuantity : "-")}枚÷{formatNumber(parameters.inspectionSpeed)}枚/h＝{resultShown ? formatNumber(resultShown.inspectionHours) : "-"}h）</p>
                     <p>変動加工費＝人件費×(生産時間＋検品時間)＋機械チャージ×生産時間＝{formatNumber(parameters.laborPerHour)}×({resultShown ? formatNumber(resultShown.productionHours) : "-"}＋{resultShown ? formatNumber(resultShown.inspectionHours) : "-"})h＋{formatNumber(parameters.machineChargePerHour)}×{resultShown ? formatNumber(resultShown.productionHours) : "-"}h</p>
                     <p>ロット固定＝({formatNumber(parameters.setupTime)}＋{formatNumber(parameters.cleanupTime)})h×({formatNumber(parameters.laborPerHour)}＋{formatNumber(parameters.machineChargePerHour)})円/h</p>
@@ -633,18 +633,18 @@ export default function QuotationPage() {
                     <p>販売単価＝総原価/枚÷(1−利益率)</p>
                   </div>
                   <div className="formula-group">
-                    <h4>フィルム</h4>
+                    <h4>フィルム費用</h4>
                     <table className="table formula-vars"><tbody>
-                      <tr><th scope="row">原反幅</th><td>{effectiveSize.webWidthMm} mm</td><td>{form.custom ? "カスタム左右幅から1列あたり原反幅を補間して自動判定します。" : "サイズマスタの確定値です。"}</td></tr>
+                      <tr><th scope="row">原反幅</th><td>{effectiveSize.webWidthMm} mm</td><td>{form.custom ? "カスタムの左右幅から、1列あたりのフィルム原反幅を自動で求めます。" : "サイズマスタに登録された確定値です。"}</td></tr>
                       <tr><th scope="row">価格帯</th><td>{effectiveSize.priceBand === "lte570" ? "570mm以下" : "571〜740mm"}</td><td>原反幅で判定します。単価は「計算パラメータ調整＞価格帯別フィルム単価」で確認・変更できます。</td></tr>
-                      <tr><th scope="row">適用m単価</th><td>{formatCurrency(displayAmount(resultShown.film.unitPrice))} /m</td><td>発注長さ（500/1000/1500m帯）と価格帯から決まります。</td></tr>
-                      <tr><th scope="row">ピッチ加算</th><td>{formatNumber(effectiveSize.pitchAddMm)} mm</td><td>製品長さに加算するシール・運送用マージンです。ピッチ＝長さ＋ピッチ加算。</td></tr>
-                      <tr><th scope="row">生産列数</th><td>{effectiveSize.lanes} 列</td><td>原反を何列並びで生産するかです（サイズマスタ確定値）。</td></tr>
-                      <tr><th scope="row">フィルムロス率</th><td>{formatNumber(Number(parameters.lossRate) * 100, 3)}%</td><td>発注長さに対する印刷・搬送ロス率です。</td></tr>
-                      <tr><th scope="row">最小ロス</th><td>{formatNumber(parameters.lossMinM)} m</td><td>ロス率によらず最低保証するロス長です。</td></tr>
-                      <tr><th scope="row">SKU最低発注</th><td>各SKU≥{formatNumber(parameters.digitalFilmMinSkuM)}m／合計≥{formatNumber(parameters.digitalFilmMinTotalM)}m</td><td>下回る場合は最低長へ自動補正します。</td></tr>
-                      <tr><th scope="row">国内・海外配送</th><td>{formatCurrency(displayAmount(parameters.domesticShippingPerTrip))} ＋ {formatCurrency(displayAmount(parameters.overseasShippingPerTrip))} /回</td><td>配送単位（{shippingUnitLabel(effectiveSize.webWidthMm, parameters)}m/回）ごとに回数を切り上げて計上します。</td></tr>
-                      <tr><th scope="row">通関料</th><td>{formatCurrency(displayAmount(parameters.customsPerTrip))} /回</td><td>フィルム費が{formatCurrency(displayAmount(parameters.customsThreshold))}超の場合は一括{formatCurrency(displayAmount(parameters.customsHighCharge))}を適用します。</td></tr>
+                      <tr><th scope="row">適用m単価</th><td>{formatCurrency(displayAmount(resultShown.film.unitPrice))} /m</td><td>発注長さ（500m・1000m・1500mの帯）と価格帯から決まります。</td></tr>
+                      <tr><th scope="row">ピッチ加算</th><td>{formatNumber(effectiveSize.pitchAddMm)} mm</td><td>製品の長さに加えるシールや運送のための余白です。ピッチ＝製品長さ＋ピッチ加算です。</td></tr>
+                      <tr><th scope="row">生産列数</th><td>{effectiveSize.lanes} 列</td><td>フィルム原反を何列並べて生産するかを表します。サイズマスタに登録された確定値です。</td></tr>
+                      <tr><th scope="row">フィルムロス率</th><td>{formatNumber(Number(parameters.lossRate) * 100, 3)}%</td><td>印刷や搬送で出るフィルムロスの割合です。発注長さに対して計算します。</td></tr>
+                      <tr><th scope="row">最小ロス</th><td>{formatNumber(parameters.lossMinM)} m</td><td>ロス率によらず、必ず確保する最低のロス長です。</td></tr>
+                      <tr><th scope="row">SKU最低発注</th><td>各SKU≥{formatNumber(parameters.digitalFilmMinSkuM)}m／合計≥{formatNumber(parameters.digitalFilmMinTotalM)}m</td><td>この長さに満たない場合は、最低発注長へ自動的に修正します。</td></tr>
+                      <tr><th scope="row">国内・海外配送</th><td>{formatCurrency(displayAmount(parameters.domesticShippingPerTrip))} ＋ {formatCurrency(displayAmount(parameters.overseasShippingPerTrip))} /回</td><td>配送単位（{shippingUnitLabel(effectiveSize.webWidthMm, parameters)}m/回）ごとに回数を切り上げて、費用に含めます。</td></tr>
+                      <tr><th scope="row">通関料</th><td>{formatCurrency(displayAmount(parameters.customsPerTrip))} /回</td><td>フィルム費が{formatCurrency(displayAmount(parameters.customsThreshold))}を超える場合は、回数に関係なく一括{formatCurrency(displayAmount(parameters.customsHighCharge))}を適用します。</td></tr>
                     </tbody></table>
                     <p>必要生産長さ＝発注枚数÷(1−{formatNumber(Number(parameters.lossRate) * 100, 3)}%)×({form.lengthMm}＋{formatNumber(effectiveSize.pitchAddMm)}mm)÷1000÷{effectiveSize.lanes}列</p>
                     <p>SKU別必要長さ＝各SKUの発注枚数÷(1−{formatNumber(Number(parameters.lossRate) * 100, 3)}%)×ピッチ÷1000÷{effectiveSize.lanes}列。SKU別に100m切上げ、各SKU≥{formatNumber(parameters.digitalFilmMinSkuM)}m・合計≥{formatNumber(parameters.digitalFilmMinTotalM)}m</p>
