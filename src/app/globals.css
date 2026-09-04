@@ -167,37 +167,40 @@ header .version-badge { display: none; }
 .history-actions { white-space: nowrap; }
 .history-actions .button + .button { margin-left: 5px; }
 
-/* 見積書画面 */
-.quote-page { max-width: 1120px; display: flex; flex-direction: column; gap: 18px; }
+/* 見積書画面：中央プレビュー＋左右エッジ編集 */
+.quote-page { max-width: 1720px; display: flex; flex-direction: column; gap: 16px; }
 .quote-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 18px; }
 .quote-toolbar h1 { margin: 0; font-size: clamp(22px, 3vw, 30px); }
 .quote-toolbar p { margin: 5px 0 0; }
-.toolbar-actions { display: grid; grid-template-columns: repeat(2, minmax(150px, auto)); gap: 8px; }
+.toolbar-actions { display: grid; grid-template-columns: repeat(3, minmax(130px, auto)); gap: 8px; }
 .logo-mark { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--primary); color: white; font-weight: 900; font-size: 16px; }
 .logo-mark.large { width: 54px; height: 54px; font-size: 28px; }
 .menu-brand { display: flex; align-items: center; gap: 8px; font-weight: 800; }
 .menu-brand small { display: block; color: var(--muted); font-size: 11px; font-weight: 600; }
 
-.quote-editor .editor-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.quote-editor label { display: grid; gap: 5px; font-size: 12px; font-weight: 800; }
-.quote-editor .wide { grid-column: 1 / -1; }
-.quote-editor input, .quote-editor textarea { width: 100%; min-height: 40px; border: 1px solid var(--line); border-radius: 7px; padding: 8px 9px; font: inherit; }
-.quote-editor textarea { resize: vertical; }
+.quote-workspace { display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr) minmax(300px, 350px); gap: 14px; align-items: start; }
+.quote-side { position: sticky; top: 16px; max-height: min(calc(100dvh - 32px), 1150px); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.quote-side-left { border-left: 4px solid var(--primary); }
+.quote-side-right { border-right: 4px solid var(--primary); }
+.side-header { display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); background: white; }
+.side-header h2 { flex: 1; margin: 0; font-size: 16px; }
+.side-kicker { color: var(--primary); font-size: 10px; font-weight: 900; letter-spacing: .12em; }
+.side-close { min-height: 36px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--muted); font-size: 12px; }
+.side-body { flex: 1; min-height: 0; overflow: auto; padding: 12px; overscroll-behavior: contain; }
 
-.quote-editor h2 { margin: 0 0 10px; font-size: 18px; }
 .editor-groups { display: grid; gap: 10px; }
 .editor-group { border: 1px solid var(--line); border-radius: 10px; background: #f8fafd; overflow: hidden; }
-.editor-group summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 10px 12px; cursor: pointer; list-style: none; font-size: 14px; font-weight: 800; background: white; }
+.editor-group summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 46px; padding: 10px 12px; cursor: pointer; list-style: none; font-size: 14px; font-weight: 800; background: white; }
 .editor-group summary::-webkit-details-marker { display: none; }
 .editor-group summary::after { content: "ひらく ＋"; flex: 0 0 auto; color: var(--primary); font-size: 12px; font-weight: 800; }
 .editor-group[open] summary { border-bottom: 1px solid var(--line); }
 .editor-group[open] summary::after { content: "とじる −"; }
 .editor-group .editor-grid { padding: 12px; }
-.editor-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
-.editor-actions .button { min-height: 48px; }
-.quote-editor .editor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.quote-editor input, .quote-editor textarea { min-height: 44px; padding: 10px 11px; font-size: 16px; }
-.mobile-quote-actions { display: none; }
+.quote-side .editor-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.quote-side label { display: grid; gap: 5px; font-size: 12px; font-weight: 800; }
+.quote-side .wide { grid-column: 1 / -1; }
+.quote-side input, .quote-side textarea { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 7px; padding: 10px 11px; font: inherit; font-size: 16px; }
+.quote-side textarea { resize: vertical; }
 
 .a4-sheet { width: min(100%, 210mm); min-height: 297mm; margin: 0 auto; background: white; color: #111827; border: 1px solid #d1d5db; box-shadow: 0 12px 34px rgba(15, 23, 42, .12); padding: 15mm 14mm; font-size: 11.2pt; line-height: 1.48; display: flex; flex-direction: column; }
 .sheet-header { display: flex; justify-content: space-between; gap: 18mm; align-items: start; border-bottom: 3px double #374151; padding-bottom: 6mm; }
@@ -243,28 +246,45 @@ header .version-badge { display: none; }
 .seal { display: grid; place-items: center; width: 17mm; height: 17mm; border: 2.5px solid #b91c1c; border-radius: 50%; color: #b91c1c; font-size: 8.5pt; transform: rotate(-9deg); }
 .sheet-error { margin-top: 8mm; }
 
+.quote-edge-handles { display: none; }
+.quote-drawer-overlay { display: none; }
+
+@media (max-width: 1200px) {
+  .quote-page { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+  .quote-workspace { display: block; }
+  .a4-sheet { margin-top: 2px; }
+
+  .quote-side { position: fixed; top: 0; bottom: 0; z-index: 70; width: min(92vw, 390px); max-height: 100dvh; border-radius: 0; opacity: 0; visibility: hidden; transition: transform .22s ease, opacity .18s ease, visibility .22s; }
+  .quote-side-left { left: 0; border-right: 1px solid var(--line); border-left: 0; transform: translateX(-102%); box-shadow: 12px 0 34px rgba(15,23,42,.16); }
+  .quote-side-right { right: 0; border-left: 1px solid var(--line); border-right: 0; transform: translateX(102%); box-shadow: -12px 0 34px rgba(15,23,42,.16); }
+  .drawer-open.drawer-left .quote-side-left,
+  .drawer-open.drawer-right .quote-side-right { transform: translateX(0); opacity: 1; visibility: visible; }
+
+  .quote-drawer-overlay { display: block; position: fixed; inset: 0; z-index: 60; background: rgba(15,23,42,.38); backdrop-filter: blur(2px); }
+
+  .quote-edge-handles { display: block; }
+  .quote-edge-handles button { position: fixed; top: 50%; z-index: 50; writing-mode: vertical-rl; min-width: 38px; min-height: 104px; padding: 12px 8px; border: 0; color: white; background: var(--primary); font: inherit; font-size: 13px; font-weight: 900; cursor: pointer; box-shadow: 0 6px 18px rgba(15,23,42,.18); }
+  .quote-edge-handles button:first-child { left: 0; border-radius: 0 12px 12px 0; transform: translateY(-50%); }
+  .quote-edge-handles button:last-child { right: 0; border-radius: 12px 0 0 12px; transform: translateY(-50%); background: var(--primary-strong); }
+  .quote-edge-handles .print-button { top: auto; bottom: calc(16px + env(safe-area-inset-bottom)); left: 50%; right: auto; writing-mode: horizontal-tb; min-width: 112px; min-height: 48px; padding: 12px 16px; border-radius: 999px; transform: translateX(-50%); background: #111827; font-size: 14px; }
+}
+
 @media (max-width: 760px) {
+  main { padding: 14px; }
   .quote-toolbar { align-items: start; flex-direction: column; }
   .toolbar-actions { grid-template-columns: 1fr; width: 100%; }
-  .quote-editor .editor-grid { grid-template-columns: 1fr; }
   .a4-sheet { padding: 8mm; }
   .sheet-header { flex-direction: column; gap: 6mm; }
   .issuer { max-width: 100%; }
   .document-title { text-align: left; }
   .price-highlight { grid-template-columns: 1fr; }
   .sheet-footer { flex-direction: column; align-items: start; }
+  .side-header { padding: 10px; }
+  .side-body { padding: 10px; }
 }
 
-@media (max-width: 860px) {
-  .quote-page { padding-bottom: calc(74px + env(safe-area-inset-bottom)); }
-  .mobile-quote-actions { display: grid; grid-template-columns: 1fr 1fr 76px; gap: 6px; position: fixed; right: 10px; bottom: 10px; left: 10px; z-index: 30; padding: 8px; background: rgba(255,255,255,.97); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 10px 28px rgba(15,23,42,.16); backdrop-filter: blur(10px); }
-  .mobile-quote-actions a { display: grid; place-items: center; min-height: 44px; border: 1px solid var(--primary); border-radius: 10px; background: white; color: var(--primary); font-size: 13px; font-weight: 800; text-decoration: none; }
-  .mobile-quote-actions .button { min-height: 44px; padding: 8px; font-size: 13px; }
-}
-
-@media (min-width: 861px) {
-  .editor-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-  .quote-editor .editor-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (min-width: 1201px) {
+  .quote-side .side-close { display: none; }
 }
 
 @media (max-width: 720px) {

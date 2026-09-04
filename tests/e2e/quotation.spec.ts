@@ -26,8 +26,18 @@ test("A4 quotation page imports simulator costs and prepares PDF printing", asyn
   await expect(page).toHaveURL(/\/quote$/);
   await expect(page.getByRole("heading", { name: "お見積書" })).toBeVisible();
   await expect(page.getByTestId("quote-source")).toContainText("原価計算結果連携済み");
-  await page.getByTestId("quote-editor-top").getByLabel("得意先名").fill("E2E株式会社");
-  await page.getByTestId("quote-editor-top").getByLabel("充填・加工 単価（空欄=自動）").fill("99");
+  const mobile = (page.viewportSize()?.width ?? 1280) <= 1200;
+  if (mobile) {
+    await page.getByRole("button", { name: "基本" }).click();
+    await page.getByTestId("quote-editor-left").getByLabel("得意先名").fill("E2E株式会社");
+    await page.getByTestId("quote-editor-left").getByRole("button", { name: "閉じる" }).click();
+    await page.getByRole("button", { name: "金額" }).click();
+    await page.getByTestId("quote-editor-right").getByLabel("充填・加工 単価（空欄=自動）").fill("99");
+    await page.getByTestId("quote-editor-right").getByRole("button", { name: "閉じる" }).click();
+  } else {
+    await page.getByTestId("quote-editor-left").getByLabel("得意先名").fill("E2E株式会社");
+    await page.getByTestId("quote-editor-right").getByLabel("充填・加工 単価（空欄=自動）").fill("99");
+  }
 
   await page.evaluate(() => {
     (window as Window & { printCalls?: number }).printCalls = 0;
