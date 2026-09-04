@@ -184,6 +184,21 @@ header .version-badge { display: none; }
 .quote-editor input, .quote-editor textarea { width: 100%; min-height: 40px; border: 1px solid var(--line); border-radius: 7px; padding: 8px 9px; font: inherit; }
 .quote-editor textarea { resize: vertical; }
 
+.quote-editor h2 { margin: 0 0 10px; font-size: 18px; }
+.editor-groups { display: grid; gap: 10px; }
+.editor-group { border: 1px solid var(--line); border-radius: 10px; background: #f8fafd; overflow: hidden; }
+.editor-group summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 10px 12px; cursor: pointer; list-style: none; font-size: 14px; font-weight: 800; background: white; }
+.editor-group summary::-webkit-details-marker { display: none; }
+.editor-group summary::after { content: "ひらく ＋"; flex: 0 0 auto; color: var(--primary); font-size: 12px; font-weight: 800; }
+.editor-group[open] summary { border-bottom: 1px solid var(--line); }
+.editor-group[open] summary::after { content: "とじる −"; }
+.editor-group .editor-grid { padding: 12px; }
+.editor-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.editor-actions .button { min-height: 48px; }
+.quote-editor .editor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.quote-editor input, .quote-editor textarea { min-height: 44px; padding: 10px 11px; font-size: 16px; }
+.mobile-quote-actions { display: none; }
+
 .a4-sheet { width: min(100%, 210mm); min-height: 297mm; margin: 0 auto; background: white; color: #111827; border: 1px solid #d1d5db; box-shadow: 0 12px 34px rgba(15, 23, 42, .12); padding: 15mm 14mm; font-size: 11.2pt; line-height: 1.48; display: flex; flex-direction: column; }
 .sheet-header { display: flex; justify-content: space-between; gap: 18mm; align-items: start; border-bottom: 3px double #374151; padding-bottom: 6mm; }
 .issuer { max-width: 62%; }
@@ -238,6 +253,18 @@ header .version-badge { display: none; }
   .document-title { text-align: left; }
   .price-highlight { grid-template-columns: 1fr; }
   .sheet-footer { flex-direction: column; align-items: start; }
+}
+
+@media (max-width: 860px) {
+  .quote-page { padding-bottom: calc(74px + env(safe-area-inset-bottom)); }
+  .mobile-quote-actions { display: grid; grid-template-columns: 1fr 1fr 76px; gap: 6px; position: fixed; right: 10px; bottom: 10px; left: 10px; z-index: 30; padding: 8px; background: rgba(255,255,255,.97); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 10px 28px rgba(15,23,42,.16); backdrop-filter: blur(10px); }
+  .mobile-quote-actions a { display: grid; place-items: center; min-height: 44px; border: 1px solid var(--primary); border-radius: 10px; background: white; color: var(--primary); font-size: 13px; font-weight: 800; text-decoration: none; }
+  .mobile-quote-actions .button { min-height: 44px; padding: 8px; font-size: 13px; }
+}
+
+@media (min-width: 861px) {
+  .editor-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .quote-editor .editor-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 720px) {

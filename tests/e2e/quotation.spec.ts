@@ -26,7 +26,8 @@ test("A4 quotation page imports simulator costs and prepares PDF printing", asyn
   await expect(page).toHaveURL(/\/quote$/);
   await expect(page.getByRole("heading", { name: "お見積書" })).toBeVisible();
   await expect(page.getByTestId("quote-source")).toContainText("原価計算結果連携済み");
-  await page.getByLabel("得意先名").fill("E2E株式会社");
+  await page.getByTestId("quote-editor-top").getByLabel("得意先名").fill("E2E株式会社");
+  await page.getByTestId("quote-editor-top").getByLabel("充填・加工 単価（空欄=自動）").fill("99");
 
   await page.evaluate(() => {
     (window as Window & { printCalls?: number }).printCalls = 0;
@@ -39,6 +40,7 @@ test("A4 quotation page imports simulator costs and prepares PDF printing", asyn
   await expect.poll(() => page.evaluate(() => (window as Window & { printCalls?: number }).printCalls)).toBe(1);
 
   await expect(page.getByTestId("quote-price-per-piece")).toContainText("￥");
+  await expect(page.getByTestId("filling-unit-price")).toContainText("￥99");
   await expect(page.getByTestId("film-meter-price")).toContainText("/m");
   await expect(page.getByTestId("film-pouch-price")).toContainText("パウチ換算");
   await expect(page.getByTestId("film-pouch-price")).toContainText("/枚");

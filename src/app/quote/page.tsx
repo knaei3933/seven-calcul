@@ -19,8 +19,37 @@ type QuoteForm = {
   validUntil: string;
   customerName: string;
   customerContact: string;
+  documentEnglish: string;
+  documentHeading: string;
+  issuerName: string;
+  issuerEnglishName: string;
+  representative: string;
+  issuerPostalCode: string;
+  issuerAddress: string;
+  issuerTelephone: string;
+  issuerWebsite: string;
+  greeting: string;
   productName: string;
   sizeSummary: string;
+  fillingItemName: string;
+  fillingItemDescription: string;
+  fillingUnitDisplay: string;
+  fillingAmountDisplay: string;
+  filmItemName: string;
+  filmItemDescription: string;
+  filmUnitDisplay: string;
+  filmPouchUnitDisplay: string;
+  filmAmountDisplay: string;
+  roundingItemName: string;
+  roundingItemDescription: string;
+  adjustmentDisplay: string;
+  pricePerPieceDisplay: string;
+  subtotalLabel: string;
+  subtotalDisplay: string;
+  taxLabel: string;
+  taxDisplay: string;
+  grandTotalLabel: string;
+  grandTotalDisplay: string;
   quantity: string;
   fillingCostPerPiece: string;
   filmCostPerPiece: string;
@@ -31,6 +60,8 @@ type QuoteForm = {
   deliveryDate: string;
   paymentTerms: string;
   notes: string;
+  sealText: string;
+  footerNote: string;
 };
 
 const defaultQuote: QuoteForm = {
@@ -39,8 +70,37 @@ const defaultQuote: QuoteForm = {
   validUntil: "",
   customerName: "",
   customerContact: "",
+  documentEnglish: "QUOTATION",
+  documentHeading: "お見積書",
+  issuerName: sevenChemical.name,
+  issuerEnglishName: sevenChemical.englishName,
+  representative: sevenChemical.representative,
+  issuerPostalCode: sevenChemical.postalCode,
+  issuerAddress: sevenChemical.address,
+  issuerTelephone: sevenChemical.telephone,
+  issuerWebsite: sevenChemical.website,
+  greeting: "平素より格別のお引き立てを賜り、厚く御礼申し上げます。下記の通りお見積りを申し上げます。",
   productName: "パウチ製品",
   sizeSummary: "50×60mm / 1連",
+  fillingItemName: "充填・加工費",
+  fillingItemDescription: "バルク充填および加工に必要な一式",
+  fillingUnitDisplay: "",
+  fillingAmountDisplay: "",
+  filmItemName: "フィルム費用",
+  filmItemDescription: "パウチフィルム製作・物流に必要な一式",
+  filmUnitDisplay: "",
+  filmPouchUnitDisplay: "",
+  filmAmountDisplay: "",
+  roundingItemName: "端数調整",
+  roundingItemDescription: "円未満の端数を切捨てて合計金額を整数円に調整します。",
+  adjustmentDisplay: "",
+  pricePerPieceDisplay: "",
+  subtotalLabel: "小計（税抜）",
+  subtotalDisplay: "",
+  taxLabel: "",
+  taxDisplay: "",
+  grandTotalLabel: "合計（税込）",
+  grandTotalDisplay: "",
   quantity: "10000",
   fillingCostPerPiece: "0",
   filmCostPerPiece: "0",
@@ -51,11 +111,21 @@ const defaultQuote: QuoteForm = {
   deliveryDate: "ご注文後の別途ご相談",
   paymentTerms: "御見積時にお相談いたします",
   notes: "上記金額には充填・加工費とフィルム費用を含みます。仕様変更時は再度お見積りいたします。",
+  sealText: "検討済",
+  footerNote: "本お見積りに関するご不明点は、下記連絡先までお気軽にお問い合わせください。",
 };
 
 function isPositiveNumber(value: string) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric >= 0;
+}
+
+function isFiniteNumber(value: string) {
+  return value.trim() !== "" && Number.isFinite(Number(value));
+}
+
+function editedNumber(value: string, fallback: string) {
+  return isFiniteNumber(value) ? value.trim() : fallback;
 }
 
 function isoDate(date: Date) {
@@ -197,6 +267,23 @@ export default function PrintableQuotationPage() {
     };
   })();
 
+  const shownTotals = totals ? {
+    pricePerPiece: editedNumber(form.pricePerPieceDisplay, totals.pricePerPiece.toString()),
+    fillingUnit: editedNumber(form.fillingUnitDisplay, totals.fillingSellingUnit.toString()),
+    fillingAmount: editedNumber(form.fillingAmountDisplay, totals.fillingAmount.toString()),
+    filmUnit: editedNumber(form.filmUnitDisplay, totals.filmMeterDisplayUnit.toString()),
+    filmPouchUnit: editedNumber(form.filmPouchUnitDisplay, totals.filmSellingUnit.toString()),
+    filmAmount: editedNumber(form.filmAmountDisplay, totals.filmAmount.toString()),
+    filmOrderLength: totals.filmOrderLength.toString(),
+    adjustment: isFiniteNumber(form.adjustmentDisplay)
+      ? form.adjustmentDisplay.trim()
+      : (totals.roundingAdjustment.abs().lt(1) ? "-" : totals.roundingAdjustment.toString()),
+    subtotal: editedNumber(form.subtotalDisplay, totals.subtotal.toString()),
+    tax: editedNumber(form.taxDisplay, totals.tax.toString()),
+    grandTotal: editedNumber(form.grandTotalDisplay, totals.grandTotal.toString()),
+  } : null;
+
+
   return (
     <main className="quote-page">
       <nav className="top-menu" aria-label="メインメニュー">
@@ -227,50 +314,36 @@ export default function PrintableQuotationPage() {
         {saveError ? <p className="error" role="alert" data-testid="save-error">{saveError}</p> : null}
       </section>
 
-      <section className="panel quote-editor no-print" aria-labelledby="quote-editor-title">
-        <h2 id="quote-editor-title">見積書編集</h2>
+      <section className="panel quote-editor no-print" aria-labelledby="quote-editor-title" id="quote-editor-top" data-testid="quote-editor-top">
+        <h2 id="quote-editor-title">見積書編集（上端）</h2>
         {!storageLoaded ? <p className="help">入力欄を準備しています。</p> : null}
-        <div className="editor-grid">
-          <label>見積番号<input value={form.quotationNumber} onChange={(event) => update("quotationNumber", event.target.value)} /></label>
-          <label>発行日<input type="date" value={form.issueDate} onChange={(event) => update("issueDate", event.target.value)} /></label>
-          <label>有効期限<input type="date" value={form.validUntil} onChange={(event) => update("validUntil", event.target.value)} /></label>
-          <label>得意先名<input value={form.customerName} onChange={(event) => update("customerName", event.target.value)} placeholder="株式会社◯◯" /></label>
-          <label>得意先担当者<input value={form.customerContact} onChange={(event) => update("customerContact", event.target.value)} placeholder="◯◯様" /></label>
-          <label>品名<input value={form.productName} onChange={(event) => update("productName", event.target.value)} /></label>
-          <label>仕様<input value={form.sizeSummary} onChange={(event) => update("sizeSummary", event.target.value)} /></label>
-          <label>数量（枚）<input inputMode="numeric" value={form.quantity} onChange={(event) => update("quantity", event.target.value)} /></label>
-          <label>充填・加工 原価 / 枚<input inputMode="decimal" value={form.fillingCostPerPiece} onChange={(event) => update("fillingCostPerPiece", event.target.value)} /></label>
-          <label>フィルム 原価 / 枚<input inputMode="decimal" value={form.filmCostPerPiece} onChange={(event) => update("filmCostPerPiece", event.target.value)} /></label>
-          <label>フィルム m単価<input inputMode="decimal" value={form.filmMeterPrice} onChange={(event) => update("filmMeterPrice", event.target.value)} /></label>
-          <label>フィルム発注長さ (m)<input inputMode="decimal" value={form.filmOrderLengthM} onChange={(event) => update("filmOrderLengthM", event.target.value)} /></label>
-          <label>適用利益率（内部管理）<input inputMode="decimal" value={form.targetMargin} onChange={(event) => update("targetMargin", event.target.value)} /></label>
-          <label>消費税率（%）<input inputMode="decimal" value={form.taxRatePercent} onChange={(event) => update("taxRatePercent", event.target.value)} /></label>
-          <label>納期<input value={form.deliveryDate} onChange={(event) => update("deliveryDate", event.target.value)} /></label>
-          <label>お支払条件<input value={form.paymentTerms} onChange={(event) => update("paymentTerms", event.target.value)} /></label>
-          <label className="wide">備考<textarea rows={3} value={form.notes} onChange={(event) => update("notes", event.target.value)} /></label>
-        </div>
+        {renderEditorGroups("top")}
         {!valid ? <p className="error">数量・原価・利益率・税率を正しく入力してください。</p> : null}
+        <div className="editor-actions">
+          <button className="button secondary" type="button" onClick={() => document.getElementById("quote-preview")?.scrollIntoView({ behavior: "smooth", block: "start" })}>プレビュー確認</button>
+          <button className="button" type="button" disabled={!valid} onClick={() => void printPdf()}>PDF出力（A4）</button>
+        </div>
       </section>
 
-      <article className="a4-sheet" aria-label="お見積書A4プレビュー">
+      <article className="a4-sheet" aria-label="お見積書A4プレビュー" id="quote-preview">
         <header className="sheet-header">
           <div className="issuer">
             <div className="issuer-logo">
               <span className="logo-mark large" aria-hidden="true">7</span>
               <div>
-                <strong>{sevenChemical.name}</strong>
-                <small>{sevenChemical.englishName}</small>
+                <strong>{form.issuerName}</strong>
+                <small>{form.issuerEnglishName}</small>
               </div>
             </div>
             <address>
-              {sevenChemical.representative}<br />
-              {sevenChemical.postalCode} {sevenChemical.address}<br />
-              {sevenChemical.telephone} / {sevenChemical.website}
+              {form.representative}<br />
+              {form.issuerPostalCode} {form.issuerAddress}<br />
+              {form.issuerTelephone} / {form.issuerWebsite}
             </address>
           </div>
           <div className="document-title">
-            <p className="english">QUOTATION</p>
-            <h2>お見積書</h2>
+            <p className="english">{form.documentEnglish}</p>
+            <h2>{form.documentHeading}</h2>
             <dl>
               <div><dt>見積番号</dt><dd>{form.quotationNumber || "-"}</dd></div>
               <div><dt>発行日</dt><dd>{form.issueDate || "-"}</dd></div>
@@ -281,23 +354,23 @@ export default function PrintableQuotationPage() {
         <section className="recipient-block">
           <p className="customer">{form.customerName || "得意先名未入力"}</p>
           {form.customerContact ? <p>{form.customerContact} 御中</p> : null}
-          <p className="greeting">平素より格別のお引き立てを賜り、厚く御礼申し上げます。下記の通りお見積りを申し上げます。</p>
+          <p className="greeting">{form.greeting}</p>
         </section>
 
-        {totals ? (
+        {shownTotals ? (
           <>
             <section className="price-highlight">
               <div>
                 <span>お見積単価（税抜）</span>
-                <strong data-testid="quote-price-per-piece">{formatCurrency(totals.pricePerPiece.toString(), 0)}<small> /枚</small></strong>
+                <strong data-testid="quote-price-per-piece">{formatCurrency(shownTotals.pricePerPiece, 0)}<small> /枚</small></strong>
               </div>
               <div>
                 <span>数量</span>
-                <strong>{formatNumber(totals.quantity.toString(), 0)} 枚</strong>
+                <strong>{formatNumber(form.quantity, 0)} 枚</strong>
               </div>
               <div>
                 <span>税込合計</span>
-                <strong>{formatCurrency(totals.grandTotal.toString(), 0)}</strong>
+                <strong>{formatCurrency(shownTotals.grandTotal, 0)}</strong>
               </div>
             </section>
 
@@ -313,41 +386,41 @@ export default function PrintableQuotationPage() {
               <tbody>
                 <tr>
                   <td>
-                    <strong>充填・加工費</strong>
-                    <small>バルク充填および加工に必要な一式</small>
+                    <strong>{form.fillingItemName}</strong>
+                    <small>{form.fillingItemDescription}</small>
                   </td>
-                  <td>{formatCurrency(totals.fillingSellingUnit.toString(), 0)}</td>
+                  <td data-testid="filling-unit-price">{formatCurrency(shownTotals.fillingUnit, 0)}</td>
                   <td>{formatNumber(form.quantity, 0)} 枚</td>
-                  <td>{formatCurrency(totals.fillingAmount.toString(), 0)}</td>
+                  <td>{formatCurrency(shownTotals.fillingAmount, 0)}</td>
                 </tr>
                 <tr>
                   <td>
-                    <strong>フィルム費用</strong>
-                    <small>パウチフィルム製作・物流に必要な一式</small>
+                    <strong>{form.filmItemName}</strong>
+                    <small>{form.filmItemDescription}</small>
                   </td>
                   <td>
-                    <strong data-testid="film-meter-price">{formatCurrency(totals.filmMeterDisplayUnit.toString(), 0)} /m</strong>
-                    <small data-testid="film-pouch-price">パウチ換算 {formatCurrency(totals.filmSellingUnit.toString(), 0)} /枚</small>
+                    <strong data-testid="film-meter-price">{formatCurrency(shownTotals.filmUnit, 0)} /m</strong>
+                    <small data-testid="film-pouch-price">パウチ換算 {formatCurrency(shownTotals.filmPouchUnit, 0)} /枚</small>
                   </td>
-                  <td><span data-testid="film-order-length">{formatNumber(totals.filmOrderLength.toString(), 0)} m</span></td>
-                  <td>{formatCurrency(totals.filmAmount.toString(), 0)}</td>
+                  <td><span data-testid="film-order-length">{formatNumber(shownTotals.filmOrderLength, 0)} m</span></td>
+                  <td>{formatCurrency(shownTotals.filmAmount, 0)}</td>
                 </tr>
                 <tr>
                   <td>
-                    <strong>端数調整</strong>
-                    <small>円未満の端数を切捨てて合計金額を整数円に調整します。</small>
+                    <strong>{form.roundingItemName}</strong>
+                    <small>{form.roundingItemDescription}</small>
                   </td>
                   <td>—</td>
                   <td>—</td>
-                  <td data-testid="rounding-adjustment">{totals.roundingAdjustment.abs().lt(1) ? "-" : formatCurrency(totals.roundingAdjustment.toString(), 0)}</td>
+                  <td data-testid="rounding-adjustment">{shownTotals.adjustment === "-" ? "-" : formatCurrency(shownTotals.adjustment, 0)}</td>
                 </tr>
               </tbody>
             </table>
 
             <section className="total-block">
-              <div><span>小計（税抜）</span><strong>{formatCurrency(totals.subtotal.toString(), 0)}</strong></div>
-              <div><span>消費税（{formatNumber(Number(form.taxRatePercent), 0)}%）</span><strong>{formatCurrency(totals.tax.toString(), 0)}</strong></div>
-              <div className="grand"><span>合計（税込）</span><strong>{formatCurrency(totals.grandTotal.toString(), 0)}</strong></div>
+              <div><span>{form.subtotalLabel}</span><strong>{formatCurrency(shownTotals.subtotal, 0)}</strong></div>
+              <div><span>{form.taxLabel || `消費税（${formatNumber(Number(form.taxRatePercent), 0)}%）`}</span><strong>{formatCurrency(shownTotals.tax, 0)}</strong></div>
+              <div className="grand"><span>{form.grandTotalLabel}</span><strong>{formatCurrency(shownTotals.grandTotal, 0)}</strong></div>
             </section>
           </>
         ) : (
@@ -364,13 +437,108 @@ export default function PrintableQuotationPage() {
         </section>
 
         <footer className="sheet-footer">
-          <p>本お見積りに関するご不明点は、下記連絡先までお気軽にお問い合わせください。</p>
+          <p>{form.footerNote}</p>
           <div className="approval">
-            <span>{sevenChemical.name}</span>
-            <span className="seal" aria-hidden="true">検討済</span>
+            <span>{form.issuerName}</span>
+            <span className="seal" aria-hidden="true">{form.sealText}</span>
           </div>
         </footer>
       </article>
+
+      <section className="panel quote-editor no-print quote-editor-bottom" aria-labelledby="quote-editor-bottom-title" id="quote-editor-bottom" data-testid="quote-editor-bottom">
+        <h2 id="quote-editor-bottom-title">見積書編集（下端）</h2>
+        {!storageLoaded ? <p className="help">入力欄を準備しています。</p> : null}
+        {renderEditorGroups("bottom")}
+        {!valid ? <p className="error">数量・原価・利益率・税率を正しく入力してください。</p> : null}
+        <div className="editor-actions">
+          <button className="button secondary" type="button" onClick={() => document.getElementById("quote-preview")?.scrollIntoView({ behavior: "smooth", block: "start" })}>プレビュー確認</button>
+          <button className="button" type="button" disabled={!valid} onClick={() => void printPdf()}>PDF出力（A4）</button>
+        </div>
+      </section>
+
+      <div className="mobile-quote-actions no-print" aria-label="見積書クイック操作">
+        <a href="#quote-editor-top">上で編集</a>
+        <a href="#quote-editor-bottom">下で編集</a>
+        <button className="button" type="button" disabled={!valid || saving} onClick={() => void printPdf()}>PDF</button>
+      </div>
     </main>
   );
+
+  function renderEditorGroups(position: "top" | "bottom") {
+    return (
+      <div className="editor-groups">
+        <details className="editor-group" open={position === "top"}>
+          <summary>基本情報・宛先</summary>
+          <div className="editor-grid">
+            <label>見積番号<input value={form.quotationNumber} onChange={(event) => update("quotationNumber", event.target.value)} /></label>
+            <label>発行日<input type="date" value={form.issueDate} onChange={(event) => update("issueDate", event.target.value)} /></label>
+            <label>有効期限<input type="date" value={form.validUntil} onChange={(event) => update("validUntil", event.target.value)} /></label>
+            <label>文書タイトル<input value={form.documentHeading} onChange={(event) => update("documentHeading", event.target.value)} /></label>
+            <label>文書英字タイトル<input value={form.documentEnglish} onChange={(event) => update("documentEnglish", event.target.value)} /></label>
+            <label>得意先名<input value={form.customerName} onChange={(event) => update("customerName", event.target.value)} placeholder="株式会社◯◯" /></label>
+            <label>得意先担当者<input value={form.customerContact} onChange={(event) => update("customerContact", event.target.value)} placeholder="◯◯様" /></label>
+            <label className="wide">宛先文言<textarea rows={3} value={form.greeting} onChange={(event) => update("greeting", event.target.value)} /></label>
+          </div>
+        </details>
+
+        <details className="editor-group">
+          <summary>発行者情報</summary>
+          <div className="editor-grid">
+            <label>発行者名<input value={form.issuerName} onChange={(event) => update("issuerName", event.target.value)} /></label>
+            <label>発行者英字名<input value={form.issuerEnglishName} onChange={(event) => update("issuerEnglishName", event.target.value)} /></label>
+            <label>代表者<input value={form.representative} onChange={(event) => update("representative", event.target.value)} /></label>
+            <label>郵便番号<input value={form.issuerPostalCode} onChange={(event) => update("issuerPostalCode", event.target.value)} /></label>
+            <label className="wide">住所<input value={form.issuerAddress} onChange={(event) => update("issuerAddress", event.target.value)} /></label>
+            <label>電話番号<input value={form.issuerTelephone} onChange={(event) => update("issuerTelephone", event.target.value)} /></label>
+            <label>ウェブサイト<input value={form.issuerWebsite} onChange={(event) => update("issuerWebsite", event.target.value)} /></label>
+          </div>
+        </details>
+
+        <details className="editor-group" open={position === "top"}>
+          <summary>明細・金額</summary>
+          <div className="editor-grid">
+            <label>品名<input value={form.productName} onChange={(event) => update("productName", event.target.value)} /></label>
+            <label>仕様<input value={form.sizeSummary} onChange={(event) => update("sizeSummary", event.target.value)} /></label>
+            <label>数量（枚）<input inputMode="numeric" value={form.quantity} onChange={(event) => update("quantity", event.target.value)} /></label>
+            <label>充填・加工 項目名<input value={form.fillingItemName} onChange={(event) => update("fillingItemName", event.target.value)} /></label>
+            <label className="wide">充填・加工 説明<textarea rows={2} value={form.fillingItemDescription} onChange={(event) => update("fillingItemDescription", event.target.value)} /></label>
+            <label>充填・加工 原価 / 枚<input inputMode="decimal" value={form.fillingCostPerPiece} onChange={(event) => update("fillingCostPerPiece", event.target.value)} /></label>
+            <label>充填・加工 単価（空欄=自動）<input inputMode="decimal" value={form.fillingUnitDisplay} onChange={(event) => update("fillingUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
+            <label>充填・加工 金額（空欄=自動）<input inputMode="decimal" value={form.fillingAmountDisplay} onChange={(event) => update("fillingAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
+            <label>フィルム 項目名<input value={form.filmItemName} onChange={(event) => update("filmItemName", event.target.value)} /></label>
+            <label className="wide">フィルム 説明<textarea rows={2} value={form.filmItemDescription} onChange={(event) => update("filmItemDescription", event.target.value)} /></label>
+            <label>フィルム 原価 / 枚<input inputMode="decimal" value={form.filmCostPerPiece} onChange={(event) => update("filmCostPerPiece", event.target.value)} /></label>
+            <label>フィルム m単価<input inputMode="decimal" value={form.filmMeterPrice} onChange={(event) => update("filmMeterPrice", event.target.value)} /></label>
+            <label>フィルム発注長さ (m)<input inputMode="decimal" value={form.filmOrderLengthM} onChange={(event) => update("filmOrderLengthM", event.target.value)} /></label>
+            <label>フィルム m単価表示（空欄=自動）<input inputMode="decimal" value={form.filmUnitDisplay} onChange={(event) => update("filmUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
+            <label>フィルム パウチ換算（空欄=自動）<input inputMode="decimal" value={form.filmPouchUnitDisplay} onChange={(event) => update("filmPouchUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
+            <label>フィルム 金額（空欄=自動）<input inputMode="decimal" value={form.filmAmountDisplay} onChange={(event) => update("filmAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
+            <label>端数調整 項目名<input value={form.roundingItemName} onChange={(event) => update("roundingItemName", event.target.value)} /></label>
+            <label className="wide">端数調整 説明<textarea rows={2} value={form.roundingItemDescription} onChange={(event) => update("roundingItemDescription", event.target.value)} /></label>
+            <label>端数調整 金額（空欄=自動）<input inputMode="decimal" value={form.adjustmentDisplay} onChange={(event) => update("adjustmentDisplay", event.target.value)} placeholder="自動計算" /></label>
+            <label>見積単価 / 枚（空欄=自動）<input inputMode="decimal" value={form.pricePerPieceDisplay} onChange={(event) => update("pricePerPieceDisplay", event.target.value)} placeholder="自動計算" /></label>
+            <label>小計ラベル<input value={form.subtotalLabel} onChange={(event) => update("subtotalLabel", event.target.value)} /></label>
+            <label>小計（空欄=自動）<input inputMode="decimal" value={form.subtotalDisplay} onChange={(event) => update("subtotalDisplay", event.target.value)} placeholder="自動計算" /></label>
+            <label>消費税ラベル（空欄=自動）<input value={form.taxLabel} onChange={(event) => update("taxLabel", event.target.value)} placeholder={`消費税（${formatNumber(Number(form.taxRatePercent), 0)}%）`} /></label>
+            <label>消費税率（%）<input inputMode="decimal" value={form.taxRatePercent} onChange={(event) => update("taxRatePercent", event.target.value)} /></label>
+            <label>消費税（空欄=自動）<input inputMode="decimal" value={form.taxDisplay} onChange={(event) => update("taxDisplay", event.target.value)} placeholder="自動計算" /></label>
+            <label>合計ラベル<input value={form.grandTotalLabel} onChange={(event) => update("grandTotalLabel", event.target.value)} /></label>
+            <label>合計（空欄=自動）<input inputMode="decimal" value={form.grandTotalDisplay} onChange={(event) => update("grandTotalDisplay", event.target.value)} placeholder="自動計算" /></label>
+            <label>適用利益率（内部管理）<input inputMode="decimal" value={form.targetMargin} onChange={(event) => update("targetMargin", event.target.value)} /></label>
+          </div>
+        </details>
+
+        <details className="editor-group" open={position === "bottom"}>
+          <summary>条件・備考・社内判</summary>
+          <div className="editor-grid">
+            <label>納期<input value={form.deliveryDate} onChange={(event) => update("deliveryDate", event.target.value)} /></label>
+            <label>お支払条件<input value={form.paymentTerms} onChange={(event) => update("paymentTerms", event.target.value)} /></label>
+            <label className="wide">備考<textarea rows={3} value={form.notes} onChange={(event) => update("notes", event.target.value)} /></label>
+            <label>社内判文言<input value={form.sealText} onChange={(event) => update("sealText", event.target.value)} /></label>
+            <label className="wide">フッター文言<textarea rows={2} value={form.footerNote} onChange={(event) => update("footerNote", event.target.value)} /></label>
+          </div>
+        </details>
+      </div>
+    );
+  }
 }
