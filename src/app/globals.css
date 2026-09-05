@@ -237,88 +237,75 @@ header .version-badge { display: none; }
 .calc-mode.auto { background: #dcfce7; color: #166534; }
 .calc-mode.override { background: #ffedd5; color: #9a3412; }
 
-.a4-sheet { width: min(100%, 210mm); min-height: 297mm; margin: 0 auto; background: white; color: #111827; border: 1px solid #d1d5db; box-shadow: 0 12px 34px rgba(15, 23, 42, .12); padding: 15mm 14mm; font-size: 11.2pt; line-height: 1.48; display: flex; flex-direction: column; }
-.sheet-header { display: flex; justify-content: space-between; gap: 18mm; align-items: start; border-bottom: 3px double #374151; padding-bottom: 6mm; }
+.a4-sheet {
+  width: min(100%, 210mm);
+  min-height: 297mm;
+  margin: 0 auto;
+  background: white;
+  color: #1f2937;
+  border: 1px solid #d1d5db;
+  border-top: 2.2mm solid #1f3a5f;
+  box-shadow: 0 12px 34px rgba(15, 23, 42, .12);
+  padding: 12mm 14mm 11mm;
+  font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", "Times New Roman", serif;
+  font-size: 10.5pt;
+  line-height: 1.38;
+  display: flex;
+  flex-direction: column;
+}
+.sheet-header { position: relative; display: flex; justify-content: space-between; gap: 14mm; align-items: start; border-bottom: 1px solid #8b96a6; padding-bottom: 4mm; }
+.sheet-header::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1mm; height: .7mm; background: #1f3a5f; }
 .issuer { max-width: 62%; }
 .issuer-logo { display: flex; align-items: center; gap: 5mm; }
-.issuer-logo strong { display: block; font-size: 15pt; letter-spacing: .04em; }
-.issuer-logo small { color: #6b7280; font-size: 8.8pt; letter-spacing: .08em; }
-.issuer address { font-style: normal; margin-top: 4mm; font-size: 9.5pt; line-height: 1.55; }
+.issuer-logo { gap: 3.5mm; }
+.issuer-logo .logo-mark.large { background: #1f3a5f; border-radius: 2.8mm; }
+.issuer-logo strong { display: block; font-size: 13.5pt; letter-spacing: .05em; }
+.issuer-logo small { color: #5b6573; font-size: 8.2pt; letter-spacing: .09em; }
+.issuer address { font-style: normal; margin-top: 2.6mm; font-size: 8.4pt; line-height: 1.38; color: #475569; }
 .document-title { min-width: 40mm; text-align: right; }
-.document-title .english { margin: 0; color: #6b7280; font-size: 9.5pt; letter-spacing: .2em; }
-.document-title h2 { margin: 1mm 0 4mm; font-size: 22pt; letter-spacing: .08em; }
-.document-title dl div { display: flex; justify-content: space-between; border-bottom: 1px solid #d1d5db; padding: 1.2mm 0; }
-.document-title dt { color: #6b7280; font-weight: 600; }
+.document-title .english { margin: 0; color: #1f3a5f; font-size: 8.6pt; letter-spacing: .22em; font-weight: 700; }
+.document-title h2 { margin: 1mm 0 3mm; color: #111827; font-size: 20pt; letter-spacing: .09em; }
+.document-title dl div { display: flex; justify-content: space-between; border-bottom: 1px solid #cbd5e1; padding: 1mm 0; }
+.document-title dt { color: #64748b; font-weight: 600; }
 .document-title dd { font-weight: 800; }
 
-.recipient-block { margin-top: 7mm; }
+.recipient-block { margin-top: 4.5mm; }
 .recipient-block p { margin: 0 0 1mm; }
-.recipient-block .customer { font-size: 14.5pt; font-weight: 900; }
-.recipient-block .greeting { margin-top: 4mm; color: #374151; font-size: 10pt; }
-.price-highlight { display: grid; grid-template-columns: 1.2fr .7fr .9fr; gap: 4mm; align-items: end; margin: 7mm 0 5mm; padding: 5mm; background: #f8fafc; border: 1px solid #e5e7eb; }
-.price-highlight span { display: block; color: #6b7280; font-size: 9pt; font-weight: 700; }
-.price-highlight strong { display: block; font-size: 17pt; font-weight: 900; }
-.price-highlight small { font-size: 10pt; }
+.recipient-block .customer { font-size: 13pt; font-weight: 900; color: #111827; }
+.recipient-block .greeting { margin-top: 2.6mm; color: #374151; font-size: 8.8pt; }
+.price-highlight { display: grid; grid-template-columns: 1.15fr .72fr .9fr; gap: 3mm; align-items: end; margin: 4mm 0 3.5mm; padding: 3.2mm 4mm; background: #f6f8fb; border: 1px solid #d8dfe9; border-left: 1.2mm solid #1f3a5f; }
+.price-highlight span { display: block; color: #64748b; font-size: 8.2pt; font-weight: 700; }
+.price-highlight strong { display: block; font-size: 15pt; font-weight: 900; color: #17223a; }
+.price-highlight small { font-size: 9pt; }
 .quote-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.quote-table th { background: #eef2f7; color: #374151; border: 1px solid #9ca3af; padding: 3mm 2.5mm; font-size: 10pt; text-align: center; }
-.quote-table td { border: 1px solid #9ca3af; padding: 4mm 2.5mm; vertical-align: top; }
+.quote-table th { background: #eef2f7; color: #243447; border: 1px solid #8b96a6; border-top: 1.5px solid #1f3a5f; padding: 2.2mm 2.2mm; font-size: 9.4pt; text-align: center; }
+.quote-table td { border: 1px solid #8b96a6; padding: 2.7mm 2.2mm; vertical-align: top; background: white; }
 .quote-table th:nth-child(1), .quote-table td:nth-child(1) { width: 42%; text-align: left; }
 .quote-table th:not(:first-child), .quote-table td:not(:first-child) { text-align: right; }
-.quote-table small { display: block; margin-top: 1mm; color: #6b7280; font-size: 8.6pt; font-weight: 400; }
+.quote-table small { display: block; margin-top: .7mm; color: #64748b; font-size: 7.8pt; font-weight: 400; }
 .film-composition { letter-spacing: .01em; }
 .sheet-editable { border-bottom: 1px dashed transparent; cursor: text; display: inline; line-height: inherit; min-width: 0; outline: none; transition: background .12s ease, border-color .12s ease; vertical-align: baseline; white-space: pre-wrap; }
 .sheet-editable:hover { background: #fffbeb; border-bottom-color: #f59e0b; }
 .sheet-editable:focus { background: #eff6ff; border-bottom-color: var(--primary); box-shadow: 0 2px 0 rgba(37, 99, 235, .18); }
 .sheet-editable.money { font: inherit; text-align: inherit; }
-.total-block { margin-left: auto; width: min(88mm, 100%); margin-top: 5mm; font-size: 10.5pt; }
-.total-block > div { display: flex; justify-content: space-between; gap: 5mm; padding: 2.3mm 0; border-bottom: 1px solid #d1d5db; }
+.total-block { margin-left: auto; width: min(82mm, 100%); margin-top: 3.5mm; font-size: 9.6pt; }
+.total-block > div { display: flex; justify-content: space-between; gap: 4mm; padding: 1.5mm 0; border-bottom: 1px solid #d8dfe9; }
 .total-block span { color: #4b5563; }
 .total-block strong { font-weight: 800; }
-.total-block .grand { border-top: 3px double #374151; border-bottom: 0; margin-top: 1mm; font-size: 13pt; }
-.terms { margin-top: 8mm; border: 1px solid #e5e7eb; padding: 4mm 5mm; background: #fbfcfe; }
-.terms dl div { display: flex; gap: 5mm; border-bottom: 0; padding: 1mm 0; }
-.terms dt { flex: 0 0 26mm; color: #4b5563; font-weight: 700; }
+.total-block .grand { border-top: 3px double #1f3a5f; border-bottom: 0; margin-top: .8mm; font-size: 12.5pt; color: #17223a; }
+.terms { margin-top: 4.5mm; border: 1px solid #d8dfe9; padding: 3mm 4mm; background: #f8fafc; }
+.terms dl div { display: flex; gap: 4mm; border-bottom: 0; padding: .8mm 0; }
+.terms dt { flex: 0 0 24mm; color: #4b5563; font-weight: 700; }
 .terms dd { margin: 0; }
-.terms .notes { margin: 3mm 0 0; padding-top: 2mm; border-top: 1px solid #e5e7eb; color: #374151; font-size: 9.5pt; }
-.sheet-footer { margin-top: auto; display: flex; justify-content: space-between; align-items: end; gap: 8mm; border-top: 1px solid #e5e7eb; padding-top: 5mm; color: #4b5563; font-size: 9pt; }
-.sheet-footer p { max-width: 78mm; margin: 0; }
+.terms .notes { margin: 2mm 0 0; padding-top: 1.6mm; border-top: 1px solid #d8dfe9; color: #374151; font-size: 8.6pt; }
+.sheet-footer { margin-top: auto; display: flex; justify-content: space-between; align-items: end; gap: 8mm; border-top: 1px solid #8b96a6; padding-top: 3.5mm; color: #4b5563; font-size: 8.2pt; }
+.sheet-footer p { max-width: 82mm; margin: 0; line-height: 1.42; }
 .approval { display: flex; align-items: center; gap: 5mm; font-size: 10pt; font-weight: 800; color: #111827; }
 .seal { display: grid; place-items: center; width: 17mm; height: 17mm; border: 2.5px solid #b91c1c; border-radius: 50%; color: #b91c1c; font-size: 8.5pt; transform: rotate(-9deg); }
 .sheet-error { margin-top: 8mm; }
 
 .quote-edge-handles { display: none; }
 .quote-drawer-overlay { display: none; }
-
-/* A4 preview uses the same compact density as printed output so editing is WYSIWYG. */
-@media screen {
-  .a4-sheet { padding: 9mm 11mm; font-size: 9pt; line-height: 1.22; }
-  .sheet-header { gap: 12mm; padding-bottom: 3mm; }
-  .issuer-logo .logo-mark.large { width: 12mm; height: 12mm; font-size: 18pt; }
-  .issuer-logo strong { font-size: 12pt; }
-  .issuer address { margin-top: 2mm; font-size: 7.5pt; line-height: 1.3; }
-  .document-title h2 { margin: 0 0 2mm; font-size: 17pt; }
-  .document-title dl div { padding: .6mm 0; }
-  .recipient-block { margin-top: 3mm; }
-  .recipient-block .customer { font-size: 11pt; }
-  .recipient-block .greeting { margin-top: 2mm; font-size: 7.5pt; }
-  .price-highlight { grid-template-columns: 1.1fr .7fr .9fr; gap: 3mm; margin: 3mm 0 2mm; padding: 2.5mm 3mm; }
-  .price-highlight span { font-size: 7.5pt; }
-  .price-highlight strong { font-size: 13pt; }
-  .price-highlight small { font-size: 8pt; }
-  .quote-table th { padding: 1.5mm 1.8mm; font-size: 7.8pt; }
-  .quote-table td { padding: 1.8mm; }
-  .quote-table small { margin-top: .4mm; font-size: 7pt; }
-  .total-block { width: min(76mm, 100%); margin-top: 2mm; font-size: 8.6pt; }
-  .total-block > div { gap: 3mm; padding: .8mm 0; }
-  .total-block .grand { margin-top: .3mm; font-size: 11pt; }
-  .terms { margin-top: 3mm; padding: 2mm 3mm; font-size: 7.8pt; }
-  .terms dl div { gap: 3mm; padding: .4mm 0; }
-  .terms dt { flex-basis: 22mm; }
-  .terms .notes { margin: 1.5mm 0 0; padding-top: 1mm; font-size: 7.4pt; }
-  .sheet-footer { padding-top: 2.3mm; font-size: 7.2pt; }
-  .sheet-footer p { max-width: 106mm; }
-  .seal { width: 12mm; height: 12mm; font-size: 6.5pt; border-width: 2px; }
-}
 
 @media (max-width: 1200px) {
   .quote-page { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
@@ -375,32 +362,6 @@ header .version-badge { display: none; }
   main { max-width: none; padding: 0; }
   .quote-page { display: block; max-width: none; }
   .panel, .quote-toolbar, .quote-editor { display: none !important; }
-  .a4-sheet { width: 210mm !important; height: 297mm !important; min-height: 297mm !important; margin: 0 !important; border: 0 !important; box-shadow: none !important; padding: 9mm 11mm !important; overflow: hidden !important; break-inside: avoid !important; page-break-inside: avoid !important; page-break-after: avoid !important; font-size: 9pt !important; line-height: 1.22 !important; print-color-adjust: exact !important; -webkit-print-color-adjust: exact !important; }
-  .sheet-header { gap: 12mm !important; padding-bottom: 3mm !important; }
-  .issuer-logo .logo-mark.large { width: 12mm !important; height: 12mm !important; font-size: 18pt !important; }
-  .issuer-logo strong { font-size: 12pt !important; }
-  .issuer address { margin-top: 2mm !important; font-size: 7.5pt !important; line-height: 1.3 !important; }
-  .document-title h2 { margin: 0 0 2mm !important; font-size: 17pt !important; }
-  .document-title dl div { padding: .6mm 0 !important; }
-  .recipient-block { margin-top: 3mm !important; }
-  .recipient-block .customer { font-size: 11pt !important; }
-  .recipient-block .greeting { margin-top: 2mm !important; font-size: 7.5pt !important; }
-  .price-highlight { grid-template-columns: 1.1fr .7fr .9fr !important; gap: 3mm !important; margin: 3mm 0 2mm !important; padding: 2.5mm 3mm !important; }
-  .price-highlight span { font-size: 7.5pt !important; }
-  .price-highlight strong { font-size: 13pt !important; }
-  .price-highlight small { font-size: 8pt !important; }
-  .quote-table th { padding: 1.5mm 1.8mm !important; font-size: 7.8pt !important; }
-  .quote-table td { padding: 1.8mm !important; }
-  .quote-table small { margin-top: .4mm !important; font-size: 7pt !important; }
-  .total-block { width: min(76mm, 100%) !important; margin-top: 2mm !important; font-size: 8.6pt !important; }
-  .total-block > div { gap: 3mm !important; padding: .8mm 0 !important; }
-  .total-block .grand { margin-top: .3mm !important; font-size: 11pt !important; }
-  .terms { margin-top: 3mm !important; padding: 2mm 3mm !important; font-size: 7.8pt !important; }
-  .terms dl div { gap: 3mm !important; padding: .4mm 0 !important; }
-  .terms dt { flex-basis: 22mm !important; }
-  .terms .notes { margin: 1.5mm 0 0 !important; padding-top: 1mm !important; font-size: 7.4pt !important; }
-  .sheet-footer { margin-top: auto !important; padding-top: 2.3mm !important; font-size: 7.2pt !important; }
-  .sheet-footer p { max-width: 106mm !important; }
-  .seal { width: 12mm !important; height: 12mm !important; font-size: 6.5pt !important; border-width: 2px !important; }
+  .a4-sheet { width: 210mm !important; height: 297mm !important; min-height: 297mm !important; margin: 0 !important; border: 0 !important; border-top: 2.2mm solid #1f3a5f !important; box-shadow: none !important; overflow: hidden !important; break-inside: avoid !important; page-break-inside: avoid !important; page-break-after: avoid !important; print-color-adjust: exact !important; -webkit-print-color-adjust: exact !important; }
   .sheet-editable { background: transparent !important; border-bottom-color: transparent !important; box-shadow: none !important; }
 }
