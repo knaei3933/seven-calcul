@@ -204,3 +204,63 @@ describe("multi-SKU film aggregation", () => {
     expect(result.film.filmBaseCost).toBe("164000");
   });
 });
+
+describe("gravure roll integration", () => {
+  it("replaces only film cost, keeps processing unchanged, and separates copper plates", () => {
+    const result = calculatePouchCost({
+      spec: baseSpec,
+      quantity: "10000",
+      printingMethod: "gravure",
+    });
+
+    expect(result.orderPatternCount).toBe(1);
+    expect(result.deliverablePatternLengthM).toBe("5500");
+    expect(result.film.orderLengthM).toBe("6000");
+    expect(result.film.lossM).toBe("500");
+    expect(result.film.filmTotal).toBe(result.gravure?.filmCostYen);
+    expect(Number(result.copperPlateCost)).toBeGreaterThan(0);
+    expect(result.costComponents.copperPlate).toBe(result.copperPlateCost);
+    expect(result.costPerPieceComponents.copperPlate).toBe(result.copperPlateCostPerPiece);
+    expect(result.audit.componentReconciliationDifference).toBe("0");
+
+    const componentTotal = Object.values(result.costComponents).reduce((total, value) => total + Number(value), 0);
+    expect(componentTotal).toBeCloseTo(Number(result.costTotal), 8);
+  });
+
+  it("uses SKU-specific color counts when calculating gravure printing cost", () => {
+    const sameColors = calculatePouchCost({
+      spec: {
+        ...baseSpec,
+        skuCount: 2,
+        skuQuantities: ["5000", "5000"],
+        skuFillMlPerChamber: ["30", "30"],
+        skuColorCounts: ["4", "4"],
+      },
+      quantity: "10000",
+      printingMethod: "gravure",
+    });
+    const skuColors = calculatePouchCost({
+      spec: {
+        ...sameSpec(),
+        skuCount: 2,
+        skuQuantities: ["5000", "5000"],
+        skuFillMlPerChamber: ["30", "30"],
+        skuColorCounts: ["2", "6"],
+      },
+      quantity: "10000",
+      printingMethod: "gravure",
+    });
+
+    expect(Number(skuColors.gravure?.printingCostYen)).toBeCloseTo(Number(sameColors.gravure?.printingCostYen), 8);
+  });
+});
+
+function sameSpec() {
+  return {
+    ...baseSpec,
+    skuCount: 2,
+    skuQuantities: ["5000", "5000"],
+    skuFillMlPerChamber: ["30", "30"],
+    skuColorCounts: ["4", "4"],
+  };
+}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
-import { analyzeQuotation, filmCompositionOf } from "@/lib/quotation-history";
+import { analyzeQuotation, filmCompositionOf, printingMethodOf } from "@/lib/quotation-history";
 import {
   DEFAULT_FILM_COMPOSITION,
   QUOTATION_RESTORE_KEY,
@@ -192,6 +192,13 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
     { name: "充填・加工", cost: analysis.fillingCostUnit, selling: analysis.fillingUnit, profit: analysis.fillingUnit.minus(analysis.fillingCostUnit), quantity: `${formatNumber(analysis.quantity.toNumber(), 0)} 枚`, amount: analysis.fillingAmount },
     { name: "フィルム", cost: analysis.filmCostUnit, selling: analysis.filmUnit, profit: analysis.filmUnit.minus(analysis.filmCostUnit), quantity: `${formatNumber(analysis.filmOrderLength.toNumber(), 0)} m`, amount: analysis.filmAmount },
   ];
+  if (printingMethodOf(record) === "gravure") {
+    rows.push({
+      name: "新規銅版", cost: analysis.copperCostUnit, selling: analysis.copperUnit,
+      profit: analysis.copperUnit.minus(analysis.copperCostUnit),
+      quantity: `${formatNumber(analysis.quantity.toNumber(), 0)} 枚`, amount: analysis.copperAmount,
+    });
+  }
 
   return (
     <div className="history-detail-layer no-print" role="dialog" aria-modal="true" aria-labelledby="history-detail-title">
@@ -238,16 +245,28 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
                     <td>{formatCurrency(analysis.fillingAmount.toFixed(0), 0)}</td>
                     <td>{formatCurrency(analysis.fillingAmount.minus(analysis.fillingCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td>
                   </tr>
-                  <tr>
-                    <td>フィルム</td>
+	                  <tr>
+	                    <td>フィルム</td>
                     <td>{formatCurrency(analysis.filmCostUnit.toFixed(2), 2)}</td>
                     <td>{formatCurrency(analysis.filmUnit.toFixed(2), 2)}</td>
                     <td>{formatCurrency(analysis.filmUnit.minus(analysis.filmCostUnit).toFixed(2), 2)}</td>
                     <td>{analysis.filmUnit.gt(0) ? `${formatNumber(analysis.filmUnit.minus(analysis.filmCostUnit).div(analysis.filmUnit).times(100).toNumber(), 2)}%` : "-"}</td>
                     <td>{formatCurrency(analysis.filmCostUnit.times(analysis.quantity).toFixed(0), 0)}</td>
                     <td>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</td>
-                    <td>{formatCurrency(analysis.filmAmount.minus(analysis.filmCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td>
-                  </tr>
+	                    <td>{formatCurrency(analysis.filmAmount.minus(analysis.filmCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td>
+	                  </tr>
+	                  {printingMethodOf(record) === "gravure" ? (
+	                    <tr>
+	                      <td>新規銅版</td>
+	                      <td>{formatCurrency(analysis.copperCostUnit.toFixed(2), 2)}</td>
+	                      <td>{formatCurrency(analysis.copperUnit.toFixed(2), 2)}</td>
+	                      <td>{formatCurrency(analysis.copperUnit.minus(analysis.copperCostUnit).toFixed(2), 2)}</td>
+	                      <td>{analysis.copperUnit.gt(0) ? `${formatNumber(analysis.copperUnit.minus(analysis.copperCostUnit).div(analysis.copperUnit).times(100).toNumber(), 2)}%` : "-"}</td>
+	                      <td>{formatCurrency(analysis.copperCostUnit.times(analysis.quantity).toFixed(0), 0)}</td>
+	                      <td>{formatCurrency(analysis.copperAmount.toFixed(0), 0)}</td>
+	                      <td>{formatCurrency(analysis.copperAmount.minus(analysis.copperCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td>
+	                    </tr>
+	                  ) : null}
                   {analysis.adjustment.abs().gt(0) ? (
                     <tr>
                       <td>端数調整</td>
@@ -284,6 +303,12 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
               <div><span>フィルム m単価</span><strong>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toFixed(0), 0)} /m` : "-"}</strong></div>
               <div><span>フィルム パウチ換算</span><strong>{formatCurrency(analysis.filmUnit.toFixed(2), 2)} /枚</strong></div>
               <div><span>フィルム金額</span><strong>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</strong></div>
+              {printingMethodOf(record) === "gravure" ? (
+                <>
+                  <div><span>銅版単価</span><strong>{formatCurrency(analysis.copperUnit.toFixed(2), 2)}</strong></div>
+                  <div><span>銅版金額</span><strong>{formatCurrency(analysis.copperAmount.toFixed(0), 0)}</strong></div>
+                </>
+              ) : null}
               <div><span>端数調整</span><strong>{displayedAdjustment}</strong></div>
               <div><span>小計（税抜）</span><strong>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</strong></div>
               <div><span>消費税</span><strong>{formatCurrency(analysis.tax.toFixed(0), 0)}</strong></div>
@@ -331,7 +356,7 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
           <details className="editor-group" open>
             <summary>表示金額・税・調整</summary>
             <div className="detail-grid">
-              <div><span>原価 / 枚（充填＋フィルム）</span><strong>{formatCurrency(analysis.costUnit.toFixed(4), 4)}</strong></div>
+              <div><span>原価 / 枚（充填＋フィルム＋銅版）</span><strong>{formatCurrency(analysis.costUnit.toFixed(4), 4)}</strong></div>
               <div><span>自動目標利益率</span><strong>{formatNumber(analysis.targetMargin.times(100).toNumber(), 2)}%</strong></div>
               <div><span>端数調整</span><strong>{displayedAdjustment}</strong></div>
               <div><span>小計（税抜）</span><strong>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</strong></div>
@@ -354,6 +379,14 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
               <div><span>担当</span><strong>{record.customerContact || "-"}</strong></div>
               <div><span>品名</span><strong>{record.productName}</strong></div>
               <div><span>仕様</span><strong>{record.sizeSummary}</strong></div>
+              <div><span>印刷方式</span><strong>{printingMethodOf(record) === "gravure" ? "グラビア印刷（ロール）" : "デジタル印刷"}</strong></div>
+              {printingMethodOf(record) === "gravure" ? (
+                <>
+                  <div><span>発注パターン</span><strong>{formatNumber(analysis.orderPatternCount.toNumber(), 0)} 回</strong></div>
+                  <div><span>納品パターン長</span><strong>{formatNumber(analysis.deliverablePatternLengthM.toNumber(), 0)} m</strong></div>
+                  <div><span>推奨発注数量</span><strong>{analysis.recommendedQuantity.gt(0) ? `${formatNumber(analysis.recommendedQuantity.toNumber(), 0)} 枚` : "-"}</strong></div>
+                </>
+              ) : null}
               <div><span>発注数量</span><strong>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</strong></div>
               <div><span>フィルム構成</span><strong>{composition || DEFAULT_FILM_COMPOSITION}</strong></div>
               <div><span>フィルム購入単価</span><strong>{formatCurrency(analysis.filmMeterPrice.toFixed(0), 0)} /m</strong></div>

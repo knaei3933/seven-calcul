@@ -34,6 +34,46 @@ const baseRecord = {
 } as unknown as QuotationRecord;
 
 describe("quotation history analysis", () => {
+  it("separates gravure copper cost and keeps displayed snapshot values", () => {
+    const analysis = analyzeQuotation({
+      ...baseRecord,
+      filmCostPerPiece: "3",
+      payload: {
+        ...baseRecord.payload,
+        printingMethod: "gravure",
+        fillingCostPerPiece: "3",
+        filmCostPerPiece: "2",
+        copperPlateCostPerPiece: "1",
+        pricePerPieceDisplay: "10",
+        fillingUnitDisplay: "5",
+        fillingAmountDisplay: "50000",
+        filmUnitDisplay: "400",
+        filmPouchUnitDisplay: "3",
+        filmAmountDisplay: "30000",
+        copperUnitDisplay: "2",
+        copperAmountDisplay: "20000",
+        subtotalDisplay: "100000",
+        taxDisplay: "10000",
+        grandTotalDisplay: "110000",
+        orderPatternCount: "1",
+        deliverablePatternLengthM: "5500",
+        recommendedQuantity: "11000",
+      },
+    });
+
+    expect(analysis.costUnit.toNumber()).toBe(6);
+    expect(analysis.copperCostUnit.toNumber()).toBe(1);
+    expect(analysis.copperUnit.toNumber()).toBe(2);
+    expect(analysis.copperAmount.toNumber()).toBe(20000);
+    expect(analysis.sellingUnit.toNumber()).toBe(10);
+    expect(analysis.profitUnit.toNumber()).toBe(4);
+    expect(analysis.profitRate.toNumber()).toBe(40);
+    expect(analysis.subtotal.toNumber()).toBe(100000);
+    expect(analysis.orderPatternCount.toNumber()).toBe(1);
+    expect(analysis.deliverablePatternLengthM.toNumber()).toBe(5500);
+    expect(analysis.recommendedQuantity.toNumber()).toBe(11000);
+  });
+
   it("recalculates profit from an edited selling price", () => {
     const analysis = analyzeQuotation({
       ...baseRecord,

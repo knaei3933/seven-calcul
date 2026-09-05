@@ -3,6 +3,7 @@ import { CALCULATION_VERSION, defaultParameters, sizeMaster } from "./constants"
 import { D, Decimal, ceilTo, eq, maxD, roundTo2, sum } from "./decimal";
 import { normalizeDigitalFilmOrder, QuotationValidationError, type FilmOrderAdjustment, type FilmSkuOrder } from "./digital-film";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
+import { calculateGravureRollCost, defaultGravureRollParameters, type GravureRollParameters } from "./gravure-roll";
 import type { CostParameters, FilmPriceMode, PriceBand, PouchSpec, PrintingMethod, QuotationStatus, SizeMaster } from "./types";
 
 export interface CostResult {
@@ -35,10 +36,23 @@ export interface CostResult {
   customCharge: string;
   totalCostPerPiece: string;
   costTotal: string;
-  costComponents: Record<"film" | "bulk" | "variableProcessing" | "fixedLot" | "custom", string>;
-  costPerPieceComponents: Record<"film" | "bulk" | "variableProcessing" | "fixedLot" | "custom", string>;
+  costComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom", string>;
+  costPerPieceComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom", string>;
   sellingPrices: { margin: string; pricePerPiece: string; totalSales: string; profit: string }[];
   film: FilmCostResult;
+  copperPlateCost: string;
+  copperPlateCostPerPiece: string;
+  orderPatternCount?: number;
+  deliverablePatternLengthM?: string;
+  recommendedQuantity?: string;
+  gravure?: {
+    materialCostYen: string;
+    printingCostYen: string;
+    laminationCostYen: string;
+    filmCostYen: string;
+    copperPlateCostYen: string;
+    finalHeatSealWidthMm: string;
+  };
   warnings: WarningCode[];
   audit: {
     calculationVersion: string;
@@ -96,6 +110,7 @@ export interface CalculationInput {
   quantity: string;
   printingMethod: PrintingMethod;
   parameters?: Partial<CostParameters>;
+  gravureParameters?: GravureRollParameters;
   targetMargins?: string[];
 }
 
@@ -116,7 +131,7 @@ function resolveTargetMargins(targetMargins?: string[]): string[] {
   return valid.sort((a, b) => a.numeric - b.numeric).map((item) => item.value);
 }
 
-export function calculatePouchCost({ spec, quantity, printingMethod, parameters, targetMargins }: CalculationInput): CostResult {
+export function calculatePouchCost({ spec, quantity, printingMethod, parameters, gravureParameters, targetMargins }: CalculationInput): CostResult {
   const params = { ...defaultParameters, ...parameters } as CostParameters;
   const quantityD = D(quantity);
   if (quantityD.lte(0) || D(spec.fillMlPerChamber).lte(0) || spec.fillingLanes <= 0) throw validationError("invalid_positive_input");
@@ -151,7 +166,40 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
     })),
     params,
   );
-  const film = calculateFilmCost(size, quantityD, printingMethod, params, digitalOrders, orderAdjustment);
+  const requiredLengthM = sum(skuRequiredLengths);
+  const gravureRoll = printingMethod === "gravure"
+    ? calculateGravureRollCost({
+        requiredLengthM,
+        materialWidthMm: Decimal.max(500, size.webWidthMm),
+        colors: spec.colorCount,
+        quantity,
+        skuColorUsage: skuRequiredLengths.map((length, index) => ({
+          lengthM: length.toString(),
+          colors: spec.skuColorCounts?.[index] ?? spec.colorCount,
+        })),
+        parameters: gravureParameters ?? defaultGravureRollParameters(),
+      })
+    : null;
+  const film = gravureRoll
+    ? {
+        requiredLengthM: gravureRoll.requiredLengthM,
+        orderLengthM: gravureRoll.productionLengthM,
+        lossM: gravureRoll.lossLengthM,
+        effectiveLengthM: gravureRoll.deliverableLengthM,
+        actualQuantity: quantityD.toString(),
+        pricingQuantity: quantityD.toString(),
+        unitPrice: D(gravureRoll.filmCostYen).div(gravureRoll.productionLengthM).toString(),
+        filmBaseCost: gravureRoll.filmCostYen,
+        domesticShipping: "0",
+        overseasShipping: "0",
+        customs: "0",
+        filmTotal: gravureRoll.filmCostYen,
+        filmCostPerPiece: gravureRoll.filmCostPerPieceYen,
+        shippingTrips: "0",
+        orderAdjustment,
+        skuCosts: [],
+      }
+    : calculateFilmCost(size, quantityD, printingMethod, params, digitalOrders, orderAdjustment);
   const skuCosts = film.skuCosts.map((skuCost, index) => ({
     ...skuCost,
     name: (spec.skuNames?.[index] ?? "").trim() || `充填物${index + 1}`,
@@ -184,7 +232,16 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
   const fixedPerPiece = fixedLot.div(quantityD);
   const customCharge = spec.isCustom ? D(params.customPouchCharge) : D(0);
 
-  const costComponents = { film: filmWithSkus.filmTotal, bulk: bulkCost, variableProcessing: variableTotal, fixedLot, custom: customCharge };
+  const copperPlateCost = gravureRoll?.copperPlateCostYen ?? "0";
+  const copperPlateCostPerPiece = gravureRoll?.copperPlateCostPerPieceYen ?? "0";
+  const costComponents = {
+    film: D(filmWithSkus.filmTotal),
+    copperPlate: D(copperPlateCost),
+    bulk: bulkCost,
+    variableProcessing: variableTotal,
+    fixedLot,
+    custom: customCharge,
+  };
   const costTotal = sum(Object.values(costComponents));
   const totalPerPiece = D(costTotal).div(quantityD);
   const reconciliation = costTotal.minus(sum(Object.values(costComponents)));
@@ -195,7 +252,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
   });
 
   const warnings = unresolvedWarnings(spec, size, params);
-  const serializedInput = JSON.stringify({ spec, quantity, printingMethod, targetMargins: targetMargins ?? null, parameters: parameters ?? null });
+  const serializedInput = JSON.stringify({ spec, quantity, printingMethod, targetMargins: targetMargins ?? null, parameters: parameters ?? null, gravureParameters: gravureParameters ?? null });
   const result = { quantity: quantityD.toString(), chamberCount: chamberCount.toString(), bulkUsageMl: bulkUsage.toString(), costComponents, costTotal: costTotal.toString(), sellingPrices };
 
   return {
@@ -232,6 +289,21 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
     costPerPieceComponents: mapValues(costComponents, (value) => D(value).div(quantityD).toString()),
     sellingPrices,
     film: filmWithSkus,
+    copperPlateCost,
+    copperPlateCostPerPiece,
+    ...(gravureRoll ? {
+      orderPatternCount: gravureRoll.orderPatternCount,
+      deliverablePatternLengthM: gravureRoll.deliverableLengthM,
+      recommendedQuantity: gravureRoll.recommendedQuantity,
+      gravure: {
+        materialCostYen: gravureRoll.materialCostYen,
+        printingCostYen: gravureRoll.printingCostYen,
+        laminationCostYen: gravureRoll.laminationCostYen,
+        filmCostYen: gravureRoll.filmCostYen,
+        copperPlateCostYen: gravureRoll.copperPlateCostYen,
+        finalHeatSealWidthMm: gravureRoll.finalHeatSealWidthMm,
+      },
+    } : {}),
     warnings,
     audit: {
       calculationVersion: CALCULATION_VERSION,

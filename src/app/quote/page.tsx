@@ -34,6 +34,15 @@ type QuoteForm = {
   fillingItemDescription: string;
   fillingUnitDisplay: string;
   fillingAmountDisplay: string;
+  printingMethod: string;
+  copperItemName: string;
+  copperItemDescription: string;
+  copperUnitDisplay: string;
+  copperAmountDisplay: string;
+  copperPlateCostPerPiece: string;
+  orderPatternCount: string;
+  deliverablePatternLengthM: string;
+  recommendedQuantity: string;
   filmItemName: string;
   filmItemDescription: string;
   filmComposition: string;
@@ -86,6 +95,15 @@ const defaultQuote: QuoteForm = {
   fillingItemDescription: "バルク充填および加工に必要な一式",
   fillingUnitDisplay: "",
   fillingAmountDisplay: "",
+  printingMethod: "digital",
+  copperItemName: "新規銅版費",
+  copperItemDescription: "グラビア印刷用新規銅版一式（版費は発注数量へ配賦）",
+  copperUnitDisplay: "",
+  copperAmountDisplay: "",
+  copperPlateCostPerPiece: "0",
+  orderPatternCount: "0",
+  deliverablePatternLengthM: "0",
+  recommendedQuantity: "",
   filmItemName: "フィルム費用",
   filmItemDescription: "発注ロットに応じた単価を適用したフィルム製作・物流の一式",
   filmComposition: DEFAULT_FILM_COMPOSITION,
@@ -247,6 +265,11 @@ export default function PrintableQuotationPage() {
           sizeSummary: draft.sizeSummary,
           quantity: draft.quantity,
           fillingCostPerPiece: draft.fillingCostPerPiece,
+          printingMethod: draft.printingMethod ?? "digital",
+          copperPlateCostPerPiece: draft.copperPlateCostPerPiece ?? "0",
+          orderPatternCount: draft.orderPatternCount ?? "0",
+          deliverablePatternLengthM: draft.deliverablePatternLengthM ?? "0",
+          recommendedQuantity: draft.recommendedQuantity ?? "",
           filmCostPerPiece: draft.filmCostPerPiece,
           filmMeterPrice: draft.filmMeterPrice,
           filmOrderLengthM: draft.filmOrderLengthM,
@@ -278,7 +301,7 @@ export default function PrintableQuotationPage() {
     setSaving(true);
     setSaveError("");
     try {
-      const costUnit = D(form.fillingCostPerPiece).plus(form.filmCostPerPiece);
+      const costUnit = D(form.fillingCostPerPiece).plus(form.filmCostPerPiece).plus(form.copperPlateCostPerPiece);
       const sellingUnit = D(shownTotals.pricePerPiece);
       const profitUnit = sellingUnit.minus(costUnit);
       const profitMargin = sellingUnit.gt(0) ? profitUnit.div(sellingUnit) : D(0);
@@ -286,7 +309,11 @@ export default function PrintableQuotationPage() {
       const targetMargin = D(form.targetMargin);
       const profitAudit = {
         basis: "displayed-unit-price",
+        printingMethod: form.printingMethod,
         quantity: form.quantity,
+        fillingCostPerPiece: form.fillingCostPerPiece,
+        filmCostPerPiece: form.filmCostPerPiece,
+        copperPlateCostPerPiece: form.copperPlateCostPerPiece,
         totalCostPerPiece: costUnit.toString(),
         proposedPricePerPiece: sellingUnit.toString(),
         profitPerPiece: profitUnit.toString(),
@@ -305,6 +332,7 @@ export default function PrintableQuotationPage() {
         body: JSON.stringify({
           ...form,
           status: "draft",
+          filmCostPerPiece: D(form.filmCostPerPiece).plus(form.copperPlateCostPerPiece).toString(),
           pricePerPiece: shownTotals.pricePerPiece.toString(),
           subtotal: shownTotals.subtotal.toString(),
           tax: shownTotals.tax.toString(),
@@ -317,6 +345,8 @@ export default function PrintableQuotationPage() {
             // 自動計算値はform上は空欄のため、表示用に確定した値を上書きする。
             fillingUnitDisplay: shownTotals.fillingUnit,
             fillingAmountDisplay: shownTotals.fillingAmount,
+            copperUnitDisplay: shownTotals.copperUnit,
+            copperAmountDisplay: shownTotals.copperAmount,
             filmUnitDisplay: shownTotals.filmUnit,
             filmPouchUnitDisplay: shownTotals.filmPouchUnit,
             filmAmountDisplay: shownTotals.filmAmount,
@@ -353,24 +383,26 @@ export default function PrintableQuotationPage() {
   const parsedTaxRatePercent = parseDecimal(form.taxRatePercent);
   const parsedFillingCost = parseDecimal(form.fillingCostPerPiece);
   const parsedFilmCost = parseDecimal(form.filmCostPerPiece);
+  const parsedCopperCost = parseDecimal(form.copperPlateCostPerPiece);
   const parsedFilmMeterPrice = parseDecimal(form.filmMeterPrice);
   const parsedFilmOrderLength = parseDecimal(form.filmOrderLengthM);
 
   const valid = !!parsedQuantity && parsedQuantity.gt(0)
     && !!parsedFillingCost && parsedFillingCost.gte(0)
     && !!parsedFilmCost && parsedFilmCost.gte(0)
+    && !!parsedCopperCost && parsedCopperCost.gte(0)
     && !!parsedTargetMargin && parsedTargetMargin.gt(0) && parsedTargetMargin.lt(1)
     && !!parsedTaxRatePercent && parsedTaxRatePercent.gte(0);
 
   const totals = (() => {
-    if (!valid || !parsedQuantity || !parsedTargetMargin || !parsedTaxRatePercent || !parsedFillingCost || !parsedFilmCost || !parsedFilmMeterPrice || !parsedFilmOrderLength) return null;
+    if (!valid || !parsedQuantity || !parsedTargetMargin || !parsedTaxRatePercent || !parsedFillingCost || !parsedFilmCost || !parsedCopperCost || !parsedFilmMeterPrice || !parsedFilmOrderLength) return null;
     const quantity = parsedQuantity;
     const margin = parsedTargetMargin;
     const taxRate = parsedTaxRatePercent.div(100);
     const fillingSellingUnit = parsedFillingCost.div(D(1).minus(margin));
-    const filmSellingUnit = parsedFilmCost.div(D(1).minus(margin));
+    const copperSellingUnit = parsedCopperCost.div(D(1).minus(margin));
     const filmMeterDisplayUnit = parsedFilmMeterPrice;
-    const pricePerPiece = fillingSellingUnit.plus(filmSellingUnit);
+    const pricePerPiece = fillingSellingUnit.plus(copperSellingUnit);
     const subtotalBeforeAdjustment = pricePerPiece.times(quantity);
     const subtotal = subtotalBeforeAdjustment.floor();
     const roundingAdjustment = subtotal.minus(subtotalBeforeAdjustment);
@@ -378,13 +410,13 @@ export default function PrintableQuotationPage() {
     return {
       quantity,
       fillingSellingUnit,
-      filmSellingUnit,
+      copperSellingUnit,
       filmMeterDisplayUnit,
       filmOrderLength: parsedFilmOrderLength,
       roundingAdjustment,
       pricePerPiece,
       fillingAmount: fillingSellingUnit.times(quantity),
-      filmAmount: filmSellingUnit.times(quantity),
+      copperAmount: copperSellingUnit.times(quantity),
       subtotal,
       tax,
       taxRate,
@@ -397,18 +429,21 @@ export default function PrintableQuotationPage() {
     const roundUnit = (value: typeof totals.pricePerPiece) => value.toDecimalPlaces(2, Decimal.ROUND_UP);
     const totalPriceInput = parseDecimal(form.pricePerPieceDisplay) ?? totals.pricePerPiece;
     const targetTotal = totalPriceInput.times(totals.quantity);
+    const copperUnit = parseDecimal(form.copperUnitDisplay)
+      ?? totals.copperSellingUnit.toDecimalPlaces(2, Decimal.ROUND_UP);
+    const copperAmount = parseDecimal(form.copperAmountDisplay) ?? copperUnit.times(totals.quantity);
     const requestedFilmMeterUnit = parseDecimal(form.filmUnitDisplay)
       ?? recommendedFilmMeterUnit(form.filmOrderLengthM);
     const filmMeterUnit = clampFilmMeterUnit(requestedFilmMeterUnit);
     const filmAmount = filmMeterUnit.times(totals.filmOrderLength);
-    const remainingFillingAmount = Decimal.max(targetTotal.minus(filmAmount), 0);
+    const remainingFillingAmount = Decimal.max(targetTotal.minus(filmAmount).minus(copperAmount), 0);
     const fillingUnit = parseDecimal(form.fillingUnitDisplay)
       ?? (totals.quantity.gt(0)
         ? roundUnit(remainingFillingAmount.div(totals.quantity))
         : D(0));
     const fillingAmount = parseDecimal(form.fillingAmountDisplay) ?? fillingUnit.times(totals.quantity);
     const filmPouchUnit = totals.quantity.gt(0) ? filmAmount.div(totals.quantity) : D(0);
-    const lineTotal = fillingAmount.plus(filmAmount);
+    const lineTotal = fillingAmount.plus(filmAmount).plus(copperAmount);
     const adjustment = form.adjustmentDisplay.trim() === "" ? "-" : form.adjustmentDisplay;
     const adjustmentAmount = adjustment === "-" ? D(0) : D(adjustment);
     const subtotal = parseDecimal(form.subtotalDisplay) ?? lineTotal.plus(adjustmentAmount);
@@ -419,6 +454,8 @@ export default function PrintableQuotationPage() {
       pricePerPiece: (totals.quantity.gt(0) ? lineTotal.div(totals.quantity) : D(0)).toString(),
       fillingUnit: fillingUnit.toString(),
       fillingAmount: fillingAmount.toString(),
+      copperUnit: copperUnit.toString(),
+      copperAmount: copperAmount.toString(),
       filmUnit: filmMeterUnit.toString(),
       filmPouchUnit: filmPouchUnit.toString(),
       filmAmount: filmAmount.toString(),
@@ -464,11 +501,12 @@ export default function PrintableQuotationPage() {
     }
     const fillingUnit = D(shownTotals!.fillingUnit);
     const fillingAmount = fillingUnit.times(quantity);
-    const filmAmount = Decimal.max(price.times(quantity).minus(fillingAmount), 0);
-    applyLineTotals(fillingUnit, filmAmount);
+    const copperAmount = D(shownTotals!.copperAmount);
+    const filmAmount = Decimal.max(price.times(quantity).minus(fillingAmount).minus(copperAmount), 0);
+    applyLineTotals(fillingUnit, filmAmount, copperAmount);
   };
 
-  const applyLineTotals = (fillingUnit: Decimal, filmAmount: Decimal) => {
+  const applyLineTotals = (fillingUnit: Decimal, filmAmount: Decimal, copperAmount: Decimal) => {
     const quantity = parseDecimal(form.quantity);
     const orderLength = parseDecimal(form.filmOrderLengthM);
     if (!quantity || !quantity.gt(0) || !orderLength || !orderLength.gt(0)) return;
@@ -476,7 +514,8 @@ export default function PrintableQuotationPage() {
     const filmMeterUnit = clampFilmMeterUnit(filmAmount.div(orderLength));
     const clampedFilmAmount = filmMeterUnit.times(orderLength);
     const filmPouchUnit = clampedFilmAmount.div(quantity);
-    const lineTotal = fillingAmount.plus(clampedFilmAmount);
+    const copperUnit = copperAmount.div(quantity);
+    const lineTotal = fillingAmount.plus(clampedFilmAmount).plus(copperAmount);
     const price = lineTotal.div(quantity);
     const subtotal = lineTotal;
     const tax = subtotal.times(D(form.taxRatePercent).div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
@@ -487,6 +526,8 @@ export default function PrintableQuotationPage() {
       filmUnitDisplay: filmMeterUnit.toString(),
       filmPouchUnitDisplay: filmPouchUnit.toString(),
       filmAmountDisplay: clampedFilmAmount.toString(),
+      copperUnitDisplay: copperUnit.toString(),
+      copperAmountDisplay: copperAmount.toString(),
       adjustmentDisplay: "-",
       subtotalDisplay: subtotal.toString(),
       taxDisplay: tax.toString(),
@@ -500,7 +541,7 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.fillingUnit ?? "0", undefined, 2));
       return;
     }
-    applyLineTotals(unit, D(shownTotals.filmAmount));
+    applyLineTotals(unit, D(shownTotals.filmAmount), D(shownTotals.copperAmount));
   };
 
   const commitFillingAmount = (raw: string, node: HTMLElement) => {
@@ -520,7 +561,7 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmUnit ?? "0"));
       return;
     }
-    applyLineTotals(D(shownTotals.fillingUnit), meterUnit.times(orderLength));
+    applyLineTotals(D(shownTotals.fillingUnit), meterUnit.times(orderLength), D(shownTotals.copperAmount));
   };
 
   const commitFilmPouchUnit = (raw: string, node: HTMLElement) => {
@@ -530,7 +571,7 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmPouchUnit ?? "0", undefined, 2));
       return;
     }
-    applyLineTotals(D(shownTotals.fillingUnit), pouchUnit.times(quantity));
+    applyLineTotals(D(shownTotals.fillingUnit), pouchUnit.times(quantity), D(shownTotals.copperAmount));
   };
 
   const commitFilmAmount = (raw: string, node: HTMLElement) => {
@@ -539,7 +580,28 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmAmount ?? "0"));
       return;
     }
-    applyLineTotals(D(shownTotals.fillingUnit), amount);
+    applyLineTotals(D(shownTotals.fillingUnit), amount, D(shownTotals.copperAmount));
+  };
+
+  const commitCopperUnit = (raw: string, node: HTMLElement) => {
+    const quantity = parseDecimal(form.quantity);
+    const unit = parseDisplayedNumber(raw);
+    if (!shownTotals || !quantity || !quantity.gt(0) || unit === null || unit.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.copperUnit ?? "0", undefined, 2));
+      return;
+    }
+    const copperAmount = unit.times(quantity);
+    applyLineTotals(D(shownTotals.fillingUnit), D(shownTotals.filmAmount), copperAmount);
+  };
+
+  const commitCopperAmount = (raw: string, node: HTMLElement) => {
+    const quantity = parseDecimal(form.quantity);
+    const amount = parseDisplayedNumber(raw);
+    if (!shownTotals || !quantity || !quantity.gt(0) || amount === null || amount.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.copperAmount ?? "0"));
+      return;
+    }
+    commitCopperUnit(amount.div(quantity).toString(), node);
   };
 
   const commitSheetSubtotal = (raw: string, node: HTMLElement) => {
@@ -549,11 +611,14 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.subtotal ?? "0"));
       return;
     }
-    const oldLineTotal = D(shownTotals.fillingAmount).plus(shownTotals.filmAmount);
+    const copperAmount = D(shownTotals.copperAmount);
+    const oldVariableTotal = D(shownTotals.fillingAmount).plus(shownTotals.filmAmount);
+    const oldLineTotal = oldVariableTotal.plus(copperAmount);
     const fillingShare = oldLineTotal.gt(0) ? D(shownTotals.fillingAmount).div(oldLineTotal) : D(1);
+    const filmShare = oldLineTotal.gt(0) ? D(shownTotals.filmAmount).div(oldLineTotal) : D(0);
     const fillingAmount = subtotal.times(fillingShare);
-    const filmAmount = Decimal.max(subtotal.minus(fillingAmount), 0);
-    applyLineTotals(quantity.gt(0) ? fillingAmount.div(quantity) : D(0), filmAmount);
+    const filmAmount = subtotal.times(filmShare);
+    applyLineTotals(quantity.gt(0) ? fillingAmount.div(quantity) : D(0), filmAmount, copperAmount);
   };
 
   const commitSheetTax = (raw: string, node: HTMLElement) => {
@@ -584,7 +649,7 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, shownTotals?.adjustment ?? "0");
       return;
     }
-    const subtotal = D(shownTotals.fillingAmount).plus(shownTotals.filmAmount).plus(adjustment).floor();
+    const subtotal = D(shownTotals.fillingAmount).plus(shownTotals.filmAmount).plus(shownTotals.copperAmount).plus(adjustment).floor();
     const tax = subtotal.times(D(form.taxRatePercent).div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
     applyPatch({ adjustmentDisplay: adjustment.toString(), subtotalDisplay: subtotal.toString(), taxDisplay: tax.toString(), grandTotalDisplay: subtotal.plus(tax).toString() });
   };
@@ -602,6 +667,8 @@ export default function PrintableQuotationPage() {
       filmUnitDisplay: "",
       filmPouchUnitDisplay: "",
       filmAmountDisplay: "",
+      copperUnitDisplay: "",
+      copperAmountDisplay: "",
       adjustmentDisplay: "",
       subtotalDisplay: "",
       taxDisplay: "",
@@ -752,6 +819,17 @@ export default function PrintableQuotationPage() {
                     }} /> m</span></td>
                     <td><EditableText value={moneyDisplay(shownTotals.filmAmount, form.filmAmountDisplay)} label="フィルム金額" className="money" onCommit={commitFilmAmount} /></td>
                   </tr>
+                  {form.printingMethod === "gravure" ? (
+                    <tr>
+                      <td>
+                        <strong><EditableText value={form.copperItemName} label="銅版費項目名" onCommit={(next) => update("copperItemName", next.trim())} /></strong>
+                        <small><EditableText value={form.copperItemDescription} label="銅版費説明" multiline onCommit={(next) => update("copperItemDescription", next)} /></small>
+                      </td>
+                      <td><EditableText value={moneyDisplay(shownTotals.copperUnit, form.copperUnitDisplay, 2)} label="銅版費単価" className="money" onCommit={commitCopperUnit} /> /枚</td>
+                      <td><EditableText value={numberDisplay(form.quantity)} label="銅版費数量" className="money" onCommit={commitQuantity} /> 枚</td>
+                      <td><EditableText value={moneyDisplay(shownTotals.copperAmount, form.copperAmountDisplay)} label="銅版費金額" className="money" onCommit={commitCopperAmount} /></td>
+                    </tr>
+                  ) : null}
                   <tr>
                     <td>
                       <strong><EditableText value={form.roundingItemName} label="端数調整項目名" onCommit={(next) => update("roundingItemName", next.trim())} /></strong>
@@ -881,6 +959,11 @@ export default function PrintableQuotationPage() {
           <label className="wide">充填・加工 説明<textarea rows={2} value={form.fillingItemDescription} onChange={(event) => update("fillingItemDescription", event.target.value)} /></label>
           <label>充填・加工 単価（空欄=自動）<input inputMode="decimal" value={form.fillingUnitDisplay} onChange={(event) => update("fillingUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>充填・加工 金額（空欄=自動）<input inputMode="decimal" value={form.fillingAmountDisplay} onChange={(event) => update("fillingAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
+          <label>銅版費 原価 / 枚<input inputMode="decimal" value={form.copperPlateCostPerPiece} onChange={(event) => update("copperPlateCostPerPiece", event.target.value)} /></label>
+          <label>銅版費 単価（空欄=自動）<input inputMode="decimal" value={form.copperUnitDisplay} onChange={(event) => update("copperUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
+          <label>銅版費 金額（空欄=自動）<input inputMode="decimal" value={form.copperAmountDisplay} onChange={(event) => update("copperAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
+          <label>銅版費 項目名<input value={form.copperItemName} onChange={(event) => update("copperItemName", event.target.value)} /></label>
+          <label className="wide">銅版費 説明<textarea rows={2} value={form.copperItemDescription} onChange={(event) => update("copperItemDescription", event.target.value)} /></label>
           <label>フィルム 項目名<input value={form.filmItemName} onChange={(event) => update("filmItemName", event.target.value)} /></label>
           <label className="wide">フィルム 説明<textarea rows={2} value={form.filmItemDescription} onChange={(event) => update("filmItemDescription", event.target.value)} /></label>
           <label className="wide">フィルム構成<input value={form.filmComposition} onChange={(event) => update("filmComposition", event.target.value)} placeholder={DEFAULT_FILM_COMPOSITION} /></label>

@@ -160,14 +160,15 @@ describe("quotation UI", () => {
     expect(await screen.findByTestId("bulk-usage")).toHaveTextContent("74,000 ml");
   });
 
-  it("blocks calculation while gravure printing is selected and explains it is pending", async () => {
+  it("calculates gravure roll film and shows the new copper plate separately", async () => {
     const user = userEvent.setup();
     render(<QuotationPage />);
-    await user.click(screen.getByLabelText("グラビア印刷（準備中）"));
-    expect(screen.getByTestId("calculate-desktop")).toBeDisabled();
-    expect(screen.getByText("グラビア印刷は原反・版代の単価確認中のため準備中です")).toBeInTheDocument();
-    await user.click(screen.getByLabelText("デジタル印刷"));
+    await user.click(screen.getByLabelText("グラビア印刷"));
     expect(screen.getByTestId("calculate-desktop")).toBeEnabled();
+    expect(screen.getAllByTestId("gravure-parameters").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("cost-copper").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("cost-film").some((node) => node.textContent?.includes("5,500m発注パターン"))).toBe(true);
+    expect(screen.getAllByTestId("cost-copper").some((node) => node.textContent?.includes("新規銅版費"))).toBe(true);
   });
 
   it("supports a custom target margin between the 40% and 50% defaults", async () => {

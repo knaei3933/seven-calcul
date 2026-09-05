@@ -6,6 +6,7 @@ import { calculatePouchCost } from "@/lib/calculation";
 import { defaultParameters, machineChargeBasis, sizeMaster } from "@/lib/constants";
 import { displayAmount } from "@/lib/calculation";
 import { D } from "@/lib/decimal";
+import { defaultGravureRollParameters, type GravureRollParameters } from "@/lib/gravure-roll";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { QUOTATION_DRAFT_KEY, buildQuotationDraft } from "@/lib/quotation-draft";
 import { deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calculations";
@@ -88,6 +89,7 @@ export default function QuotationPage() {
     ],
   });
   const [parameters, setParameters] = useState<CostParameters>(defaultParameters);
+  const [gravureParameters, setGravureParameters] = useState<GravureRollParameters>(() => ({ ...defaultGravureRollParameters() }));
   const [machineBreakdown, setMachineBreakdown] = useState({ ...MACHINE_BREAKDOWN_DEFAULTS });
   type ServerCalculation = { result: ReturnType<typeof calculatePouchCost>; inputSha256: string };
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
@@ -116,7 +118,6 @@ export default function QuotationPage() {
       })
       .sort((a, b) => Number(a) - Number(b));
   }, [effectiveMargin]);
-  const gravurePending = form.printingMethod === "gravure";
   const skuCount = Number(form.skuCount);
   const skuInputsReady = Number.isInteger(skuCount) && skuCount > 0;
   const skuQuantitySum = form.skus.reduce((total, sku) => total + (isNumericInput(sku.quantity) ? Number(sku.quantity) : 0), 0);
@@ -133,10 +134,11 @@ export default function QuotationPage() {
     && isPositiveDecimalInput(form.lanes)
     && isNonNegativeDecimalInput(form.bulkPrice)
     && positiveParameters(parameters)
+    && (form.printingMethod !== "gravure" || positiveGravureParameters(gravureParameters))
     && skuQuantitiesValid;
   const colorPriceUnapplied = true;
   const taxRoundingUnconfirmed = !TAX_ROUNDING_CONFIRMED;
-  const blocker = !skuInputsReady || !skuQuantitiesValid || gravurePending || dimensionMismatch || !marginValid || !positive;
+  const blocker = !skuInputsReady || !skuQuantitiesValid || dimensionMismatch || !marginValid || !positive;
   const issuanceBlocker = blocker || colorPriceUnapplied || taxRoundingUnconfirmed;
 
   const spec = useCallback((): PouchSpec => ({
@@ -182,7 +184,14 @@ export default function QuotationPage() {
   const depreciationPerHour = machineBreakdownValid ? D(machineBreakdown.acquisitionCostYen).div(machineBreakdown.usefulLifeYears).div(machineBreakdown.annualOperatingHours) : null;
   const electricityPerHour = machineBreakdownValid ? D(machineBreakdown.annualElectricityKwh).times(machineBreakdown.electricityUnitPriceYen).div(machineBreakdown.annualOperatingHours) : null;
 
-  const calculationInput = useMemo(() => ({ spec: spec(), quantity: form.quantity, printingMethod: form.printingMethod, targetMargins: targetMarginList, parameters }), [spec, form.quantity, form.printingMethod, targetMarginList, parameters]);
+  const calculationInput = useMemo(() => ({
+    spec: spec(),
+    quantity: form.quantity,
+    printingMethod: form.printingMethod,
+    targetMargins: targetMarginList,
+    parameters,
+    gravureParameters,
+  }), [spec, form.quantity, form.printingMethod, targetMarginList, parameters, gravureParameters]);
 
   const provisionalResult = useMemo(() => {
     if (blocker) return null;
@@ -231,12 +240,13 @@ export default function QuotationPage() {
           connected: form.connected,
           skuNames: form.skus.map((sku, index) => sku.name.trim() || `充填物${index + 1}`),
           targetMargin: effectiveMargin,
+          printingMethod: form.printingMethod,
         })),
       );
     } catch {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
-  }, [customerPrice, effectiveMargin, form.connected, form.lengthMm, form.skus, form.widthMm, resultShown]);
+  }, [customerPrice, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]);
 
   const lanesPerCycle = Number(form.lanes) > 0 ? Math.max(1, Math.floor(Number(form.lanes) / Number(form.connected))) : 1;
   const effectiveProductionSpeedPerMinute = Number(form.lanes) > 0
@@ -375,9 +385,9 @@ export default function QuotationPage() {
               <span id="printing-label">印刷方式</span>
               <div className="radio-cards" role="radiogroup" aria-labelledby="printing-label">
                 <label><input type="radio" name="printing-method" aria-label="デジタル印刷" checked={form.printingMethod === "digital"} onChange={() => set("printingMethod", "digital")} />デジタル印刷</label>
-                <label><input type="radio" name="printing-method" aria-label="グラビア印刷（準備中）" checked={form.printingMethod === "gravure"} onChange={() => set("printingMethod", "gravure")} />グラビア印刷（準備中）</label>
+                <label><input type="radio" name="printing-method" aria-label="グラビア印刷" checked={form.printingMethod === "gravure"} onChange={() => set("printingMethod", "gravure")} />グラビア印刷</label>
               </div>
-              <p className="help">デジタル印刷の計算値を適用中。グラビア印刷は原反・版代の単価確認後に反映します。</p>
+              <p className="help">グラビア選択時はロールフィルム用の原反・印刷・ラミネート・銅版費を計算します。他の生産資源はデジタル計算と同じモデルを使います。</p>
             </div>
             <div className="field">
               <span id="margin-label">目標利益率（参考値）</span>
@@ -408,7 +418,7 @@ export default function QuotationPage() {
             <Field label="バルク単価 (円/ml)" htmlFor="bulk"><input id="bulk" inputMode="decimal" value={form.bulkPrice} onChange={(e) => set("bulkPrice", e.target.value)} /></Field>
             <details className="parameters" data-testid="parameters">
               <summary>計算パラメータ調整</summary>
-              {parameterGroups.map((group) => (
+                  {parameterGroups.map((group) => (
                 <fieldset className="parameter-group" key={group.title}>
                   <legend>{group.title}</legend>
                   {group.fields.map((field) => (
@@ -422,6 +432,22 @@ export default function QuotationPage() {
                       />
                     </label>
                   ))}
+                  {form.printingMethod === "gravure" ? (
+                    <fieldset className="parameter-group" data-testid="gravure-parameters">
+                      <legend>グラビアロール</legend>
+                      <label className="parameter-label">PET 単価 (円/kg)<input inputMode="decimal" value={gravureParameters.petUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, petUnitPriceYenPerKg: e.target.value }))} /></label>
+                      <label className="parameter-label">AL 単価 (円/kg)<input inputMode="decimal" value={gravureParameters.alUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, alUnitPriceYenPerKg: e.target.value }))} /></label>
+                      <label className="parameter-label">LLDPE 単価 (円/kg)<input inputMode="decimal" value={gravureParameters.lldpeUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, lldpeUnitPriceYenPerKg: e.target.value }))} /></label>
+                      <label className="parameter-label">印刷単価 (円/m)<input inputMode="decimal" value={gravureParameters.printingUnitPriceYenPerM} onChange={(e) => setGravureParameters((old) => ({ ...old, printingUnitPriceYenPerM: e.target.value }))} /></label>
+                      <label className="parameter-label">ラミ単価 AL有 (円/m)<input inputMode="decimal" value={gravureParameters.laminationUnitPriceYenPerMWithAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithAl: e.target.value }))} /></label>
+                      <label className="parameter-label">ラミ単価 AL無 (円/m)<input inputMode="decimal" value={gravureParameters.laminationUnitPriceYenPerMWithoutAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithoutAl: e.target.value }))} /></label>
+                      <label className="parameter-label">新規銅版単価 (円)<input inputMode="decimal" value={gravureParameters.newCopperPlateUnitPriceYen} onChange={(e) => setGravureParameters((old) => ({ ...old, newCopperPlateUnitPriceYen: e.target.value }))} /></label>
+                      <label className="parameter-label">発注パターン (m)<input inputMode="decimal" readOnly value={formatNumber(gravureParameters.deliverablePatternLengthM)} /></label>
+                      <label className="parameter-label">製作ロット (m)<input inputMode="decimal" readOnly value={formatNumber(gravureParameters.productionPatternLengthM)} /></label>
+                      <label className="parameter-label">為替 (100円=원)<input inputMode="decimal" value={gravureParameters.krwPer100Yen} onChange={(e) => setGravureParameters((old) => ({ ...old, krwPer100Yen: e.target.value }))} /></label>
+                      <p className="help">初期値は100円=850원で換算しました。固定構成は PET12+AL7+PET12+LLDPE50 です。</p>
+                    </fieldset>
+                  ) : null}
                   {group.title === "加工・固定費" ? (
                     <div className="machine-breakdown" data-testid="machine-breakdown">
                       <p className="help">
@@ -487,7 +513,9 @@ export default function QuotationPage() {
                   {formatCurrency(displayAmount(resultShown.totalCostPerPiece))}<span className="help"> / 枚</span>
                   <span className="total-sub">総原価 <strong>{formatCurrency(displayAmount(resultShown.costTotal))}</strong> ／ 参考: フィルム発注 {formatNumber(resultShown.film.orderLengthM)}m で製造可能 {formatNumber(resultShown.film.actualQuantity)} 枚（余剰 ≈ {formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）</span>
                 </p>
-                <p className="help">「単価計算用数量」は発注したフィルムから実際に作れる枚数（ロス控除後・500枚単位）です。フィルム発注を100m単位で切り上げるため、発注枚数より多くなることがあります。</p>
+                <p className="help">{form.printingMethod === "gravure"
+                  ? `グラビアは5,500m納品・6,000m製作パターンで計算します。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
+                  : "「単価計算用数量」は発注したフィルムから実際に作れる枚数（ロス控除後・500枚単位）です。フィルム発注を100m単位で切り上げるため、発注枚数より多くなることがあります。"}</p>
                 <div className="cost-breakdown">
                   <details className="cost-block" data-testid="cost-processing">
                     <summary><h3>① 加工費（人件費・機械）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.variableProcessing))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.variableProcessing))} /枚）</small></span></summary>
@@ -526,9 +554,19 @@ export default function QuotationPage() {
                       <thead><tr><th scope="col">項目</th><th scope="col">単価</th><th scope="col">数量</th><th scope="col">金額</th></tr></thead>
                       <tbody>
                         <tr><td>フィルム代</td><td>{formatCurrency(displayAmount(resultShown.film.unitPrice))} /m</td><td>{formatNumber(resultShown.film.orderLengthM)} m</td><td>{formatCurrency(displayAmount(resultShown.film.filmBaseCost))}</td></tr>
-                        <tr><td>国内配送</td><td>{formatCurrency(displayAmount(parameters.domesticShippingPerTrip))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.domesticShipping))}</td></tr>
-                        <tr><td>海外配送</td><td>{formatCurrency(displayAmount(parameters.overseasShippingPerTrip))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.overseasShipping))}</td></tr>
-                        <tr><td>通関料</td><td>—</td><td>—</td><td>{formatCurrency(displayAmount(resultShown.film.customs))}</td></tr>
+                        {form.printingMethod !== "gravure" ? (
+                          <>
+                            <tr><td>国内配送</td><td>{formatCurrency(displayAmount(parameters.domesticShippingPerTrip))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.domesticShipping))}</td></tr>
+                            <tr><td>海外配送</td><td>{formatCurrency(displayAmount(parameters.overseasShippingPerTrip))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.overseasShipping))}</td></tr>
+                            <tr><td>通関料</td><td>—</td><td>—</td><td>{formatCurrency(displayAmount(resultShown.film.customs))}</td></tr>
+                          </>
+                        ) : (
+                          <>
+                            <tr><td>原材料費</td><td>—</td><td>{formatNumber(resultShown.film.orderLengthM)} m</td><td>{formatCurrency(displayAmount(resultShown.gravure?.materialCostYen ?? "0"))}</td></tr>
+                            <tr><td>印刷費</td><td>{formatCurrency(displayAmount(gravureParameters.printingUnitPriceYenPerM))} /m・色</td><td>SKU別</td><td>{formatCurrency(displayAmount(resultShown.gravure?.printingCostYen ?? "0"))}</td></tr>
+                            <tr><td>ラミネート費</td><td>{formatCurrency(displayAmount(gravureParameters.laminationUnitPriceYenPerMWithAl))} /m</td><td>3回</td><td>{formatCurrency(displayAmount(resultShown.gravure?.laminationCostYen ?? "0"))}</td></tr>
+                          </>
+                        )}
                       </tbody>
                     </table>
                     <div className="chain-steps" data-testid="film-loss-chain">
@@ -537,13 +575,25 @@ export default function QuotationPage() {
                         const sumRounded = f.skuCosts.reduce((total, sku) => total + Math.ceil(Number(sku.requiredLengthM) / 100) * 100, 0);
                         return (
                           <>
-                            <p>① 必要な生産長さは合計 {formatNumber(f.requiredLengthM)}m です。計算式は「発注枚数 ÷ (1−ロス率) × ピッチ ÷ 生産列数」です。</p>
-                            <p>② SKUごとに 100m単位へ切り上げます。切り上げ後の合計は {formatNumber(String(sumRounded))}m です。</p>
-                            <p>③ 最低発注ルールを適用します。各SKUは {formatNumber(parameters.digitalFilmMinSkuM)}m 以上、合計は {formatNumber(parameters.digitalFilmMinTotalM)}m 以上のため、発注長さは {formatNumber(f.orderLengthM)}m{Number(f.orderLengthM) > sumRounded ? " になります（最低値を満たすまで切り上げました）" : " です（切り上げ後の長さがそのまま使えます）"}。</p>
-                            <p>④ フィルムのロス {formatNumber(f.lossM)}m を差し引きます。ロスは{f.skuCosts.some((sku) => sku.multiplier === 2) ? "生産検討長さ（発注×2倍）" : "発注長さ"}の {formatNumber(Number(parameters.lossRate) * 100, 3)}% で、最低 {formatNumber(parameters.lossMinM)}m を保証します。差し引いたあとの有効長は {formatNumber(f.effectiveLengthM)}m です。</p>
-                            <p>⑤ 参考として、有効なフィルム長から作れる枚数は {formatNumber(f.actualQuantity)}枚 です。計算は「有効 {formatNumber(f.effectiveLengthM)}m ÷ ピッチ × 列数」で、価格計算は500枚単位の {formatNumber(f.pricingQuantity)}枚 を使います。</p>
-                            <p>⑥ <strong>見積書のフィルム単価は発注枚数基準</strong>です。計算式は「フィルム費用合計 ÷ 発注枚数 {formatNumber(resultShown.quantity)}枚」です。実際に作れる枚数との差（約{formatNumber(String(Math.max(0, Number(f.actualQuantity) - Number(resultShown.quantity))))}枚）は、発注者が負担する余剰生産分です。</p>
-                            {f.skuCosts.some((sku) => sku.multiplier === 2) ? (
+                            {form.printingMethod === "gravure" ? (
+                              <>
+                                <p>① 必要納品長は合計 {formatNumber(f.requiredLengthM)}m です。</p>
+                                <p>② 5,500m発注パターンへ切り上げます。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
+                                <p>③ 製作6,000mの中にロス500mが含まれます。このロットのグラビアロスは {formatNumber(f.lossM)}m です。</p>
+                                <p>④ 原材料・印刷・ラミネートは製作長 {formatNumber(f.orderLengthM)}m 分で計算し、銅版費は色数×銅版幅×外径で別計上します。</p>
+                                <p>⑤ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(resultShown.deliverablePatternLengthM ?? "1").times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
+                              </>
+                            ) : (
+                              <>
+                                <p>① 必要な生産長さは合計 {formatNumber(f.requiredLengthM)}m です。計算式は「発注枚数 ÷ (1−ロス率) × ピッチ ÷ 生産列数」です。</p>
+                                <p>② SKUごとに 100m単位へ切り上げます。切り上げ後の合計は {formatNumber(String(sumRounded))}m です。</p>
+                                <p>③ 最低発注ルールを適用します。各SKUは {formatNumber(parameters.digitalFilmMinSkuM)}m 以上、合計は {formatNumber(parameters.digitalFilmMinTotalM)}m 以上のため、発注長さは {formatNumber(f.orderLengthM)}m{Number(f.orderLengthM) > sumRounded ? " になります（最低値を満たすまで切り上げました）" : " です（切り上げ後の長さがそのまま使えます）"}。</p>
+                                <p>④ フィルムのロス {formatNumber(f.lossM)}m を差し引きます。ロスは{f.skuCosts.some((sku) => sku.multiplier === 2) ? "生産検討長さ（発注×2倍）" : "発注長さ"}の {formatNumber(Number(parameters.lossRate) * 100, 3)}% で、最低 {formatNumber(parameters.lossMinM)}m を保証します。差し引いたあとの有効長は {formatNumber(f.effectiveLengthM)}m です。</p>
+                                <p>⑤ 参考として、有効なフィルム長から作れる枚数は {formatNumber(f.actualQuantity)}枚 です。計算は「有効 {formatNumber(f.effectiveLengthM)}m ÷ ピッチ × 列数」で、価格計算は500枚単位の {formatNumber(f.pricingQuantity)}枚 を使います。</p>
+                                <p>⑥ <strong>見積書のフィルム単価は発注枚数基準</strong>です。計算式は「フィルム費用合計 ÷ 発注枚数 {formatNumber(resultShown.quantity)}枚」です。実際に作れる枚数との差（約{formatNumber(String(Math.max(0, Number(f.actualQuantity) - Number(resultShown.quantity))))}枚）は、発注者が負担する余剰生産分です。</p>
+                              </>
+                            )}
+                            {form.printingMethod !== "gravure" && f.skuCosts.some((sku) => sku.multiplier === 2) ? (
                               <p>⑦ 幅35mmおよびXraラウンドで必要長さが900mを超えたため、幅736mm・2倍生産へ自動的に切り替えました。この場合の生産検討長さは「発注×2倍」、送り単位は200m、価格帯は571〜740mm、ロスは検討長さの10%で計算します。</p>
                             ) : null}
                           </>
@@ -551,6 +601,18 @@ export default function QuotationPage() {
                       })()}
                     </div>
                   </details>
+                  {form.printingMethod === "gravure" ? (
+                    <details className="cost-block" data-testid="cost-copper">
+                      <summary><h3>③-2 新規銅版費</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.copperPlate))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.copperPlate))} /枚）</small></span></summary>
+                      <table className="table breakdown-table">
+                        <thead><tr><th scope="col">項目</th><th scope="col">計算</th><th scope="col">金額</th></tr></thead>
+                        <tbody>
+                          <tr><td>新規銅版</td><td>色数 × (原反幅+100mm) × ¥{formatNumber(gravureParameters.newCopperPlateUnitPriceYen)} × 42cm</td><td>{formatCurrency(displayAmount(resultShown.costComponents.copperPlate))}</td></tr>
+                        </tbody>
+                      </table>
+                      <p className="chain">常に新規銅版を作成する前提です。版費はロット固定費として全発注数量に配賦します。</p>
+                    </details>
+                  ) : null}
                   <details className="cost-block" data-testid="cost-bulk">
                     <summary><h3>④ バルク費用（液体材料）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.bulk))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.bulk))} /枚）</small></span></summary>
                     <table className="table breakdown-table">
@@ -674,7 +736,6 @@ export default function QuotationPage() {
 
   function blockers() {
     const items = [...(positive ? [] : ["正の数値を入力してください"])];
-    if (gravurePending) items.push("グラビア印刷は原反・版代の単価確認中のため準備中です");
     if (!marginValid) items.push("利益率は0〜100%の間で入力してください");
     if (dimensionMismatch) items.push("標準サイズ寸法不一致");
     if (!skuInputsReady) items.push("SKU数は1以上の整数で入力してください");
@@ -735,6 +796,22 @@ function positiveParameters(parameters: CostParameters) {
     && positiveDecimal(parameters.laborPerHour) && positiveDecimal(parameters.machineChargePerHour) && positiveDecimal(parameters.productionSpeedPerMinute) && positiveDecimal(parameters.inspectionSpeed)
     && positiveDecimal(parameters.setupTime) && positiveDecimal(parameters.cleanupTime) && positiveDecimal(parameters.customPouchCharge)
     && Object.values(parameters.filmUnitPrices).every((lengthPrices) => Object.values(lengthPrices).every(positiveDecimal));
+}
+function positiveGravureParameters(parameters: GravureRollParameters) {
+  const nonNegative = (value: string) => isNumericInput(value) && Number(value) >= 0;
+  const positive = (value: string) => isPositiveDecimalInput(value);
+  return nonNegative(parameters.petUnitPriceYenPerKg)
+    && nonNegative(parameters.alUnitPriceYenPerKg)
+    && nonNegative(parameters.lldpeUnitPriceYenPerKg)
+    && nonNegative(parameters.printingUnitPriceYenPerM)
+    && nonNegative(parameters.laminationUnitPriceYenPerMWithAl)
+    && nonNegative(parameters.laminationUnitPriceYenPerMWithoutAl)
+    && nonNegative(parameters.newCopperPlateUnitPriceYen)
+    && positive(parameters.copperPlateWidthExtraMm)
+    && positive(parameters.copperPlateMinimumDiameterMm)
+    && positive(parameters.deliverablePatternLengthM)
+    && positive(parameters.productionPatternLengthM)
+    && positive(parameters.krwPer100Yen);
 }
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) { return <div className="field"><label htmlFor={htmlFor}>{label}</label>{children}</div>; }
 declare global { interface Window { dispatchDebugError?: (message: string) => void; } }

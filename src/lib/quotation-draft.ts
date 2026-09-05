@@ -25,6 +25,11 @@ export interface QuotationDraft {
   totalCostPerPiece: string;
   calculationVersion: string;
   resultHash: string;
+  printingMethod?: string;
+  copperPlateCostPerPiece?: string;
+  orderPatternCount?: string;
+  deliverablePatternLengthM?: string;
+  recommendedQuantity?: string;
 }
 
 export function buildQuotationDraft(
@@ -35,6 +40,7 @@ export function buildQuotationDraft(
     connected: string;
     skuNames: string[];
     targetMargin: string;
+    printingMethod?: string;
   },
 ): QuotationDraft {
   const fillingCost = D(result.costPerPieceComponents.bulk)
@@ -55,6 +61,13 @@ export function buildQuotationDraft(
     totalCostPerPiece: result.totalCostPerPiece,
     calculationVersion: result.audit.calculationVersion,
     resultHash: result.audit.resultJsonSha256,
+    printingMethod: context.printingMethod,
+    ...(context.printingMethod === "gravure" ? {
+      copperPlateCostPerPiece: result.copperPlateCostPerPiece,
+      orderPatternCount: String(result.orderPatternCount ?? 1),
+      deliverablePatternLengthM: result.deliverablePatternLengthM ?? "5500",
+      recommendedQuantity: result.recommendedQuantity ?? result.quantity,
+    } : {}),
   };
 }
 
