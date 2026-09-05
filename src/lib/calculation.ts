@@ -39,8 +39,8 @@ export interface CostResult {
   sellerProfitCost: string;
   totalCostPerPiece: string;
   costTotal: string;
-  costComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom" | "sellerProfit", string>;
-  costPerPieceComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom" | "sellerProfit", string>;
+  costComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom", string>;
+  costPerPieceComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom", string>;
   sellingPrices: { margin: string; pricePerPiece: string; totalSales: string; profit: string }[];
   film: FilmCostResult;
   copperPlateCost: string;
@@ -242,19 +242,23 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
 
   const copperPlateCost = gravureRoll?.copperPlateCostYen ?? "0";
   const copperPlateCostPerPiece = gravureRoll?.copperPlateCostPerPieceYen ?? "0";
-  const baseCostComponents = {
-    film: D(filmWithSkus.filmTotal),
+  const sellerProfitBaseCost = D(filmWithSkus.filmTotal);
+  const sellerProfitCost = sellerProfitBaseCost.times(params.sellerProfitRate);
+  const filmCostWithSellerProfit = sellerProfitBaseCost.plus(sellerProfitCost);
+  const filmWithSellerProfit: FilmCostResult = {
+    ...filmWithSkus,
+    filmBaseCost: filmCostWithSellerProfit.toString(),
+    unitPrice: filmCostWithSellerProfit.div(filmWithSkus.orderLengthM).toString(),
+    filmTotal: filmCostWithSellerProfit.toString(),
+    filmCostPerPiece: filmCostWithSellerProfit.div(quantityD).toString(),
+  };
+  const costComponents = {
+    film: filmCostWithSellerProfit,
     copperPlate: D(copperPlateCost),
     bulk: bulkCost,
     variableProcessing: variableTotal,
     fixedLot,
     custom: customCharge,
-  };
-  const sellerProfitBaseCost = sum(Object.values(baseCostComponents));
-  const sellerProfitCost = sellerProfitBaseCost.times(params.sellerProfitRate);
-  const costComponents = {
-    ...baseCostComponents,
-    sellerProfit: sellerProfitCost,
   };
   const costTotal = sum(Object.values(costComponents));
   const totalPerPiece = D(costTotal).div(quantityD);
@@ -289,7 +293,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
     bulkUsageMl: bulkUsage.toString(),
     bulkCost: bulkCost.toString(),
     bulkCostPerPiece: bulkPerPiece.toString(),
-    materialCostPerPiece: D(filmWithSkus.filmCostPerPiece).plus(bulkPerPiece).toString(),
+    materialCostPerPiece: D(filmWithSellerProfit.filmCostPerPiece).plus(bulkPerPiece).toString(),
     variableLaborPerPiece: variableLaborPerPiece.toString(),
     machineVariablePerPiece: machineVariablePerPiece.toString(),
     variableProcessingPerPiece: variableProcessingPerPiece.toString(),
@@ -305,7 +309,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
     costComponents: mapValues(costComponents, String),
     costPerPieceComponents: mapValues(costComponents, (value) => D(value).div(quantityD).toString()),
     sellingPrices,
-    film: filmWithSkus,
+    film: filmWithSellerProfit,
     copperPlateCost,
     copperPlateCostPerPiece,
     ...(gravureRoll ? {

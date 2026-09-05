@@ -23,7 +23,7 @@ describe("bulk calculation", () => {
   });
 
   it("uses sellable pouch quantity, chamber multiplication, test fill, and hopper initial charge", () => {
-    const result = calculatePouchCost({ spec: baseSpec, quantity: "10000", printingMethod: "digital" });
+    const result = calculatePouchCost({ spec: baseSpec, quantity: "10000", printingMethod: "digital", parameters: { sellerProfitRate: "0" } });
     expect(result.chamberCount).toBe("20000");
     expect(result.testFillMl).toBe("60000");
     expect(result.bulkUsageMl).toBe("722000");
@@ -35,7 +35,7 @@ describe("bulk calculation", () => {
     expect(result.testFillMl).toBe("60000");
     expect(result.bulkUsageMl).toBe("722000");
     expect(result.costComponents.bulk).toBe("267140");
-    expect(result.film.filmTotal).toBe("182200");
+    expect(result.film.filmTotal).toBe("204064");
     expect(result.film.shippingTrips).toBe("1");
   });
 
@@ -80,7 +80,7 @@ describe("digital film", () => {
 });
 
 describe("commercial calculation", () => {
-  it("includes the 12% seller profit in manufacturing cost before target margins", () => {
+  it("includes the 12% seller profit in film cost before target margins", () => {
     const result = calculatePouchCost({
       spec: { ...baseSpec, isCustom: true, customWidthMm: "45", customLengthMm: "145" },
       quantity: "7",
@@ -90,8 +90,11 @@ describe("commercial calculation", () => {
     const expectedSellerProfit = Number(baseCost) * Number(defaultParameters.sellerProfitRate);
 
     expect(result.sellerProfitRate).toBe("0.12");
-    expect(Number(result.costComponents.sellerProfit)).toBeCloseTo(expectedSellerProfit, 8);
-    expect(Number(result.costTotal)).toBeCloseTo(Number(baseCost) + expectedSellerProfit, 8);
+    expect(Number(result.sellerProfitCost)).toBeCloseTo(expectedSellerProfit, 8);
+    expect(Number(result.costComponents.film)).toBeCloseTo(Number(baseCost) + expectedSellerProfit, 8);
+    const displayedComponentTotal = Object.values(result.costComponents)
+      .reduce((total, value) => total + Number(value), 0);
+    expect(displayedComponentTotal).toBeCloseTo(Number(result.costTotal), 8);
     expect(result.audit.componentReconciliationDifference).toBe("0");
   });
 
@@ -141,6 +144,7 @@ describe("multi-SKU film aggregation", () => {
       },
       quantity: "10000",
       printingMethod: "digital",
+      parameters: { sellerProfitRate: "0" },
     });
 
     expect(Number(result.film.requiredLengthM)).toBeCloseTo(366.6666666666667, 10);
@@ -163,6 +167,7 @@ describe("multi-SKU film aggregation", () => {
       spec: { ...baseSpec, sizeKey: "tube-35x60", connectedChambers: 1, skuCount: 1 },
       quantity: "60000",
       printingMethod: "digital",
+      parameters: { sellerProfitRate: "0" },
     });
     expect(result.film.orderLengthM).toBe("600");
     expect(result.film.skuCosts[0].multiplier).toBe(2);
@@ -170,8 +175,8 @@ describe("multi-SKU film aggregation", () => {
     expect(result.film.skuCosts[0].appliedBand).toBe("571to740");
     expect(Number(result.film.lossM)).toBeCloseTo(120, 6);
     expect(result.film.pricingQuantity).toBe("65000");
-    expect(result.film.unitPrice).toBe("365");
-    expect(result.film.filmBaseCost).toBe("219000");
+    expect(result.film.unitPrice).toBe("466");
+    expect(result.film.filmBaseCost).toBe("279600");
   });
 
   it("keeps 35mm sizes on 356mm single production at or below 900m", () => {
@@ -180,11 +185,12 @@ describe("multi-SKU film aggregation", () => {
       spec: { ...baseSpec, sizeKey: "tube-35x60", connectedChambers: 1, skuCount: 1 },
       quantity: "20000",
       printingMethod: "digital",
+      parameters: { sellerProfitRate: "0" },
     });
     expect(result.film.orderLengthM).toBe("500");
     expect(result.film.skuCosts[0].multiplier).toBe(1);
     expect(result.film.skuCosts[0].appliedBand).toBe("lte570");
-    expect(result.film.unitPrice).toBe("328");
+    expect(result.film.unitPrice).toBe("364.4");
   });
 
   it("aggregates rounded SKU order lengths, losses, and priceable quantities", () => {
@@ -201,10 +207,10 @@ describe("multi-SKU film aggregation", () => {
 
   it("keeps print color count as reference metadata that does not change film pricing", () => {
     const spec = { ...baseSpec, skuCount: 1 };
-    const fourColors = calculatePouchCost({ spec: { ...spec, colorCount: 4 }, quantity: "10000", printingMethod: "digital" });
-    const eightColors = calculatePouchCost({ spec: { ...spec, colorCount: 8 }, quantity: "10000", printingMethod: "digital" });
-    expect(fourColors.film.filmBaseCost).toBe("164000");
-    expect(eightColors.film.filmBaseCost).toBe("164000");
+    const fourColors = calculatePouchCost({ spec: { ...spec, colorCount: 4 }, quantity: "10000", printingMethod: "digital", parameters: { sellerProfitRate: "0" } });
+    const eightColors = calculatePouchCost({ spec: { ...spec, colorCount: 8 }, quantity: "10000", printingMethod: "digital", parameters: { sellerProfitRate: "0" } });
+    expect(fourColors.film.filmBaseCost).toBe("182200");
+    expect(eightColors.film.filmBaseCost).toBe("182200");
     expect(fourColors.audit.inputJsonSha256).not.toBe(eightColors.audit.inputJsonSha256);
   });
 
@@ -213,10 +219,11 @@ describe("multi-SKU film aggregation", () => {
       spec: { ...baseSpec, skuCount: 1 },
       quantity: "10000",
       printingMethod: "digital",
+      parameters: { sellerProfitRate: "0" },
     });
     expect(result.audit.digitalFilmPriceMode).toBe("common_fallback");
-    expect(result.film.unitPrice).toBe("328");
-    expect(result.film.filmBaseCost).toBe("164000");
+    expect(result.film.unitPrice).toBe("364.4");
+    expect(result.film.filmBaseCost).toBe("182200");
   });
 });
 
@@ -235,16 +242,21 @@ describe("gravure roll integration", () => {
     expect(result.film.shippingTrips).toBe("11");
     expect(result.film.overseasShipping).toBe(result.gravure?.overseasShippingCostYen);
     expect(Number(result.film.customs)).toBeCloseTo(Number(result.gravure?.customsBaseCostYen) * 0.05, 8);
-    expect(Number(result.film.filmTotal)).toBeCloseTo(
-      Number(result.gravure?.customsBaseCostYen) + Number(result.gravure?.customsCostYen) + Number(result.gravure?.overseasShippingCostYen),
-      8,
-    );
+    const rawGravureFilmTotal = Number(result.gravure?.customsBaseCostYen)
+      + Number(result.gravure?.customsCostYen)
+      + Number(result.gravure?.overseasShippingCostYen);
+    expect(Number(result.sellerProfitBaseCost)).toBeCloseTo(rawGravureFilmTotal, 8);
+    expect(Number(result.film.filmTotal)).toBeCloseTo(rawGravureFilmTotal * 1.12, 8);
     expect(Number(result.gravure?.manufacturerMarginCostYen)).toBeCloseTo(Number(result.gravure?.filmCostYen) * 0.2, 8);
     expect(Number(result.film.overseasShipping)).toBe(121000);
     expect(Number(result.copperPlateCost)).toBeGreaterThan(0);
     expect(result.costComponents.copperPlate).toBe(result.copperPlateCost);
     expect(result.sellerProfitRate).toBe("0.12");
-    expect(Number(result.costComponents.sellerProfit)).toBeCloseTo(Number(result.sellerProfitBaseCost) * 0.12, 8);
+    expect(Number(result.sellerProfitCost)).toBeCloseTo(Number(result.sellerProfitBaseCost) * 0.12, 8);
+    expect(Number(result.costComponents.film)).toBeCloseTo(
+      Number(result.sellerProfitBaseCost) * 1.12,
+      8,
+    );
     expect(result.costPerPieceComponents.copperPlate).toBe(result.copperPlateCostPerPiece);
     expect(result.audit.componentReconciliationDifference).toBe("0");
 
