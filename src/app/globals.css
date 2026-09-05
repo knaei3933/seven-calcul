@@ -223,6 +223,7 @@ header .version-badge { display: none; }
 .history-detail-header h2 { margin: 2px 0; font-size: 20px; }
 .history-detail-header p { margin: 0; color: var(--muted); font-size: 12px; }
 .detail-scroll { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.detail-scroll > * { flex: 0 0 auto; }
 .profit-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .profit-kpis article { display: grid; gap: 3px; border: 1px solid #cbd5e1; border-radius: 10px; background: white; padding: 10px; }
 .profit-kpis span { color: var(--muted); font-size: 11px; font-weight: 800; }
