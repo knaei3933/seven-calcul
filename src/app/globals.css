@@ -228,6 +228,20 @@ header .version-badge { display: none; }
 .profit-kpis span { color: var(--muted); font-size: 11px; font-weight: 800; }
 .profit-kpis strong { font-size: clamp(17px, 2vw, 23px); }
 .profit-kpis small { color: var(--muted); font-size: 11px; }
+.profit-summary { display: grid; gap: 10px; border: 1px solid #86efac; border-radius: 12px; background: linear-gradient(180deg, #f0fdf4 0%, white 58%); padding: 12px; }
+.profit-summary-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.profit-summary-head > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.profit-summary-head > div:first-child span { color: #166534; font-size: 11px; font-weight: 900; }
+.profit-summary-head > div:first-child strong { font-size: clamp(22px, 2.6vw, 30px); line-height: 1.15; }
+.profit-summary-head > div:first-child small { color: var(--muted); font-size: 12px; }
+.profit-summary-total { display: grid; gap: 3px; justify-items: end; border: 1px solid #bbf7d0; border-radius: 10px; background: white; padding: 10px 12px; text-align: right; }
+.profit-summary-total span { color: #166534; font-size: 11px; font-weight: 900; }
+.profit-summary-total strong { font-size: clamp(20px, 2.2vw, 26px); }
+.profit-summary-total small { color: var(--muted); font-size: 11px; }
+.profit-summary-table { min-width: 820px; }
+.profit-summary-table th { white-space: nowrap; font-size: 11px; }
+.profit-summary-table td { white-space: nowrap; font-size: 12px; }
+.profit-summary-table .profit-total-row td { background: #dcfce7; font-weight: 900; }
 .detail-table-wrap { overflow-x: auto; }
 .detail-table-wrap table { min-width: 760px; }
 .detail-total-row td { font-weight: 900; background: #eef2ff; }
@@ -413,6 +427,8 @@ header .version-badge { display: none; }
   .history-detail-layer { grid-template-columns: 1fr; }
   .history-detail-panel { grid-column: 1; margin: 0; height: 100dvh; border-radius: 0; }
   .profit-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .profit-summary-head { grid-template-columns: 1fr; }
+  .profit-summary-total { justify-items: start; text-align: left; }
   .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .raw-grid { grid-template-columns: 1fr; }
 }
