@@ -210,7 +210,7 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
   const filmCostYen = materialCost.plus(printingCost).plus(laminationCost);
   const shippingTrips = Decimal.max(
     1,
-    productionLengthM.div(D(params.overseasShippingUnitM)).toDecimalPlaces(0, Decimal.ROUND_CEIL).toNumber(),
+    deliverableLengthM.div(D(params.overseasShippingUnitM)).toDecimalPlaces(0, Decimal.ROUND_CEIL).toNumber(),
   ).toNumber();
   const overseasShippingCostYen = D(shippingTrips).times(params.overseasShippingPerTripYen);
   const plateWidthCm = materialWidthMm.plus(D(params.copperPlateWidthExtraMm)).div(10);
