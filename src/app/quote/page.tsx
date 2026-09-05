@@ -93,7 +93,7 @@ const defaultQuote: QuoteForm = {
   filmPouchUnitDisplay: "",
   filmAmountDisplay: "",
   roundingItemName: "端数調整",
-  roundingItemDescription: "発注長別フィルム単価と総額の整合を調整します。",
+  roundingItemDescription: "合計金額に端数が生じた場合のみ調整します。",
   adjustmentDisplay: "",
   pricePerPieceDisplay: "",
   subtotalLabel: "小計（税抜）",
@@ -393,12 +393,7 @@ export default function PrintableQuotationPage() {
     const fillingAmount = parseDecimal(form.fillingAmountDisplay) ?? fillingUnit.times(totals.quantity);
     const filmPouchUnit = totals.quantity.gt(0) ? filmAmount.div(totals.quantity) : D(0);
     const lineTotal = fillingAmount.plus(filmAmount);
-    const automaticAdjustment = targetTotal.minus(lineTotal);
-    const roundedAdjustment = automaticAdjustment.abs().lt(1)
-      ? D(0)
-      : automaticAdjustment.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-    const automaticAdjustmentDisplay = roundedAdjustment.eq(0) ? "-" : roundedAdjustment.toString();
-    const adjustment = parseDecimal(form.adjustmentDisplay)?.toString() ?? automaticAdjustmentDisplay;
+    const adjustment = form.adjustmentDisplay.trim() === "" ? "-" : form.adjustmentDisplay;
     const adjustmentAmount = adjustment === "-" ? D(0) : D(adjustment);
     const subtotal = parseDecimal(form.subtotalDisplay) ?? lineTotal.plus(adjustmentAmount);
     const tax = parseDecimal(form.taxDisplay) ?? subtotal.times(totals.taxRate).toDecimalPlaces(0);
@@ -412,10 +407,7 @@ export default function PrintableQuotationPage() {
       filmPouchUnit: filmPouchUnit.toString(),
       filmAmount: filmAmount.toString(),
       filmOrderLength: totals.filmOrderLength.toString(),
-      adjustment: parseDecimal(form.adjustmentDisplay)?.toString()
-        ?? (subtotal.minus(lineTotal).abs().lt(1)
-          ? "-"
-          : subtotal.minus(lineTotal).toString()),
+      adjustment,
       subtotal: subtotal.toString(),
       tax: tax.toString(),
       grandTotal: grandTotal.toString(),
