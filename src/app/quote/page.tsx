@@ -432,15 +432,38 @@ export default function PrintableQuotationPage() {
     const copperUnit = parseDecimal(form.copperUnitDisplay)
       ?? totals.copperSellingUnit.toDecimalPlaces(2, Decimal.ROUND_UP);
     const copperAmount = parseDecimal(form.copperAmountDisplay) ?? copperUnit.times(totals.quantity);
-    const requestedFilmMeterUnit = parseDecimal(form.filmUnitDisplay)
-      ?? recommendedFilmMeterUnit(form.filmOrderLengthM);
-    const filmMeterUnit = clampFilmMeterUnit(requestedFilmMeterUnit);
+
+    const isGravure = form.printingMethod === "gravure";
+    let fillingUnit: Decimal;
+    let filmMeterUnit: Decimal;
+    if (isGravure) {
+      // 그라비아는 길이가 5,500m 단위라 디지털용 380~480엔/m 밴드를 적용하지 않는다.
+      // 충전·가공 판매금액을 먼저 확보하고, 잔액을 m당 판매단가로 환산한다.
+      fillingUnit = parseDecimal(form.fillingUnitDisplay)
+        ?? (totals.quantity.gt(0)
+          ? roundUnit((parsedFillingCost ?? D(0)).div(D(1).minus(parsedTargetMargin ?? D(0))))
+          : D(0));
+      const provisionalFillingAmount = fillingUnit.times(totals.quantity);
+      const residualFilmAmount = Decimal.max(
+        targetTotal.minus(provisionalFillingAmount).minus(copperAmount),
+        0,
+      );
+      filmMeterUnit = parseDecimal(form.filmUnitDisplay)
+        ?? (totals.filmOrderLength.gt(0)
+          ? residualFilmAmount.div(totals.filmOrderLength).toDecimalPlaces(2, Decimal.ROUND_DOWN)
+          : D(0));
+    } else {
+      const requestedFilmMeterUnit = parseDecimal(form.filmUnitDisplay)
+        ?? recommendedFilmMeterUnit(form.filmOrderLengthM);
+      filmMeterUnit = clampFilmMeterUnit(requestedFilmMeterUnit);
+      const filmAmount = filmMeterUnit.times(totals.filmOrderLength);
+      const remainingFillingAmount = Decimal.max(targetTotal.minus(filmAmount).minus(copperAmount), 0);
+      fillingUnit = parseDecimal(form.fillingUnitDisplay)
+        ?? (totals.quantity.gt(0)
+          ? roundUnit(remainingFillingAmount.div(totals.quantity))
+          : D(0));
+    }
     const filmAmount = filmMeterUnit.times(totals.filmOrderLength);
-    const remainingFillingAmount = Decimal.max(targetTotal.minus(filmAmount).minus(copperAmount), 0);
-    const fillingUnit = parseDecimal(form.fillingUnitDisplay)
-      ?? (totals.quantity.gt(0)
-        ? roundUnit(remainingFillingAmount.div(totals.quantity))
-        : D(0));
     const fillingAmount = parseDecimal(form.fillingAmountDisplay) ?? fillingUnit.times(totals.quantity);
     const filmPouchUnit = totals.quantity.gt(0) ? filmAmount.div(totals.quantity) : D(0);
     const lineTotal = fillingAmount.plus(filmAmount).plus(copperAmount);
@@ -511,7 +534,9 @@ export default function PrintableQuotationPage() {
     const orderLength = parseDecimal(form.filmOrderLengthM);
     if (!quantity || !quantity.gt(0) || !orderLength || !orderLength.gt(0)) return;
     const fillingAmount = fillingUnit.times(quantity);
-    const filmMeterUnit = clampFilmMeterUnit(filmAmount.div(orderLength));
+    const filmMeterUnit = form.printingMethod === "gravure"
+      ? filmAmount.div(orderLength)
+      : clampFilmMeterUnit(filmAmount.div(orderLength));
     const clampedFilmAmount = filmMeterUnit.times(orderLength);
     const filmPouchUnit = clampedFilmAmount.div(quantity);
     const copperUnit = copperAmount.div(quantity);
