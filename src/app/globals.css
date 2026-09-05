@@ -266,6 +266,11 @@ header .version-badge { display: none; }
 .quote-table th:not(:first-child), .quote-table td:not(:first-child) { text-align: right; }
 .quote-table small { display: block; margin-top: 1mm; color: #6b7280; font-size: 8.6pt; font-weight: 400; }
 .film-composition { letter-spacing: .01em; }
+.sheet-editable { border-bottom: 1px dashed transparent; cursor: text; display: inline-block; min-width: 1em; outline: none; transition: background .12s ease, border-color .12s ease; }
+.sheet-editable.multiline { display: block; white-space: pre-wrap; }
+.sheet-editable:hover { background: #fffbeb; border-bottom-color: #f59e0b; }
+.sheet-editable:focus { background: #eff6ff; border-bottom-color: var(--primary); box-shadow: 0 2px 0 rgba(37, 99, 235, .18); }
+.sheet-editable.money { font: inherit; text-align: inherit; }
 .total-block { margin-left: auto; width: min(88mm, 100%); margin-top: 5mm; font-size: 10.5pt; }
 .total-block > div { display: flex; justify-content: space-between; gap: 5mm; padding: 2.3mm 0; border-bottom: 1px solid #d1d5db; }
 .total-block span { color: #4b5563; }
@@ -341,4 +346,5 @@ header .version-badge { display: none; }
   .quote-page { display: block; max-width: none; }
   .panel, .quote-toolbar, .quote-editor { display: none !important; }
   .a4-sheet { width: 210mm !important; height: 297mm !important; min-height: 297mm !important; margin: 0 !important; border: 0 !important; box-shadow: none !important; padding: 15mm 14mm !important; overflow: hidden !important; break-inside: avoid !important; page-break-inside: avoid !important; page-break-after: avoid !important; print-color-adjust: exact !important; -webkit-print-color-adjust: exact !important; }
+  .sheet-editable { background: transparent !important; border-bottom-color: transparent !important; box-shadow: none !important; }
 }

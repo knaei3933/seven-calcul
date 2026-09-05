@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { D, Decimal, parseDecimal } from "@/lib/decimal";
@@ -123,6 +123,59 @@ function isFiniteNumber(value: string) {
 
 function isoDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+type EditableTextProps = {
+  value: string;
+  label: string;
+  className?: string;
+  multiline?: boolean;
+  onCommit: (next: string, node: HTMLElement) => void;
+};
+
+function EditableText({ value, label, className, multiline = false, onCommit }: EditableTextProps) {
+  const nodeRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const node = nodeRef.current;
+    if (node && document.activeElement !== node && node.textContent !== value) node.textContent = value;
+  }, [value]);
+
+  const commit = (node: HTMLElement) => {
+    const next = node.textContent ?? "";
+    if (next !== value) onCommit(next, node);
+  };
+
+  const shared = {
+    ref: (node: HTMLElement | null) => { nodeRef.current = node; },
+    contentEditable: true,
+    suppressContentEditableWarning: true,
+    spellCheck: false,
+    role: "textbox",
+    tabIndex: 0,
+    "aria-label": label,
+    className: `sheet-editable ${multiline ? "multiline" : ""} ${className ?? ""}`,
+    onBlur: (event: React.FocusEvent<HTMLElement>) => commit(event.currentTarget),
+    onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+      if (event.key === "Enter" && !multiline) {
+        event.preventDefault();
+        event.currentTarget.blur();
+      }
+      if (event.key === "Escape") {
+        event.currentTarget.textContent = value;
+        event.currentTarget.blur();
+      }
+    },
+    onFocus: (event: React.FocusEvent<HTMLElement>) => {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(event.currentTarget);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    },
+  };
+
+  return <span {...shared} />;
 }
 
 export default function PrintableQuotationPage() {
@@ -329,6 +382,187 @@ export default function PrintableQuotationPage() {
     };
   })();
 
+  const parseDisplayedNumber = (raw: string) => parseDecimal(raw.replace(/[,，]/g, "").replace(/[^\d.+-]/g, ""));
+  const applyPatch = (patch: Partial<QuoteForm>) => setForm((old) => ({ ...old, ...patch }));
+
+  const moneyDisplay = (value: string, override?: string, autoDigits = 0) => {
+    if (override !== undefined) {
+      const parsed = parseDecimal(override);
+      if (parsed) return formatCurrency(parsed.toString(), Math.min(parsed.decimalPlaces() ?? 0, 4));
+    }
+    return formatCurrency(value, autoDigits);
+  };
+
+  const numberDisplay = (value: string, override?: string) => {
+    if (override !== undefined && isFiniteNumber(override)) return override.trim();
+    return formatNumber(value, 0);
+  };
+
+  const rejectInvalidNumber = (node: HTMLElement, fallback: string) => {
+    node.textContent = fallback;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  };
+
+  const commitSheetPrice = (raw: string, node: HTMLElement) => {
+    const price = parseDisplayedNumber(raw);
+    const quantity = parseDecimal(form.quantity);
+    if (!price || price.lt(0) || !quantity || quantity.gt(0) === false) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.pricePerPiece ?? "0"));
+      return;
+    }
+    const subtotal = price.times(quantity).floor();
+    const tax = subtotal.times(D(form.taxRatePercent).div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    applyPatch({
+      pricePerPieceDisplay: price.toString(),
+      fillingUnitDisplay: "",
+      fillingAmountDisplay: "",
+      filmPouchUnitDisplay: "",
+      filmAmountDisplay: "",
+      adjustmentDisplay: "",
+      subtotalDisplay: subtotal.toString(),
+      taxDisplay: tax.toString(),
+      grandTotalDisplay: subtotal.plus(tax).toString(),
+    });
+  };
+
+  const commitLineUnit = (line: "filling" | "film", raw: string, node: HTMLElement) => {
+    const quantity = parseDecimal(form.quantity);
+    const unit = parseDisplayedNumber(raw);
+    if (!shownTotals || !quantity || !quantity.gt(0) || unit === null || unit.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(line === "filling" ? shownTotals?.fillingUnit ?? "0" : shownTotals?.filmPouchUnit ?? "0"));
+      return;
+    }
+    const fillingUnit = line === "filling" ? unit : D(shownTotals.fillingUnit);
+    const filmUnit = line === "film" ? unit : D(shownTotals.filmPouchUnit);
+    const fillingAmount = fillingUnit.times(quantity);
+    const filmAmount = filmUnit.times(quantity);
+    const price = fillingUnit.plus(filmUnit);
+    const subtotal = price.times(quantity).floor();
+    const tax = subtotal.times(D(form.taxRatePercent).div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    const filmMeterUnit = line === "film"
+      ? quantity.gt(0) && parseDecimal(form.filmOrderLengthM)
+        ? unit.times(parseDecimal(form.filmOrderLengthM)!).div(quantity)
+        : D(form.filmMeterPrice)
+      : D(form.filmMeterPrice);
+
+    applyPatch({
+      pricePerPieceDisplay: price.toString(),
+      fillingUnitDisplay: fillingUnit.toString(),
+      fillingAmountDisplay: fillingAmount.toString(),
+      filmUnitDisplay: filmMeterUnit.toString(),
+      filmPouchUnitDisplay: filmUnit.toString(),
+      filmAmountDisplay: filmAmount.toString(),
+      adjustmentDisplay: subtotal.minus(fillingAmount).minus(filmAmount).toString(),
+      subtotalDisplay: subtotal.toString(),
+      taxDisplay: tax.toString(),
+      grandTotalDisplay: subtotal.plus(tax).toString(),
+    });
+  };
+
+  const commitLineAmount = (line: "filling" | "film", raw: string, node: HTMLElement) => {
+    const quantity = parseDecimal(form.quantity);
+    const amount = parseDisplayedNumber(raw);
+    if (!shownTotals || !quantity || !quantity.gt(0) || amount === null || amount.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(line === "filling" ? shownTotals?.fillingAmount ?? "0" : shownTotals?.filmAmount ?? "0"));
+      return;
+    }
+    void commitLineUnit(line, amount.div(quantity).toString(), node);
+  };
+
+  const commitSheetSubtotal = (raw: string, node: HTMLElement) => {
+    const quantity = parseDecimal(form.quantity);
+    const subtotal = parseDisplayedNumber(raw);
+    if (!shownTotals || !quantity || !quantity.gt(0) || subtotal === null || subtotal.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.subtotal ?? "0"));
+      return;
+    }
+    const oldPrice = D(shownTotals.pricePerPiece);
+    const newPrice = subtotal.div(quantity);
+    const scale = oldPrice.gt(0) ? newPrice.div(oldPrice) : D(1);
+    const fillingUnit = D(shownTotals.fillingUnit).times(scale);
+    const filmUnit = D(shownTotals.filmPouchUnit).times(scale);
+    const fillingAmount = fillingUnit.times(quantity);
+    const filmAmount = filmUnit.times(quantity);
+    const tax = subtotal.times(D(form.taxRatePercent).div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+
+    applyPatch({
+      pricePerPieceDisplay: newPrice.toString(),
+      fillingUnitDisplay: fillingUnit.toString(),
+      fillingAmountDisplay: fillingAmount.toString(),
+      filmPouchUnitDisplay: filmUnit.toString(),
+      filmAmountDisplay: filmAmount.toString(),
+      adjustmentDisplay: subtotal.minus(fillingAmount).minus(filmAmount).toString(),
+      subtotalDisplay: subtotal.toString(),
+      taxDisplay: tax.toString(),
+      grandTotalDisplay: subtotal.plus(tax).toString(),
+    });
+  };
+
+  const commitSheetTax = (raw: string, node: HTMLElement) => {
+    const tax = parseDisplayedNumber(raw);
+    if (!shownTotals || tax === null || tax.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.tax ?? "0"));
+      return;
+    }
+    const subtotal = D(shownTotals.subtotal);
+    applyPatch({ taxDisplay: tax.toString(), grandTotalDisplay: subtotal.plus(tax).toString() });
+  };
+
+  const commitSheetGrandTotal = (raw: string, node: HTMLElement) => {
+    const grandTotal = parseDisplayedNumber(raw);
+    const taxRate = parseDecimal(form.taxRatePercent);
+    if (!shownTotals || grandTotal === null || grandTotal.lt(0) || !taxRate || taxRate.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.grandTotal ?? "0"));
+      return;
+    }
+    const subtotal = grandTotal.div(D(1).plus(taxRate.div(100))).floor();
+    commitSheetSubtotal(subtotal.toString(), node);
+    applyPatch({ grandTotalDisplay: grandTotal.toString(), taxDisplay: grandTotal.minus(subtotal).toString() });
+  };
+
+  const commitAdjustment = (raw: string, node: HTMLElement) => {
+    const adjustment = parseDisplayedNumber(raw);
+    if (!shownTotals || adjustment === null) {
+      rejectInvalidNumber(node, shownTotals?.adjustment ?? "0");
+      return;
+    }
+    const subtotal = D(shownTotals.fillingAmount).plus(shownTotals.filmAmount).plus(adjustment).floor();
+    const tax = subtotal.times(D(form.taxRatePercent).div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    applyPatch({ adjustmentDisplay: adjustment.toString(), subtotalDisplay: subtotal.toString(), taxDisplay: tax.toString(), grandTotalDisplay: subtotal.plus(tax).toString() });
+  };
+
+  const commitQuantity = (raw: string, node: HTMLElement) => {
+    const quantity = parseDisplayedNumber(raw);
+    if (!quantity || quantity.lte(0)) {
+      rejectInvalidNumber(node, formatNumber(form.quantity, 0));
+      return;
+    }
+    applyPatch({
+      quantity: quantity.toString(),
+      fillingAmountDisplay: "",
+      filmAmountDisplay: "",
+      adjustmentDisplay: "",
+      subtotalDisplay: "",
+      taxDisplay: "",
+      grandTotalDisplay: "",
+    });
+  };
+
+  const commitFilmMeterUnit = (raw: string, node: HTMLElement) => {
+    const meterUnit = parseDisplayedNumber(raw);
+    const quantity = parseDecimal(form.quantity);
+    const orderLength = parseDecimal(form.filmOrderLengthM);
+    if (!shownTotals || meterUnit === null || meterUnit.lt(0) || !quantity || !quantity.gt(0) || !orderLength || orderLength.lte(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmUnit ?? form.filmMeterPrice));
+      return;
+    }
+    commitLineUnit("film", meterUnit.times(orderLength).div(quantity).toString(), node);
+  };
+
 
   return (
     <main className={`quote-page ${mobileDrawer ? `drawer-open drawer-${mobileDrawer}` : ""}`}>
@@ -347,7 +581,7 @@ export default function PrintableQuotationPage() {
       <section className="panel quote-toolbar" aria-labelledby="quote-toolbar-title">
         <div>
           <h1 id="quote-toolbar-title">見積書発行</h1>
-          <p>左端は宛先・基本情報、右端は明細・金額を直接編集できます。</p>
+          <p>中央のA4見積書を直接編集できます。金額・数量・文面をクリックしてその場で修正してください。</p>
           <p className="help" data-testid="quote-source">
             {sourceVersion ? `原価計算結果連携済み / 計算ID ${sourceVersion.slice(0, 12)}` : "原価シミュレーター未連携。手入力または「原価値を取込」後に出力できます。"}
           </p>
@@ -382,19 +616,25 @@ export default function PrintableQuotationPage() {
               <div className="issuer-logo">
                 <span className="logo-mark large" aria-hidden="true">7</span>
                 <div>
-                  <strong>{form.issuerName}</strong>
-                  <small>{form.issuerEnglishName}</small>
+                  <strong><EditableText value={form.issuerName} label="発行者名" onCommit={(next) => update("issuerName", next.trim())} /></strong>
+                  <small><EditableText value={form.issuerEnglishName} label="発行者英字名" onCommit={(next) => update("issuerEnglishName", next.trim())} /></small>
                 </div>
               </div>
               <address>
-                {form.representative}<br />
-                {form.issuerPostalCode} {form.issuerAddress}<br />
-                {form.issuerTelephone} / {form.issuerWebsite}
+                <EditableText value={form.representative} label="代表者" onCommit={(next) => update("representative", next.trim())} /><br />
+                <EditableText value={`${form.issuerPostalCode} ${form.issuerAddress}`} label="発行者住所" onCommit={(next) => {
+                  const match = next.trim().match(/^(\S+)\s+(.+)$/);
+                  applyPatch({ issuerPostalCode: match?.[1] ?? next.trim(), issuerAddress: match?.[2] ?? "" });
+                }} /><br />
+                <EditableText value={`${form.issuerTelephone} / ${form.issuerWebsite}`} label="電話番号とウェブサイト" onCommit={(next) => {
+                  const [telephone, website] = next.split("/").map((item) => item.trim());
+                  applyPatch({ issuerTelephone: telephone ?? "", issuerWebsite: website ?? "" });
+                }} />
               </address>
             </div>
             <div className="document-title">
-              <p className="english">{form.documentEnglish}</p>
-              <h2>{form.documentHeading}</h2>
+              <p className="english"><EditableText value={form.documentEnglish} label="文書英字タイトル" onCommit={(next) => update("documentEnglish", next.trim())} /></p>
+              <h2><EditableText value={form.documentHeading} label="文書タイトル" onCommit={(next) => update("documentHeading", next.trim())} /></h2>
               <dl>
                 <div><dt>見積番号</dt><dd>{form.quotationNumber || "-"}</dd></div>
                 <div><dt>発行日</dt><dd>{form.issueDate || "-"}</dd></div>
@@ -403,9 +643,9 @@ export default function PrintableQuotationPage() {
           </header>
 
           <section className="recipient-block">
-            <p className="customer">{form.customerName || "得意先名未入力"}</p>
-            {form.customerContact ? <p>{form.customerContact} 御中</p> : null}
-            <p className="greeting">{form.greeting}</p>
+            <p className="customer"><EditableText value={form.customerName || "得意先名未入力"} label="得意先名" onCommit={(next) => update("customerName", next.trim())} /></p>
+            <p><EditableText value={`${form.customerContact ? `${form.customerContact} 御中` : "御中"}`} label="得意先担当者" onCommit={(next) => update("customerContact", next.replace(/御中$/, "").trim())} /></p>
+            <p className="greeting"><EditableText value={form.greeting} label="宛先文言" multiline onCommit={(next) => update("greeting", next)} /></p>
           </section>
 
           {shownTotals ? (
@@ -413,15 +653,18 @@ export default function PrintableQuotationPage() {
               <section className="price-highlight">
                 <div>
                   <span>お見積単価（税抜）</span>
-                  <strong data-testid="quote-price-per-piece">{formatCurrency(shownTotals.pricePerPiece, 0)}<small> /枚</small></strong>
+                  <strong data-testid="quote-price-per-piece">
+                    <EditableText value={moneyDisplay(shownTotals.pricePerPiece, form.pricePerPieceDisplay)} label="お見積単価" className="money" onCommit={commitSheetPrice} />
+                    <small> /枚</small>
+                  </strong>
                 </div>
                 <div>
                   <span>数量</span>
-                  <strong>{formatNumber(form.quantity, 0)} 枚</strong>
+                  <strong><EditableText value={numberDisplay(form.quantity)} label="数量" className="money" onCommit={commitQuantity} /><small> 枚</small></strong>
                 </div>
                 <div>
                   <span>税込合計</span>
-                  <strong>{formatCurrency(shownTotals.grandTotal, 0)}</strong>
+                  <strong><EditableText value={moneyDisplay(shownTotals.grandTotal, form.grandTotalDisplay)} label="税込合計" className="money" onCommit={commitSheetGrandTotal} /></strong>
                 </div>
               </section>
 
@@ -437,42 +680,44 @@ export default function PrintableQuotationPage() {
                 <tbody>
                   <tr>
                     <td>
-                      <strong>{form.fillingItemName}</strong>
-                      <small>{form.fillingItemDescription}</small>
+                      <strong><EditableText value={form.fillingItemName} label="充填・加工項目名" onCommit={(next) => update("fillingItemName", next.trim())} /></strong>
+                      <small><EditableText value={form.fillingItemDescription} label="充填・加工説明" multiline onCommit={(next) => update("fillingItemDescription", next)} /></small>
                     </td>
-                    <td data-testid="filling-unit-price">{formatCurrency(shownTotals.fillingUnit, 0)}</td>
-                    <td>{formatNumber(form.quantity, 0)} 枚</td>
-                    <td>{formatCurrency(shownTotals.fillingAmount, 0)}</td>
+                    <td data-testid="filling-unit-price"><EditableText value={moneyDisplay(shownTotals.fillingUnit, form.fillingUnitDisplay, 2)} label="充填・加工単価" className="money" onCommit={(next, node) => commitLineUnit("filling", next, node)} /></td>
+                    <td><EditableText value={numberDisplay(form.quantity)} label="充填・加工数量" className="money" onCommit={commitQuantity} /> 枚</td>
+                    <td><EditableText value={moneyDisplay(shownTotals.fillingAmount, form.fillingAmountDisplay)} label="充填・加工金額" className="money" onCommit={(next, node) => commitLineAmount("filling", next, node)} /></td>
                   </tr>
                   <tr>
                     <td>
-                      <strong>{form.filmItemName}</strong>
-                      <small>{form.filmItemDescription}</small>
-                      <small className="film-composition" data-testid="film-composition">構成：{form.filmComposition || DEFAULT_FILM_COMPOSITION}</small>
+                      <strong><EditableText value={form.filmItemName} label="フィルム項目名" onCommit={(next) => update("filmItemName", next.trim())} /></strong>
+                      <small><EditableText value={form.filmItemDescription} label="フィルム説明" multiline onCommit={(next) => update("filmItemDescription", next)} /></small>
+                      <small className="film-composition" data-testid="film-composition">構成：<EditableText value={form.filmComposition || DEFAULT_FILM_COMPOSITION} label="フィルム構成" onCommit={(next) => update("filmComposition", next.trim())} /></small>
                     </td>
                     <td>
-                      <strong data-testid="film-meter-price">{formatCurrency(shownTotals.filmUnit, 0)} /m</strong>
-                      <small data-testid="film-pouch-price">パウチ換算 {formatCurrency(shownTotals.filmPouchUnit, 0)} /枚</small>
+                      <strong data-testid="film-meter-price"><EditableText value={moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay)} label="フィルムm単価" className="money" onCommit={commitFilmMeterUnit} /> /m</strong>
+                      <small data-testid="film-pouch-price">パウチ換算 <EditableText value={moneyDisplay(shownTotals.filmPouchUnit, form.filmPouchUnitDisplay, 2)} label="フィルムパウチ換算単価" className="money" onCommit={(next, node) => commitLineUnit("film", next, node)} /> /枚</small>
                     </td>
-                    <td><span data-testid="film-order-length">{formatNumber(shownTotals.filmOrderLength, 0)} m</span></td>
-                    <td>{formatCurrency(shownTotals.filmAmount, 0)}</td>
+                    <td><span data-testid="film-order-length"><EditableText value={numberDisplay(shownTotals.filmOrderLength, form.filmOrderLengthM)} label="フィルム発注長さ" className="money" onCommit={(next) => update("filmOrderLengthM", parseDisplayedNumber(next)?.toString() ?? form.filmOrderLengthM)} /> m</span></td>
+                    <td><EditableText value={moneyDisplay(shownTotals.filmAmount, form.filmAmountDisplay)} label="フィルム金額" className="money" onCommit={(next, node) => commitLineAmount("film", next, node)} /></td>
                   </tr>
                   <tr>
                     <td>
-                      <strong>{form.roundingItemName}</strong>
-                      <small>{form.roundingItemDescription}</small>
+                      <strong><EditableText value={form.roundingItemName} label="端数調整項目名" onCommit={(next) => update("roundingItemName", next.trim())} /></strong>
+                      <small><EditableText value={form.roundingItemDescription} label="端数調整説明" multiline onCommit={(next) => update("roundingItemDescription", next)} /></small>
                     </td>
                     <td>—</td>
                     <td>—</td>
-                    <td data-testid="rounding-adjustment">{shownTotals.adjustment === "-" ? "-" : formatCurrency(shownTotals.adjustment, 0)}</td>
+                    <td data-testid="rounding-adjustment">
+                      <EditableText value={shownTotals.adjustment === "-" ? "-" : moneyDisplay(shownTotals.adjustment, form.adjustmentDisplay === "" ? undefined : form.adjustmentDisplay)} label="端数調整" className="money" onCommit={commitAdjustment} />
+                    </td>
                   </tr>
                 </tbody>
               </table>
 
               <section className="total-block">
-                <div><span>{form.subtotalLabel}</span><strong>{formatCurrency(shownTotals.subtotal, 0)}</strong></div>
-                <div><span>{form.taxLabel || `消費税（${formatNumber(Number(form.taxRatePercent), 0)}%）`}</span><strong>{formatCurrency(shownTotals.tax, 0)}</strong></div>
-                <div className="grand"><span>{form.grandTotalLabel}</span><strong>{formatCurrency(shownTotals.grandTotal, 0)}</strong></div>
+                <div><span><EditableText value={form.subtotalLabel} label="小計ラベル" onCommit={(next) => update("subtotalLabel", next.trim())} /></span><strong><EditableText value={moneyDisplay(shownTotals.subtotal, form.subtotalDisplay)} label="小計" className="money" onCommit={commitSheetSubtotal} /></strong></div>
+                <div><span><EditableText value={form.taxLabel || `消費税（${formatNumber(Number(form.taxRatePercent), 0)}%）`} label="消費税ラベル" onCommit={(next) => update("taxLabel", next.trim())} /></span><strong><EditableText value={moneyDisplay(shownTotals.tax, form.taxDisplay)} label="消費税" className="money" onCommit={commitSheetTax} /></strong></div>
+                <div className="grand"><span><EditableText value={form.grandTotalLabel} label="合計ラベル" onCommit={(next) => update("grandTotalLabel", next.trim())} /></span><strong><EditableText value={moneyDisplay(shownTotals.grandTotal, form.grandTotalDisplay)} label="合計" className="money" onCommit={commitSheetGrandTotal} /></strong></div>
               </section>
             </>
           ) : (
@@ -481,18 +726,18 @@ export default function PrintableQuotationPage() {
 
           <section className="terms">
             <dl>
-              <div><dt>納期</dt><dd>{form.deliveryDate || "-"}</dd></div>
-              <div><dt>お支払条件</dt><dd>{form.paymentTerms || "-"}</dd></div>
-              <div><dt>見積有効期限</dt><dd>{form.validUntil || "-"}</dd></div>
+              <div><dt>納期</dt><dd><EditableText value={form.deliveryDate || "-"} label="納期" onCommit={(next) => update("deliveryDate", next.trim())} /></dd></div>
+              <div><dt>お支払条件</dt><dd><EditableText value={form.paymentTerms || "-"} label="お支払条件" onCommit={(next) => update("paymentTerms", next.trim())} /></dd></div>
+              <div><dt>見積有効期限</dt><dd><EditableText value={form.validUntil || "-"} label="見積有効期限" onCommit={(next) => update("validUntil", next.trim())} /></dd></div>
             </dl>
-            <p className="notes"><strong>備考</strong>{form.notes ? ` ${form.notes}` : ""}</p>
+            <p className="notes"><strong>備考</strong><EditableText value={form.notes ? ` ${form.notes}` : ""} label="備考" multiline onCommit={(next) => update("notes", next)} /></p>
           </section>
 
           <footer className="sheet-footer">
-            <p>{form.footerNote}</p>
+            <p><EditableText value={form.footerNote} label="フッター文言" multiline onCommit={(next) => update("footerNote", next)} /></p>
             <div className="approval">
-              <span>{form.issuerName}</span>
-              <span className="seal" aria-hidden="true">{form.sealText}</span>
+              <span><EditableText value={form.issuerName} label="承認発行者名" onCommit={(next) => update("issuerName", next.trim())} /></span>
+              <span className="seal" aria-hidden="true"><EditableText value={form.sealText} label="社内判文言" onCommit={(next) => update("sealText", next.trim())} /></span>
             </div>
           </footer>
         </article>
@@ -573,7 +818,7 @@ export default function PrintableQuotationPage() {
     return (
       <>
         {renderQuotationGuide()}
-      <details className="editor-group" open>
+      <details className="editor-group">
         <summary>明細・金額</summary>
         <div className="editor-grid">
           <label>品名<input value={form.productName} onChange={(event) => update("productName", event.target.value)} /></label>
@@ -632,8 +877,11 @@ export default function PrintableQuotationPage() {
 
     return (
       <details className="editor-group calculation-guide" open data-testid="quote-calculation-guide">
-        <summary>入力ガイド（原価 → 見積単価）</summary>
+        <summary>直接編集ガイド</summary>
         <div className="calc-guide">
+          <p className="calc-formula">
+            中央のA4用紙が入力画面です。<strong>「￥」金額・数量・品名・備考をクリック</strong>すると、表示されている文字をそのまま編集できます。
+          </p>
           <div className="calc-guide-cards">
             <div>
               <span>充填・加工 原価</span>
@@ -661,16 +909,11 @@ export default function PrintableQuotationPage() {
             </div>
           </div>
 
-          <p className="calc-formula">
-            見積単価 ＝（充填・加工原価 ＋ フィルム原価）÷（1 − 目標利益率）<br />
-            = {formatNumber(totalCost.toNumber(), 4)} ÷（1 − {marginPercent || "0"}%）＝ {formatNumber(autoPrice.toNumber(), 4)} 円
-          </p>
-
           <ol className="calc-steps">
-            <li><strong>基本はここに入力しません。</strong>シミュレーター取込で「原価 / 枚」2項目は自動入力されます。</li>
-            <li>金額を変えたい場合は<strong>目標利益率（%）</strong>だけ変更してください。空欄にすると自動計算が止まります。</li>
-            <li>得意先提示単価を直接決めたい場合のみ<strong>見積単価 / 枚</strong>に入力します。空欄なら自動計算値です。</li>
-            <li>長い小数は計算保持用です。帳票は円単位表示、合計は小数を保持してから調整されます。</li>
+            <li>見積単価を <strong>￥39 → ￥8.1</strong> のように変えると、小計・消費税・合計と明細配分が自動的に更新されます。</li>
+            <li>明細の単価・金額を変えた場合も、見積単価と合計が追従します。</li>
+            <li>原価と目標利益率は内部管理値です。通常の編集はA4面だけで完結します。</li>
+            <li>自動計算式：見積単価 ＝ 原価 ÷（1 − 利益率）。現在 {formatNumber(totalCost.toNumber(), 4)} ÷（1 − {marginPercent || "0"}%）＝ {formatNumber(autoPrice.toNumber(), 4)} 円。</li>
           </ol>
 
           <p className={`calc-mode ${isPriceOverride ? "override" : "auto"}`}>
