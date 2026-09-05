@@ -401,8 +401,12 @@ export default function PrintableQuotationPage() {
     const taxRate = parsedTaxRatePercent.div(100);
     const fillingSellingUnit = parsedFillingCost.div(D(1).minus(margin));
     const copperSellingUnit = parsedCopperCost.div(D(1).minus(margin));
+    const filmSellingUnit = parsedFilmCost.div(D(1).minus(margin));
     const filmMeterDisplayUnit = parsedFilmMeterPrice;
-    const pricePerPiece = fillingSellingUnit.plus(copperSellingUnit);
+    // 그라비아는 목표 총액에 필름 판매금액도 포함해야 잔액을 m당 판매단가로 배분할 수 있다.
+    const pricePerPiece = form.printingMethod === "gravure"
+      ? fillingSellingUnit.plus(copperSellingUnit).plus(filmSellingUnit)
+      : fillingSellingUnit.plus(copperSellingUnit);
     const subtotalBeforeAdjustment = pricePerPiece.times(quantity);
     const subtotal = subtotalBeforeAdjustment.floor();
     const roundingAdjustment = subtotal.minus(subtotalBeforeAdjustment);
@@ -411,6 +415,7 @@ export default function PrintableQuotationPage() {
       quantity,
       fillingSellingUnit,
       copperSellingUnit,
+      filmSellingUnit,
       filmMeterDisplayUnit,
       filmOrderLength: parsedFilmOrderLength,
       roundingAdjustment,
@@ -450,7 +455,7 @@ export default function PrintableQuotationPage() {
       );
       filmMeterUnit = parseDecimal(form.filmUnitDisplay)
         ?? (totals.filmOrderLength.gt(0)
-          ? residualFilmAmount.div(totals.filmOrderLength).toDecimalPlaces(2, Decimal.ROUND_DOWN)
+          ? residualFilmAmount.div(totals.filmOrderLength).toDecimalPlaces(2, Decimal.ROUND_UP)
           : D(0));
     } else {
       const requestedFilmMeterUnit = parseDecimal(form.filmUnitDisplay)
