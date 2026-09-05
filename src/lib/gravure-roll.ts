@@ -25,6 +25,10 @@ export const GRAVURE_ROLL_DEFAULTS_KRW = {
   overseasShippingPerTripYen: "11000",
   manufacturerMarginRate: "0.20",
   customsRate: "0.05",
+  smallWidthThresholdMm: "50",
+  smallWidthOrderPatternLengthM: "11000",
+  smallWidthProductionPatternLengthM: "12000",
+  smallWidthManufacturerUnitPriceKRWPerM: "410",
   krwPer100Yen: "850",
 } as const;
 
@@ -47,6 +51,10 @@ export interface GravureRollParameters {
   overseasShippingPerTripYen: string;
   manufacturerMarginRate: string;
   customsRate: string;
+  smallWidthThresholdMm: string;
+  smallWidthOrderPatternLengthM: string;
+  smallWidthProductionPatternLengthM: string;
+  smallWidthManufacturerUnitPriceKRWPerM: string;
   krwPer100Yen: string;
 }
 
@@ -69,6 +77,10 @@ export function defaultGravureRollParameters(): GravureRollParameters {
     overseasShippingPerTripYen: GRAVURE_ROLL_DEFAULTS_KRW.overseasShippingPerTripYen,
     manufacturerMarginRate: GRAVURE_ROLL_DEFAULTS_KRW.manufacturerMarginRate,
     customsRate: GRAVURE_ROLL_DEFAULTS_KRW.customsRate,
+    smallWidthThresholdMm: GRAVURE_ROLL_DEFAULTS_KRW.smallWidthThresholdMm,
+    smallWidthOrderPatternLengthM: GRAVURE_ROLL_DEFAULTS_KRW.smallWidthOrderPatternLengthM,
+    smallWidthProductionPatternLengthM: GRAVURE_ROLL_DEFAULTS_KRW.smallWidthProductionPatternLengthM,
+    smallWidthManufacturerUnitPriceKRWPerM: GRAVURE_ROLL_DEFAULTS_KRW.smallWidthManufacturerUnitPriceKRWPerM,
     krwPer100Yen: GRAVURE_ROLL_DEFAULTS_KRW.krwPer100Yen,
   };
 }
@@ -78,6 +90,7 @@ export interface GravureRollCostInput {
   materialWidthMm: string | number | Decimal;
   colors: string | number | Decimal;
   quantity: string | number | Decimal;
+  pouchWidthMm?: string | number | Decimal;
   skuColorUsage?: { lengthM: string | number | Decimal; colors: string | number | Decimal }[];
   parameters: GravureRollParameters;
 }
@@ -101,6 +114,8 @@ export interface GravureRollCostResult {
   shippingTrips: number;
   copperPlateCostYen: string;
   totalGravureCostYen: string;
+  smallWidthTier: boolean;
+  smallWidthManufacturerUnitPriceKRWPerM: string;
   filmCostPerPieceYen: string;
   copperPlateCostPerPieceYen: string;
   recommendedQuantity: string;
@@ -175,6 +190,7 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
   const materialWidthMm = D(input.materialWidthMm);
   const colors = D(input.colors);
   const params = input.parameters;
+  const pouchWidthMm = D(input.pouchWidthMm ?? input.materialWidthMm);
   if (quantity.lte(0) || requiredLengthM.lte(0) || materialWidthMm.lte(0) || colors.lte(0)) throw new Error("invalid_positive_input");
   const skuColorUsage = input.skuColorUsage?.map((usage) => ({
     lengthM: D(usage.lengthM),
@@ -186,43 +202,62 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
     if (usageLength.minus(requiredLengthM).abs().gt("0.0000001")) throw new Error("invalid_sku_length_sum");
   }
 
-  const patternLength = D(params.deliverablePatternLengthM);
-  const productionLength = D(params.productionPatternLengthM);
+  const smallWidthTier = pouchWidthMm.lte(D(params.smallWidthThresholdMm));
+  const patternLength = smallWidthTier
+    ? D(params.smallWidthOrderPatternLengthM)
+    : D(params.deliverablePatternLengthM);
+  const productionPatternLength = smallWidthTier
+    ? D(params.smallWidthProductionPatternLengthM)
+    : D(params.productionPatternLengthM);
   const orderPatternCount = positivePatternCount(requiredLengthM.div(patternLength));
   const deliverableLengthM = patternLength.times(orderPatternCount);
-  const productionLengthM = productionLength.times(orderPatternCount);
+  const productionLengthM = productionPatternLength.times(orderPatternCount);
   const widthM = materialWidthMm.div(1000);
   const layers = GRAVURE_ROLL_MATERIAL_STRUCTURE;
-  const materialCost = layers.reduce((total, layer, index) => {
-    const unitPrice = layer.materialId === "AL"
-      ? params.alUnitPriceYenPerKg
-      : layer.materialId === "LLDPE"
-        ? params.lldpeUnitPriceYenPerKg
-        : params.petUnitPriceYenPerKg;
-    const effectiveWidthMm = index === layers.length - 1 ? materialWidthMm.plus(10) : materialWidthMm;
-    return total.plus(
-      D(layer.thicknessMicron).div(1000)
-        .times(effectiveWidthMm.div(1000))
-        .times(productionLengthM)
-        .times(layer.density)
-        .times(unitPrice),
-    );
-  }, D(0));
-  const printingCost = (skuColorUsage ?? [{ lengthM: requiredLengthM, colors }])
-    .reduce((total, usage) => total.plus(
-      widthM
-        .times(productionLengthM.times(usage.lengthM).div(requiredLengthM))
-        .times(usage.colors)
-        .times(params.printingUnitPriceYenPerM),
-    ), D(0));
-  const laminationCost = widthM.times(productionLengthM).times(layers.length - 1).times(params.laminationUnitPriceYenPerMWithAl);
-  const filmCostYen = materialCost.plus(printingCost).plus(laminationCost);
+  let materialCost = D(0);
+  let printingCost = D(0);
+  let laminationCost = D(0);
+  let filmCostYen: Decimal;
+  let manufacturerMarginCostYen: Decimal;
+  if (smallWidthTier) {
+    // 50mm以下は固定の製造者販売単価（KRW/m）を採用する。マージンは単価済み。
+    filmCostYen = D(params.smallWidthManufacturerUnitPriceKRWPerM)
+      .times(100)
+      .div(params.krwPer100Yen)
+      .times(productionLengthM);
+    manufacturerMarginCostYen = D(0);
+  } else {
+    materialCost = layers.reduce((total, layer, index) => {
+      const unitPrice = layer.materialId === "AL"
+        ? params.alUnitPriceYenPerKg
+        : layer.materialId === "LLDPE"
+          ? params.lldpeUnitPriceYenPerKg
+          : params.petUnitPriceYenPerKg;
+      const effectiveWidthMm = index === layers.length - 1 ? materialWidthMm.plus(10) : materialWidthMm;
+      return total.plus(
+        D(layer.thicknessMicron).div(1000)
+          .times(effectiveWidthMm.div(1000))
+          .times(productionLengthM)
+          .times(layer.density)
+          .times(unitPrice),
+      );
+    }, D(0));
+    printingCost = (skuColorUsage ?? [{ lengthM: requiredLengthM, colors }])
+      .reduce((total, usage) => total.plus(
+        widthM
+          .times(productionLengthM.times(usage.lengthM).div(requiredLengthM))
+          .times(usage.colors)
+          .times(params.printingUnitPriceYenPerM),
+      ), D(0));
+    laminationCost = widthM.times(productionLengthM).times(layers.length - 1).times(params.laminationUnitPriceYenPerMWithAl);
+    filmCostYen = materialCost.plus(printingCost).plus(laminationCost);
+    manufacturerMarginCostYen = filmCostYen.times(params.manufacturerMarginRate);
+  }
   const shippingTrips = Decimal.max(
     1,
     deliverableLengthM.div(D(params.overseasShippingUnitM)).toDecimalPlaces(0, Decimal.ROUND_CEIL).toNumber(),
   ).toNumber();
   const overseasShippingCostYen = D(shippingTrips).times(params.overseasShippingPerTripYen);
-  const manufacturerMarginCostYen = filmCostYen.times(params.manufacturerMarginRate);
   const customsBaseCostYen = filmCostYen.plus(manufacturerMarginCostYen);
   const customsCostYen = customsBaseCostYen.times(params.customsRate);
   const plateWidthCm = materialWidthMm.plus(D(params.copperPlateWidthExtraMm)).div(10);
@@ -256,6 +291,8 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
     shippingTrips,
     copperPlateCostYen: copperPlateCostYen.toString(),
     totalGravureCostYen: customsBaseCostYen.plus(customsCostYen).plus(overseasShippingCostYen).plus(copperPlateCostYen).toString(),
+    smallWidthTier,
+    smallWidthManufacturerUnitPriceKRWPerM: params.smallWidthManufacturerUnitPriceKRWPerM,
     filmCostPerPieceYen: quantity.gt(0)
       ? customsBaseCostYen.plus(customsCostYen).plus(overseasShippingCostYen).div(quantity).toString()
       : "0",

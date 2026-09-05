@@ -230,7 +230,7 @@ describe("multi-SKU film aggregation", () => {
 describe("gravure roll integration", () => {
   it("replaces only film cost, keeps processing unchanged, and separates copper plates", () => {
     const result = calculatePouchCost({
-      spec: baseSpec,
+      spec: { ...baseSpec, sizeKey: "round-60x80", connectedChambers: 1 },
       quantity: "10000",
       printingMethod: "gravure",
     });

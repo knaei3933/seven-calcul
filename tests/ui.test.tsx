@@ -168,7 +168,7 @@ describe("quotation UI", () => {
     expect(screen.getByTestId("calculate-desktop")).toBeEnabled();
     expect(screen.getAllByTestId("gravure-parameters").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("cost-copper").length).toBeGreaterThan(0);
-    expect(screen.getAllByTestId("cost-film").some((node) => node.textContent?.includes("5,500m発注パターン"))).toBe(true);
+    expect(screen.getAllByTestId("cost-film").some((node) => node.textContent?.includes("小幅固定製造単価"))).toBe(true);
     expect(screen.getAllByTestId("cost-copper").some((node) => node.textContent?.includes("新規銅版費"))).toBe(true);
   });
 

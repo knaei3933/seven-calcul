@@ -485,8 +485,12 @@ export default function QuotationPage() {
                       <label className="parameter-label">ラミ単価 AL有 (円/m)<input inputMode="decimal" value={normalizedGravureParameters.laminationUnitPriceYenPerMWithAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithAl: e.target.value }))} /></label>
                       <label className="parameter-label">ラミ単価 AL無 (円/m)<input inputMode="decimal" value={normalizedGravureParameters.laminationUnitPriceYenPerMWithoutAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithoutAl: e.target.value }))} /></label>
                       <label className="parameter-label">新規銅版単価 (円)<input inputMode="decimal" value={normalizedGravureParameters.newCopperPlateUnitPriceYen} onChange={(e) => setGravureParameters((old) => ({ ...old, newCopperPlateUnitPriceYen: e.target.value }))} /></label>
-                      <label className="parameter-label">発注パターン (m)<input inputMode="decimal" readOnly value={formatNumber(normalizedGravureParameters.deliverablePatternLengthM)} /></label>
-                      <label className="parameter-label">製作ロット (m)<input inputMode="decimal" readOnly value={formatNumber(normalizedGravureParameters.productionPatternLengthM)} /></label>
+                      <label className="parameter-label">標準納品パターン (m)<input inputMode="decimal" readOnly value={formatNumber(normalizedGravureParameters.deliverablePatternLengthM)} /></label>
+                      <label className="parameter-label">標準製作ロット (m)<input inputMode="decimal" readOnly value={formatNumber(normalizedGravureParameters.productionPatternLengthM)} /></label>
+                      <label className="parameter-label">小幅閾値 (mm)<input inputMode="decimal" value={normalizedGravureParameters.smallWidthThresholdMm} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthThresholdMm: e.target.value }))} /></label>
+                      <label className="parameter-label">小幅納品パターン (m)<input inputMode="decimal" value={normalizedGravureParameters.smallWidthOrderPatternLengthM} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthOrderPatternLengthM: e.target.value }))} /></label>
+                      <label className="parameter-label">小幅製作ロット (m)<input inputMode="decimal" value={normalizedGravureParameters.smallWidthProductionPatternLengthM} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthProductionPatternLengthM: e.target.value }))} /></label>
+                      <label className="parameter-label">小幅固定製造単価 (원/m)<input inputMode="decimal" value={normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthManufacturerUnitPriceKRWPerM: e.target.value }))} /></label>
                       <label className="parameter-label">海外配送単位 (m)<input inputMode="decimal" value={normalizedGravureParameters.overseasShippingUnitM} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingUnitM: e.target.value }))} /></label>
                       <label className="parameter-label">海外配送費 / 回 (円)<input inputMode="decimal" value={normalizedGravureParameters.overseasShippingPerTripYen} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingPerTripYen: e.target.value }))} /></label>
                       <label className="parameter-label">製造マージン率 (%)<input inputMode="decimal" value={formatNumber(Number(normalizedGravureParameters.manufacturerMarginRate) * 100, 3)} onChange={(e) => setGravureParameters((old) => ({ ...old, manufacturerMarginRate: formatNumber(Number(e.target.value) / 100, 6) }))} /></label>
@@ -561,7 +565,7 @@ export default function QuotationPage() {
                   <span className="total-sub">総原価 <strong>{formatCurrency(displayAmount(resultShown.costTotal))}</strong> ／ 参考: フィルム発注 {formatNumber(resultShown.film.orderLengthM)}m で製造可能 {formatNumber(resultShown.film.actualQuantity)} 枚（余剰 ≈ {formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）</span>
                 </p>
                 <p className="help">{form.printingMethod === "gravure"
-                  ? `グラビアは5,500m納品・6,000m製作パターンで計算します。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
+                  ? `グラビアは幅${formatNumber(normalizedGravureParameters.smallWidthThresholdMm)}mm以下は${formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・${formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作、その他は5,500m納品・6,000m製作パターンで計算します。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
                   : "「単価計算用数量」は発注したフィルムから実際に作れる枚数（ロス控除後・500枚単位）です。フィルム発注を100m単位で切り上げるため、発注枚数より多くなることがあります。"}</p>
                 <div className="cost-breakdown">
                   <details className="cost-block" data-testid="cost-processing">
@@ -621,12 +625,25 @@ export default function QuotationPage() {
                             {form.printingMethod === "gravure" ? (
                               <>
                                 <p>① 必要納品長は合計 {formatNumber(f.requiredLengthM)}m です。</p>
-                                <p>② 5,500m発注パターンへ切り上げます。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
-                                <p>③ 製作6,000mの中にロス500mが含まれます。このロットのグラビアロスは {formatNumber(f.lossM)}m です。</p>
-                                <p>④ <strong>フィルム代＝原材料費＋印刷費＋ラミネート費＋製造マージン＋通関料＋海外配送費＋販売会社利益</strong>＝{formatCurrency(displayAmount((resultShown.gravure?.materialCostYen ?? "0").toString()))}＋{formatCurrency(displayAmount(resultShown.gravure?.printingCostYen ?? "0"))}＋{formatCurrency(displayAmount(resultShown.gravure?.laminationCostYen ?? "0"))}＋{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＋{formatCurrency(displayAmount(resultShown.sellerProfitCost))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は色数×銅版幅×外径で別計上します。</p>
-                                <p>⑤ 製造マージン＝フィルム製造原価 {formatCurrency(displayAmount((resultShown.gravure?.filmCostYen ?? "0").toString()))} × {formatNumber(Number(normalizedGravureParameters.manufacturerMarginRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}。通関料＝製造マージン込製造者販売価格 {formatCurrency(displayAmount(resultShown.gravure?.customsBaseCostYen ?? "0"))} × {formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.customsCostYen ?? "0"))} です。</p>
+                                {resultShown.gravure?.smallWidthTier ? (
+                                  <p>② パウチ幅が小幅閾値以下のため、{formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・{formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作パターンを使います。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
+                                ) : (
+                                  <p>② 5,500m発注パターンへ切り上げます。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
+                                )}
+                                <p>③ 製作長 {formatNumber(f.orderLengthM)}m の中にロス {formatNumber(f.lossM)}m が含まれます。</p>
+                                {resultShown.gravure?.smallWidthTier ? (
+                                  <>
+                                    <p>④ <strong>フィルム代＝小幅固定製造単価×製作長＋通関料＋海外配送費＋販売会社利益</strong>＝원{formatNumber(normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM)}/m×{formatNumber(f.orderLengthM)}m＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＋{formatCurrency(displayAmount(resultShown.sellerProfitCost))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は別計上します。</p>
+                                    <p>⑤ 通関料＝固定製造者販売価格 {formatCurrency(displayAmount(resultShown.gravure?.customsBaseCostYen ?? "0"))} × {formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.customsCostYen ?? "0"))}。</p>
+                                  </>
+                                ) : (
+                                  <>
+                                    <p>④ <strong>フィルム代＝原材料費＋印刷費＋ラミネート費＋製造マージン＋通関料＋海外配送費＋販売会社利益</strong>＝{formatCurrency(displayAmount((resultShown.gravure?.materialCostYen ?? "0").toString()))}＋{formatCurrency(displayAmount(resultShown.gravure?.printingCostYen ?? "0"))}＋{formatCurrency(displayAmount(resultShown.gravure?.laminationCostYen ?? "0"))}＋{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＋{formatCurrency(displayAmount(resultShown.sellerProfitCost))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は色数×銅版幅×外径で別計上します。</p>
+                                    <p>⑤ 製造マージン＝フィルム製造原価 {formatCurrency(displayAmount((resultShown.gravure?.filmCostYen ?? "0").toString()))} × {formatNumber(Number(normalizedGravureParameters.manufacturerMarginRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}。通関料＝製造マージン込製造者販売価格 {formatCurrency(displayAmount(resultShown.gravure?.customsBaseCostYen ?? "0"))} × {formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.customsCostYen ?? "0"))} です。</p>
+                                  </>
+                                )}
                                 <p>⑥ 販売会社利益＝フィルム費用基準 {formatCurrency(displayAmount(resultShown.sellerProfitBaseCost))} × {formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.sellerProfitCost))}。この金額はフィルム費用に含めます。</p>
-                                <p>⑦ 海外配送はロス500mを含めず、納品可能長基準で計算します。ceil(納品可能長 {formatNumber(f.effectiveLengthM)}m ÷ {formatNumber(normalizedGravureParameters.overseasShippingUnitM)}m)×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatNumber(f.shippingTrips)}回×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatCurrency(displayAmount(f.overseasShipping))}。この金額は上記のフィルムm単価に含めて表示します。</p>
+                                <p>⑦ 海外配送はロスを含めず、納品可能長基準で計算します。ceil(納品可能長 {formatNumber(f.effectiveLengthM)}m ÷ {formatNumber(normalizedGravureParameters.overseasShippingUnitM)}m)×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatNumber(f.shippingTrips)}回×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatCurrency(displayAmount(f.overseasShipping))}。この金額は上記のフィルムm単価に含めて表示します。</p>
                                 <p>⑧ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(resultShown.deliverablePatternLengthM ?? "1").times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
                               </>
                             ) : (
@@ -873,6 +890,10 @@ function positiveGravureParameters(parameters: GravureRollParameters) {
     && nonNegative(parameters.overseasShippingPerTripYen)
     && nonNegative(parameters.manufacturerMarginRate) && Number(parameters.manufacturerMarginRate) < 1
     && nonNegative(parameters.customsRate)
+    && positive(parameters.smallWidthThresholdMm)
+    && positive(parameters.smallWidthOrderPatternLengthM)
+    && positive(parameters.smallWidthProductionPatternLengthM)
+    && nonNegative(parameters.smallWidthManufacturerUnitPriceKRWPerM)
     && positive(parameters.krwPer100Yen);
 }
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) { return <div className="field"><label htmlFor={htmlFor}>{label}</label>{children}</div>; }

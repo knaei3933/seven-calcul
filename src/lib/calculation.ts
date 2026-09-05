@@ -54,6 +54,8 @@ export interface CostResult {
     laminationCostYen: string;
     filmCostYen: string;
     manufacturerMarginCostYen: string;
+    smallWidthTier: boolean;
+    smallWidthManufacturerUnitPriceKRWPerM: string;
     customsBaseCostYen: string;
     customsCostYen: string;
     overseasShippingCostYen: string;
@@ -179,6 +181,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
     ? calculateGravureRollCost({
         requiredLengthM,
         materialWidthMm: Decimal.max(500, size.webWidthMm),
+        pouchWidthMm: size.widthMm,
         colors: spec.colorCount,
         quantity,
         skuColorUsage: skuRequiredLengths.map((length, index) => ({
@@ -322,6 +325,8 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
         laminationCostYen: gravureRoll.laminationCostYen,
         filmCostYen: gravureRoll.filmCostYen,
         manufacturerMarginCostYen: gravureRoll.manufacturerMarginCostYen,
+        smallWidthTier: gravureRoll.smallWidthTier,
+        smallWidthManufacturerUnitPriceKRWPerM: gravureRoll.smallWidthManufacturerUnitPriceKRWPerM,
         customsBaseCostYen: gravureRoll.customsBaseCostYen,
         customsCostYen: gravureRoll.customsCostYen,
         overseasShippingCostYen: gravureRoll.overseasShippingCostYen,

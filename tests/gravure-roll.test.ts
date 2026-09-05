@@ -64,4 +64,27 @@ describe("gravure roll calculation", () => {
       8,
     );
   });
+
+  it("uses a 12,000m lot and fixed KRW 410/m for pouch widths up to 50mm", () => {
+    const result = calculateGravureRollCost({
+      requiredLengthM: "11000",
+      materialWidthMm: "500",
+      pouchWidthMm: "50",
+      colors: 4,
+      quantity: "10000",
+      parameters: defaultGravureRollParameters(),
+    });
+
+    expect(result.smallWidthTier).toBe(true);
+    expect(result.orderPatternCount).toBe(1);
+    expect(result.deliverableLengthM).toBe("11000");
+    expect(result.productionLengthM).toBe("12000");
+    expect(result.lossLengthM).toBe("1000");
+    expect(result.materialCostYen).toBe("0");
+    expect(result.printingCostYen).toBe("0");
+    expect(result.laminationCostYen).toBe("0");
+    expect(result.manufacturerMarginCostYen).toBe("0");
+    expect(Number(result.filmCostYen)).toBeCloseTo(410 * 12000 * 100 / 850, 8);
+    expect(result.shippingTrips).toBe(22);
+  });
 });
