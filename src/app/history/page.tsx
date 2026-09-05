@@ -140,7 +140,7 @@ export default function QuotationHistoryPage() {
                   <td>{record.customerName || "-"}</td>
                   <td>{record.productName}<small>{record.sizeSummary}</small></td>
                   <td>{formatNumber(record.quantity, 0)} 枚</td>
-                  <td>{formatCurrency(record.pricePerPiece, 0)}</td>
+                  <td>{formatCurrency(record.pricePerPiece, 2)}</td>
                   <td>{formatCurrency(record.grandTotal, 0)}</td>
                   <td>
                     <select
@@ -176,6 +176,9 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
   const payloadEntries = Object.entries(record.payload);
   const recordEntries = Object.entries(record).filter(([key]) => key !== "payload");
   const amountDifference = analysis.grandTotal.minus(analysis.subtotal.plus(analysis.tax));
+  const displayedAdjustment = analysis.displayedAdjustment === "-"
+    ? "-"
+    : (analysis.displayedAdjustment !== "" ? formatCurrency(analysis.displayedAdjustment, 0) : "-");
 
   const rows = [
     { name: "充填・加工", cost: analysis.fillingCostUnit, selling: analysis.fillingUnit, profit: analysis.fillingUnit.minus(analysis.fillingCostUnit), quantity: `${formatNumber(analysis.quantity.toNumber(), 0)} 枚`, amount: analysis.fillingAmount },
@@ -196,13 +199,29 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
 
         <div className="detail-scroll">
           <section className="profit-kpis" aria-label="利益再計算">
-            <article><span>表示見積単価</span><strong>{formatCurrency(analysis.sellingUnit.toFixed(0), 0)}</strong><small>/枚</small></article>
+            <article><span>表示見積単価</span><strong>{formatCurrency(analysis.sellingUnit.toFixed(2), 2)}</strong><small>/枚</small></article>
             <article><span>総原価</span><strong>{formatCurrency(analysis.costUnit.toFixed(2), 2)}</strong><small>/枚</small></article>
             <article><span>利益 / 枚</span><strong>{formatCurrency(analysis.profitUnit.toFixed(2), 2)}</strong><small>{formatNumber(analysis.profitRate.toNumber(), 2)}%</small></article>
             <article><span>総利益（税抜）</span><strong>{formatCurrency(analysis.totalProfit.toFixed(0), 0)}</strong><small>{formatNumber(analysis.quantity.toNumber(), 0)}枚</small></article>
           </section>
 
           <details className="editor-group" open>
+            <summary>見積書表示値（DB snapshot）</summary>
+            <div className="detail-grid">
+              <div><span>お見積単価</span><strong>{formatCurrency(analysis.sellingUnit.toFixed(2), 2)} /枚</strong></div>
+              <div><span>充填・加工単価</span><strong>{formatCurrency(analysis.fillingUnit.toFixed(2), 2)}</strong></div>
+              <div><span>充填・加工金額</span><strong>{formatCurrency(analysis.fillingAmount.toFixed(0), 0)}</strong></div>
+              <div><span>フィルム m単価</span><strong>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toFixed(0), 0)} /m` : "-"}</strong></div>
+              <div><span>フィルム パウチ換算</span><strong>{formatCurrency(analysis.filmUnit.toFixed(2), 2)} /枚</strong></div>
+              <div><span>フィルム金額</span><strong>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</strong></div>
+              <div><span>端数調整</span><strong>{displayedAdjustment}</strong></div>
+              <div><span>小計（税抜）</span><strong>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</strong></div>
+              <div><span>消費税</span><strong>{formatCurrency(analysis.tax.toFixed(0), 0)}</strong></div>
+              <div><span>税込合計</span><strong>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</strong></div>
+            </div>
+          </details>
+
+          <details className="editor-group">
             <summary>原価・見積・利益の逆算明細</summary>
             <div className="detail-table-wrap">
               <table className="table">
@@ -228,7 +247,7 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
                     <td>{formatCurrency(analysis.profitUnit.toFixed(4), 4)}</td>
                     <td>{formatNumber(analysis.profitRate.toNumber(), 2)}%</td>
                     <td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td>
-                    <td>{formatCurrency(analysis.totalRevenue.toFixed(0), 0)}</td>
+                    <td>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -244,7 +263,7 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
             <div className="detail-grid">
               <div><span>原価 / 枚（充填＋フィルム）</span><strong>{formatCurrency(analysis.costUnit.toFixed(4), 4)}</strong></div>
               <div><span>自動目標利益率</span><strong>{formatNumber(analysis.targetMargin.times(100).toNumber(), 2)}%</strong></div>
-              <div><span>端数調整</span><strong>{formatCurrency(analysis.adjustment.toFixed(0), 0)}</strong></div>
+              <div><span>端数調整</span><strong>{displayedAdjustment}</strong></div>
               <div><span>小計（税抜）</span><strong>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</strong></div>
               <div><span>消費税（{formatNumber(analysis.taxRate.toNumber(), 2)}%）</span><strong>{formatCurrency(analysis.tax.toFixed(0), 0)}</strong></div>
               <div><span>税込合計</span><strong>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</strong></div>
@@ -265,7 +284,7 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
               <div><span>品名</span><strong>{record.productName}</strong></div>
               <div><span>仕様</span><strong>{record.sizeSummary}</strong></div>
               <div><span>フィルム構成</span><strong>{composition || DEFAULT_FILM_COMPOSITION}</strong></div>
-              <div><span>フィルム m単価</span><strong>{formatCurrency(analysis.filmMeterPrice.toFixed(0), 0)} /m</strong></div>
+              <div><span>フィルム m単価</span><strong>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toFixed(0), 0)} /m` : "-"}（見積表示）</strong></div>
               <div><span>フィルム発注長</span><strong>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</strong></div>
               <div><span>納期</span><strong>{record.deliveryDate || "-"}</strong></div>
               <div><span>支払条件</span><strong>{record.paymentTerms || "-"}</strong></div>

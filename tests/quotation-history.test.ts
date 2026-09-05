@@ -54,4 +54,46 @@ describe("quotation history analysis", () => {
       payload: { ...baseRecord.payload, filmComposition: "PET12/AL7" },
     })).toBe("PET12/AL7");
   });
+
+  it("uses the displayed-value snapshot without recomputing rounded quote lines", () => {
+    const analysis = analyzeQuotation({
+      ...baseRecord,
+      payload: {
+        ...baseRecord.payload,
+        quantity: "10000",
+        fillingCostPerPiece: "3",
+        filmCostPerPiece: "2",
+        pricePerPieceDisplay: "38.8",
+        fillingUnitDisplay: "16.3",
+        fillingAmountDisplay: "163000",
+        filmUnitDisplay: "450",
+        filmPouchUnitDisplay: "22.5",
+        filmAmountDisplay: "225000",
+        adjustmentDisplay: "-",
+        subtotalDisplay: "388000",
+        taxDisplay: "38800",
+        grandTotalDisplay: "426800",
+      },
+    });
+
+    expect(analysis.sellingUnit.toNumber()).toBe(38.8);
+    expect(analysis.fillingUnit.toNumber()).toBe(16.3);
+    expect(analysis.fillingAmount.toNumber()).toBe(163000);
+    expect(analysis.displayedFilmMeterUnit?.toNumber()).toBe(450);
+    expect(analysis.filmUnit.toNumber()).toBe(22.5);
+    expect(analysis.filmAmount.toNumber()).toBe(225000);
+    expect(analysis.adjustment.toNumber()).toBe(0);
+    expect(analysis.subtotal.toNumber()).toBe(388000);
+    expect(analysis.tax.toNumber()).toBe(38800);
+    expect(analysis.grandTotal.toNumber()).toBe(426800);
+  });
+
+  it("uses record totals as the display fallback for legacy payloads", () => {
+    const analysis = analyzeQuotation(baseRecord);
+
+    expect(analysis.sellingUnit.toNumber()).toBe(Number(baseRecord.pricePerPiece));
+    expect(analysis.subtotal.toNumber()).toBe(Number(baseRecord.subtotal));
+    expect(analysis.tax.toNumber()).toBe(Number(baseRecord.tax));
+    expect(analysis.grandTotal.toNumber()).toBe(Number(baseRecord.grandTotal));
+  });
 });

@@ -282,7 +282,7 @@ export default function PrintableQuotationPage() {
       const sellingUnit = D(shownTotals.pricePerPiece);
       const profitUnit = sellingUnit.minus(costUnit);
       const profitMargin = sellingUnit.gt(0) ? profitUnit.div(sellingUnit) : D(0);
-      const markupRate = costUnit.gt(0) ? sellingUnit.div(costUnit) : D(0);
+      const markupRate = costUnit.gt(0) ? profitUnit.div(costUnit) : D(0);
       const targetMargin = D(form.targetMargin);
       const profitAudit = {
         basis: "displayed-unit-price",
@@ -311,7 +311,23 @@ export default function PrintableQuotationPage() {
           grandTotal: shownTotals.grandTotal.toString(),
           calculationVersion: sourceVersion ? "simulator-linked" : "manual-entry",
           resultHash: sourceVersion,
-          payload: { ...form, resultHash: sourceVersion, profitAudit },
+          payload: {
+            ...form,
+            // 見積書に実際に表示された値を履歴用スナップショットとして固定する。
+            // 自動計算値はform上は空欄のため、表示用に確定した値を上書きする。
+            fillingUnitDisplay: shownTotals.fillingUnit,
+            fillingAmountDisplay: shownTotals.fillingAmount,
+            filmUnitDisplay: shownTotals.filmUnit,
+            filmPouchUnitDisplay: shownTotals.filmPouchUnit,
+            filmAmountDisplay: shownTotals.filmAmount,
+            adjustmentDisplay: shownTotals.adjustment,
+            pricePerPieceDisplay: shownTotals.pricePerPiece,
+            subtotalDisplay: shownTotals.subtotal,
+            taxDisplay: shownTotals.tax,
+            grandTotalDisplay: shownTotals.grandTotal,
+            resultHash: sourceVersion,
+            profitAudit,
+          },
         }),
       });
       const payload = await response.json();

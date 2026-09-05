@@ -40,7 +40,11 @@ export function analyzeQuotation(record: QuotationRecord) {
   const fillingUnit = editedNumber(payload.fillingUnitDisplay) ?? targetFillingUnit;
   const filmUnit = editedNumber(payload.filmPouchUnitDisplay) ?? targetFilmUnit;
   const displayedCostUnit = fillingUnit.plus(filmUnit);
-  const sellingUnit = editedNumber(payload.pricePerPieceDisplay) ?? displayedCostUnit;
+  // record側の単価・合計は保存時に見積書表示値として確定しているため、
+  // 旧payload（表示snapshotがない履歴）でも必ずrecord値をfallbackにする。
+  const sellingUnit = editedNumber(payload.pricePerPieceDisplay)
+    ?? editedNumber(record.pricePerPiece)
+    ?? displayedCostUnit;
   const profitUnit = sellingUnit.minus(costUnit);
   const profitRate = sellingUnit.gt(0) ? profitUnit.div(sellingUnit).times(100) : D(0);
   const markupRate = costUnit.gt(0) ? profitUnit.div(costUnit).times(100) : D(0);
@@ -49,11 +53,20 @@ export function analyzeQuotation(record: QuotationRecord) {
 
   const beforeAdjustment = sellingUnit.times(quantity);
   const automaticSubtotal = beforeAdjustment.floor();
-  const adjustment = editedNumber(payload.adjustmentDisplay) ?? automaticSubtotal.minus(beforeAdjustment);
-  const subtotal = editedNumber(payload.subtotalDisplay) ?? automaticSubtotal;
+  const adjustmentText = payload.adjustmentDisplay;
+  const adjustment = adjustmentText === "-"
+    ? D(0)
+    : editedNumber(payload.adjustmentDisplay) ?? automaticSubtotal.minus(beforeAdjustment);
+  const subtotal = editedNumber(payload.subtotalDisplay)
+    ?? editedNumber(record.subtotal)
+    ?? automaticSubtotal;
   const taxRate = positiveNumber(payload.taxRatePercent ?? record.taxRatePercent) ?? D(0);
-  const tax = editedNumber(payload.taxDisplay) ?? subtotal.times(taxRate.div(100)).toDecimalPlaces(0);
-  const grandTotal = editedNumber(payload.grandTotalDisplay) ?? subtotal.plus(tax);
+  const tax = editedNumber(payload.taxDisplay)
+    ?? editedNumber(record.tax)
+    ?? subtotal.times(taxRate.div(100)).toDecimalPlaces(0);
+  const grandTotal = editedNumber(payload.grandTotalDisplay)
+    ?? editedNumber(record.grandTotal)
+    ?? subtotal.plus(tax);
 
   const storedSellingUnit = storedNumber(record.pricePerPiece);
   const storedCostUnit = storedNumber(record.fillingCostPerPiece).plus(record.filmCostPerPiece);
@@ -70,6 +83,7 @@ export function analyzeQuotation(record: QuotationRecord) {
     quantity,
     fillingCostUnit,
     filmCostUnit,
+    displayedFilmMeterUnit: editedNumber(payload.filmUnitDisplay),
     filmMeterPrice: storedNumber(payload.filmMeterPrice ?? record.filmMeterPrice),
     filmOrderLength: storedNumber(payload.filmOrderLengthM ?? record.filmOrderLengthM),
     costUnit,
@@ -78,8 +92,9 @@ export function analyzeQuotation(record: QuotationRecord) {
     targetFilmUnit,
     fillingUnit,
     filmUnit,
-    fillingAmount: fillingUnit.times(quantity),
-    filmAmount: filmUnit.times(quantity),
+    displayedAdjustment: adjustmentText === "-" ? "-" : text(payload.adjustmentDisplay, ""),
+    fillingAmount: editedNumber(payload.fillingAmountDisplay) ?? fillingUnit.times(quantity),
+    filmAmount: editedNumber(payload.filmAmountDisplay) ?? filmUnit.times(quantity),
     sellingUnit,
     profitUnit,
     profitRate,
