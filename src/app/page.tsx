@@ -44,7 +44,7 @@ const parameterGroups = [
       { key: "setupTime", label: "段取り時間 (h)", value: (params: CostParameters) => params.setupTime },
       { key: "cleanupTime", label: "清掃時間 (h)", value: (params: CostParameters) => params.cleanupTime },
       { key: "customPouchCharge", label: "カスタム費用 (円)", value: (params: CostParameters) => params.customPouchCharge },
-      { key: "sellerProfitRate", label: "販売会社利益率 (%)", value: (params: CostParameters) => formatNumber(Number(params.sellerProfitRate) * 100, 3) },
+      { key: "sellerProfitRate", label: "供給価格調整率 (%)", value: (params: CostParameters) => formatNumber(Number(params.sellerProfitRate) * 100, 3) },
     ] as const,
   },
   {
@@ -625,6 +625,7 @@ export default function QuotationPage() {
                           .div(normalizedGravureParameters.krwPer100Yen);
                         const smallWidthManufacturingSaleYen = smallWidthYenPerMeter.times(f.orderLengthM);
                         const smallWidthShippingYen = D(f.overseasShipping);
+                        const smallWidthManufacturerSalePriceYen = smallWidthManufacturingSaleYen.plus(D(resultShown.sellerProfitCost));
                         return (
                           <>
                             {form.printingMethod === "gravure" ? (
@@ -638,22 +639,19 @@ export default function QuotationPage() {
                                 <p>③ 製作長 {formatNumber(f.orderLengthM)}m の中にロス {formatNumber(f.lossM)}m が含まれます。</p>
                                 {resultShown.gravure?.smallWidthTier ? (
                                   <>
-                                    <p>④-1 固定製造単価の円換算＝원{formatNumber(normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM)}/m × 100 ÷ {formatNumber(normalizedGravureParameters.krwPer100Yen)}＝<strong>{formatCurrency(smallWidthYenPerMeter.toString(), 4)} /m</strong></p>
-                                    <p>④-2 製造者販売価格＝원{formatNumber(normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM)}/m × {formatNumber(f.orderLengthM)}m＝원{formatNumber(D(normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM).times(f.orderLengthM).toString())}＝{formatCurrency(smallWidthManufacturingSaleYen.toString(), 2)}</p>
-                                    <p>④-3 通関料＝{formatCurrency(smallWidthManufacturingSaleYen.toString(), 2)} × {formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(f.customs))}</p>
-                                    <p>④-4 海外配送費＝{formatNumber(f.shippingTrips)}回 × {formatCurrency(displayAmount(smallWidthShippingYen.div(D(f.shippingTrips || 1)).toString()), 0)}＝{formatCurrency(displayAmount(f.overseasShipping))}</p>
-                                    <p>④-5 販売会社利益＝（{formatCurrency(smallWidthManufacturingSaleYen.toString(), 2)}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}）× {formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.sellerProfitCost))}</p>
-                                    <p>④-6 <strong>フィルム代合計</strong>＝{formatCurrency(smallWidthManufacturingSaleYen.toString(), 2)}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＋{formatCurrency(displayAmount(resultShown.sellerProfitCost))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は別計上します。</p>
+                                    <p>④-1 <strong>製造者販売価格</strong>＝{formatCurrency(smallWidthManufacturerSalePriceYen.toString(), 2)}</p>
+                                    <p>④-2 通関料＝{formatCurrency(displayAmount(f.customs))}</p>
+                                    <p>④-3 海外配送費＝{formatCurrency(displayAmount(f.overseasShipping))}</p>
+                                    <p>④-4 <strong>フィルム代合計</strong>＝{formatCurrency(smallWidthManufacturerSalePriceYen.toString(), 2)}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は別計上します。</p>
                                   </>
                                 ) : (
                                   <>
-                                    <p>④ <strong>フィルム代＝原材料費＋印刷費＋ラミネート費＋製造マージン＋通関料＋海外配送費＋販売会社利益</strong>＝{formatCurrency(displayAmount((resultShown.gravure?.materialCostYen ?? "0").toString()))}＋{formatCurrency(displayAmount(resultShown.gravure?.printingCostYen ?? "0"))}＋{formatCurrency(displayAmount(resultShown.gravure?.laminationCostYen ?? "0"))}＋{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＋{formatCurrency(displayAmount(resultShown.sellerProfitCost))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は色数×銅版幅×外径で別計上します。</p>
+                                    <p>④ <strong>フィルム代＝製造者販売価格＋通関料＋海外配送費</strong>＝{formatCurrency(displayAmount(D(f.filmTotal).minus(f.customs).minus(f.overseasShipping).toString()))}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は色数×銅版幅×外径で別計上します。</p>
                                     <p>⑤ 製造マージン＝フィルム製造原価 {formatCurrency(displayAmount((resultShown.gravure?.filmCostYen ?? "0").toString()))} × {formatNumber(Number(normalizedGravureParameters.manufacturerMarginRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}。通関料＝製造マージン込製造者販売価格 {formatCurrency(displayAmount(resultShown.gravure?.customsBaseCostYen ?? "0"))} × {formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.customsCostYen ?? "0"))} です。</p>
                                   </>
                                 )}
-                                <p>⑥ 販売会社利益＝フィルム費用基準 {formatCurrency(displayAmount(resultShown.sellerProfitBaseCost))} × {formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.sellerProfitCost))}。この金額はフィルム費用に含めます。</p>
                                 <p>⑦ 海外配送はロスを含めず、納品可能長基準で計算します。ceil(納品可能長 {formatNumber(f.effectiveLengthM)}m ÷ {formatNumber(normalizedGravureParameters.overseasShippingUnitM)}m)×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatNumber(f.shippingTrips)}回×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatCurrency(displayAmount(f.overseasShipping))}。この金額は上記のフィルムm単価に含めて表示します。</p>
-                                <p>⑧ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(resultShown.deliverablePatternLengthM ?? "1").times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
+                                <p>⑥ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(resultShown.deliverablePatternLengthM ?? "1").times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
                               </>
                             ) : (
                               <>
@@ -663,7 +661,6 @@ export default function QuotationPage() {
                                 <p>④ フィルムのロス {formatNumber(f.lossM)}m を差し引きます。ロスは{f.skuCosts.some((sku) => sku.multiplier === 2) ? "生産検討長さ（発注×2倍）" : "発注長さ"}の {formatNumber(Number(parameters.lossRate) * 100, 3)}% で、最低 {formatNumber(parameters.lossMinM)}m を保証します。差し引いたあとの有効長は {formatNumber(f.effectiveLengthM)}m です。</p>
                                 <p>⑤ 参考として、有効なフィルム長から作れる枚数は {formatNumber(f.actualQuantity)}枚 です。計算は「有効 {formatNumber(f.effectiveLengthM)}m ÷ ピッチ × 列数」で、価格計算は500枚単位の {formatNumber(f.pricingQuantity)}枚 を使います。</p>
                                 <p>⑥ <strong>見積書のフィルム単価は発注枚数基準</strong>です。計算式は「フィルム費用合計 ÷ 発注枚数 {formatNumber(resultShown.quantity)}枚」です。実際に作れる枚数との差（約{formatNumber(String(Math.max(0, Number(f.actualQuantity) - Number(resultShown.quantity))))}枚）は、発注者が負担する余剰生産分です。</p>
-                                <p>⑦ 販売会社利益＝フィルム費用基準 {formatCurrency(displayAmount(resultShown.sellerProfitBaseCost))} × {formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.sellerProfitCost))}。この金額はフィルム費用とm単価に含めます。</p>
                               </>
                             )}
                             {form.printingMethod !== "gravure" && f.skuCosts.some((sku) => sku.multiplier === 2) ? (
@@ -746,7 +743,7 @@ export default function QuotationPage() {
                       <tr><th scope="row">検品速度</th><td>{formatNumber(parameters.inspectionSpeed)} 枚/h</td><td>検品にかかる人件費を1枚あたりに割り当てるときの分母です。</td></tr>
                       <tr><th scope="row">段取り・清掃時間</th><td>{formatNumber(parameters.setupTime)}h ＋ {formatNumber(parameters.cleanupTime)}h</td><td>ロット開始前の準備と、終了後の清掃にかかる時間です。発注数量に関係なく、ロットごとに固定で発生します。</td></tr>
                       <tr><th scope="row">カスタム費用</th><td>{formatCurrency(displayAmount(parameters.customPouchCharge))}</td><td>カスタム区分を選択したときに、ロット1回だけ加算する費用です。</td></tr>
-                      <tr><th scope="row">販売会社利益率</th><td>{formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%</td><td>フィルム費用に対して加算し、Seven化学向けの取得原価に含めます。</td></tr>
+                      <tr><th scope="row">供給価格調整率</th><td>{formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%</td><td>製造者販売価格に反映します。</td></tr>
                     </tbody></table>
                     <p>① 年間減価償却費＝設備取得価額÷耐用年数＝{formatCurrency(displayAmount(machineBreakdown.acquisitionCostYen))}÷{formatNumber(machineBreakdown.usefulLifeYears)}年＝{annualDepreciation ? formatCurrency(displayAmount(annualDepreciation.toString())) : "-"} /年（定額法・残存価額0）</p>
                     <p>② 年間電気代＝年間使用電力量×電力単価＝{formatNumber(machineBreakdown.annualElectricityKwh)}kWh×{formatNumber(machineBreakdown.electricityUnitPriceYen)}円/kWh＝{annualElectricity ? formatCurrency(displayAmount(annualElectricity.toString())) : "-"} /年（月{annualElectricity ? formatCurrency(displayAmount(annualElectricity.div(12).toString())) : "-"}）</p>
@@ -756,7 +753,6 @@ export default function QuotationPage() {
                     <p>変動加工費＝人件費×(生産時間＋検品時間)＋機械チャージ×生産時間＝{formatNumber(parameters.laborPerHour)}×({resultShown ? formatNumber(resultShown.productionHours) : "-"}＋{resultShown ? formatNumber(resultShown.inspectionHours) : "-"})h＋{formatNumber(parameters.machineChargePerHour)}×{resultShown ? formatNumber(resultShown.productionHours) : "-"}h</p>
                     <p>ロット固定＝({formatNumber(parameters.setupTime)}＋{formatNumber(parameters.cleanupTime)})h×({formatNumber(parameters.laborPerHour)}＋{formatNumber(parameters.machineChargePerHour)})円/h</p>
                     <p>カスタム費用＝{form.custom ? formatCurrency(displayAmount(parameters.customPouchCharge)) : "0"}（カスタム区分時のみ）</p>
-                    <p>販売会社利益＝フィルム費用 {formatCurrency(displayAmount(resultShown.sellerProfitBaseCost))} × {formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.sellerProfitCost))}（フィルム費用に含む）。</p>
                     <p>総原価＝フィルム＋バルク＋変動加工＋ロット固定</p>
                     <p>販売単価＝総原価/枚÷(1−利益率)</p>
                   </div>
