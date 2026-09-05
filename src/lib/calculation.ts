@@ -250,8 +250,8 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
   const filmCostWithSellerProfit = sellerProfitBaseCost.plus(sellerProfitCost);
   const filmWithSellerProfit: FilmCostResult = {
     ...filmWithSkus,
-    filmBaseCost: filmCostWithSellerProfit.toString(),
-    unitPrice: filmCostWithSellerProfit.div(filmWithSkus.orderLengthM).toString(),
+    filmBaseCost: filmWithSkus.filmBaseCost,
+    unitPrice: filmWithSkus.unitPrice,
     filmTotal: filmCostWithSellerProfit.toString(),
     filmCostPerPiece: filmCostWithSellerProfit.div(quantityD).toString(),
   };

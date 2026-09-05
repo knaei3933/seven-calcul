@@ -175,8 +175,8 @@ describe("multi-SKU film aggregation", () => {
     expect(result.film.skuCosts[0].appliedBand).toBe("571to740");
     expect(Number(result.film.lossM)).toBeCloseTo(120, 6);
     expect(result.film.pricingQuantity).toBe("65000");
-    expect(result.film.unitPrice).toBe("466");
-    expect(result.film.filmBaseCost).toBe("279600");
+    expect(result.film.unitPrice).toBe("365");
+    expect(result.film.filmBaseCost).toBe("219000");
   });
 
   it("keeps 35mm sizes on 356mm single production at or below 900m", () => {
@@ -190,7 +190,7 @@ describe("multi-SKU film aggregation", () => {
     expect(result.film.orderLengthM).toBe("500");
     expect(result.film.skuCosts[0].multiplier).toBe(1);
     expect(result.film.skuCosts[0].appliedBand).toBe("lte570");
-    expect(result.film.unitPrice).toBe("364.4");
+    expect(result.film.unitPrice).toBe("328");
   });
 
   it("aggregates rounded SKU order lengths, losses, and priceable quantities", () => {
@@ -209,8 +209,8 @@ describe("multi-SKU film aggregation", () => {
     const spec = { ...baseSpec, skuCount: 1 };
     const fourColors = calculatePouchCost({ spec: { ...spec, colorCount: 4 }, quantity: "10000", printingMethod: "digital", parameters: { sellerProfitRate: "0" } });
     const eightColors = calculatePouchCost({ spec: { ...spec, colorCount: 8 }, quantity: "10000", printingMethod: "digital", parameters: { sellerProfitRate: "0" } });
-    expect(fourColors.film.filmBaseCost).toBe("182200");
-    expect(eightColors.film.filmBaseCost).toBe("182200");
+    expect(fourColors.film.filmBaseCost).toBe("164000");
+    expect(eightColors.film.filmBaseCost).toBe("164000");
     expect(fourColors.audit.inputJsonSha256).not.toBe(eightColors.audit.inputJsonSha256);
   });
 
@@ -222,8 +222,8 @@ describe("multi-SKU film aggregation", () => {
       parameters: { sellerProfitRate: "0" },
     });
     expect(result.audit.digitalFilmPriceMode).toBe("common_fallback");
-    expect(result.film.unitPrice).toBe("364.4");
-    expect(result.film.filmBaseCost).toBe("182200");
+    expect(result.film.unitPrice).toBe("328");
+    expect(result.film.filmBaseCost).toBe("164000");
   });
 });
 

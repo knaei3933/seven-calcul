@@ -610,6 +610,9 @@ export default function QuotationPage() {
                             <tr><td>国内配送</td><td>{formatCurrency(displayAmount(parameters.domesticShippingPerTrip))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.domesticShipping))}</td></tr>
                             <tr><td>海外配送</td><td>{formatCurrency(displayAmount(parameters.overseasShippingPerTrip))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.overseasShipping))}</td></tr>
                             <tr><td>通関料</td><td>—</td><td>—</td><td>{formatCurrency(displayAmount(resultShown.film.customs))}</td></tr>
+                            <tr><td>小計（Excel基準）</td><td>—</td><td>—</td><td>{formatCurrency(displayAmount(D(resultShown.film.filmBaseCost).plus(resultShown.film.domesticShipping).plus(resultShown.film.overseasShipping).plus(resultShown.film.customs).toString()))}</td></tr>
+                            <tr><td>供給価格調整</td><td>{formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%</td><td>—</td><td>{formatCurrency(displayAmount(resultShown.sellerProfitCost))}</td></tr>
+                            <tr><td><strong>フィルム費用合計</strong></td><td>—</td><td>—</td><td><strong>{formatCurrency(displayAmount(resultShown.costComponents.film))}</strong></td></tr>
                           </>
                         ) : (
                           null
