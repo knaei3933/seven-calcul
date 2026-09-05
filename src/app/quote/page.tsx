@@ -365,31 +365,31 @@ export default function PrintableQuotationPage() {
     if (!totals) return null;
     const roundUnit = (value: typeof totals.pricePerPiece) => value.toDecimalPlaces(2, Decimal.ROUND_UP);
     const totalPriceInput = parseDecimal(form.pricePerPieceDisplay) ?? totals.pricePerPiece;
-    let effectiveFillingUnit = roundUnit(totals.fillingSellingUnit);
-    let effectiveFilmUnit = roundUnit(totals.filmSellingUnit);
-
-    if (isFiniteNumber(form.pricePerPieceDisplay) && !totalPriceInput.eq(effectiveFillingUnit.plus(effectiveFilmUnit))) {
-      const fillingShare = totals.pricePerPiece.gt(0)
-        ? totals.fillingSellingUnit.div(totals.pricePerPiece)
-        : D(0);
-      effectiveFillingUnit = roundUnit(totalPriceInput.times(fillingShare));
-      effectiveFilmUnit = roundUnit(totalPriceInput.minus(effectiveFillingUnit));
-    }
-
+    const effectiveFillingUnit = roundUnit(totals.fillingSellingUnit);
     const fillingUnit = parseDecimal(form.fillingUnitDisplay) ?? effectiveFillingUnit;
-    const filmPouchUnit = parseDecimal(form.filmPouchUnitDisplay) ?? effectiveFilmUnit;
     const fillingAmount = parseDecimal(form.fillingAmountDisplay) ?? fillingUnit.times(totals.quantity);
-    const filmAmount = parseDecimal(form.filmAmountDisplay) ?? filmPouchUnit.times(totals.quantity);
+    const targetTotal = totalPriceInput.times(totals.quantity);
+    const automaticFilmAmount = totals.filmSellingUnit.times(totals.quantity)
+      .div(totals.filmOrderLength)
+      .toDecimalPlaces(0, Decimal.ROUND_UP)
+      .times(totals.filmOrderLength);
+    const filmAmount = isFiniteNumber(form.pricePerPieceDisplay)
+      ? Decimal.max(targetTotal.minus(fillingAmount), 0)
+      : parseDecimal(form.filmAmountDisplay) ?? automaticFilmAmount;
+    const filmMeterUnit = parseDecimal(form.filmUnitDisplay)
+      ?? (totals.filmOrderLength.gt(0) ? filmAmount.div(totals.filmOrderLength) : D(0));
+    const filmPouchUnit = parseDecimal(form.filmPouchUnitDisplay)
+      ?? (totals.quantity.gt(0) ? filmAmount.div(totals.quantity) : D(0));
     const lineTotal = fillingAmount.plus(filmAmount);
     const subtotal = parseDecimal(form.subtotalDisplay) ?? lineTotal;
     const tax = parseDecimal(form.taxDisplay) ?? subtotal.times(totals.taxRate).toDecimalPlaces(0);
     const grandTotal = parseDecimal(form.grandTotalDisplay) ?? subtotal.plus(tax);
 
     return {
-      pricePerPiece: effectiveFillingUnit.plus(effectiveFilmUnit).toString(),
+      pricePerPiece: (totals.quantity.gt(0) ? lineTotal.div(totals.quantity) : D(0)).toString(),
       fillingUnit: fillingUnit.toString(),
       fillingAmount: fillingAmount.toString(),
-      filmUnit: (parseDecimal(form.filmUnitDisplay) ?? totals.filmMeterDisplayUnit).toString(),
+      filmUnit: filmMeterUnit.toString(),
       filmPouchUnit: filmPouchUnit.toString(),
       filmAmount: filmAmount.toString(),
       filmOrderLength: totals.filmOrderLength.toString(),
@@ -435,63 +435,83 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.pricePerPiece ?? "0"));
       return;
     }
-    const subtotal = price.times(quantity).floor();
-    const tax = subtotal.times(D(form.taxRatePercent).div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-    applyPatch({
-      pricePerPieceDisplay: price.toString(),
-      fillingUnitDisplay: "",
-      fillingAmountDisplay: "",
-      filmPouchUnitDisplay: "",
-      filmAmountDisplay: "",
-      adjustmentDisplay: "",
-      subtotalDisplay: subtotal.toString(),
-      taxDisplay: tax.toString(),
-      grandTotalDisplay: subtotal.plus(tax).toString(),
-    });
+    const fillingUnit = D(shownTotals!.fillingUnit);
+    const fillingAmount = fillingUnit.times(quantity);
+    const filmAmount = Decimal.max(price.times(quantity).minus(fillingAmount), 0);
+    applyLineTotals(fillingUnit, filmAmount);
   };
 
-  const commitLineUnit = (line: "filling" | "film", raw: string, node: HTMLElement) => {
+  const applyLineTotals = (fillingUnit: Decimal, filmAmount: Decimal) => {
     const quantity = parseDecimal(form.quantity);
-    const unit = parseDisplayedNumber(raw);
-    if (!shownTotals || !quantity || !quantity.gt(0) || unit === null || unit.lt(0)) {
-      rejectInvalidNumber(node, moneyDisplay(line === "filling" ? shownTotals?.fillingUnit ?? "0" : shownTotals?.filmPouchUnit ?? "0"));
-      return;
-    }
-    const fillingUnit = line === "filling" ? unit : D(shownTotals.fillingUnit);
-    const filmUnit = line === "film" ? unit : D(shownTotals.filmPouchUnit);
+    const orderLength = parseDecimal(form.filmOrderLengthM);
+    if (!quantity || !quantity.gt(0) || !orderLength || !orderLength.gt(0)) return;
     const fillingAmount = fillingUnit.times(quantity);
-    const filmAmount = filmUnit.times(quantity);
-    const price = fillingUnit.plus(filmUnit);
-    const subtotal = price.times(quantity).floor();
+    const filmMeterUnit = filmAmount.div(orderLength);
+    const filmPouchUnit = filmAmount.div(quantity);
+    const lineTotal = fillingAmount.plus(filmAmount);
+    const price = lineTotal.div(quantity);
+    const subtotal = lineTotal;
     const tax = subtotal.times(D(form.taxRatePercent).div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-    const filmMeterUnit = line === "film"
-      ? quantity.gt(0) && parseDecimal(form.filmOrderLengthM)
-        ? unit.times(parseDecimal(form.filmOrderLengthM)!).div(quantity)
-        : D(form.filmMeterPrice)
-      : D(form.filmMeterPrice);
-
     applyPatch({
       pricePerPieceDisplay: price.toString(),
       fillingUnitDisplay: fillingUnit.toString(),
       fillingAmountDisplay: fillingAmount.toString(),
       filmUnitDisplay: filmMeterUnit.toString(),
-      filmPouchUnitDisplay: filmUnit.toString(),
+      filmPouchUnitDisplay: filmPouchUnit.toString(),
       filmAmountDisplay: filmAmount.toString(),
-      adjustmentDisplay: subtotal.minus(fillingAmount).minus(filmAmount).toString(),
+      adjustmentDisplay: "-",
       subtotalDisplay: subtotal.toString(),
       taxDisplay: tax.toString(),
       grandTotalDisplay: subtotal.plus(tax).toString(),
     });
   };
 
-  const commitLineAmount = (line: "filling" | "film", raw: string, node: HTMLElement) => {
+  const commitFillingUnit = (raw: string, node: HTMLElement) => {
+    const unit = parseDisplayedNumber(raw);
+    if (!shownTotals || unit === null || unit.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.fillingUnit ?? "0", undefined, 2));
+      return;
+    }
+    applyLineTotals(unit, D(shownTotals.filmAmount));
+  };
+
+  const commitFillingAmount = (raw: string, node: HTMLElement) => {
     const quantity = parseDecimal(form.quantity);
     const amount = parseDisplayedNumber(raw);
     if (!shownTotals || !quantity || !quantity.gt(0) || amount === null || amount.lt(0)) {
-      rejectInvalidNumber(node, moneyDisplay(line === "filling" ? shownTotals?.fillingAmount ?? "0" : shownTotals?.filmAmount ?? "0"));
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.fillingAmount ?? "0"));
       return;
     }
-    void commitLineUnit(line, amount.div(quantity).toString(), node);
+    commitFillingUnit(amount.div(quantity).toString(), node);
+  };
+
+  const commitFilmMeterUnit = (raw: string, node: HTMLElement) => {
+    const orderLength = parseDecimal(form.filmOrderLengthM);
+    const meterUnit = parseDisplayedNumber(raw);
+    if (!shownTotals || !orderLength || !orderLength.gt(0) || meterUnit === null || meterUnit.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmUnit ?? "0"));
+      return;
+    }
+    applyLineTotals(D(shownTotals.fillingUnit), meterUnit.times(orderLength));
+  };
+
+  const commitFilmPouchUnit = (raw: string, node: HTMLElement) => {
+    const quantity = parseDecimal(form.quantity);
+    const pouchUnit = parseDisplayedNumber(raw);
+    if (!shownTotals || !quantity || !quantity.gt(0) || pouchUnit === null || pouchUnit.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmPouchUnit ?? "0", undefined, 2));
+      return;
+    }
+    applyLineTotals(D(shownTotals.fillingUnit), pouchUnit.times(quantity));
+  };
+
+  const commitFilmAmount = (raw: string, node: HTMLElement) => {
+    const amount = parseDisplayedNumber(raw);
+    if (!shownTotals || amount === null || amount.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmAmount ?? "0"));
+      return;
+    }
+    applyLineTotals(D(shownTotals.fillingUnit), amount);
   };
 
   const commitSheetSubtotal = (raw: string, node: HTMLElement) => {
@@ -501,26 +521,11 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.subtotal ?? "0"));
       return;
     }
-    const oldPrice = D(shownTotals.pricePerPiece);
-    const newPrice = subtotal.div(quantity);
-    const scale = oldPrice.gt(0) ? newPrice.div(oldPrice) : D(1);
-    const fillingUnit = D(shownTotals.fillingUnit).times(scale);
-    const filmUnit = D(shownTotals.filmPouchUnit).times(scale);
-    const fillingAmount = fillingUnit.times(quantity);
-    const filmAmount = filmUnit.times(quantity);
-    const tax = subtotal.times(D(form.taxRatePercent).div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-
-    applyPatch({
-      pricePerPieceDisplay: newPrice.toString(),
-      fillingUnitDisplay: fillingUnit.toString(),
-      fillingAmountDisplay: fillingAmount.toString(),
-      filmPouchUnitDisplay: filmUnit.toString(),
-      filmAmountDisplay: filmAmount.toString(),
-      adjustmentDisplay: subtotal.minus(fillingAmount).minus(filmAmount).toString(),
-      subtotalDisplay: subtotal.toString(),
-      taxDisplay: tax.toString(),
-      grandTotalDisplay: subtotal.plus(tax).toString(),
-    });
+    const oldLineTotal = D(shownTotals.fillingAmount).plus(shownTotals.filmAmount);
+    const fillingShare = oldLineTotal.gt(0) ? D(shownTotals.fillingAmount).div(oldLineTotal) : D(1);
+    const fillingAmount = subtotal.times(fillingShare);
+    const filmAmount = Decimal.max(subtotal.minus(fillingAmount), 0);
+    applyLineTotals(quantity.gt(0) ? fillingAmount.div(quantity) : D(0), filmAmount);
   };
 
   const commitSheetTax = (raw: string, node: HTMLElement) => {
@@ -572,18 +577,6 @@ export default function PrintableQuotationPage() {
       grandTotalDisplay: "",
     });
   };
-
-  const commitFilmMeterUnit = (raw: string, node: HTMLElement) => {
-    const meterUnit = parseDisplayedNumber(raw);
-    const quantity = parseDecimal(form.quantity);
-    const orderLength = parseDecimal(form.filmOrderLengthM);
-    if (!shownTotals || meterUnit === null || meterUnit.lt(0) || !quantity || !quantity.gt(0) || !orderLength || orderLength.lte(0)) {
-      rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmUnit ?? form.filmMeterPrice));
-      return;
-    }
-    commitLineUnit("film", meterUnit.times(orderLength).div(quantity).toString(), node);
-  };
-
 
   return (
     <main className={`quote-page ${mobileDrawer ? `drawer-open drawer-${mobileDrawer}` : ""}`}>
@@ -692,23 +685,22 @@ export default function PrintableQuotationPage() {
                       <strong><EditableText value={form.fillingItemName} label="充填・加工項目名" onCommit={(next) => update("fillingItemName", next.trim())} /></strong>
                       <small><EditableText value={form.fillingItemDescription} label="充填・加工説明" multiline onCommit={(next) => update("fillingItemDescription", next)} /></small>
                     </td>
-                    <td data-testid="filling-unit-price"><EditableText value={moneyDisplay(shownTotals.fillingUnit, form.fillingUnitDisplay, 2)} label="充填・加工単価" className="money" onCommit={(next, node) => commitLineUnit("filling", next, node)} /></td>
+                    <td data-testid="filling-unit-price"><EditableText value={moneyDisplay(shownTotals.fillingUnit, form.fillingUnitDisplay, 2)} label="充填・加工単価" className="money" onCommit={commitFillingUnit} /></td>
                     <td><EditableText value={numberDisplay(form.quantity)} label="充填・加工数量" className="money" onCommit={commitQuantity} /> 枚</td>
-                    <td><EditableText value={moneyDisplay(shownTotals.fillingAmount, form.fillingAmountDisplay)} label="充填・加工金額" className="money" onCommit={(next, node) => commitLineAmount("filling", next, node)} /></td>
+                    <td><EditableText value={moneyDisplay(shownTotals.fillingAmount, form.fillingAmountDisplay)} label="充填・加工金額" className="money" onCommit={commitFillingAmount} /></td>
                   </tr>
                   <tr>
                     <td>
                       <strong><EditableText value={form.filmItemName} label="フィルム項目名" onCommit={(next) => update("filmItemName", next.trim())} /></strong>
                       <small><EditableText value={form.filmItemDescription} label="フィルム説明" multiline onCommit={(next) => update("filmItemDescription", next)} /></small>
                       <small className="film-composition" data-testid="film-composition">構成：<EditableText value={form.filmComposition || DEFAULT_FILM_COMPOSITION} label="フィルム構成" onCommit={(next) => update("filmComposition", next.trim())} /></small>
-                      <small data-testid="film-order-summary">材料参考 <EditableText value={moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay)} label="フィルムm単価" className="money" onCommit={commitFilmMeterUnit} /> /m × <span data-testid="film-order-length"><EditableText value={numberDisplay(shownTotals.filmOrderLength, form.filmOrderLengthM)} label="フィルム発注長さ" onCommit={(next) => update("filmOrderLengthM", parseDisplayedNumber(next)?.toString() ?? form.filmOrderLengthM)} /> m</span></small>
                     </td>
                     <td>
-                      <strong data-testid="film-pouch-price"><EditableText value={moneyDisplay(shownTotals.filmPouchUnit, form.filmPouchUnitDisplay, 2)} label="フィルムパウチ換算単価" className="money" onCommit={(next, node) => commitLineUnit("film", next, node)} /> /枚</strong>
-                      <small data-testid="film-meter-price">材料参考 <EditableText value={moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay)} label="フィルムm単価" className="money" onCommit={commitFilmMeterUnit} /> /m</small>
+                      <strong data-testid="film-meter-price"><EditableText value={moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay)} label="フィルム販売m単価" className="money" onCommit={commitFilmMeterUnit} /> /m</strong>
+                      <small data-testid="film-pouch-price">パウチ換算 <EditableText value={moneyDisplay(shownTotals.filmPouchUnit, form.filmPouchUnitDisplay, 2)} label="フィルムパウチ換算単価" className="money" onCommit={(next, node) => commitFilmPouchUnit(next, node)} /> /枚</small>
                     </td>
-                    <td><EditableText value={numberDisplay(form.quantity)} label="フィルム数量" className="money" onCommit={commitQuantity} /> 枚</td>
-                    <td><EditableText value={moneyDisplay(shownTotals.filmAmount, form.filmAmountDisplay)} label="フィルム金額" className="money" onCommit={(next, node) => commitLineAmount("film", next, node)} /></td>
+                    <td><span data-testid="film-order-length"><EditableText value={numberDisplay(shownTotals.filmOrderLength, form.filmOrderLengthM)} label="フィルム発注長さ" onCommit={(next) => update("filmOrderLengthM", parseDisplayedNumber(next)?.toString() ?? form.filmOrderLengthM)} /> m</span></td>
+                    <td><EditableText value={moneyDisplay(shownTotals.filmAmount, form.filmAmountDisplay)} label="フィルム金額" className="money" onCommit={commitFilmAmount} /></td>
                   </tr>
                   <tr>
                     <td>
@@ -841,10 +833,10 @@ export default function PrintableQuotationPage() {
           <label>フィルム 項目名<input value={form.filmItemName} onChange={(event) => update("filmItemName", event.target.value)} /></label>
           <label className="wide">フィルム 説明<textarea rows={2} value={form.filmItemDescription} onChange={(event) => update("filmItemDescription", event.target.value)} /></label>
           <label className="wide">フィルム構成<input value={form.filmComposition} onChange={(event) => update("filmComposition", event.target.value)} placeholder={DEFAULT_FILM_COMPOSITION} /></label>
-          <label>フィルム m単価<input inputMode="decimal" value={form.filmMeterPrice} onChange={(event) => update("filmMeterPrice", event.target.value)} /></label>
+          <label>フィルム 仕入m単価（参考）<input inputMode="decimal" value={form.filmMeterPrice} onChange={(event) => update("filmMeterPrice", event.target.value)} /></label>
           <label>フィルム発注長さ (m)<input inputMode="decimal" value={form.filmOrderLengthM} onChange={(event) => update("filmOrderLengthM", event.target.value)} /></label>
-          <label>フィルム m単価表示（空欄=自動）<input inputMode="decimal" value={form.filmUnitDisplay} onChange={(event) => update("filmUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>フィルム パウチ換算（空欄=自動）<input inputMode="decimal" value={form.filmPouchUnitDisplay} onChange={(event) => update("filmPouchUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
+          <label>フィルム 販売m単価（空欄=自動）<input inputMode="decimal" value={form.filmUnitDisplay} onChange={(event) => update("filmUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
+          <label>フィルム パウチ換算（参考・空欄=自動）<input inputMode="decimal" value={form.filmPouchUnitDisplay} onChange={(event) => update("filmPouchUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>フィルム 金額（空欄=自動）<input inputMode="decimal" value={form.filmAmountDisplay} onChange={(event) => update("filmAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>端数調整 項目名<input value={form.roundingItemName} onChange={(event) => update("roundingItemName", event.target.value)} /></label>
           <label className="wide">端数調整 説明<textarea rows={2} value={form.roundingItemDescription} onChange={(event) => update("roundingItemDescription", event.target.value)} /></label>
