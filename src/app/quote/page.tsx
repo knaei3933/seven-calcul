@@ -627,7 +627,8 @@ export default function PrintableQuotationPage() {
           <div className="side-body">{renderEditorGroups("left")}</div>
         </aside>
 
-        <article className="a4-sheet" aria-label="お見積書A4プレビュー" id="quote-preview">
+        <div className="sheet-scroll">
+          <article className="a4-sheet" aria-label="お見積書A4プレビュー" id="quote-preview">
           <header className="sheet-header">
             <div className="issuer">
               <div className="issuer-logo">
@@ -775,7 +776,8 @@ export default function PrintableQuotationPage() {
               <span className="seal" aria-hidden="true"><EditableText value={form.sealText} label="社内判文言" onCommit={(next) => update("sealText", next.trim())} /></span>
             </div>
           </footer>
-        </article>
+          </article>
+        </div>
 
         <aside
           className="panel quote-side quote-side-right no-print"
