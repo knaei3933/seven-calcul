@@ -89,7 +89,7 @@ export default function QuotationPage() {
     ],
   });
   const [parameters, setParameters] = useState<CostParameters>(defaultParameters);
-  const [gravureParameters, setGravureParameters] = useState<GravureRollParameters>(() => ({ ...defaultGravureRollParameters() }));
+  const [gravureParameters, setGravureParameters] = useState<GravureRollParameters>(() => normalizeGravureParameters(defaultGravureRollParameters()));
   const [machineBreakdown, setMachineBreakdown] = useState({ ...MACHINE_BREAKDOWN_DEFAULTS });
   type ServerCalculation = { result: ReturnType<typeof calculatePouchCost>; inputSha256: string };
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
@@ -129,12 +129,13 @@ export default function QuotationPage() {
     ? form.skus.reduce((total, sku) => total + (isNumericInput(sku.quantity) && isNumericInput(sku.fillMl) ? Number(sku.quantity) * Number(sku.fillMl) : 0), 0) / skuQuantitySum
     : 0;
   const skuDisplayName = (index: number) => form.skus[index]?.name.trim() || `充填物${index + 1}`;
+  const normalizedGravureParameters = normalizeGravureParameters(gravureParameters);
   const positive = customDimensionsValid
     && isPositiveDecimalInput(form.quantity)
     && isPositiveDecimalInput(form.lanes)
     && isNonNegativeDecimalInput(form.bulkPrice)
     && positiveParameters(parameters)
-    && (form.printingMethod !== "gravure" || positiveGravureParameters(gravureParameters))
+    && (form.printingMethod !== "gravure" || positiveGravureParameters(normalizedGravureParameters))
     && skuQuantitiesValid;
   const colorPriceUnapplied = true;
   const taxRoundingUnconfirmed = !TAX_ROUNDING_CONFIRMED;
@@ -190,8 +191,8 @@ export default function QuotationPage() {
     printingMethod: form.printingMethod,
     targetMargins: targetMarginList,
     parameters,
-    gravureParameters,
-  }), [spec, form.quantity, form.printingMethod, targetMarginList, parameters, gravureParameters]);
+    gravureParameters: normalizedGravureParameters,
+  }), [spec, form.quantity, form.printingMethod, targetMarginList, parameters, normalizedGravureParameters]);
 
   const provisionalResult = useMemo(() => {
     if (blocker) return null;
@@ -435,20 +436,20 @@ export default function QuotationPage() {
                   {form.printingMethod === "gravure" ? (
                     <fieldset className="parameter-group" data-testid="gravure-parameters">
                       <legend>グラビアロール</legend>
-                      <label className="parameter-label">PET 単価 (円/kg)<input inputMode="decimal" value={gravureParameters.petUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, petUnitPriceYenPerKg: e.target.value }))} /></label>
-                      <label className="parameter-label">AL 単価 (円/kg)<input inputMode="decimal" value={gravureParameters.alUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, alUnitPriceYenPerKg: e.target.value }))} /></label>
-                      <label className="parameter-label">LLDPE 単価 (円/kg)<input inputMode="decimal" value={gravureParameters.lldpeUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, lldpeUnitPriceYenPerKg: e.target.value }))} /></label>
-                      <label className="parameter-label">印刷単価 (円/m)<input inputMode="decimal" value={gravureParameters.printingUnitPriceYenPerM} onChange={(e) => setGravureParameters((old) => ({ ...old, printingUnitPriceYenPerM: e.target.value }))} /></label>
-                      <label className="parameter-label">ラミ単価 AL有 (円/m)<input inputMode="decimal" value={gravureParameters.laminationUnitPriceYenPerMWithAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithAl: e.target.value }))} /></label>
-                      <label className="parameter-label">ラミ単価 AL無 (円/m)<input inputMode="decimal" value={gravureParameters.laminationUnitPriceYenPerMWithoutAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithoutAl: e.target.value }))} /></label>
-                      <label className="parameter-label">新規銅版単価 (円)<input inputMode="decimal" value={gravureParameters.newCopperPlateUnitPriceYen} onChange={(e) => setGravureParameters((old) => ({ ...old, newCopperPlateUnitPriceYen: e.target.value }))} /></label>
-                      <label className="parameter-label">発注パターン (m)<input inputMode="decimal" readOnly value={formatNumber(gravureParameters.deliverablePatternLengthM)} /></label>
-                      <label className="parameter-label">製作ロット (m)<input inputMode="decimal" readOnly value={formatNumber(gravureParameters.productionPatternLengthM)} /></label>
-                      <label className="parameter-label">海外配送単位 (m)<input inputMode="decimal" value={gravureParameters.overseasShippingUnitM} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingUnitM: e.target.value }))} /></label>
-                      <label className="parameter-label">海外配送費 / 回 (円)<input inputMode="decimal" value={gravureParameters.overseasShippingPerTripYen} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingPerTripYen: e.target.value }))} /></label>
-                      <label className="parameter-label">製造マージン率 (%)<input inputMode="decimal" value={formatNumber(Number(gravureParameters.manufacturerMarginRate) * 100, 3)} onChange={(e) => setGravureParameters((old) => ({ ...old, manufacturerMarginRate: formatNumber(Number(e.target.value) / 100, 6) }))} /></label>
-                      <label className="parameter-label">관세율 (%)<input inputMode="decimal" value={formatNumber(Number(gravureParameters.customsRate) * 100, 3)} onChange={(e) => setGravureParameters((old) => ({ ...old, customsRate: formatNumber(Number(e.target.value) / 100, 6) }))} /></label>
-                      <label className="parameter-label">為替 (100円=원)<input inputMode="decimal" value={gravureParameters.krwPer100Yen} onChange={(e) => setGravureParameters((old) => ({ ...old, krwPer100Yen: e.target.value }))} /></label>
+                      <label className="parameter-label">PET 単価 (円/kg)<input inputMode="decimal" value={normalizedGravureParameters.petUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, petUnitPriceYenPerKg: e.target.value }))} /></label>
+                      <label className="parameter-label">AL 単価 (円/kg)<input inputMode="decimal" value={normalizedGravureParameters.alUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, alUnitPriceYenPerKg: e.target.value }))} /></label>
+                      <label className="parameter-label">LLDPE 単価 (円/kg)<input inputMode="decimal" value={normalizedGravureParameters.lldpeUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, lldpeUnitPriceYenPerKg: e.target.value }))} /></label>
+                      <label className="parameter-label">印刷単価 (円/m)<input inputMode="decimal" value={normalizedGravureParameters.printingUnitPriceYenPerM} onChange={(e) => setGravureParameters((old) => ({ ...old, printingUnitPriceYenPerM: e.target.value }))} /></label>
+                      <label className="parameter-label">ラミ単価 AL有 (円/m)<input inputMode="decimal" value={normalizedGravureParameters.laminationUnitPriceYenPerMWithAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithAl: e.target.value }))} /></label>
+                      <label className="parameter-label">ラミ単価 AL無 (円/m)<input inputMode="decimal" value={normalizedGravureParameters.laminationUnitPriceYenPerMWithoutAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithoutAl: e.target.value }))} /></label>
+                      <label className="parameter-label">新規銅版単価 (円)<input inputMode="decimal" value={normalizedGravureParameters.newCopperPlateUnitPriceYen} onChange={(e) => setGravureParameters((old) => ({ ...old, newCopperPlateUnitPriceYen: e.target.value }))} /></label>
+                      <label className="parameter-label">発注パターン (m)<input inputMode="decimal" readOnly value={formatNumber(normalizedGravureParameters.deliverablePatternLengthM)} /></label>
+                      <label className="parameter-label">製作ロット (m)<input inputMode="decimal" readOnly value={formatNumber(normalizedGravureParameters.productionPatternLengthM)} /></label>
+                      <label className="parameter-label">海外配送単位 (m)<input inputMode="decimal" value={normalizedGravureParameters.overseasShippingUnitM} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingUnitM: e.target.value }))} /></label>
+                      <label className="parameter-label">海外配送費 / 回 (円)<input inputMode="decimal" value={normalizedGravureParameters.overseasShippingPerTripYen} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingPerTripYen: e.target.value }))} /></label>
+                      <label className="parameter-label">製造マージン率 (%)<input inputMode="decimal" value={formatNumber(Number(normalizedGravureParameters.manufacturerMarginRate) * 100, 3)} onChange={(e) => setGravureParameters((old) => ({ ...old, manufacturerMarginRate: formatNumber(Number(e.target.value) / 100, 6) }))} /></label>
+                      <label className="parameter-label">관세율 (%)<input inputMode="decimal" value={formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 3)} onChange={(e) => setGravureParameters((old) => ({ ...old, customsRate: formatNumber(Number(e.target.value) / 100, 6) }))} /></label>
+                      <label className="parameter-label">為替 (100円=원)<input inputMode="decimal" value={normalizedGravureParameters.krwPer100Yen} onChange={(e) => setGravureParameters((old) => ({ ...old, krwPer100Yen: e.target.value }))} /></label>
                       <p className="help">初期値は100円=850원で換算しました。固定構成は PET12+AL7+PET12+LLDPE50 です。</p>
                     </fieldset>
                   ) : null}
@@ -581,8 +582,8 @@ export default function QuotationPage() {
                                 <p>② 5,500m発注パターンへ切り上げます。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
                                 <p>③ 製作6,000mの中にロス500mが含まれます。このロットのグラビアロスは {formatNumber(f.lossM)}m です。</p>
                                 <p>④ <strong>フィルム代＝原材料費＋印刷費＋ラミネート費＋製造マージン＋通関料＋海外配送費</strong>＝{formatCurrency(displayAmount((resultShown.gravure?.materialCostYen ?? "0").toString()))}＋{formatCurrency(displayAmount(resultShown.gravure?.printingCostYen ?? "0"))}＋{formatCurrency(displayAmount(resultShown.gravure?.laminationCostYen ?? "0"))}＋{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は色数×銅版幅×外径で別計上します。</p>
-                                <p>⑤ 製造マージン＝フィルム製造原価 {formatCurrency(displayAmount((resultShown.gravure?.filmCostYen ?? "0").toString()))} × {formatNumber(Number(gravureParameters.manufacturerMarginRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}。通関料＝製造マージン込製造者販売価格 {formatCurrency(displayAmount(resultShown.gravure?.customsBaseCostYen ?? "0"))} × {formatNumber(Number(gravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.customsCostYen ?? "0"))} です。</p>
-                                <p>⑥ 海外配送はロス500mを含めず、納品可能長基準で計算します。ceil(納品可能長 {formatNumber(f.effectiveLengthM)}m ÷ {formatNumber(gravureParameters.overseasShippingUnitM)}m)×{formatCurrency(displayAmount(gravureParameters.overseasShippingPerTripYen))}＝{formatNumber(f.shippingTrips)}回×{formatCurrency(displayAmount(gravureParameters.overseasShippingPerTripYen))}＝{formatCurrency(displayAmount(f.overseasShipping))}。この金額は上記のフィルムm単価に含めて表示します。</p>
+                                <p>⑤ 製造マージン＝フィルム製造原価 {formatCurrency(displayAmount((resultShown.gravure?.filmCostYen ?? "0").toString()))} × {formatNumber(Number(normalizedGravureParameters.manufacturerMarginRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}。通関料＝製造マージン込製造者販売価格 {formatCurrency(displayAmount(resultShown.gravure?.customsBaseCostYen ?? "0"))} × {formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.customsCostYen ?? "0"))} です。</p>
+                                <p>⑥ 海外配送はロス500mを含めず、納品可能長基準で計算します。ceil(納品可能長 {formatNumber(f.effectiveLengthM)}m ÷ {formatNumber(normalizedGravureParameters.overseasShippingUnitM)}m)×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatNumber(f.shippingTrips)}回×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatCurrency(displayAmount(f.overseasShipping))}。この金額は上記のフィルムm単価に含めて表示します。</p>
                                 <p>⑦ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(resultShown.deliverablePatternLengthM ?? "1").times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
                               </>
                             ) : (
@@ -609,7 +610,7 @@ export default function QuotationPage() {
                       <table className="table breakdown-table">
                         <thead><tr><th scope="col">項目</th><th scope="col">計算</th><th scope="col">金額</th></tr></thead>
                         <tbody>
-                          <tr><td>新規銅版</td><td>色数 × (原反幅+100mm) × ¥{formatNumber(gravureParameters.newCopperPlateUnitPriceYen)} × 42cm</td><td>{formatCurrency(displayAmount(resultShown.costComponents.copperPlate))}</td></tr>
+                          <tr><td>新規銅版</td><td>色数 × (原反幅+100mm) × ¥{formatNumber(normalizedGravureParameters.newCopperPlateUnitPriceYen)} × 42cm</td><td>{formatCurrency(displayAmount(resultShown.costComponents.copperPlate))}</td></tr>
                         </tbody>
                       </table>
                       <p className="chain">常に新規銅版を作成する前提です。版費はロット固定費として全発注数量に配賦します。</p>
@@ -775,7 +776,15 @@ function resizeSkus(form: { skus: SkuEntry[]; quantity: string }, count: number)
     colorCount: template?.colorCount ?? "4",
   }).map((sku, index2) => ({ ...sku, quantity: quantities[index2] ?? sku.quantity }));
 }
-function isNumericInput(value: string) { return value.trim() !== "" && Number.isFinite(Number(value)); }
+function isNumericInput(value: string) { return typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)); }
+function normalizeGravureParameters(value?: Partial<GravureRollParameters> | null): GravureRollParameters {
+  const defaults = defaultGravureRollParameters();
+  return (Object.keys(defaults) as (keyof GravureRollParameters)[]).reduce<GravureRollParameters>((normalized, key) => {
+    const candidate = value?.[key];
+    normalized[key] = typeof candidate === "string" ? candidate : defaults[key];
+    return normalized;
+  }, { ...defaults });
+}
 function machineBreakdownBasisValid(basis: Record<MachineBreakdownKey, string>) {
   return Object.entries(basis).every(([key, value]) => isNumericInput(value) && (key === "usefulLifeYears" || key === "annualOperatingHours" ? Number(value) > 0 : Number(value) >= 0));
 }
