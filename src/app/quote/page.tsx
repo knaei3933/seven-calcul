@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { D, Decimal, parseDecimal } from "@/lib/decimal";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
@@ -587,18 +586,6 @@ export default function PrintableQuotationPage() {
 
   return (
     <main className={`quote-page ${mobileDrawer ? `drawer-open drawer-${mobileDrawer}` : ""}`}>
-      <nav className="top-menu" aria-label="メインメニュー">
-        <div className="menu-brand">
-          <span className="logo-mark" aria-hidden="true">7</span>
-          <span>セブン化学 <small>Quotation Suite</small></span>
-        </div>
-        <div className="menu-links">
-          <Link href="/">原価シミュレーター</Link>
-          <Link href="/quote" aria-current="page">見積書発行</Link>
-          <Link href="/history">見積履歴</Link>
-        </div>
-      </nav>
-
       <section className="panel quote-toolbar" aria-labelledby="quote-toolbar-title">
         <div>
           <h1 id="quote-toolbar-title">見積書発行</h1>

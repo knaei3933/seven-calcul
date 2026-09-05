@@ -2,7 +2,6 @@
 
 import { createHash } from "node:crypto";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { calculatePouchCost } from "@/lib/calculation";
 import { defaultParameters, machineChargeBasis, sizeMaster } from "@/lib/constants";
 import { displayAmount } from "@/lib/calculation";
@@ -270,14 +269,6 @@ export default function QuotationPage() {
       <div className="app-shell">
         <header className="app-header">
           <div><h1>パウチ参考原価・販売価格シミュレーター</h1><p>販売数量は連結後パウチ「枚」、充填は区画「室」で計算します。</p></div>
-          <div className="header-tools">
-            <nav className="top-menu compact" aria-label="メインメニュー">
-              <Link href="/" aria-current="page">原価シミュレーター</Link>
-              <Link href="/quote">見積書発行</Link>
-              <Link href="/history">見積履歴</Link>
-            </nav>
-            <span className="version-badge">Decimal計算コア 2026-09.1</span>
-          </div>
         </header>
         <form onSubmit={submit} className="layout" noValidate data-testid="quotation-form" data-state={staleResult ? "stale" : "current"}>
           <section className="panel" aria-labelledby="input-title">

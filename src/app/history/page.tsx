@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { analyzeQuotation, filmCompositionOf } from "@/lib/quotation-history";
@@ -91,18 +90,6 @@ export default function QuotationHistoryPage() {
 
   return (
     <main className="history-page">
-      <nav className="top-menu page-menu" aria-label="メインメニュー">
-        <div className="menu-brand">
-          <span className="logo-mark" aria-hidden="true">7</span>
-          <span>セブン化学 <small>Quotation Suite</small></span>
-        </div>
-        <div className="menu-links">
-          <Link href="/">原価シミュレーター</Link>
-          <Link href="/quote">見積書発行</Link>
-          <Link href="/history" aria-current="page">見積履歴</Link>
-        </div>
-      </nav>
-
       <section className="panel history-toolbar" aria-labelledby="history-title">
         <div>
           <h1 id="history-title">見積履歴（SQLite）</h1>
