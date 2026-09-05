@@ -21,6 +21,8 @@ export const GRAVURE_ROLL_DEFAULTS_KRW = {
   copperPlateMinimumDiameterMm: "420",
   deliverablePatternLengthM: "5500",
   productionPatternLengthM: "6000",
+  overseasShippingUnitM: "500",
+  overseasShippingPerTripYen: "11000",
   krwPer100Yen: "850",
 } as const;
 
@@ -39,6 +41,8 @@ export interface GravureRollParameters {
   copperPlateMinimumDiameterMm: string;
   deliverablePatternLengthM: string;
   productionPatternLengthM: string;
+  overseasShippingUnitM: string;
+  overseasShippingPerTripYen: string;
   krwPer100Yen: string;
 }
 
@@ -57,6 +61,8 @@ export function defaultGravureRollParameters(): GravureRollParameters {
     copperPlateMinimumDiameterMm: GRAVURE_ROLL_DEFAULTS_KRW.copperPlateMinimumDiameterMm,
     deliverablePatternLengthM: GRAVURE_ROLL_DEFAULTS_KRW.deliverablePatternLengthM,
     productionPatternLengthM: GRAVURE_ROLL_DEFAULTS_KRW.productionPatternLengthM,
+    overseasShippingUnitM: GRAVURE_ROLL_DEFAULTS_KRW.overseasShippingUnitM,
+    overseasShippingPerTripYen: GRAVURE_ROLL_DEFAULTS_KRW.overseasShippingPerTripYen,
     krwPer100Yen: GRAVURE_ROLL_DEFAULTS_KRW.krwPer100Yen,
   };
 }
@@ -82,6 +88,8 @@ export interface GravureRollCostResult {
   printingCostYen: string;
   laminationCostYen: string;
   filmCostYen: string;
+  overseasShippingCostYen: string;
+  shippingTrips: number;
   copperPlateCostYen: string;
   totalGravureCostYen: string;
   filmCostPerPieceYen: string;
@@ -200,6 +208,11 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
     ), D(0));
   const laminationCost = widthM.times(productionLengthM).times(layers.length - 1).times(params.laminationUnitPriceYenPerMWithAl);
   const filmCostYen = materialCost.plus(printingCost).plus(laminationCost);
+  const shippingTrips = Decimal.max(
+    1,
+    productionLengthM.div(D(params.overseasShippingUnitM)).toDecimalPlaces(0, Decimal.ROUND_CEIL).toNumber(),
+  ).toNumber();
+  const overseasShippingCostYen = D(shippingTrips).times(params.overseasShippingPerTripYen);
   const plateWidthCm = materialWidthMm.plus(D(params.copperPlateWidthExtraMm)).div(10);
   const plateDiameterCm = D(params.copperPlateMinimumDiameterMm).div(10);
   const copperPlateCostYen = colors.times(plateWidthCm).times(params.newCopperPlateUnitPriceYen).times(plateDiameterCm);
@@ -224,9 +237,11 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
     printingCostYen: printingCost.toString(),
     laminationCostYen: laminationCost.toString(),
     filmCostYen: filmCostYen.toString(),
+    overseasShippingCostYen: overseasShippingCostYen.toString(),
+    shippingTrips,
     copperPlateCostYen: copperPlateCostYen.toString(),
-    totalGravureCostYen: filmCostYen.plus(copperPlateCostYen).toString(),
-    filmCostPerPieceYen: quantity.gt(0) ? filmCostYen.div(quantity).toString() : "0",
+    totalGravureCostYen: filmCostYen.plus(overseasShippingCostYen).plus(copperPlateCostYen).toString(),
+    filmCostPerPieceYen: quantity.gt(0) ? filmCostYen.plus(overseasShippingCostYen).div(quantity).toString() : "0",
     copperPlateCostPerPieceYen: quantity.gt(0) ? copperPlateCostYen.div(quantity).toString() : "0",
     recommendedQuantity: recommendedQuantity.toString(),
     recommendedQuantityUtilization: utilization.toString(),

@@ -444,6 +444,8 @@ export default function QuotationPage() {
                       <label className="parameter-label">新規銅版単価 (円)<input inputMode="decimal" value={gravureParameters.newCopperPlateUnitPriceYen} onChange={(e) => setGravureParameters((old) => ({ ...old, newCopperPlateUnitPriceYen: e.target.value }))} /></label>
                       <label className="parameter-label">発注パターン (m)<input inputMode="decimal" readOnly value={formatNumber(gravureParameters.deliverablePatternLengthM)} /></label>
                       <label className="parameter-label">製作ロット (m)<input inputMode="decimal" readOnly value={formatNumber(gravureParameters.productionPatternLengthM)} /></label>
+                      <label className="parameter-label">海外配送単位 (m)<input inputMode="decimal" value={gravureParameters.overseasShippingUnitM} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingUnitM: e.target.value }))} /></label>
+                      <label className="parameter-label">海外配送費 / 回 (円)<input inputMode="decimal" value={gravureParameters.overseasShippingPerTripYen} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingPerTripYen: e.target.value }))} /></label>
                       <label className="parameter-label">為替 (100円=원)<input inputMode="decimal" value={gravureParameters.krwPer100Yen} onChange={(e) => setGravureParameters((old) => ({ ...old, krwPer100Yen: e.target.value }))} /></label>
                       <p className="help">初期値は100円=850원で換算しました。固定構成は PET12+AL7+PET12+LLDPE50 です。</p>
                     </fieldset>
@@ -553,7 +555,7 @@ export default function QuotationPage() {
                     <table className="table breakdown-table">
                       <thead><tr><th scope="col">項目</th><th scope="col">単価</th><th scope="col">数量</th><th scope="col">金額</th></tr></thead>
                       <tbody>
-                        <tr><td>フィルム代</td><td>{formatCurrency(displayAmount(resultShown.film.unitPrice))} /m</td><td>{formatNumber(resultShown.film.orderLengthM)} m</td><td>{formatCurrency(displayAmount(resultShown.film.filmBaseCost))}</td></tr>
+                        <tr><td>フィルム代</td><td>{formatCurrency(displayAmount(resultShown.film.unitPrice))} /m</td><td>{formatNumber(resultShown.film.orderLengthM)} m</td><td>{formatCurrency(displayAmount(form.printingMethod === "gravure" ? resultShown.film.filmTotal : resultShown.film.filmBaseCost))}</td></tr>
                         {form.printingMethod !== "gravure" ? (
                           <>
                             <tr><td>国内配送</td><td>{formatCurrency(displayAmount(parameters.domesticShippingPerTrip))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.domesticShipping))}</td></tr>
@@ -562,9 +564,7 @@ export default function QuotationPage() {
                           </>
                         ) : (
                           <>
-                            <tr><td>原材料費</td><td>—</td><td>{formatNumber(resultShown.film.orderLengthM)} m</td><td>{formatCurrency(displayAmount(resultShown.gravure?.materialCostYen ?? "0"))}</td></tr>
-                            <tr><td>印刷費</td><td>{formatCurrency(displayAmount(gravureParameters.printingUnitPriceYenPerM))} /m・色</td><td>SKU別</td><td>{formatCurrency(displayAmount(resultShown.gravure?.printingCostYen ?? "0"))}</td></tr>
-                            <tr><td>ラミネート費</td><td>{formatCurrency(displayAmount(gravureParameters.laminationUnitPriceYenPerMWithAl))} /m</td><td>3回</td><td>{formatCurrency(displayAmount(resultShown.gravure?.laminationCostYen ?? "0"))}</td></tr>
+                            <tr><td>海外配送（フィルム代に含む）</td><td>{formatCurrency(displayAmount(gravureParameters.overseasShippingPerTripYen))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.overseasShipping))}</td></tr>
                           </>
                         )}
                       </tbody>
@@ -580,8 +580,9 @@ export default function QuotationPage() {
                                 <p>① 必要納品長は合計 {formatNumber(f.requiredLengthM)}m です。</p>
                                 <p>② 5,500m発注パターンへ切り上げます。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
                                 <p>③ 製作6,000mの中にロス500mが含まれます。このロットのグラビアロスは {formatNumber(f.lossM)}m です。</p>
-                                <p>④ 原材料・印刷・ラミネートは製作長 {formatNumber(f.orderLengthM)}m 分で計算し、銅版費は色数×銅版幅×外径で別計上します。</p>
-                                <p>⑤ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(resultShown.deliverablePatternLengthM ?? "1").times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
+                                <p>④ <strong>フィルム代＝原材料費＋印刷費＋ラミネート費＋海外配送費</strong>＝{formatCurrency(displayAmount((resultShown.gravure?.materialCostYen ?? "0").toString()))}＋{formatCurrency(displayAmount(resultShown.gravure?.printingCostYen ?? "0"))}＋{formatCurrency(displayAmount(resultShown.gravure?.laminationCostYen ?? "0"))}＋{formatCurrency(displayAmount(f.overseasShipping))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は色数×銅版幅×外径で別計上します。</p>
+                                <p>⑤ 海外配送＝ceil(製作長 {formatNumber(f.orderLengthM)}m ÷ {formatNumber(gravureParameters.overseasShippingUnitM)}m)×{formatCurrency(displayAmount(gravureParameters.overseasShippingPerTripYen))}＝{formatNumber(f.shippingTrips)}回×{formatCurrency(displayAmount(gravureParameters.overseasShippingPerTripYen))}＝{formatCurrency(displayAmount(f.overseasShipping))}。</p>
+                                <p>⑥ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(resultShown.deliverablePatternLengthM ?? "1").times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
                               </>
                             ) : (
                               <>
@@ -811,6 +812,8 @@ function positiveGravureParameters(parameters: GravureRollParameters) {
     && positive(parameters.copperPlateMinimumDiameterMm)
     && positive(parameters.deliverablePatternLengthM)
     && positive(parameters.productionPatternLengthM)
+    && positive(parameters.overseasShippingUnitM)
+    && nonNegative(parameters.overseasShippingPerTripYen)
     && positive(parameters.krwPer100Yen);
 }
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) { return <div className="field"><label htmlFor={htmlFor}>{label}</label>{children}</div>; }

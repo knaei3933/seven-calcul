@@ -50,6 +50,8 @@ export interface CostResult {
     printingCostYen: string;
     laminationCostYen: string;
     filmCostYen: string;
+    overseasShippingCostYen: string;
+    shippingTrips: number;
     copperPlateCostYen: string;
     finalHeatSealWidthMm: string;
   };
@@ -188,14 +190,14 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
         effectiveLengthM: gravureRoll.deliverableLengthM,
         actualQuantity: quantityD.toString(),
         pricingQuantity: quantityD.toString(),
-        unitPrice: D(gravureRoll.filmCostYen).div(gravureRoll.productionLengthM).toString(),
+        unitPrice: D(gravureRoll.filmCostYen).plus(gravureRoll.overseasShippingCostYen).div(gravureRoll.productionLengthM).toString(),
         filmBaseCost: gravureRoll.filmCostYen,
         domesticShipping: "0",
-        overseasShipping: "0",
+        overseasShipping: gravureRoll.overseasShippingCostYen,
         customs: "0",
-        filmTotal: gravureRoll.filmCostYen,
+        filmTotal: D(gravureRoll.filmCostYen).plus(gravureRoll.overseasShippingCostYen).toString(),
         filmCostPerPiece: gravureRoll.filmCostPerPieceYen,
-        shippingTrips: "0",
+        shippingTrips: gravureRoll.shippingTrips.toString(),
         orderAdjustment,
         skuCosts: [],
       }
@@ -300,6 +302,8 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
         printingCostYen: gravureRoll.printingCostYen,
         laminationCostYen: gravureRoll.laminationCostYen,
         filmCostYen: gravureRoll.filmCostYen,
+        overseasShippingCostYen: gravureRoll.overseasShippingCostYen,
+        shippingTrips: gravureRoll.shippingTrips,
         copperPlateCostYen: gravureRoll.copperPlateCostYen,
         finalHeatSealWidthMm: gravureRoll.finalHeatSealWidthMm,
       },

@@ -43,4 +43,23 @@ describe("gravure roll calculation", () => {
     expect(Number(jpy.filmCostYen)).toBeCloseTo(Number(krw.filmCostKRW) * 100 / 850, 4);
     expect(Number(jpy.copperPlateCostYen)).toBeCloseTo(Number(krw.copperPlateCostKRW) * 100 / 850, 4);
   });
+
+  it("includes overseas shipping at 500m units and ¥11,000 per trip", () => {
+    const result = calculateGravureRollCost({
+      ...baseInput,
+      quantity: "10000",
+      parameters: defaultGravureRollParameters(),
+    });
+
+    expect(result.shippingTrips).toBe(12);
+    expect(result.overseasShippingCostYen).toBe("132000");
+    expect(Number(result.filmCostPerPieceYen)).toBeCloseTo(
+      (Number(result.filmCostYen) + 132000) / 10000,
+      8,
+    );
+    expect(Number(result.totalGravureCostYen)).toBeCloseTo(
+      Number(result.filmCostYen) + 132000 + Number(result.copperPlateCostYen),
+      8,
+    );
+  });
 });

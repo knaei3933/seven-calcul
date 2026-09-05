@@ -217,7 +217,13 @@ describe("gravure roll integration", () => {
     expect(result.deliverablePatternLengthM).toBe("5500");
     expect(result.film.orderLengthM).toBe("6000");
     expect(result.film.lossM).toBe("500");
-    expect(result.film.filmTotal).toBe(result.gravure?.filmCostYen);
+    expect(result.film.shippingTrips).toBe("12");
+    expect(result.film.overseasShipping).toBe(result.gravure?.overseasShippingCostYen);
+    expect(Number(result.film.filmTotal)).toBeCloseTo(
+      Number(result.gravure?.filmCostYen) + Number(result.gravure?.overseasShippingCostYen),
+      8,
+    );
+    expect(Number(result.film.overseasShipping)).toBe(132000);
     expect(Number(result.copperPlateCost)).toBeGreaterThan(0);
     expect(result.costComponents.copperPlate).toBe(result.copperPlateCost);
     expect(result.costPerPieceComponents.copperPlate).toBe(result.copperPlateCostPerPiece);
