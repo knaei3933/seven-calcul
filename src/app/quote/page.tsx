@@ -216,6 +216,7 @@ export default function PrintableQuotationPage() {
 
   const saveToHistory = async () => {
     if (!totals) return false;
+    if (!shownTotals) return false;
     setSaving(true);
     setSaveError("");
     try {
@@ -225,10 +226,10 @@ export default function PrintableQuotationPage() {
         body: JSON.stringify({
           ...form,
           status: "draft",
-          pricePerPiece: totals.pricePerPiece.toString(),
-          subtotal: totals.subtotal.toString(),
-          tax: totals.tax.toString(),
-          grandTotal: totals.grandTotal.toString(),
+          pricePerPiece: shownTotals.pricePerPiece.toString(),
+          subtotal: shownTotals.subtotal.toString(),
+          tax: shownTotals.tax.toString(),
+          grandTotal: shownTotals.grandTotal.toString(),
           calculationVersion: sourceVersion ? "simulator-linked" : "manual-entry",
           resultHash: sourceVersion,
           payload: { ...form, resultHash: sourceVersion },
@@ -284,25 +285,53 @@ export default function PrintableQuotationPage() {
       filmAmount: filmSellingUnit.times(quantity),
       subtotal,
       tax,
+      taxRate,
       grandTotal: subtotal.plus(tax),
     };
   })();
 
-  const shownTotals = totals ? {
-    pricePerPiece: editedNumber(form.pricePerPieceDisplay, totals.pricePerPiece.toString()),
-    fillingUnit: editedNumber(form.fillingUnitDisplay, totals.fillingSellingUnit.toString()),
-    fillingAmount: editedNumber(form.fillingAmountDisplay, totals.fillingAmount.toString()),
-    filmUnit: editedNumber(form.filmUnitDisplay, totals.filmMeterDisplayUnit.toString()),
-    filmPouchUnit: editedNumber(form.filmPouchUnitDisplay, totals.filmSellingUnit.toString()),
-    filmAmount: editedNumber(form.filmAmountDisplay, totals.filmAmount.toString()),
-    filmOrderLength: totals.filmOrderLength.toString(),
-    adjustment: isFiniteNumber(form.adjustmentDisplay)
-      ? form.adjustmentDisplay.trim()
-      : (totals.roundingAdjustment.abs().lt(1) ? "-" : totals.roundingAdjustment.toString()),
-    subtotal: editedNumber(form.subtotalDisplay, totals.subtotal.toString()),
-    tax: editedNumber(form.taxDisplay, totals.tax.toString()),
-    grandTotal: editedNumber(form.grandTotalDisplay, totals.grandTotal.toString()),
-  } : null;
+  const shownTotals = (() => {
+    if (!totals) return null;
+    const requestedPrice = editedNumber(form.pricePerPieceDisplay, totals.pricePerPiece.toString());
+    const totalPrice = D(requestedPrice);
+    let effectiveFillingUnit = totals.fillingSellingUnit;
+    let effectiveFilmUnit = totals.filmSellingUnit;
+
+    if (isFiniteNumber(form.pricePerPieceDisplay) && !totalPrice.eq(totals.pricePerPiece)) {
+      const fillingShare = totals.pricePerPiece.gt(0)
+        ? totals.fillingSellingUnit.div(totals.pricePerPiece)
+        : D(0);
+      effectiveFillingUnit = totalPrice.times(fillingShare);
+      effectiveFilmUnit = totalPrice.minus(effectiveFillingUnit);
+    }
+
+    const fillingUnit = D(editedNumber(form.fillingUnitDisplay, effectiveFillingUnit.toString()));
+    const filmPouchUnit = D(editedNumber(form.filmPouchUnitDisplay, effectiveFilmUnit.toString()));
+    const fillingAmount = D(editedNumber(form.fillingAmountDisplay, fillingUnit.times(totals.quantity).toString()));
+    const filmAmount = D(editedNumber(form.filmAmountDisplay, filmPouchUnit.times(totals.quantity).toString()));
+    const subtotalBeforeAdjustment = totalPrice.times(totals.quantity);
+    const subtotal = D(editedNumber(form.subtotalDisplay, subtotalBeforeAdjustment.floor().toString()));
+    const tax = D(editedNumber(form.taxDisplay, subtotal.times(totals.taxRate).toDecimalPlaces(0).toString()));
+    const grandTotal = D(editedNumber(form.grandTotalDisplay, subtotal.plus(tax).toString()));
+
+    return {
+      pricePerPiece: totalPrice.toString(),
+      fillingUnit: fillingUnit.toString(),
+      fillingAmount: fillingAmount.toString(),
+      filmUnit: editedNumber(form.filmUnitDisplay, totals.filmMeterDisplayUnit.toString()),
+      filmPouchUnit: filmPouchUnit.toString(),
+      filmAmount: filmAmount.toString(),
+      filmOrderLength: totals.filmOrderLength.toString(),
+      adjustment: isFiniteNumber(form.adjustmentDisplay)
+        ? form.adjustmentDisplay.trim()
+        : (subtotalBeforeAdjustment.floor().minus(subtotalBeforeAdjustment).abs().lt(1)
+          ? "-"
+          : subtotalBeforeAdjustment.floor().minus(subtotalBeforeAdjustment).toString()),
+      subtotal: subtotal.toString(),
+      tax: tax.toString(),
+      grandTotal: grandTotal.toString(),
+    };
+  })();
 
 
   return (
