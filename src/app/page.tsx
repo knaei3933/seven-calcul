@@ -447,9 +447,7 @@ export default function QuotationPage() {
                       <label className="parameter-label">海外配送単位 (m)<input inputMode="decimal" value={gravureParameters.overseasShippingUnitM} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingUnitM: e.target.value }))} /></label>
                       <label className="parameter-label">海外配送費 / 回 (円)<input inputMode="decimal" value={gravureParameters.overseasShippingPerTripYen} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingPerTripYen: e.target.value }))} /></label>
                       <label className="parameter-label">製造マージン率 (%)<input inputMode="decimal" value={formatNumber(Number(gravureParameters.manufacturerMarginRate) * 100, 3)} onChange={(e) => setGravureParameters((old) => ({ ...old, manufacturerMarginRate: formatNumber(Number(e.target.value) / 100, 6) }))} /></label>
-                      <label className="parameter-label">通関料閾値 (円)<input inputMode="decimal" value={gravureParameters.customsThresholdYen} onChange={(e) => setGravureParameters((old) => ({ ...old, customsThresholdYen: e.target.value }))} /></label>
-                      <label className="parameter-label">通関料 / 回 (円)<input inputMode="decimal" value={gravureParameters.customsPerTripYen} onChange={(e) => setGravureParameters((old) => ({ ...old, customsPerTripYen: e.target.value }))} /></label>
-                      <label className="parameter-label">閾値超過時通関料 (円)<input inputMode="decimal" value={gravureParameters.customsHighChargeYen} onChange={(e) => setGravureParameters((old) => ({ ...old, customsHighChargeYen: e.target.value }))} /></label>
+                      <label className="parameter-label">관세율 (%)<input inputMode="decimal" value={formatNumber(Number(gravureParameters.customsRate) * 100, 3)} onChange={(e) => setGravureParameters((old) => ({ ...old, customsRate: formatNumber(Number(e.target.value) / 100, 6) }))} /></label>
                       <label className="parameter-label">為替 (100円=원)<input inputMode="decimal" value={gravureParameters.krwPer100Yen} onChange={(e) => setGravureParameters((old) => ({ ...old, krwPer100Yen: e.target.value }))} /></label>
                       <p className="help">初期値は100円=850원で換算しました。固定構成は PET12+AL7+PET12+LLDPE50 です。</p>
                     </fieldset>
@@ -583,7 +581,7 @@ export default function QuotationPage() {
                                 <p>② 5,500m発注パターンへ切り上げます。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
                                 <p>③ 製作6,000mの中にロス500mが含まれます。このロットのグラビアロスは {formatNumber(f.lossM)}m です。</p>
                                 <p>④ <strong>フィルム代＝原材料費＋印刷費＋ラミネート費＋製造マージン＋通関料＋海外配送費</strong>＝{formatCurrency(displayAmount((resultShown.gravure?.materialCostYen ?? "0").toString()))}＋{formatCurrency(displayAmount(resultShown.gravure?.printingCostYen ?? "0"))}＋{formatCurrency(displayAmount(resultShown.gravure?.laminationCostYen ?? "0"))}＋{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は色数×銅版幅×外径で別計上します。</p>
-                                <p>⑤ 製造マージン＝フィルム製造原価 {formatCurrency(displayAmount((resultShown.gravure?.filmCostYen ?? "0").toString()))} × {formatNumber(Number(gravureParameters.manufacturerMarginRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}。通関料＝製造マージン込 {formatCurrency(displayAmount(resultShown.gravure?.customsBaseCostYen ?? "0"))} が閾値 {formatCurrency(displayAmount(gravureParameters.customsThresholdYen))} を{D(resultShown.gravure?.customsBaseCostYen ?? "0").gt(gravureParameters.customsThresholdYen) ? "超えるため" : "下回るため"} {formatCurrency(displayAmount(D(resultShown.gravure?.customsBaseCostYen ?? "0").gt(gravureParameters.customsThresholdYen) ? gravureParameters.customsHighChargeYen : D(f.shippingTrips).times(gravureParameters.customsPerTripYen).toString()))} です。</p>
+                                <p>⑤ 製造マージン＝フィルム製造原価 {formatCurrency(displayAmount((resultShown.gravure?.filmCostYen ?? "0").toString()))} × {formatNumber(Number(gravureParameters.manufacturerMarginRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}。通関料＝製造マージン込製造者販売価格 {formatCurrency(displayAmount(resultShown.gravure?.customsBaseCostYen ?? "0"))} × {formatNumber(Number(gravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.customsCostYen ?? "0"))} です。</p>
                                 <p>⑥ 海外配送はロス500mを含めず、納品可能長基準で計算します。ceil(納品可能長 {formatNumber(f.effectiveLengthM)}m ÷ {formatNumber(gravureParameters.overseasShippingUnitM)}m)×{formatCurrency(displayAmount(gravureParameters.overseasShippingPerTripYen))}＝{formatNumber(f.shippingTrips)}回×{formatCurrency(displayAmount(gravureParameters.overseasShippingPerTripYen))}＝{formatCurrency(displayAmount(f.overseasShipping))}。この金額は上記のフィルムm単価に含めて表示します。</p>
                                 <p>⑦ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(resultShown.deliverablePatternLengthM ?? "1").times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
                               </>
@@ -818,9 +816,7 @@ function positiveGravureParameters(parameters: GravureRollParameters) {
     && positive(parameters.overseasShippingUnitM)
     && nonNegative(parameters.overseasShippingPerTripYen)
     && nonNegative(parameters.manufacturerMarginRate) && Number(parameters.manufacturerMarginRate) < 1
-    && positive(parameters.customsThresholdYen)
-    && nonNegative(parameters.customsPerTripYen)
-    && nonNegative(parameters.customsHighChargeYen)
+    && nonNegative(parameters.customsRate)
     && positive(parameters.krwPer100Yen);
 }
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) { return <div className="field"><label htmlFor={htmlFor}>{label}</label>{children}</div>; }

@@ -24,9 +24,7 @@ export const GRAVURE_ROLL_DEFAULTS_KRW = {
   overseasShippingUnitM: "500",
   overseasShippingPerTripYen: "11000",
   manufacturerMarginRate: "0.20",
-  customsThresholdYen: "200000",
-  customsPerTripYen: "200",
-  customsHighChargeYen: "6600",
+  customsRate: "0.05",
   krwPer100Yen: "850",
 } as const;
 
@@ -48,9 +46,7 @@ export interface GravureRollParameters {
   overseasShippingUnitM: string;
   overseasShippingPerTripYen: string;
   manufacturerMarginRate: string;
-  customsThresholdYen: string;
-  customsPerTripYen: string;
-  customsHighChargeYen: string;
+  customsRate: string;
   krwPer100Yen: string;
 }
 
@@ -72,9 +68,7 @@ export function defaultGravureRollParameters(): GravureRollParameters {
     overseasShippingUnitM: GRAVURE_ROLL_DEFAULTS_KRW.overseasShippingUnitM,
     overseasShippingPerTripYen: GRAVURE_ROLL_DEFAULTS_KRW.overseasShippingPerTripYen,
     manufacturerMarginRate: GRAVURE_ROLL_DEFAULTS_KRW.manufacturerMarginRate,
-    customsThresholdYen: GRAVURE_ROLL_DEFAULTS_KRW.customsThresholdYen,
-    customsPerTripYen: GRAVURE_ROLL_DEFAULTS_KRW.customsPerTripYen,
-    customsHighChargeYen: GRAVURE_ROLL_DEFAULTS_KRW.customsHighChargeYen,
+    customsRate: GRAVURE_ROLL_DEFAULTS_KRW.customsRate,
     krwPer100Yen: GRAVURE_ROLL_DEFAULTS_KRW.krwPer100Yen,
   };
 }
@@ -230,9 +224,7 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
   const overseasShippingCostYen = D(shippingTrips).times(params.overseasShippingPerTripYen);
   const manufacturerMarginCostYen = filmCostYen.times(params.manufacturerMarginRate);
   const customsBaseCostYen = filmCostYen.plus(manufacturerMarginCostYen);
-  const customsCostYen = customsBaseCostYen.gt(params.customsThresholdYen)
-    ? D(params.customsHighChargeYen)
-    : D(shippingTrips).times(params.customsPerTripYen);
+  const customsCostYen = customsBaseCostYen.times(params.customsRate);
   const plateWidthCm = materialWidthMm.plus(D(params.copperPlateWidthExtraMm)).div(10);
   const plateDiameterCm = D(params.copperPlateMinimumDiameterMm).div(10);
   const copperPlateCostYen = colors.times(plateWidthCm).times(params.newCopperPlateUnitPriceYen).times(plateDiameterCm);

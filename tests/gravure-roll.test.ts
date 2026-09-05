@@ -54,13 +54,13 @@ describe("gravure roll calculation", () => {
     expect(result.shippingTrips).toBe(11);
     expect(result.overseasShippingCostYen).toBe("121000");
     expect(Number(result.manufacturerMarginCostYen)).toBeCloseTo(Number(result.filmCostYen) * 0.2, 8);
-    expect(result.customsCostYen).toBe("6600");
+    expect(Number(result.customsCostYen)).toBeCloseTo(Number(result.customsBaseCostYen) * 0.05, 8);
     expect(Number(result.filmCostPerPieceYen)).toBeCloseTo(
-      (Number(result.filmCostYen) * 1.2 + 6600 + 121000) / 10000,
+      (Number(result.filmCostYen) * 1.2 * 1.05 + 121000) / 10000,
       8,
     );
     expect(Number(result.totalGravureCostYen)).toBeCloseTo(
-      Number(result.filmCostYen) * 1.2 + 6600 + 121000 + Number(result.copperPlateCostYen),
+      Number(result.filmCostYen) * 1.2 * 1.05 + 121000 + Number(result.copperPlateCostYen),
       8,
     );
   });

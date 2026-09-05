@@ -219,7 +219,7 @@ describe("gravure roll integration", () => {
     expect(result.film.lossM).toBe("500");
     expect(result.film.shippingTrips).toBe("11");
     expect(result.film.overseasShipping).toBe(result.gravure?.overseasShippingCostYen);
-    expect(Number(result.film.customs)).toBe(6600);
+    expect(Number(result.film.customs)).toBeCloseTo(Number(result.gravure?.customsBaseCostYen) * 0.05, 8);
     expect(Number(result.film.filmTotal)).toBeCloseTo(
       Number(result.gravure?.customsBaseCostYen) + Number(result.gravure?.customsCostYen) + Number(result.gravure?.overseasShippingCostYen),
       8,
