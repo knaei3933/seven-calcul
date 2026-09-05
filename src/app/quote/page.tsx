@@ -363,29 +363,30 @@ export default function PrintableQuotationPage() {
 
   const shownTotals = (() => {
     if (!totals) return null;
-    const totalPrice = parseDecimal(form.pricePerPieceDisplay) ?? totals.pricePerPiece;
-    let effectiveFillingUnit = totals.fillingSellingUnit;
-    let effectiveFilmUnit = totals.filmSellingUnit;
+    const roundUnit = (value: typeof totals.pricePerPiece) => value.toDecimalPlaces(2, Decimal.ROUND_UP);
+    const totalPriceInput = parseDecimal(form.pricePerPieceDisplay) ?? totals.pricePerPiece;
+    let effectiveFillingUnit = roundUnit(totals.fillingSellingUnit);
+    let effectiveFilmUnit = roundUnit(totals.filmSellingUnit);
 
-    if (isFiniteNumber(form.pricePerPieceDisplay) && !totalPrice.eq(totals.pricePerPiece)) {
+    if (isFiniteNumber(form.pricePerPieceDisplay) && !totalPriceInput.eq(effectiveFillingUnit.plus(effectiveFilmUnit))) {
       const fillingShare = totals.pricePerPiece.gt(0)
         ? totals.fillingSellingUnit.div(totals.pricePerPiece)
         : D(0);
-      effectiveFillingUnit = totalPrice.times(fillingShare);
-      effectiveFilmUnit = totalPrice.minus(effectiveFillingUnit);
+      effectiveFillingUnit = roundUnit(totalPriceInput.times(fillingShare));
+      effectiveFilmUnit = roundUnit(totalPriceInput.minus(effectiveFillingUnit));
     }
 
     const fillingUnit = parseDecimal(form.fillingUnitDisplay) ?? effectiveFillingUnit;
     const filmPouchUnit = parseDecimal(form.filmPouchUnitDisplay) ?? effectiveFilmUnit;
     const fillingAmount = parseDecimal(form.fillingAmountDisplay) ?? fillingUnit.times(totals.quantity);
     const filmAmount = parseDecimal(form.filmAmountDisplay) ?? filmPouchUnit.times(totals.quantity);
-    const subtotalBeforeAdjustment = totalPrice.times(totals.quantity);
-    const subtotal = parseDecimal(form.subtotalDisplay) ?? subtotalBeforeAdjustment.floor();
+    const lineTotal = fillingAmount.plus(filmAmount);
+    const subtotal = parseDecimal(form.subtotalDisplay) ?? lineTotal;
     const tax = parseDecimal(form.taxDisplay) ?? subtotal.times(totals.taxRate).toDecimalPlaces(0);
     const grandTotal = parseDecimal(form.grandTotalDisplay) ?? subtotal.plus(tax);
 
     return {
-      pricePerPiece: totalPrice.toString(),
+      pricePerPiece: effectiveFillingUnit.plus(effectiveFilmUnit).toString(),
       fillingUnit: fillingUnit.toString(),
       fillingAmount: fillingAmount.toString(),
       filmUnit: (parseDecimal(form.filmUnitDisplay) ?? totals.filmMeterDisplayUnit).toString(),
@@ -393,9 +394,9 @@ export default function PrintableQuotationPage() {
       filmAmount: filmAmount.toString(),
       filmOrderLength: totals.filmOrderLength.toString(),
       adjustment: parseDecimal(form.adjustmentDisplay)?.toString()
-        ?? (subtotalBeforeAdjustment.floor().minus(subtotalBeforeAdjustment).abs().lt(1)
+        ?? (subtotal.minus(lineTotal).abs().lt(1)
           ? "-"
-          : subtotalBeforeAdjustment.floor().minus(subtotalBeforeAdjustment).toString()),
+          : subtotal.minus(lineTotal).toString()),
       subtotal: subtotal.toString(),
       tax: tax.toString(),
       grandTotal: grandTotal.toString(),
@@ -662,7 +663,7 @@ export default function PrintableQuotationPage() {
                 <div>
                   <span>お見積単価（税抜）</span>
                   <strong data-testid="quote-price-per-piece">
-                    <EditableText value={moneyDisplay(shownTotals.pricePerPiece, form.pricePerPieceDisplay)} label="お見積単価" className="money" onCommit={commitSheetPrice} />
+                    <EditableText value={moneyDisplay(shownTotals.pricePerPiece, form.pricePerPieceDisplay, 2)} label="お見積単価" className="money" onCommit={commitSheetPrice} />
                     <small> /枚</small>
                   </strong>
                 </div>
@@ -700,12 +701,13 @@ export default function PrintableQuotationPage() {
                       <strong><EditableText value={form.filmItemName} label="フィルム項目名" onCommit={(next) => update("filmItemName", next.trim())} /></strong>
                       <small><EditableText value={form.filmItemDescription} label="フィルム説明" multiline onCommit={(next) => update("filmItemDescription", next)} /></small>
                       <small className="film-composition" data-testid="film-composition">構成：<EditableText value={form.filmComposition || DEFAULT_FILM_COMPOSITION} label="フィルム構成" onCommit={(next) => update("filmComposition", next.trim())} /></small>
+                      <small data-testid="film-order-summary">材料参考 <EditableText value={moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay)} label="フィルムm単価" className="money" onCommit={commitFilmMeterUnit} /> /m × <span data-testid="film-order-length"><EditableText value={numberDisplay(shownTotals.filmOrderLength, form.filmOrderLengthM)} label="フィルム発注長さ" onCommit={(next) => update("filmOrderLengthM", parseDisplayedNumber(next)?.toString() ?? form.filmOrderLengthM)} /> m</span></small>
                     </td>
                     <td>
-                      <strong data-testid="film-meter-price"><EditableText value={moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay)} label="フィルムm単価" className="money" onCommit={commitFilmMeterUnit} /> /m</strong>
-                      <small data-testid="film-pouch-price">パウチ換算 <EditableText value={moneyDisplay(shownTotals.filmPouchUnit, form.filmPouchUnitDisplay, 2)} label="フィルムパウチ換算単価" className="money" onCommit={(next, node) => commitLineUnit("film", next, node)} /> /枚</small>
+                      <strong data-testid="film-pouch-price"><EditableText value={moneyDisplay(shownTotals.filmPouchUnit, form.filmPouchUnitDisplay, 2)} label="フィルムパウチ換算単価" className="money" onCommit={(next, node) => commitLineUnit("film", next, node)} /> /枚</strong>
+                      <small data-testid="film-meter-price">材料参考 <EditableText value={moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay)} label="フィルムm単価" className="money" onCommit={commitFilmMeterUnit} /> /m</small>
                     </td>
-                    <td><span data-testid="film-order-length"><EditableText value={numberDisplay(shownTotals.filmOrderLength, form.filmOrderLengthM)} label="フィルム発注長さ" className="money" onCommit={(next) => update("filmOrderLengthM", parseDisplayedNumber(next)?.toString() ?? form.filmOrderLengthM)} /> m</span></td>
+                    <td><EditableText value={numberDisplay(form.quantity)} label="フィルム数量" className="money" onCommit={commitQuantity} /> 枚</td>
                     <td><EditableText value={moneyDisplay(shownTotals.filmAmount, form.filmAmountDisplay)} label="フィルム金額" className="money" onCommit={(next, node) => commitLineAmount("film", next, node)} /></td>
                   </tr>
                   <tr>
