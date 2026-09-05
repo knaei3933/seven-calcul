@@ -620,6 +620,11 @@ export default function QuotationPage() {
                       {(() => {
                         const f = resultShown.film;
                         const sumRounded = f.skuCosts.reduce((total, sku) => total + Math.ceil(Number(sku.requiredLengthM) / 100) * 100, 0);
+                        const smallWidthYenPerMeter = D(normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM)
+                          .times(100)
+                          .div(normalizedGravureParameters.krwPer100Yen);
+                        const smallWidthManufacturingSaleYen = smallWidthYenPerMeter.times(f.orderLengthM);
+                        const smallWidthShippingYen = D(f.overseasShipping);
                         return (
                           <>
                             {form.printingMethod === "gravure" ? (
@@ -633,8 +638,12 @@ export default function QuotationPage() {
                                 <p>③ 製作長 {formatNumber(f.orderLengthM)}m の中にロス {formatNumber(f.lossM)}m が含まれます。</p>
                                 {resultShown.gravure?.smallWidthTier ? (
                                   <>
-                                    <p>④ <strong>フィルム代＝小幅固定製造単価×製作長＋通関料＋海外配送費＋販売会社利益</strong>＝원{formatNumber(normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM)}/m×{formatNumber(f.orderLengthM)}m＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＋{formatCurrency(displayAmount(resultShown.sellerProfitCost))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は別計上します。</p>
-                                    <p>⑤ 通関料＝固定製造者販売価格 {formatCurrency(displayAmount(resultShown.gravure?.customsBaseCostYen ?? "0"))} × {formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.customsCostYen ?? "0"))}。</p>
+                                    <p>④-1 固定製造単価の円換算＝원{formatNumber(normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM)}/m × 100 ÷ {formatNumber(normalizedGravureParameters.krwPer100Yen)}＝<strong>{formatCurrency(smallWidthYenPerMeter.toString(), 4)} /m</strong></p>
+                                    <p>④-2 製造者販売価格＝원{formatNumber(normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM)}/m × {formatNumber(f.orderLengthM)}m＝원{formatNumber(D(normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM).times(f.orderLengthM).toString())}＝{formatCurrency(smallWidthManufacturingSaleYen.toString(), 2)}</p>
+                                    <p>④-3 通関料＝{formatCurrency(smallWidthManufacturingSaleYen.toString(), 2)} × {formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(f.customs))}</p>
+                                    <p>④-4 海外配送費＝{formatNumber(f.shippingTrips)}回 × {formatCurrency(displayAmount(smallWidthShippingYen.div(D(f.shippingTrips || 1)).toString()), 0)}＝{formatCurrency(displayAmount(f.overseasShipping))}</p>
+                                    <p>④-5 販売会社利益＝（{formatCurrency(smallWidthManufacturingSaleYen.toString(), 2)}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}）× {formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.sellerProfitCost))}</p>
+                                    <p>④-6 <strong>フィルム代合計</strong>＝{formatCurrency(smallWidthManufacturingSaleYen.toString(), 2)}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＋{formatCurrency(displayAmount(resultShown.sellerProfitCost))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は別計上します。</p>
                                   </>
                                 ) : (
                                   <>
