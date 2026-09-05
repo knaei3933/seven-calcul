@@ -1,4 +1,4 @@
-import { D, type Decimal } from "./decimal";
+import { D, Decimal } from "./decimal";
 import { DEFAULT_FILM_COMPOSITION } from "./quotation-shared";
 import type { QuotationRecord } from "./quotation-shared";
 
@@ -21,6 +21,17 @@ const positiveNumber = (value: unknown): Decimal | null => {
 const text = (value: unknown, fallback = ""): string =>
   typeof value === "string" && value.trim() !== "" ? value : fallback;
 
+// 見積書の容量単価（500m未満=480 / 500-999m=450 / 1000-1499m=410 / 1500m以上=380）。
+// 表示snapshotを持たない旧レコードの明細復元にのみ使う。
+function legacyRecommendedFilmMeterUnit(value: unknown): Decimal | null {
+  const length = editedNumber(value);
+  if (!length) return null;
+  if (length.gte(1500)) return D(380);
+  if (length.gte(1000)) return D(410);
+  if (length.gte(500)) return D(450);
+  return D(480);
+}
+
 export function filmCompositionOf(record: QuotationRecord): string {
   return text(record.payload.filmComposition, DEFAULT_FILM_COMPOSITION);
 }
@@ -37,14 +48,26 @@ export function analyzeQuotation(record: QuotationRecord) {
   const targetFillingUnit = fillingCostUnit.div(marginDivider);
   const targetFilmUnit = filmCostUnit.div(marginDivider);
 
-  const fillingUnit = editedNumber(payload.fillingUnitDisplay) ?? targetFillingUnit;
-  const filmUnit = editedNumber(payload.filmPouchUnitDisplay) ?? targetFilmUnit;
-  const displayedCostUnit = fillingUnit.plus(filmUnit);
   // record側の単価・合計は保存時に見積書表示値として確定しているため、
   // 旧payload（表示snapshotがない履歴）でも必ずrecord値をfallbackにする。
   const sellingUnit = editedNumber(payload.pricePerPieceDisplay)
     ?? editedNumber(record.pricePerPiece)
-    ?? displayedCostUnit;
+    ?? targetFillingUnit.plus(targetFilmUnit);
+
+  const displayedFilmMeterUnit = editedNumber(payload.filmUnitDisplay)
+    ?? legacyRecommendedFilmMeterUnit(payload.filmOrderLengthM ?? record.filmOrderLengthM);
+  const filmOrderLength = storedNumber(payload.filmOrderLengthM ?? record.filmOrderLengthM);
+  const legacyFilmAmount = displayedFilmMeterUnit && filmOrderLength.gt(0)
+    ? displayedFilmMeterUnit.times(filmOrderLength)
+    : null;
+  const legacyFillingAmount = legacyFilmAmount
+    ? Decimal.max(sellingUnit.times(quantity).minus(legacyFilmAmount), D(0))
+    : null;
+
+  const fillingUnit = editedNumber(payload.fillingUnitDisplay)
+    ?? (legacyFillingAmount && quantity.gt(0) ? legacyFillingAmount.div(quantity) : targetFillingUnit);
+  const filmUnit = editedNumber(payload.filmPouchUnitDisplay)
+    ?? (legacyFilmAmount && quantity.gt(0) ? legacyFilmAmount.div(quantity) : targetFilmUnit);
   const profitUnit = sellingUnit.minus(costUnit);
   const profitRate = sellingUnit.gt(0) ? profitUnit.div(sellingUnit).times(100) : D(0);
   const markupRate = costUnit.gt(0) ? profitUnit.div(costUnit).times(100) : D(0);
@@ -83,9 +106,9 @@ export function analyzeQuotation(record: QuotationRecord) {
     quantity,
     fillingCostUnit,
     filmCostUnit,
-    displayedFilmMeterUnit: editedNumber(payload.filmUnitDisplay),
+    displayedFilmMeterUnit,
     filmMeterPrice: storedNumber(payload.filmMeterPrice ?? record.filmMeterPrice),
-    filmOrderLength: storedNumber(payload.filmOrderLengthM ?? record.filmOrderLengthM),
+    filmOrderLength,
     costUnit,
     targetMargin,
     targetFillingUnit,
@@ -93,8 +116,12 @@ export function analyzeQuotation(record: QuotationRecord) {
     fillingUnit,
     filmUnit,
     displayedAdjustment: adjustmentText === "-" ? "-" : text(payload.adjustmentDisplay, ""),
-    fillingAmount: editedNumber(payload.fillingAmountDisplay) ?? fillingUnit.times(quantity),
-    filmAmount: editedNumber(payload.filmAmountDisplay) ?? filmUnit.times(quantity),
+    fillingAmount: editedNumber(payload.fillingAmountDisplay)
+      ?? legacyFillingAmount
+      ?? fillingUnit.times(quantity),
+    filmAmount: editedNumber(payload.filmAmountDisplay)
+      ?? legacyFilmAmount
+      ?? filmUnit.times(quantity),
     sellingUnit,
     profitUnit,
     profitRate,

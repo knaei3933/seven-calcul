@@ -96,4 +96,22 @@ describe("quotation history analysis", () => {
     expect(analysis.tax.toNumber()).toBe(Number(baseRecord.tax));
     expect(analysis.grandTotal.toNumber()).toBe(Number(baseRecord.grandTotal));
   });
+
+  it("restores legacy quote lines from the record total and film order", () => {
+    const analysis = analyzeQuotation({
+      ...baseRecord,
+      fillingCostPerPiece: "5.055864785420340975896531452087007642563",
+      filmCostPerPiece: "18.22",
+      filmMeterPrice: "328",
+      pricePerPiece: "38.8",
+      payload: {},
+    });
+
+    expect(analysis.displayedFilmMeterUnit?.toNumber()).toBe(450);
+    expect(analysis.fillingUnit.toFixed(2)).toBe("16.30");
+    expect(analysis.fillingAmount.toNumber()).toBe(163000);
+    expect(analysis.filmUnit.toFixed(2)).toBe("22.50");
+    expect(analysis.filmAmount.toNumber()).toBe(225000);
+    expect(analysis.profitRate.toFixed(4)).toBe("40.0107");
+  });
 });
