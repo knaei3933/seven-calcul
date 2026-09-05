@@ -8,6 +8,19 @@ export type Decimal = DecimalConstructor;
 export const D = (value: DecimalValueInput): Decimal =>
   value instanceof Decimal ? value : new Decimal(value ?? 0);
 
+export const parseDecimal = (value: unknown): Decimal | null => {
+  if (value instanceof Decimal) return value;
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  if (typeof value === "number" && !Number.isFinite(value)) return null;
+  if (typeof value === "string" && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value.trim())) return null;
+  try {
+    const parsed = new Decimal(value);
+    return parsed.isFinite() ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
 export const sum = (values: DecimalValueInput[]): Decimal =>
   values.reduce<Decimal>((total, value) => total.plus(D(value)), D(0));
 

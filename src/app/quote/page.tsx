@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { D, Decimal } from "@/lib/decimal";
+import { D, Decimal, parseDecimal } from "@/lib/decimal";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import {
   QUOTATION_DRAFT_KEY,
@@ -117,17 +117,8 @@ const defaultQuote: QuoteForm = {
   footerNote: "本お見積りに関するご不明点は、下記連絡先までお気軽にお問い合わせください。",
 };
 
-function isPositiveNumber(value: string) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric >= 0;
-}
-
 function isFiniteNumber(value: string) {
-  return value.trim() !== "" && Number.isFinite(Number(value));
-}
-
-function editedNumber(value: string, fallback: string) {
-  return isFiniteNumber(value) ? value.trim() : fallback;
+  return parseDecimal(value) !== null;
 }
 
 function isoDate(date: Date) {
@@ -253,21 +244,28 @@ export default function PrintableQuotationPage() {
     window.print();
   };
 
-  const valid = isPositiveNumber(form.quantity)
-    && isPositiveNumber(form.fillingCostPerPiece)
-    && isPositiveNumber(form.filmCostPerPiece)
-    && Number(form.targetMargin) > 0
-    && Number(form.targetMargin) < 1
-    && Number(form.taxRatePercent) >= 0;
+  const parsedQuantity = parseDecimal(form.quantity);
+  const parsedTargetMargin = parseDecimal(form.targetMargin);
+  const parsedTaxRatePercent = parseDecimal(form.taxRatePercent);
+  const parsedFillingCost = parseDecimal(form.fillingCostPerPiece);
+  const parsedFilmCost = parseDecimal(form.filmCostPerPiece);
+  const parsedFilmMeterPrice = parseDecimal(form.filmMeterPrice);
+  const parsedFilmOrderLength = parseDecimal(form.filmOrderLengthM);
+
+  const valid = !!parsedQuantity && parsedQuantity.gt(0)
+    && !!parsedFillingCost && parsedFillingCost.gte(0)
+    && !!parsedFilmCost && parsedFilmCost.gte(0)
+    && !!parsedTargetMargin && parsedTargetMargin.gt(0) && parsedTargetMargin.lt(1)
+    && !!parsedTaxRatePercent && parsedTaxRatePercent.gte(0);
 
   const totals = (() => {
-    if (!valid) return null;
-    const quantity = D(form.quantity);
-    const margin = D(form.targetMargin);
-    const taxRate = D(form.taxRatePercent).div(100);
-    const fillingSellingUnit = D(form.fillingCostPerPiece).div(D(1).minus(margin));
-    const filmSellingUnit = D(form.filmCostPerPiece).div(D(1).minus(margin));
-    const filmMeterDisplayUnit = D(form.filmMeterPrice);
+    if (!valid || !parsedQuantity || !parsedTargetMargin || !parsedTaxRatePercent || !parsedFillingCost || !parsedFilmCost || !parsedFilmMeterPrice || !parsedFilmOrderLength) return null;
+    const quantity = parsedQuantity;
+    const margin = parsedTargetMargin;
+    const taxRate = parsedTaxRatePercent.div(100);
+    const fillingSellingUnit = parsedFillingCost.div(D(1).minus(margin));
+    const filmSellingUnit = parsedFilmCost.div(D(1).minus(margin));
+    const filmMeterDisplayUnit = parsedFilmMeterPrice;
     const pricePerPiece = fillingSellingUnit.plus(filmSellingUnit);
     const subtotalBeforeAdjustment = pricePerPiece.times(quantity);
     const subtotal = subtotalBeforeAdjustment.floor();
@@ -278,7 +276,7 @@ export default function PrintableQuotationPage() {
       fillingSellingUnit,
       filmSellingUnit,
       filmMeterDisplayUnit,
-      filmOrderLength: D(form.filmOrderLengthM),
+      filmOrderLength: parsedFilmOrderLength,
       roundingAdjustment,
       pricePerPiece,
       fillingAmount: fillingSellingUnit.times(quantity),
@@ -292,8 +290,7 @@ export default function PrintableQuotationPage() {
 
   const shownTotals = (() => {
     if (!totals) return null;
-    const requestedPrice = editedNumber(form.pricePerPieceDisplay, totals.pricePerPiece.toString());
-    const totalPrice = D(requestedPrice);
+    const totalPrice = parseDecimal(form.pricePerPieceDisplay) ?? totals.pricePerPiece;
     let effectiveFillingUnit = totals.fillingSellingUnit;
     let effectiveFilmUnit = totals.filmSellingUnit;
 
@@ -305,26 +302,25 @@ export default function PrintableQuotationPage() {
       effectiveFilmUnit = totalPrice.minus(effectiveFillingUnit);
     }
 
-    const fillingUnit = D(editedNumber(form.fillingUnitDisplay, effectiveFillingUnit.toString()));
-    const filmPouchUnit = D(editedNumber(form.filmPouchUnitDisplay, effectiveFilmUnit.toString()));
-    const fillingAmount = D(editedNumber(form.fillingAmountDisplay, fillingUnit.times(totals.quantity).toString()));
-    const filmAmount = D(editedNumber(form.filmAmountDisplay, filmPouchUnit.times(totals.quantity).toString()));
+    const fillingUnit = parseDecimal(form.fillingUnitDisplay) ?? effectiveFillingUnit;
+    const filmPouchUnit = parseDecimal(form.filmPouchUnitDisplay) ?? effectiveFilmUnit;
+    const fillingAmount = parseDecimal(form.fillingAmountDisplay) ?? fillingUnit.times(totals.quantity);
+    const filmAmount = parseDecimal(form.filmAmountDisplay) ?? filmPouchUnit.times(totals.quantity);
     const subtotalBeforeAdjustment = totalPrice.times(totals.quantity);
-    const subtotal = D(editedNumber(form.subtotalDisplay, subtotalBeforeAdjustment.floor().toString()));
-    const tax = D(editedNumber(form.taxDisplay, subtotal.times(totals.taxRate).toDecimalPlaces(0).toString()));
-    const grandTotal = D(editedNumber(form.grandTotalDisplay, subtotal.plus(tax).toString()));
+    const subtotal = parseDecimal(form.subtotalDisplay) ?? subtotalBeforeAdjustment.floor();
+    const tax = parseDecimal(form.taxDisplay) ?? subtotal.times(totals.taxRate).toDecimalPlaces(0);
+    const grandTotal = parseDecimal(form.grandTotalDisplay) ?? subtotal.plus(tax);
 
     return {
       pricePerPiece: totalPrice.toString(),
       fillingUnit: fillingUnit.toString(),
       fillingAmount: fillingAmount.toString(),
-      filmUnit: editedNumber(form.filmUnitDisplay, totals.filmMeterDisplayUnit.toString()),
+      filmUnit: (parseDecimal(form.filmUnitDisplay) ?? totals.filmMeterDisplayUnit).toString(),
       filmPouchUnit: filmPouchUnit.toString(),
       filmAmount: filmAmount.toString(),
       filmOrderLength: totals.filmOrderLength.toString(),
-      adjustment: isFiniteNumber(form.adjustmentDisplay)
-        ? form.adjustmentDisplay.trim()
-        : (subtotalBeforeAdjustment.floor().minus(subtotalBeforeAdjustment).abs().lt(1)
+      adjustment: parseDecimal(form.adjustmentDisplay)?.toString()
+        ?? (subtotalBeforeAdjustment.floor().minus(subtotalBeforeAdjustment).abs().lt(1)
           ? "-"
           : subtotalBeforeAdjustment.floor().minus(subtotalBeforeAdjustment).toString()),
       subtotal: subtotal.toString(),
