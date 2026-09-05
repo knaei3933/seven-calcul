@@ -35,7 +35,7 @@ describe("bulk calculation", () => {
     expect(result.testFillMl).toBe("60000");
     expect(result.bulkUsageMl).toBe("722000");
     expect(result.costComponents.bulk).toBe("267140");
-    expect(result.film.filmTotal).toBe("204064");
+    expect(result.film.filmTotal).toBe("182200");
     expect(result.film.shippingTrips).toBe("1");
   });
 
@@ -80,18 +80,17 @@ describe("digital film", () => {
 });
 
 describe("commercial calculation", () => {
-  it("includes the 12% seller profit in film cost before target margins", () => {
+  it("does not add seller profit again to digital film prices", () => {
     const result = calculatePouchCost({
       spec: { ...baseSpec, isCustom: true, customWidthMm: "45", customLengthMm: "145" },
       quantity: "7",
       printingMethod: "digital",
     });
-    const baseCost = result.sellerProfitBaseCost;
-    const expectedSellerProfit = Number(baseCost) * Number(defaultParameters.sellerProfitRate);
 
-    expect(result.sellerProfitRate).toBe("0.12");
-    expect(Number(result.sellerProfitCost)).toBeCloseTo(expectedSellerProfit, 8);
-    expect(Number(result.costComponents.film)).toBeCloseTo(Number(baseCost) + expectedSellerProfit, 8);
+    expect(result.sellerProfitRate).toBe("0");
+    expect(Number(result.sellerProfitBaseCost)).toBe(0);
+    expect(Number(result.sellerProfitCost)).toBe(0);
+    expect(Number(result.costComponents.film)).toBeCloseTo(Number(result.film.filmTotal), 8);
     const displayedComponentTotal = Object.values(result.costComponents)
       .reduce((total, value) => total + Number(value), 0);
     expect(displayedComponentTotal).toBeCloseTo(Number(result.costTotal), 8);

@@ -464,7 +464,7 @@ export default function QuotationPage() {
                   {parameterGroups.map((group) => (
                 <fieldset className="parameter-group" key={group.title}>
                   <legend>{group.title}</legend>
-                  {group.fields.map((field) => (
+                  {group.fields.filter((field) => field.key !== "sellerProfitRate" || form.printingMethod === "gravure").map((field) => (
                     <label key={field.key} className="parameter-label">
                       {field.label}
                       <input
@@ -610,8 +610,6 @@ export default function QuotationPage() {
                             <tr><td>国内配送</td><td>{formatCurrency(displayAmount(parameters.domesticShippingPerTrip))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.domesticShipping))}</td></tr>
                             <tr><td>海外配送</td><td>{formatCurrency(displayAmount(parameters.overseasShippingPerTrip))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.overseasShipping))}</td></tr>
                             <tr><td>通関料</td><td>—</td><td>—</td><td>{formatCurrency(displayAmount(resultShown.film.customs))}</td></tr>
-                            <tr><td>小計（Excel基準）</td><td>—</td><td>—</td><td>{formatCurrency(displayAmount(D(resultShown.film.filmBaseCost).plus(resultShown.film.domesticShipping).plus(resultShown.film.overseasShipping).plus(resultShown.film.customs).toString()))}</td></tr>
-                            <tr><td>供給価格調整</td><td>{formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%</td><td>—</td><td>{formatCurrency(displayAmount(resultShown.sellerProfitCost))}</td></tr>
                             <tr><td><strong>フィルム費用合計</strong></td><td>—</td><td>—</td><td><strong>{formatCurrency(displayAmount(resultShown.costComponents.film))}</strong></td></tr>
                           </>
                         ) : (
@@ -750,7 +748,9 @@ export default function QuotationPage() {
                       <tr><th scope="row">検品速度</th><td>{formatNumber(parameters.inspectionSpeed)} 枚/h</td><td>検品にかかる人件費を1枚あたりに割り当てるときの分母です。</td></tr>
                       <tr><th scope="row">段取り・清掃時間</th><td>{formatNumber(parameters.setupTime)}h ＋ {formatNumber(parameters.cleanupTime)}h</td><td>ロット開始前の準備と、終了後の清掃にかかる時間です。発注数量に関係なく、ロットごとに固定で発生します。</td></tr>
                       <tr><th scope="row">カスタム費用</th><td>{formatCurrency(displayAmount(parameters.customPouchCharge))}</td><td>カスタム区分を選択したときに、ロット1回だけ加算する費用です。</td></tr>
-                      <tr><th scope="row">供給価格調整率</th><td>{formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%</td><td>製造者販売価格に反映します。</td></tr>
+                      {form.printingMethod === "gravure" ? (
+                        <tr><th scope="row">供給価格調整率</th><td>{formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%</td><td>グラビアの製造者販売価格に反映します。デジタル単価は調整済みのため追加しません。</td></tr>
+                      ) : null}
                     </tbody></table>
                     <p>① 年間減価償却費＝設備取得価額÷耐用年数＝{formatCurrency(displayAmount(machineBreakdown.acquisitionCostYen))}÷{formatNumber(machineBreakdown.usefulLifeYears)}年＝{annualDepreciation ? formatCurrency(displayAmount(annualDepreciation.toString())) : "-"} /年（定額法・残存価額0）</p>
                     <p>② 年間電気代＝年間使用電力量×電力単価＝{formatNumber(machineBreakdown.annualElectricityKwh)}kWh×{formatNumber(machineBreakdown.electricityUnitPriceYen)}円/kWh＝{annualElectricity ? formatCurrency(displayAmount(annualElectricity.toString())) : "-"} /年（月{annualElectricity ? formatCurrency(displayAmount(annualElectricity.div(12).toString())) : "-"}）</p>

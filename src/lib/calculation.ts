@@ -245,9 +245,11 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
 
   const copperPlateCost = gravureRoll?.copperPlateCostYen ?? "0";
   const copperPlateCostPerPiece = gravureRoll?.copperPlateCostPerPieceYen ?? "0";
-  const sellerProfitBaseCost = D(filmWithSkus.filmTotal);
+  // デジタルのフィルム単価は仕入価格に供給調整済みのため追加調整しない。
+  const appliesSellerProfit = printingMethod === "gravure";
+  const sellerProfitBaseCost = appliesSellerProfit ? D(filmWithSkus.filmTotal) : D(0);
   const sellerProfitCost = sellerProfitBaseCost.times(params.sellerProfitRate);
-  const filmCostWithSellerProfit = sellerProfitBaseCost.plus(sellerProfitCost);
+  const filmCostWithSellerProfit = D(filmWithSkus.filmTotal).plus(sellerProfitCost);
   const filmWithSellerProfit: FilmCostResult = {
     ...filmWithSkus,
     filmBaseCost: filmWithSkus.filmBaseCost,
@@ -305,7 +307,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
     fixedCostPerPiece: fixedPerPiece.toString(),
     customCharge: customCharge.toString(),
     sellerProfitBaseCost: sellerProfitBaseCost.toString(),
-    sellerProfitRate: params.sellerProfitRate,
+    sellerProfitRate: appliesSellerProfit ? params.sellerProfitRate : "0",
     sellerProfitCost: sellerProfitCost.toString(),
     totalCostPerPiece: totalPerPiece.toString(),
     costTotal: costTotal.toString(),
