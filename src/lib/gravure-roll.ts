@@ -7,6 +7,8 @@ export const GRAVURE_ROLL_MATERIAL_STRUCTURE = [
   { materialId: "LLDPE", label: "LLDPE50", thicknessMicron: 50, density: "0.92" },
 ] as const;
 
+export const GRAVURE_ROLL_COPPER_PLATE_MINIMUM_YEN = "32000";
+
 export const GRAVURE_ROLL_DEFAULTS_KRW = {
   materialUnitPricesPerKg: {
     PET: "4300",
@@ -262,7 +264,15 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
   const customsCostYen = customsBaseCostYen.times(params.customsRate);
   const plateWidthCm = materialWidthMm.plus(D(params.copperPlateWidthExtraMm)).div(10);
   const plateDiameterCm = D(params.copperPlateMinimumDiameterMm).div(10);
-  const copperPlateCostYen = colors.times(plateWidthCm).times(params.newCopperPlateUnitPriceYen).times(plateDiameterCm);
+  const calculatedCopperPlateCostYen = colors
+    .times(plateWidthCm)
+    .times(params.newCopperPlateUnitPriceYen)
+    .times(plateDiameterCm)
+    .toDecimalPlaces(0, Decimal.ROUND_CEIL);
+  const copperPlateCostYen = Decimal.max(
+    GRAVURE_ROLL_COPPER_PLATE_MINIMUM_YEN,
+    calculatedCopperPlateCostYen,
+  );
 
   const perPieceRequiredLength = requiredLengthM.div(quantity);
   const patternCapacity = deliverableLengthM.div(perPieceRequiredLength).toDecimalPlaces(0, Decimal.ROUND_FLOOR);

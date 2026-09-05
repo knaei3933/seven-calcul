@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { calculateGravureRollCostKRW, defaultGravureRollParameters, calculateGravureRollCost } from "@/lib/gravure-roll";
+import { Decimal } from "@/lib/decimal";
 
 const baseInput = {
   requiredLengthM: "5500",
@@ -41,7 +42,27 @@ describe("gravure roll calculation", () => {
       parameters: defaultGravureRollParameters(),
     });
     expect(Number(jpy.filmCostYen)).toBeCloseTo(Number(krw.filmCostKRW) * 100 / 850, 4);
-    expect(Number(jpy.copperPlateCostYen)).toBeCloseTo(Number(krw.copperPlateCostKRW) * 100 / 850, 4);
+    expect(Number(jpy.copperPlateCostYen)).toBe(
+      Number(Decimal.max("32000", Math.ceil(Number(krw.copperPlateCostKRW) * 100 / 850))),
+    );
+  });
+
+  it("applies a ¥32,000 copper plate minimum and rounds up fractions", () => {
+    const belowMinimum = calculateGravureRollCost({
+      ...baseInput,
+      colors: 1,
+      quantity: "10000",
+      parameters: defaultGravureRollParameters(),
+    });
+    const aboveMinimum = calculateGravureRollCost({
+      ...baseInput,
+      quantity: "10000",
+      parameters: defaultGravureRollParameters(),
+    });
+
+    expect(belowMinimum.copperPlateCostYen).toBe("32000");
+    expect(aboveMinimum.copperPlateCostYen).toBe("62259");
+    expect(Number(aboveMinimum.copperPlateCostYen) % 1).toBe(0);
   });
 
   it("includes overseas shipping at 500m units and ¥11,000 per trip", () => {

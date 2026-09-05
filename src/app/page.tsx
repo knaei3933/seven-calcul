@@ -677,10 +677,14 @@ export default function QuotationPage() {
                       <table className="table breakdown-table">
                         <thead><tr><th scope="col">項目</th><th scope="col">計算</th><th scope="col">金額</th></tr></thead>
                         <tbody>
-                          <tr><td>新規銅版</td><td>色数 × (原反幅+100mm) × ¥{formatNumber(normalizedGravureParameters.newCopperPlateUnitPriceYen)} × 42cm</td><td>{formatCurrency(displayAmount(resultShown.costComponents.copperPlate))}</td></tr>
+                          <tr>
+                            <td>新規銅版</td>
+                            <td>MAX(¥32,000, 色数 × (原反幅+100mm) × ¥{formatNumber(normalizedGravureParameters.newCopperPlateUnitPriceYen)} × 42cm を切り上げ)</td>
+                            <td data-testid="copper-plate-amount">{formatCurrency(displayAmount(resultShown.costComponents.copperPlate), 0)}</td>
+                          </tr>
                         </tbody>
                       </table>
-                      <p className="chain">常に新規銅版を作成する前提です。版費はロット固定費として全発注数量に配賦します。</p>
+                      <p className="chain">常に新規銅版を作成する前提です。計算額が¥32,000未満の場合は¥32,000を適用し、小数は切り上げて整数円にします。版費はロット固定費として全発注数量に配賦します。</p>
                     </details>
                   ) : null}
                   <details className="cost-block" data-testid="cost-bulk">
