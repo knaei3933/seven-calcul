@@ -32,7 +32,7 @@ export const ceilTo = (value: DecimalValueInput, unit: DecimalValueInput): Decim
   return amount.div(step).ceil().times(step);
 };
 
-export const roundTo2 = (value: DecimalValueInput): string => D(value).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString();
+export const roundTo2 = (value: DecimalValueInput): string => D(value).toDecimalPlaces(2, Decimal.ROUND_UP).toString();
 
 export const maxD = (...values: DecimalValueInput[]): Decimal => values.reduce<Decimal>((a, b) => Decimal.max(a, D(b)), D(0));
 export const eq = (a: DecimalValueInput, b: DecimalValueInput): boolean => D(a).eq(D(b));

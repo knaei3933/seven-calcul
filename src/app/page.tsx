@@ -498,7 +498,7 @@ export default function QuotationPage() {
                 </p>
                 <p className="help">「単価計算用数量」は発注したフィルムから実際に作れる枚数（ロス控除後・500枚単位）です。フィルム発注を100m単位で切り上げるため、発注枚数より多くなることがあります。</p>
                 <div className="cost-breakdown">
-                  <details className="cost-block" data-testid="cost-processing" open>
+                  <details className="cost-block" data-testid="cost-processing">
                     <summary><h3>① 加工費（人件費・機械）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.variableProcessing))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.variableProcessing))} /枚）</small></span></summary>
                     <table className="table breakdown-table">
                       <thead><tr><th scope="col">項目</th><th scope="col">単価</th><th scope="col">1枚あたり</th><th scope="col">金額</th></tr></thead>
@@ -511,7 +511,7 @@ export default function QuotationPage() {
                     <p className="chain">実効生産速度＝基準 {formatNumber(resultShown.baseProductionSpeedPerMinute)}枚/分 × 60 ＝ {formatNumber(Number(resultShown.baseProductionSpeedPerMinute) * 60)}枚/h（1連基準）× {resultShown.lanesPerCycle}／{form.lanes}列 ＝ {formatNumber(resultShown.effectiveProductionSpeed)} 枚/h（{formatNumber(Number(resultShown.effectiveProductionSpeed) / 60)} 枚/分・{form.connected}連は1回に{resultShown.lanesPerCycle}枚）</p>
                     <p className="chain">生産時間＝稼働生産数 ÷ 実効速度 ＝ {formatNumber(resultShown.productionRunQuantity)}枚 ÷ {formatNumber(resultShown.effectiveProductionSpeed)}枚/h ＝ {formatNumber(resultShown.productionHours)}h。稼働生産数は発注 {formatNumber(resultShown.quantity)}枚 ÷ (1−ロス{formatNumber(Number(parameters.lossRate) * 100, 3)}%)＝ロス分のパウチも実際に機械へ流すための数です。</p>
                   </details>
-                  <details className="cost-block" data-testid="cost-fixed" open>
+                  <details className="cost-block" data-testid="cost-fixed">
                     <summary><h3>② 段取り・清掃費（ロット1回ごとの固定費）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.fixedLot))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.fixedLot))} /枚）</small></span></summary>
                     <table className="table breakdown-table">
                       <thead><tr><th scope="col">項目</th><th scope="col">時間</th><th scope="col">単価</th><th scope="col">金額</th></tr></thead>
@@ -529,7 +529,7 @@ export default function QuotationPage() {
                       </p>
                     ) : null}
                   </details>
-                  <details className="cost-block" data-testid="cost-film" open>
+                  <details className="cost-block" data-testid="cost-film">
                     <summary><h3>③ フィルム費用</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.film))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.film))} /枚）</small></span></summary>
                     <table className="table breakdown-table">
                       <thead><tr><th scope="col">項目</th><th scope="col">単価</th><th scope="col">数量</th><th scope="col">金額</th></tr></thead>
@@ -560,7 +560,7 @@ export default function QuotationPage() {
                       })()}
                     </div>
                   </details>
-                  <details className="cost-block" data-testid="cost-bulk" open>
+                  <details className="cost-block" data-testid="cost-bulk">
                     <summary><h3>④ バルク費用（液体材料）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.bulk))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.bulk))} /枚）</small></span></summary>
                     <table className="table breakdown-table">
                       <thead><tr><th scope="col">項目</th><th scope="col">単価</th><th scope="col">数量</th><th scope="col">金額</th></tr></thead>
@@ -572,7 +572,7 @@ export default function QuotationPage() {
                       </tbody>
                     </table>
                   </details>
-                  <details className="cost-block" data-testid="cost-custom" open>
+                  <details className="cost-block" data-testid="cost-custom">
                     <summary><h3>⑤ カスタム費用</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.custom))}</span></summary>
                     <p className="chain">カスタム区分（自由なサイズ）を選択したときは、ロット1回あたり {formatCurrency(displayAmount(parameters.customPouchCharge))} を加算します。標準サイズの場合は ¥0 です。</p>
                   </details>

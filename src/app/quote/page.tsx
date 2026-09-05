@@ -264,6 +264,27 @@ export default function PrintableQuotationPage() {
     setSaving(true);
     setSaveError("");
     try {
+      const costUnit = D(form.fillingCostPerPiece).plus(form.filmCostPerPiece);
+      const sellingUnit = D(shownTotals.pricePerPiece);
+      const profitUnit = sellingUnit.minus(costUnit);
+      const profitMargin = sellingUnit.gt(0) ? profitUnit.div(sellingUnit) : D(0);
+      const markupRate = costUnit.gt(0) ? sellingUnit.div(costUnit) : D(0);
+      const targetMargin = D(form.targetMargin);
+      const profitAudit = {
+        basis: "displayed-unit-price",
+        quantity: form.quantity,
+        totalCostPerPiece: costUnit.toString(),
+        proposedPricePerPiece: sellingUnit.toString(),
+        profitPerPiece: profitUnit.toString(),
+        profitMarginRate: profitMargin.toString(),
+        profitMarginPercent: profitMargin.times(100).toString(),
+        markupRate: markupRate.toString(),
+        targetMarginRate: targetMargin.toString(),
+        targetMarginPercent: targetMargin.times(100).toString(),
+        totalRevenue: sellingUnit.times(totals.quantity).toString(),
+        totalProfit: profitUnit.times(totals.quantity).toString(),
+        recordedAt: new Date().toISOString(),
+      };
       const response = await fetch("/api/quotations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -276,7 +297,7 @@ export default function PrintableQuotationPage() {
           grandTotal: shownTotals.grandTotal.toString(),
           calculationVersion: sourceVersion ? "simulator-linked" : "manual-entry",
           resultHash: sourceVersion,
-          payload: { ...form, resultHash: sourceVersion },
+          payload: { ...form, resultHash: sourceVersion, profitAudit },
         }),
       });
       const payload = await response.json();
@@ -826,13 +847,11 @@ export default function PrintableQuotationPage() {
           <label>数量（枚）<input inputMode="numeric" value={form.quantity} onChange={(event) => update("quantity", event.target.value)} /></label>
           <label>充填・加工 項目名<input value={form.fillingItemName} onChange={(event) => update("fillingItemName", event.target.value)} /></label>
           <label className="wide">充填・加工 説明<textarea rows={2} value={form.fillingItemDescription} onChange={(event) => update("fillingItemDescription", event.target.value)} /></label>
-          <label>充填・加工 原価 / 枚<input inputMode="decimal" value={form.fillingCostPerPiece} onChange={(event) => update("fillingCostPerPiece", event.target.value)} /></label>
           <label>充填・加工 単価（空欄=自動）<input inputMode="decimal" value={form.fillingUnitDisplay} onChange={(event) => update("fillingUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>充填・加工 金額（空欄=自動）<input inputMode="decimal" value={form.fillingAmountDisplay} onChange={(event) => update("fillingAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>フィルム 項目名<input value={form.filmItemName} onChange={(event) => update("filmItemName", event.target.value)} /></label>
           <label className="wide">フィルム 説明<textarea rows={2} value={form.filmItemDescription} onChange={(event) => update("filmItemDescription", event.target.value)} /></label>
           <label className="wide">フィルム構成<input value={form.filmComposition} onChange={(event) => update("filmComposition", event.target.value)} placeholder={DEFAULT_FILM_COMPOSITION} /></label>
-          <label>フィルム 原価 / 枚<input inputMode="decimal" value={form.filmCostPerPiece} onChange={(event) => update("filmCostPerPiece", event.target.value)} /></label>
           <label>フィルム m単価<input inputMode="decimal" value={form.filmMeterPrice} onChange={(event) => update("filmMeterPrice", event.target.value)} /></label>
           <label>フィルム発注長さ (m)<input inputMode="decimal" value={form.filmOrderLengthM} onChange={(event) => update("filmOrderLengthM", event.target.value)} /></label>
           <label>フィルム m単価表示（空欄=自動）<input inputMode="decimal" value={form.filmUnitDisplay} onChange={(event) => update("filmUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
@@ -865,14 +884,6 @@ export default function PrintableQuotationPage() {
   }
 
   function renderQuotationGuide() {
-    const marginPercent = isFiniteNumber(form.targetMargin)
-      ? D(form.targetMargin).times(100).toFixed(2, Decimal.ROUND_DOWN)
-      : "";
-    const fillingCost = isFiniteNumber(form.fillingCostPerPiece) ? D(form.fillingCostPerPiece) : D(0);
-    const filmCost = isFiniteNumber(form.filmCostPerPiece) ? D(form.filmCostPerPiece) : D(0);
-    const totalCost = fillingCost.plus(filmCost);
-    const autoPrice = shownTotals && totals ? totals.pricePerPiece : D(0);
-    const printPrice = shownTotals ? shownTotals.pricePerPiece : "";
     const isPriceOverride = isFiniteNumber(form.pricePerPieceDisplay);
 
     return (
@@ -882,38 +893,10 @@ export default function PrintableQuotationPage() {
           <p className="calc-formula">
             中央のA4用紙が入力画面です。<strong>「￥」金額・数量・品名・備考をクリック</strong>すると、表示されている文字をそのまま編集できます。
           </p>
-          <div className="calc-guide-cards">
-            <div>
-              <span>充填・加工 原価</span>
-              <strong>{formatNumber(fillingCost.toNumber(), 4)} 円</strong>
-            </div>
-            <div>
-              <span>フィルム 原価</span>
-              <strong>{formatNumber(filmCost.toNumber(), 4)} 円</strong>
-            </div>
-            <div>
-              <span>合計原価</span>
-              <strong>{formatNumber(totalCost.toNumber(), 4)} 円</strong>
-            </div>
-            <div>
-              <span>目標利益率</span>
-              <strong>{marginPercent ? `${formatNumber(Number(marginPercent), 2)}%` : "-"}</strong>
-            </div>
-            <div>
-              <span>自動見積単価（計算値）</span>
-              <strong>{formatNumber(autoPrice.toNumber(), 4)} 円</strong>
-            </div>
-            <div>
-              <span>帳票表示単価</span>
-              <strong>{formatCurrency(printPrice, 0)}</strong>
-            </div>
-          </div>
-
           <ol className="calc-steps">
             <li>見積単価を <strong>￥39 → ￥8.1</strong> のように変えると、小計・消費税・合計と明細配分が自動的に更新されます。</li>
             <li>明細の単価・金額を変えた場合も、見積単価と合計が追従します。</li>
-            <li>原価と目標利益率は内部管理値です。通常の編集はA4面だけで完結します。</li>
-            <li>自動計算式：見積単価 ＝ 原価 ÷（1 − 利益率）。現在 {formatNumber(totalCost.toNumber(), 4)} ÷（1 − {marginPercent || "0"}%）＝ {formatNumber(autoPrice.toNumber(), 4)} 円。</li>
+            <li>原価・利益の内部計算は保存時に記録し、帳票には表示しません。</li>
           </ol>
 
           <p className={`calc-mode ${isPriceOverride ? "override" : "auto"}`}>

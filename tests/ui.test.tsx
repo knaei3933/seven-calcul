@@ -15,6 +15,11 @@ describe("quotation UI", () => {
     expect(screen.getByTestId("server-result").getAttribute("data-state")).not.toBe("calculated");
     expect(screen.getByTestId("customer-total")).not.toHaveTextContent("原価");
     expect(screen.queryByTestId("customer-commission")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cost-processing")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("cost-fixed")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("cost-film")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("cost-bulk")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("cost-custom")).not.toHaveAttribute("open");
   });
 
   it("exposes complete SKU inputs with labels and a calculation-only CTA", () => {
