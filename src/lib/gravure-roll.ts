@@ -23,6 +23,10 @@ export const GRAVURE_ROLL_DEFAULTS_KRW = {
   productionPatternLengthM: "6000",
   overseasShippingUnitM: "500",
   overseasShippingPerTripYen: "11000",
+  manufacturerMarginRate: "0.20",
+  customsThresholdYen: "200000",
+  customsPerTripYen: "200",
+  customsHighChargeYen: "6600",
   krwPer100Yen: "850",
 } as const;
 
@@ -43,6 +47,10 @@ export interface GravureRollParameters {
   productionPatternLengthM: string;
   overseasShippingUnitM: string;
   overseasShippingPerTripYen: string;
+  manufacturerMarginRate: string;
+  customsThresholdYen: string;
+  customsPerTripYen: string;
+  customsHighChargeYen: string;
   krwPer100Yen: string;
 }
 
@@ -63,6 +71,10 @@ export function defaultGravureRollParameters(): GravureRollParameters {
     productionPatternLengthM: GRAVURE_ROLL_DEFAULTS_KRW.productionPatternLengthM,
     overseasShippingUnitM: GRAVURE_ROLL_DEFAULTS_KRW.overseasShippingUnitM,
     overseasShippingPerTripYen: GRAVURE_ROLL_DEFAULTS_KRW.overseasShippingPerTripYen,
+    manufacturerMarginRate: GRAVURE_ROLL_DEFAULTS_KRW.manufacturerMarginRate,
+    customsThresholdYen: GRAVURE_ROLL_DEFAULTS_KRW.customsThresholdYen,
+    customsPerTripYen: GRAVURE_ROLL_DEFAULTS_KRW.customsPerTripYen,
+    customsHighChargeYen: GRAVURE_ROLL_DEFAULTS_KRW.customsHighChargeYen,
     krwPer100Yen: GRAVURE_ROLL_DEFAULTS_KRW.krwPer100Yen,
   };
 }
@@ -88,6 +100,9 @@ export interface GravureRollCostResult {
   printingCostYen: string;
   laminationCostYen: string;
   filmCostYen: string;
+  manufacturerMarginCostYen: string;
+  customsBaseCostYen: string;
+  customsCostYen: string;
   overseasShippingCostYen: string;
   shippingTrips: number;
   copperPlateCostYen: string;
@@ -213,6 +228,11 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
     deliverableLengthM.div(D(params.overseasShippingUnitM)).toDecimalPlaces(0, Decimal.ROUND_CEIL).toNumber(),
   ).toNumber();
   const overseasShippingCostYen = D(shippingTrips).times(params.overseasShippingPerTripYen);
+  const manufacturerMarginCostYen = filmCostYen.times(params.manufacturerMarginRate);
+  const customsBaseCostYen = filmCostYen.plus(manufacturerMarginCostYen);
+  const customsCostYen = customsBaseCostYen.gt(params.customsThresholdYen)
+    ? D(params.customsHighChargeYen)
+    : D(shippingTrips).times(params.customsPerTripYen);
   const plateWidthCm = materialWidthMm.plus(D(params.copperPlateWidthExtraMm)).div(10);
   const plateDiameterCm = D(params.copperPlateMinimumDiameterMm).div(10);
   const copperPlateCostYen = colors.times(plateWidthCm).times(params.newCopperPlateUnitPriceYen).times(plateDiameterCm);
@@ -237,11 +257,16 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
     printingCostYen: printingCost.toString(),
     laminationCostYen: laminationCost.toString(),
     filmCostYen: filmCostYen.toString(),
+    manufacturerMarginCostYen: manufacturerMarginCostYen.toString(),
+    customsBaseCostYen: customsBaseCostYen.toString(),
+    customsCostYen: customsCostYen.toString(),
     overseasShippingCostYen: overseasShippingCostYen.toString(),
     shippingTrips,
     copperPlateCostYen: copperPlateCostYen.toString(),
-    totalGravureCostYen: filmCostYen.plus(overseasShippingCostYen).plus(copperPlateCostYen).toString(),
-    filmCostPerPieceYen: quantity.gt(0) ? filmCostYen.plus(overseasShippingCostYen).div(quantity).toString() : "0",
+    totalGravureCostYen: customsBaseCostYen.plus(customsCostYen).plus(overseasShippingCostYen).plus(copperPlateCostYen).toString(),
+    filmCostPerPieceYen: quantity.gt(0)
+      ? customsBaseCostYen.plus(customsCostYen).plus(overseasShippingCostYen).div(quantity).toString()
+      : "0",
     copperPlateCostPerPieceYen: quantity.gt(0) ? copperPlateCostYen.div(quantity).toString() : "0",
     recommendedQuantity: recommendedQuantity.toString(),
     recommendedQuantityUtilization: utilization.toString(),

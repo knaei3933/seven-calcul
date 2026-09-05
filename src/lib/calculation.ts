@@ -50,6 +50,9 @@ export interface CostResult {
     printingCostYen: string;
     laminationCostYen: string;
     filmCostYen: string;
+    manufacturerMarginCostYen: string;
+    customsBaseCostYen: string;
+    customsCostYen: string;
     overseasShippingCostYen: string;
     shippingTrips: number;
     copperPlateCostYen: string;
@@ -190,12 +193,12 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
         effectiveLengthM: gravureRoll.deliverableLengthM,
         actualQuantity: quantityD.toString(),
         pricingQuantity: quantityD.toString(),
-        unitPrice: D(gravureRoll.filmCostYen).plus(gravureRoll.overseasShippingCostYen).div(gravureRoll.productionLengthM).toString(),
+        unitPrice: D(gravureRoll.customsBaseCostYen).plus(gravureRoll.customsCostYen).plus(gravureRoll.overseasShippingCostYen).div(gravureRoll.productionLengthM).toString(),
         filmBaseCost: gravureRoll.filmCostYen,
         domesticShipping: "0",
         overseasShipping: gravureRoll.overseasShippingCostYen,
-        customs: "0",
-        filmTotal: D(gravureRoll.filmCostYen).plus(gravureRoll.overseasShippingCostYen).toString(),
+        customs: gravureRoll.customsCostYen,
+        filmTotal: D(gravureRoll.customsBaseCostYen).plus(gravureRoll.customsCostYen).plus(gravureRoll.overseasShippingCostYen).toString(),
         filmCostPerPiece: gravureRoll.filmCostPerPieceYen,
         shippingTrips: gravureRoll.shippingTrips.toString(),
         orderAdjustment,
@@ -302,6 +305,9 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
         printingCostYen: gravureRoll.printingCostYen,
         laminationCostYen: gravureRoll.laminationCostYen,
         filmCostYen: gravureRoll.filmCostYen,
+        manufacturerMarginCostYen: gravureRoll.manufacturerMarginCostYen,
+        customsBaseCostYen: gravureRoll.customsBaseCostYen,
+        customsCostYen: gravureRoll.customsCostYen,
         overseasShippingCostYen: gravureRoll.overseasShippingCostYen,
         shippingTrips: gravureRoll.shippingTrips,
         copperPlateCostYen: gravureRoll.copperPlateCostYen,
