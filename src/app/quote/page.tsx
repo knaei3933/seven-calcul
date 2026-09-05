@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { D } from "@/lib/decimal";
+import { D, Decimal } from "@/lib/decimal";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import {
   QUOTATION_DRAFT_KEY,
@@ -546,6 +546,8 @@ export default function PrintableQuotationPage() {
     }
 
     return (
+      <>
+        {renderQuotationGuide()}
       <details className="editor-group" open>
         <summary>明細・金額</summary>
         <div className="editor-grid">
@@ -577,7 +579,78 @@ export default function PrintableQuotationPage() {
           <label>消費税（空欄=自動）<input inputMode="decimal" value={form.taxDisplay} onChange={(event) => update("taxDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>合計ラベル<input value={form.grandTotalLabel} onChange={(event) => update("grandTotalLabel", event.target.value)} /></label>
           <label>合計（空欄=自動）<input inputMode="decimal" value={form.grandTotalDisplay} onChange={(event) => update("grandTotalDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>適用利益率（内部管理）<input inputMode="decimal" value={form.targetMargin} onChange={(event) => update("targetMargin", event.target.value)} /></label>
+          <label>目標利益率（%）<input inputMode="decimal" value={isFiniteNumber(form.targetMargin) ? D(form.targetMargin).times(100).toDecimalPlaces(2, Decimal.ROUND_DOWN).toString() : ""} onChange={(event) => {
+            const raw = event.target.value.trim();
+            if (raw === "") {
+              update("targetMargin", "");
+              return;
+            }
+            const percent = Number(raw);
+            if (Number.isFinite(percent)) update("targetMargin", (percent / 100).toString());
+          }} /></label>
+        </div>
+      </details>
+      </>
+    );
+  }
+
+  function renderQuotationGuide() {
+    const marginPercent = isFiniteNumber(form.targetMargin)
+      ? D(form.targetMargin).times(100).toFixed(2, Decimal.ROUND_DOWN)
+      : "";
+    const fillingCost = isFiniteNumber(form.fillingCostPerPiece) ? D(form.fillingCostPerPiece) : D(0);
+    const filmCost = isFiniteNumber(form.filmCostPerPiece) ? D(form.filmCostPerPiece) : D(0);
+    const totalCost = fillingCost.plus(filmCost);
+    const autoPrice = shownTotals && totals ? totals.pricePerPiece : D(0);
+    const printPrice = shownTotals ? shownTotals.pricePerPiece : "";
+    const isPriceOverride = isFiniteNumber(form.pricePerPieceDisplay);
+
+    return (
+      <details className="editor-group calculation-guide" open data-testid="quote-calculation-guide">
+        <summary>入力ガイド（原価 → 見積単価）</summary>
+        <div className="calc-guide">
+          <div className="calc-guide-cards">
+            <div>
+              <span>充填・加工 原価</span>
+              <strong>{formatNumber(fillingCost.toNumber(), 4)} 円</strong>
+            </div>
+            <div>
+              <span>フィルム 原価</span>
+              <strong>{formatNumber(filmCost.toNumber(), 4)} 円</strong>
+            </div>
+            <div>
+              <span>合計原価</span>
+              <strong>{formatNumber(totalCost.toNumber(), 4)} 円</strong>
+            </div>
+            <div>
+              <span>目標利益率</span>
+              <strong>{marginPercent ? `${formatNumber(Number(marginPercent), 2)}%` : "-"}</strong>
+            </div>
+            <div>
+              <span>自動見積単価（計算値）</span>
+              <strong>{formatNumber(autoPrice.toNumber(), 4)} 円</strong>
+            </div>
+            <div>
+              <span>帳票表示単価</span>
+              <strong>{formatCurrency(printPrice, 0)}</strong>
+            </div>
+          </div>
+
+          <p className="calc-formula">
+            見積単価 ＝（充填・加工原価 ＋ フィルム原価）÷（1 − 目標利益率）<br />
+            = {formatNumber(totalCost.toNumber(), 4)} ÷（1 − {marginPercent || "0"}%）＝ {formatNumber(autoPrice.toNumber(), 4)} 円
+          </p>
+
+          <ol className="calc-steps">
+            <li><strong>基本はここに入力しません。</strong>シミュレーター取込で「原価 / 枚」2項目は自動入力されます。</li>
+            <li>金額を変えたい場合は<strong>目標利益率（%）</strong>だけ変更してください。空欄にすると自動計算が止まります。</li>
+            <li>得意先提示単価を直接決めたい場合のみ<strong>見積単価 / 枚</strong>に入力します。空欄なら自動計算値です。</li>
+            <li>長い小数は計算保持用です。帳票は円単位表示、合計は小数を保持してから調整されます。</li>
+          </ol>
+
+          <p className={`calc-mode ${isPriceOverride ? "override" : "auto"}`}>
+            {isPriceOverride ? "現在：見積単価 override 中" : "現在：目標利益率による自動計算"}
+          </p>
         </div>
       </details>
     );
