@@ -66,6 +66,7 @@ export const defaultParameters: CostParameters = {
   digitalFilmMinTotalM: "500",
   digitalFilmMinSkuM: "300",
   commissionRate: "0.20",
+  sellerProfitRate: "0.12",
   filmUnitPrices: {
     lte570: { "500": "328", "1000": "252", "1500": "226" },
     "571to740": { "500": "365", "1000": "280", "1500": "252" },

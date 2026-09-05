@@ -79,6 +79,7 @@ export interface CostParameters {
   digitalFilmMinTotalM: DecimalValue;
   digitalFilmMinSkuM: DecimalValue;
   commissionRate: DecimalValue;
+  sellerProfitRate: DecimalValue;
   filmUnitPrices: Record<PriceBand, Record<"500" | "1000" | "1500", DecimalValue>>;
   shippingUnitsM: Record<"500" | "400", number[]>;
 }

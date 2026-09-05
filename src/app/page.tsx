@@ -32,6 +32,7 @@ const MACHINE_BREAKDOWN_LABELS: Record<MachineBreakdownKey, string> = {
   electricityUnitPriceYen: "電力単価 (円/kWh)",
   annualOperatingHours: "年間稼働時間 (時間/年)",
 };
+const SIMULATOR_STATE_KEY = "pouch-simulator-state-v1";
 
 const parameterGroups = [
   {
@@ -43,6 +44,7 @@ const parameterGroups = [
       { key: "setupTime", label: "段取り時間 (h)", value: (params: CostParameters) => params.setupTime },
       { key: "cleanupTime", label: "清掃時間 (h)", value: (params: CostParameters) => params.cleanupTime },
       { key: "customPouchCharge", label: "カスタム費用 (円)", value: (params: CostParameters) => params.customPouchCharge },
+      { key: "sellerProfitRate", label: "販売会社利益率 (%)", value: (params: CostParameters) => formatNumber(Number(params.sellerProfitRate) * 100, 3) },
     ] as const,
   },
   {
@@ -90,12 +92,37 @@ export default function QuotationPage() {
   });
   const [parameters, setParameters] = useState<CostParameters>(defaultParameters);
   const [gravureParameters, setGravureParameters] = useState<GravureRollParameters>(() => normalizeGravureParameters(defaultGravureRollParameters()));
-  const [machineBreakdown, setMachineBreakdown] = useState({ ...MACHINE_BREAKDOWN_DEFAULTS });
+  const [machineBreakdown, setMachineBreakdown] = useState<Record<MachineBreakdownKey, string>>(() => ({ ...MACHINE_BREAKDOWN_DEFAULTS }));
   type ServerCalculation = { result: ReturnType<typeof calculatePouchCost>; inputSha256: string };
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const requestOrderRef = useRef(0);
+  const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      try {
+        const raw = sessionStorage.getItem(SIMULATOR_STATE_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw) as {
+            form?: Partial<typeof form>;
+            parameters?: Partial<CostParameters>;
+            gravureParameters?: Partial<GravureRollParameters>;
+            machineBreakdown?: Partial<Record<MachineBreakdownKey, string>>;
+          };
+          if (saved.form) setForm((old) => ({ ...old, ...saved.form }));
+          if (saved.parameters) setParameters((old) => ({ ...old, ...saved.parameters }));
+          if (saved.gravureParameters) setGravureParameters(normalizeGravureParameters(saved.gravureParameters));
+          if (saved.machineBreakdown) setMachineBreakdown((old) => ({ ...old, ...saved.machineBreakdown }));
+        }
+      } catch {
+        // 저장 상태가 손상된 경우 기본값을 유지한다.
+      } finally {
+        setSimulatorStateLoaded(true);
+      }
+    });
+  }, []);
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((old) => ({ ...old, [key]: value }));
   const patchForm = (patch: Partial<typeof form>) => setForm((old) => ({ ...old, ...patch }));
@@ -161,7 +188,7 @@ export default function QuotationPage() {
   }), [form, skuCount, weightedAvgFill]);
 
   const setParameter = (
-    key: "lossRate" | "lossMinM" | "digitalFilmMinSkuM" | "digitalFilmMinTotalM" | "domesticShippingPerTrip" | "overseasShippingPerTrip" | "customsThreshold" | "customsHighCharge" | "customsPerTrip" | "bulkLossRate" | "fillTestRuns" | "hopperInitialChargeMl" | "pressureInitialChargeMl" | "laborPerHour" | "machineChargePerHour" | "productionSpeedPerMinute" | "inspectionSpeed" | "setupTime" | "cleanupTime" | "customPouchCharge",
+    key: "lossRate" | "lossMinM" | "digitalFilmMinSkuM" | "digitalFilmMinTotalM" | "domesticShippingPerTrip" | "overseasShippingPerTrip" | "customsThreshold" | "customsHighCharge" | "customsPerTrip" | "bulkLossRate" | "fillTestRuns" | "hopperInitialChargeMl" | "pressureInitialChargeMl" | "laborPerHour" | "machineChargePerHour" | "productionSpeedPerMinute" | "inspectionSpeed" | "setupTime" | "cleanupTime" | "customPouchCharge" | "sellerProfitRate",
     rawValue: string,
     mode: "percent" | "value",
   ) => setParameters((old) => ({ ...old, [key]: mode === "percent" ? formatNumber(Number(rawValue) / 100, 6) : rawValue }));
@@ -248,6 +275,21 @@ export default function QuotationPage() {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
   }, [customerPrice, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]);
+
+  useEffect(() => {
+    if (!simulatorStateLoaded) return;
+    try {
+      sessionStorage.setItem(SIMULATOR_STATE_KEY, JSON.stringify({
+        version: 1,
+        form,
+        parameters,
+        gravureParameters: normalizedGravureParameters,
+        machineBreakdown,
+      }));
+    } catch {
+      // private mode 등 저장 실패 시에도 계산은 계속 동작한다.
+    }
+  }, [form, machineBreakdown, normalizedGravureParameters, parameters, simulatorStateLoaded]);
 
   const lanesPerCycle = Number(form.lanes) > 0 ? Math.max(1, Math.floor(Number(form.lanes) / Number(form.connected))) : 1;
   const effectiveProductionSpeedPerMinute = Number(form.lanes) > 0
@@ -632,6 +674,10 @@ export default function QuotationPage() {
                     <summary><h3>⑤ カスタム費用</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.custom))}</span></summary>
                     <p className="chain">カスタム区分（自由なサイズ）を選択したときは、ロット1回あたり {formatCurrency(displayAmount(parameters.customPouchCharge))} を加算します。標準サイズの場合は ¥0 です。</p>
                   </details>
+                  <details className="cost-block" data-testid="cost-seller-profit">
+                    <summary><h3>⑥ 販売会社利益（原価込）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.sellerProfit))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.sellerProfit))} /枚）</small></span></summary>
+                    <p className="chain">製造原価小計 {formatCurrency(displayAmount(resultShown.sellerProfitBaseCost))} × {formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.costComponents.sellerProfit))}。販売会社利益は売上側マージンではなく、Seven化学向けの取得原価に含めます。</p>
+                  </details>
                 </div>
                 {resultShown.film.skuCosts.length > 1 ? (
                   <table className="table"><caption className="help">SKU別フィルム発注内訳</caption><thead><tr><th scope="col">SKU / 製品名</th><th scope="col">発注枚数</th><th scope="col">充填量</th><th scope="col">色数</th><th scope="col">生産</th><th scope="col">必要</th><th scope="col">発注</th><th scope="col">フィルム費</th></tr></thead><tbody>
@@ -676,6 +722,7 @@ export default function QuotationPage() {
                       <tr><th scope="row">検品速度</th><td>{formatNumber(parameters.inspectionSpeed)} 枚/h</td><td>検品にかかる人件費を1枚あたりに割り当てるときの分母です。</td></tr>
                       <tr><th scope="row">段取り・清掃時間</th><td>{formatNumber(parameters.setupTime)}h ＋ {formatNumber(parameters.cleanupTime)}h</td><td>ロット開始前の準備と、終了後の清掃にかかる時間です。発注数量に関係なく、ロットごとに固定で発生します。</td></tr>
                       <tr><th scope="row">カスタム費用</th><td>{formatCurrency(displayAmount(parameters.customPouchCharge))}</td><td>カスタム区分を選択したときに、ロット1回だけ加算する費用です。</td></tr>
+                      <tr><th scope="row">販売会社利益率</th><td>{formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%</td><td>製造原価小計に対して加算し、Seven化学向けの取得原価に含めます。</td></tr>
                     </tbody></table>
                     <p>① 年間減価償却費＝設備取得価額÷耐用年数＝{formatCurrency(displayAmount(machineBreakdown.acquisitionCostYen))}÷{formatNumber(machineBreakdown.usefulLifeYears)}年＝{annualDepreciation ? formatCurrency(displayAmount(annualDepreciation.toString())) : "-"} /年（定額法・残存価額0）</p>
                     <p>② 年間電気代＝年間使用電力量×電力単価＝{formatNumber(machineBreakdown.annualElectricityKwh)}kWh×{formatNumber(machineBreakdown.electricityUnitPriceYen)}円/kWh＝{annualElectricity ? formatCurrency(displayAmount(annualElectricity.toString())) : "-"} /年（月{annualElectricity ? formatCurrency(displayAmount(annualElectricity.div(12).toString())) : "-"}）</p>
@@ -685,6 +732,7 @@ export default function QuotationPage() {
                     <p>変動加工費＝人件費×(生産時間＋検品時間)＋機械チャージ×生産時間＝{formatNumber(parameters.laborPerHour)}×({resultShown ? formatNumber(resultShown.productionHours) : "-"}＋{resultShown ? formatNumber(resultShown.inspectionHours) : "-"})h＋{formatNumber(parameters.machineChargePerHour)}×{resultShown ? formatNumber(resultShown.productionHours) : "-"}h</p>
                     <p>ロット固定＝({formatNumber(parameters.setupTime)}＋{formatNumber(parameters.cleanupTime)})h×({formatNumber(parameters.laborPerHour)}＋{formatNumber(parameters.machineChargePerHour)})円/h</p>
                     <p>カスタム費用＝{form.custom ? formatCurrency(displayAmount(parameters.customPouchCharge)) : "0"}（カスタム区分時のみ）</p>
+                    <p>販売会社利益＝製造原価小計 × {formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.costComponents.sellerProfit))}。</p>
                     <p>総原価＝フィルム＋バルク＋変動加工＋ロット固定</p>
                     <p>販売単価＝総原価/枚÷(1−利益率)</p>
                   </div>
@@ -806,6 +854,7 @@ function positiveParameters(parameters: CostParameters) {
     && positiveDecimal(parameters.hopperInitialChargeMl) && positiveDecimal(parameters.pressureInitialChargeMl)
     && positiveDecimal(parameters.laborPerHour) && positiveDecimal(parameters.machineChargePerHour) && positiveDecimal(parameters.productionSpeedPerMinute) && positiveDecimal(parameters.inspectionSpeed)
     && positiveDecimal(parameters.setupTime) && positiveDecimal(parameters.cleanupTime) && positiveDecimal(parameters.customPouchCharge)
+    && isNonNegativeDecimalInput(parameters.sellerProfitRate) && Number(parameters.sellerProfitRate) < 1
     && Object.values(parameters.filmUnitPrices).every((lengthPrices) => Object.values(lengthPrices).every(positiveDecimal));
 }
 function positiveGravureParameters(parameters: GravureRollParameters) {

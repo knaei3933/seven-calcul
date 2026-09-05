@@ -34,10 +34,13 @@ export interface CostResult {
   fixedLotCost: string;
   fixedCostPerPiece: string;
   customCharge: string;
+  sellerProfitBaseCost: string;
+  sellerProfitRate: string;
+  sellerProfitCost: string;
   totalCostPerPiece: string;
   costTotal: string;
-  costComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom", string>;
-  costPerPieceComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom", string>;
+  costComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom" | "sellerProfit", string>;
+  costPerPieceComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom" | "sellerProfit", string>;
   sellingPrices: { margin: string; pricePerPiece: string; totalSales: string; profit: string }[];
   film: FilmCostResult;
   copperPlateCost: string;
@@ -239,13 +242,19 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
 
   const copperPlateCost = gravureRoll?.copperPlateCostYen ?? "0";
   const copperPlateCostPerPiece = gravureRoll?.copperPlateCostPerPieceYen ?? "0";
-  const costComponents = {
+  const baseCostComponents = {
     film: D(filmWithSkus.filmTotal),
     copperPlate: D(copperPlateCost),
     bulk: bulkCost,
     variableProcessing: variableTotal,
     fixedLot,
     custom: customCharge,
+  };
+  const sellerProfitBaseCost = sum(Object.values(baseCostComponents));
+  const sellerProfitCost = sellerProfitBaseCost.times(params.sellerProfitRate);
+  const costComponents = {
+    ...baseCostComponents,
+    sellerProfit: sellerProfitCost,
   };
   const costTotal = sum(Object.values(costComponents));
   const totalPerPiece = D(costTotal).div(quantityD);
@@ -288,6 +297,9 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
     fixedLotCost: fixedLot.toString(),
     fixedCostPerPiece: fixedPerPiece.toString(),
     customCharge: customCharge.toString(),
+    sellerProfitBaseCost: sellerProfitBaseCost.toString(),
+    sellerProfitRate: params.sellerProfitRate,
+    sellerProfitCost: sellerProfitCost.toString(),
     totalCostPerPiece: totalPerPiece.toString(),
     costTotal: costTotal.toString(),
     costComponents: mapValues(costComponents, String),

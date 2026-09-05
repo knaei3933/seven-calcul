@@ -80,6 +80,21 @@ describe("digital film", () => {
 });
 
 describe("commercial calculation", () => {
+  it("includes the 12% seller profit in manufacturing cost before target margins", () => {
+    const result = calculatePouchCost({
+      spec: { ...baseSpec, isCustom: true, customWidthMm: "45", customLengthMm: "145" },
+      quantity: "7",
+      printingMethod: "digital",
+    });
+    const baseCost = result.sellerProfitBaseCost;
+    const expectedSellerProfit = Number(baseCost) * Number(defaultParameters.sellerProfitRate);
+
+    expect(result.sellerProfitRate).toBe("0.12");
+    expect(Number(result.costComponents.sellerProfit)).toBeCloseTo(expectedSellerProfit, 8);
+    expect(Number(result.costTotal)).toBeCloseTo(Number(baseCost) + expectedSellerProfit, 8);
+    expect(result.audit.componentReconciliationDifference).toBe("0");
+  });
+
   it("adds custom charge once and reconciles components exactly", () => {
     const result = calculatePouchCost({
       spec: { ...baseSpec, isCustom: true, customWidthMm: "45", customLengthMm: "145" },
@@ -228,6 +243,8 @@ describe("gravure roll integration", () => {
     expect(Number(result.film.overseasShipping)).toBe(121000);
     expect(Number(result.copperPlateCost)).toBeGreaterThan(0);
     expect(result.costComponents.copperPlate).toBe(result.copperPlateCost);
+    expect(result.sellerProfitRate).toBe("0.12");
+    expect(Number(result.costComponents.sellerProfit)).toBeCloseTo(Number(result.sellerProfitBaseCost) * 0.12, 8);
     expect(result.costPerPieceComponents.copperPlate).toBe(result.copperPlateCostPerPiece);
     expect(result.audit.componentReconciliationDifference).toBe("0");
 

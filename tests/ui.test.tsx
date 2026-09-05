@@ -1,11 +1,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QuotationPage from "@/app/page";
 import { calculatePouchCost } from "@/lib/calculation";
 
 describe("quotation UI", () => {
+  beforeEach(() => sessionStorage.clear());
   afterEach(cleanup);
 
   it("exposes a provisional quote while keeping all issuance controls blocked", async () => {

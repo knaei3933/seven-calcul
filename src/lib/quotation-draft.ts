@@ -47,6 +47,12 @@ export function buildQuotationDraft(
     .plus(result.costPerPieceComponents.variableProcessing)
     .plus(result.costPerPieceComponents.fixedLot)
     .plus(result.costPerPieceComponents.custom);
+  const sellerRate = D(result.sellerProfitRate);
+  const filmMaterialCost = D(result.costPerPieceComponents.film)
+    .plus(result.costPerPieceComponents.copperPlate);
+  // 판매사이익 12%는 원가 항목이므로 견적서의 기존 2개 원가 행에 비율 배분한다.
+  const fillingCostWithSellerProfit = fillingCost.times(D(1).plus(sellerRate));
+  const filmCostWithSellerProfit = filmMaterialCost.times(D(1).plus(sellerRate));
   const productSummary = context.skuNames.filter(Boolean).join(" / ") || "パウチ製品";
 
   return {
@@ -54,8 +60,8 @@ export function buildQuotationDraft(
     sizeSummary: `${context.widthMm}×${context.lengthMm}mm / ${context.connected}連`,
     quantity: result.quantity,
     targetMargin: context.targetMargin,
-    fillingCostPerPiece: fillingCost.toString(),
-    filmCostPerPiece: result.costPerPieceComponents.film,
+    fillingCostPerPiece: fillingCostWithSellerProfit.toString(),
+    filmCostPerPiece: filmCostWithSellerProfit.toString(),
     filmMeterPrice: result.film.unitPrice,
     filmOrderLengthM: result.film.orderLengthM,
     totalCostPerPiece: result.totalCostPerPiece,
