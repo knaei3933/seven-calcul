@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { CALCULATION_VERSION, defaultParameters, sizeMaster } from "./constants";
+import { CALCULATION_VERSION, defaultParameters, defaultProductionSpeedForFillMl, sizeMaster } from "./constants";
 import { D, Decimal, ceilTo, eq, maxD, roundTo2, sum } from "./decimal";
 import { normalizeDigitalFilmOrder, QuotationValidationError, type FilmOrderAdjustment, type FilmSkuOrder } from "./digital-film";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
@@ -142,9 +142,14 @@ function resolveTargetMargins(targetMargins?: string[]): string[] {
 }
 
 export function calculatePouchCost({ spec, quantity, printingMethod, parameters, gravureParameters, targetMargins }: CalculationInput): CostResult {
-  const params = { ...defaultParameters, ...parameters } as CostParameters;
   const quantityD = D(quantity);
   if (quantityD.lte(0) || D(spec.fillMlPerChamber).lte(0) || spec.fillingLanes <= 0) throw validationError("invalid_positive_input");
+  const params = {
+    ...defaultParameters,
+    ...parameters,
+    productionSpeedPerMinute: parameters?.productionSpeedPerMinute
+      ?? String(defaultProductionSpeedForFillMl(spec.fillMlPerChamber)),
+  } as CostParameters;
   const margins = resolveTargetMargins(targetMargins);
 
   const size = getSizeMaster(spec);

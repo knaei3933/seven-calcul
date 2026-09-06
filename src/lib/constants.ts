@@ -22,6 +22,15 @@ export function machineChargePerHourFromBasis(basis: typeof machineChargeBasis =
   return annualDepreciation.plus(annualElectricity).div(basis.annualOperatingHours).toString();
 }
 
+export function defaultProductionSpeedForFillMl(fillMl: number | string): number {
+  const fill = Number(fillMl);
+  if (!Number.isFinite(fill) || fill <= 0) return 100;
+  if (fill < 2) return 140;
+  if (fill < 3) return 120;
+  if (fill < 8) return 100;
+  return 80;
+}
+
 export const sizeMaster: Record<SizeKey, SizeMaster> = {
   "round-50x60": base("round-50x60", "round", "ラウンド 50×60", 50, 60, 4, 476, "lte570", 6, 1),
   "round-50x80": base("round-50x80", "round", "ラウンド 50×80", 50, 80, 4, 476, "lte570", 8, 1),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { approvedCommission, calculatePouchCost } from "@/lib/calculation";
-import { defaultParameters, sizeMaster } from "@/lib/constants";
+import { defaultParameters, defaultProductionSpeedForFillMl, sizeMaster } from "@/lib/constants";
 import { normalizeDigitalFilmOrder } from "@/lib/digital-film";
 import type { PouchSpec } from "@/lib/types";
 
@@ -51,13 +51,25 @@ describe("bulk calculation", () => {
 });
 
 describe("digital film", () => {
+  it("uses the fill-volume based default production speed", () => {
+    expect(defaultProductionSpeedForFillMl(1)).toBe(140);
+    expect(defaultProductionSpeedForFillMl(1.99)).toBe(140);
+    expect(defaultProductionSpeedForFillMl(2)).toBe(120);
+    expect(defaultProductionSpeedForFillMl(2.5)).toBe(120);
+    expect(defaultProductionSpeedForFillMl(3)).toBe(100);
+    expect(defaultProductionSpeedForFillMl(7)).toBe(100);
+    expect(defaultProductionSpeedForFillMl(7.99)).toBe(100);
+    expect(defaultProductionSpeedForFillMl(8)).toBe(80);
+  });
+
   it("scales effective production speed by connected chambers (lanes÷連結)", () => {
     const single = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 1 }, quantity: "10000", printingMethod: "digital" });
     const twin = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 2 }, quantity: "10000", printingMethod: "digital" });
     const quad = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 4 }, quantity: "10000", printingMethod: "digital" });
-    expect(single.effectiveProductionSpeed).toBe("6000");
-    expect(twin.effectiveProductionSpeed).toBe("3000");
-    expect(quad.effectiveProductionSpeed).toBe("1500");
+    expect(single.baseProductionSpeedPerMinute).toBe("80");
+    expect(single.effectiveProductionSpeed).toBe("4800");
+    expect(twin.effectiveProductionSpeed).toBe("2400");
+    expect(quad.effectiveProductionSpeed).toBe("1200");
     expect(Number(twin.variableProcessingPerPiece)).toBeGreaterThan(Number(single.variableProcessingPerPiece));
     expect(Number(quad.variableProcessingPerPiece)).toBeGreaterThan(Number(twin.variableProcessingPerPiece));
   });
@@ -65,7 +77,7 @@ describe("digital film", () => {
   it("runs the machine for the loss-inclusive quantity when computing production time", () => {
     const result = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 1 }, quantity: "10000", printingMethod: "digital" });
     expect(Number(result.productionRunQuantity)).toBeCloseTo(10000 / 0.9, 6);
-    expect(Number(result.productionHours)).toBeCloseTo(10000 / 0.9 / 6000, 6);
+    expect(Number(result.productionHours)).toBeCloseTo(10000 / 0.9 / 4800, 6);
     expect(Number(result.inspectionHours)).toBeCloseTo(10000 / 0.9 / 1500, 6);
   });
 

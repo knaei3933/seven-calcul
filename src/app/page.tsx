@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { calculatePouchCost } from "@/lib/calculation";
-import { defaultParameters, machineChargeBasis, sizeMaster } from "@/lib/constants";
+import { defaultParameters, defaultProductionSpeedForFillMl, machineChargeBasis, sizeMaster } from "@/lib/constants";
 import { displayAmount } from "@/lib/calculation";
 import { D } from "@/lib/decimal";
 import { defaultGravureRollParameters, type GravureRollParameters } from "@/lib/gravure-roll";
@@ -99,6 +99,7 @@ export default function QuotationPage() {
   const [pending, setPending] = useState(false);
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
+  const [productionSpeedManual, setProductionSpeedManual] = useState(false);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -110,11 +111,17 @@ export default function QuotationPage() {
             parameters?: Partial<CostParameters>;
             gravureParameters?: Partial<GravureRollParameters>;
             machineBreakdown?: Partial<Record<MachineBreakdownKey, string>>;
+            productionSpeedManual?: boolean;
           };
           if (saved.form) setForm((old) => ({ ...old, ...saved.form }));
           if (saved.parameters) setParameters((old) => ({ ...old, ...saved.parameters }));
           if (saved.gravureParameters) setGravureParameters(normalizeGravureParameters(saved.gravureParameters));
           if (saved.machineBreakdown) setMachineBreakdown((old) => ({ ...old, ...saved.machineBreakdown }));
+          if (typeof saved.productionSpeedManual === "boolean") {
+            setProductionSpeedManual(saved.productionSpeedManual);
+          } else if (saved.parameters?.productionSpeedPerMinute) {
+            setProductionSpeedManual(true);
+          }
         }
       } catch {
         // 저장 상태가 손상된 경우 기본값을 유지한다.
@@ -155,13 +162,21 @@ export default function QuotationPage() {
   const weightedAvgFill = skuQuantitySum > 0
     ? form.skus.reduce((total, sku) => total + (isNumericInput(sku.quantity) && isNumericInput(sku.fillMl) ? Number(sku.quantity) * Number(sku.fillMl) : 0), 0) / skuQuantitySum
     : 0;
+  const recommendedProductionSpeed = defaultProductionSpeedForFillMl(weightedAvgFill > 0 ? weightedAvgFill : 3);
+  const effectiveProductionSpeedInput = productionSpeedManual
+    ? parameters.productionSpeedPerMinute
+    : formatNumber(recommendedProductionSpeed, 0);
+  const effectiveParameters = useMemo(() => ({
+    ...parameters,
+    productionSpeedPerMinute: effectiveProductionSpeedInput,
+  }), [parameters, effectiveProductionSpeedInput]);
   const skuDisplayName = (index: number) => form.skus[index]?.name.trim() || `充填物${index + 1}`;
   const normalizedGravureParameters = normalizeGravureParameters(gravureParameters);
   const positive = customDimensionsValid
     && isPositiveDecimalInput(form.quantity)
     && isPositiveDecimalInput(form.lanes)
     && isNonNegativeDecimalInput(form.bulkPrice)
-    && positiveParameters(parameters)
+    && positiveParameters(effectiveParameters)
     && (form.printingMethod !== "gravure" || positiveGravureParameters(normalizedGravureParameters))
     && skuQuantitiesValid;
   const colorPriceUnapplied = true;
@@ -191,7 +206,10 @@ export default function QuotationPage() {
     key: "lossRate" | "lossMinM" | "digitalFilmMinSkuM" | "digitalFilmMinTotalM" | "domesticShippingPerTrip" | "overseasShippingPerTrip" | "customsThreshold" | "customsHighCharge" | "customsPerTrip" | "bulkLossRate" | "fillTestRuns" | "hopperInitialChargeMl" | "pressureInitialChargeMl" | "laborPerHour" | "machineChargePerHour" | "productionSpeedPerMinute" | "inspectionSpeed" | "setupTime" | "cleanupTime" | "customPouchCharge" | "sellerProfitRate",
     rawValue: string,
     mode: "percent" | "value",
-  ) => setParameters((old) => ({ ...old, [key]: mode === "percent" ? formatNumber(Number(rawValue) / 100, 6) : rawValue }));
+  ) => {
+    if (key === "productionSpeedPerMinute") setProductionSpeedManual(true);
+    setParameters((old) => ({ ...old, [key]: mode === "percent" ? formatNumber(Number(rawValue) / 100, 6) : rawValue }));
+  };
 
   const setFilmUnitPrice = (band: "lte570" | "571to740", lengthBand: "500" | "1000" | "1500", rawValue: string) => setParameters((old) => ({ ...old, filmUnitPrices: { ...old.filmUnitPrices, [band]: { ...old.filmUnitPrices[band], [lengthBand]: rawValue } } }));
 
@@ -217,9 +235,9 @@ export default function QuotationPage() {
     quantity: form.quantity,
     printingMethod: form.printingMethod,
     targetMargins: targetMarginList,
-    parameters,
+    parameters: effectiveParameters,
     gravureParameters: normalizedGravureParameters,
-  }), [spec, form.quantity, form.printingMethod, targetMarginList, parameters, normalizedGravureParameters]);
+  }), [spec, form.quantity, form.printingMethod, targetMarginList, effectiveParameters, normalizedGravureParameters]);
 
   const provisionalResult = useMemo(() => {
     if (blocker) return null;
@@ -285,16 +303,17 @@ export default function QuotationPage() {
         parameters,
         gravureParameters: normalizedGravureParameters,
         machineBreakdown,
+        productionSpeedManual,
       }));
     } catch {
       // private mode 등 저장 실패 시에도 계산은 계속 동작한다.
     }
-  }, [form, machineBreakdown, normalizedGravureParameters, parameters, simulatorStateLoaded]);
+  }, [form, machineBreakdown, normalizedGravureParameters, parameters, productionSpeedManual, simulatorStateLoaded]);
 
   const lanesPerCycle = Number(form.lanes) > 0 ? Math.max(1, Math.floor(Number(form.lanes) / Number(form.connected))) : 1;
   const effectiveProductionSpeedPerMinute = Number(form.lanes) > 0
-    ? Number(parameters.productionSpeedPerMinute) * lanesPerCycle / Number(form.lanes)
-    : Number(parameters.productionSpeedPerMinute);
+    ? Number(effectiveParameters.productionSpeedPerMinute) * lanesPerCycle / Number(form.lanes)
+    : Number(effectiveParameters.productionSpeedPerMinute);
   const effectiveProductionSpeed = effectiveProductionSpeedPerMinute * 60;
   const totalChambers = isNumericInput(form.quantity) && Number(form.quantity) > 0
     ? Number(form.quantity) * Number(form.connected)
@@ -412,11 +431,17 @@ export default function QuotationPage() {
                   id="production-speed"
                   inputMode="decimal"
                   aria-describedby="production-speed-help"
-                  className={isPositiveDecimalInput(parameters.productionSpeedPerMinute) ? undefined : "invalid"}
-                  value={parameters.productionSpeedPerMinute}
+                  className={isPositiveDecimalInput(effectiveParameters.productionSpeedPerMinute) ? undefined : "invalid"}
+                  value={effectiveParameters.productionSpeedPerMinute}
                   onChange={(e) => setParameter("productionSpeedPerMinute", e.target.value, "value")}
                 />
-                <p className="help" id="production-speed-help">機械が1分に作れる1連パウチの枚数です。例：分速40枚 → {formatNumber(40 * 60)}枚/h（×60で自動換算）。</p>
+                <p className="help" id="production-speed-help">
+                  {productionSpeedManual ? "手動入力中。" : `充填量 ${formatNumber(weightedAvgFill > 0 ? weightedAvgFill : 3)}ml の基準値を自動適用中。`}
+                  ルール：1ml台=140枚/分、2ml台=120枚/分、3〜7ml=100枚/分、8ml以上=80枚/分。
+                  {productionSpeedManual ? (
+                    <button className="button secondary small" type="button" onClick={() => { setProductionSpeedManual(false); setParameters((old) => ({ ...old, productionSpeedPerMinute: formatNumber(recommendedProductionSpeed, 0) })); }}>充填量基準速度に戻す</button>
+                  ) : null}
+                </p>
               </Field>
               <div className="field">
                 <span>実効生産速度（{form.connected}連）</span>
@@ -551,7 +576,7 @@ export default function QuotationPage() {
                   ) : null}
                 </fieldset>
               ))}
-              <button className="button secondary small" type="button" onClick={() => { setParameters(defaultParameters); setMachineBreakdown({ ...MACHINE_BREAKDOWN_DEFAULTS }); }}>初期値に戻す</button>
+              <button className="button secondary small" type="button" onClick={() => { setParameters(defaultParameters); setMachineBreakdown({ ...MACHINE_BREAKDOWN_DEFAULTS }); setProductionSpeedManual(false); }}>初期値に戻す</button>
             </details>
           </section>
           <section className="panel" aria-labelledby="result-title">
@@ -742,7 +767,7 @@ export default function QuotationPage() {
                     <table className="table formula-vars"><tbody>
                       <tr><th scope="row">人件費</th><td>{formatCurrency(displayAmount(parameters.laborPerHour))} /時間</td><td>生産と検品の両方にかかる人件費の単価です。それぞれの工程にかかる時間に応じて、1枚あたりに割り当てます。</td></tr>
                       <tr><th scope="row">機械チャージ</th><td>{formatCurrency(displayAmount(parameters.machineChargePerHour))} /時間</td><td>充填機を1時間動かすための単価です。年間の減価償却費と電気代を年間稼働時間で割って計算します。生産時間に応じた1枚あたりの費用と、段取り・清掃時間の固定費の両方に使います。</td></tr>
-                      <tr><th scope="row">生産速度</th><td>{formatNumber(parameters.productionSpeedPerMinute)} 枚/分（1連基準・時給換算 {formatNumber(Number(parameters.productionSpeedPerMinute) * 60)} 枚/h）</td><td>1分あたりに作れる1連パウチの枚数です。60倍すると1時間あたりの枚数になり、連結形式によって実効速度が変わります。</td></tr>
+                      <tr><th scope="row">生産速度</th><td>{formatNumber(effectiveParameters.productionSpeedPerMinute)} 枚/分（1連基準・時給換算 {formatNumber(Number(effectiveParameters.productionSpeedPerMinute) * 60)} 枚/h）</td><td>1分あたりに作れる1連パウチの枚数です。充填量基準の初期値は、1ml台=140、2ml台=120、3〜7ml=100、8ml以上=80です。手動入力でいつでも上書きできます。</td></tr>
                       <tr><th scope="row">稼働生産数</th><td>{resultShown ? formatNumber(resultShown.productionRunQuantity) : "-"} 枚</td><td>「発注枚数 ÷ (1−ロス率)」で計算します。ロス分のパウチも実際には機械へ流すため、生産時間はこの数で計算します。</td></tr>
                       <tr><th scope="row">実効生産速度</th><td>{resultShown ? `${formatNumber(Number(resultShown.effectiveProductionSpeed) / 60)} 枚/分（${formatNumber(resultShown.effectiveProductionSpeed)} 枚/h）` : "-"}</td><td>{form.lanes}列÷{form.connected}連＝1回に{lanesPerCycle}枚作れるため、「基準速度×{lanesPerCycle}／{form.lanes}」で計算します。{form.connected}連は、1個を充填するために必要な室数ぶん列を占有します。</td></tr>
                       <tr><th scope="row">検品速度</th><td>{formatNumber(parameters.inspectionSpeed)} 枚/h</td><td>検品にかかる人件費を1枚あたりに割り当てるときの分母です。</td></tr>
