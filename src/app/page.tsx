@@ -114,6 +114,10 @@ export default function QuotationPage() {
   const [customerList, setCustomerList] = useState<CustomerMaster[]>([]);
   const [customerListQuery, setCustomerListQuery] = useState("");
   const [customerListLoading, setCustomerListLoading] = useState(false);
+  const [editingCustomerCode, setEditingCustomerCode] = useState<string | null>(null);
+  const [customerEdit, setCustomerEdit] = useState<CustomerMasterInput | null>(null);
+  const [customerEditSaving, setCustomerEditSaving] = useState(false);
+  const [customerListMessage, setCustomerListMessage] = useState("");
   const [customerStatus, setCustomerStatus] = useState<{ loading: boolean; found: boolean; message: string; saving: boolean }>({
     loading: false,
     found: false,
@@ -398,6 +402,64 @@ export default function QuotationPage() {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
   }, [customerDraft, customerPrice, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
+
+  const startCustomerEdit = (customer: CustomerMaster) => {
+    setEditingCustomerCode(customer.customerCode);
+    setCustomerEdit({
+      customerCode: customer.customerCode,
+      customerName: customer.customerName,
+      customerPostalCode: customer.customerPostalCode,
+      customerAddress: customer.customerAddress,
+      customerContact: customer.customerContact,
+      customerTelephone: customer.customerTelephone,
+      customerEmail: customer.customerEmail,
+    });
+    setCustomerListMessage("");
+  };
+
+  const updateCustomerEdit = (key: keyof CustomerMasterInput, value: string) => {
+    setCustomerEdit((old) => old ? { ...old, [key]: value } : old);
+  };
+
+  const cancelCustomerEdit = () => {
+    setEditingCustomerCode(null);
+    setCustomerEdit(null);
+  };
+
+  const saveCustomerEdit = async () => {
+    if (!customerEdit) return;
+    setCustomerEditSaving(true);
+    setCustomerListMessage("");
+    try {
+      const response = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(customerEdit),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.customer) throw new Error();
+      const saved = payload.customer as CustomerMaster;
+      setCustomerList((old) => old.map((customer) => customer.customerCode === saved.customerCode ? saved : customer));
+      if (form.customerCode === saved.customerCode) {
+        setForm((old) => ({
+          ...old,
+          customerName: saved.customerName,
+          customerPostalCode: saved.customerPostalCode,
+          customerAddress: saved.customerAddress,
+          customerContact: saved.customerContact,
+          customerTelephone: saved.customerTelephone,
+          customerEmail: saved.customerEmail,
+        }));
+      }
+      setEditingCustomerCode(null);
+      setCustomerEdit(null);
+      setCustomerListMessage(`${saved.customerCode} を更新しました。`);
+    } catch {
+      setCustomerListMessage("顧客情報を更新できませんでした。");
+    } finally {
+      setCustomerEditSaving(false);
+    }
+  };
 
   const openCustomerList = async () => {
     setCustomerListOpen(true);
@@ -1039,22 +1101,46 @@ export default function QuotationPage() {
                 onChange={(event) => setCustomerListQuery(event.target.value)}
               />
             </div>
+            {customerListMessage ? <p className="customer-list-message" role="status">{customerListMessage}</p> : null}
             <div className="customer-list-body">
               {customerListLoading ? <p>読み込み中...</p> : customerList.length === 0 ? <p>登録済み顧客はありません。</p> : (
                 <table>
-                  <thead><tr><th>コード</th><th>会社名</th><th>担当者</th><th>住所</th><th>電話</th><th>メール</th><th></th></tr></thead>
+                  <thead><tr><th>コード</th><th>会社名</th><th>担当者</th><th>郵便番号</th><th>住所</th><th>電話</th><th>メール</th><th>操作</th></tr></thead>
                   <tbody>
-                    {customerList.map((customer) => (
-                      <tr key={customer.customerCode}>
-                        <td>{customer.customerCode}</td>
-                        <td>{customer.customerName}</td>
-                        <td>{customer.customerContact || "-"}</td>
-                        <td>{customer.customerAddress || "-"}</td>
-                        <td>{customer.customerTelephone || "-"}</td>
-                        <td>{customer.customerEmail || "-"}</td>
-                        <td><button type="button" onClick={() => selectCustomerFromList(customer)}>選択</button></td>
-                      </tr>
-                    ))}
+                    {customerList.map((customer) => {
+                      const editing = editingCustomerCode === customer.customerCode;
+                      return editing && customerEdit ? (
+                        <tr key={customer.customerCode} className="customer-edit-row">
+                          <td>{customer.customerCode}</td>
+                          <td><input value={customerEdit.customerName} onChange={(event) => updateCustomerEdit("customerName", event.target.value)} /></td>
+                          <td><input value={customerEdit.customerContact} onChange={(event) => updateCustomerEdit("customerContact", event.target.value)} /></td>
+                          <td><input value={customerEdit.customerPostalCode} onChange={(event) => updateCustomerEdit("customerPostalCode", event.target.value)} /></td>
+                          <td><input value={customerEdit.customerAddress} onChange={(event) => updateCustomerEdit("customerAddress", event.target.value)} /></td>
+                          <td><input value={customerEdit.customerTelephone} onChange={(event) => updateCustomerEdit("customerTelephone", event.target.value)} /></td>
+                          <td><input value={customerEdit.customerEmail} onChange={(event) => updateCustomerEdit("customerEmail", event.target.value)} /></td>
+                          <td className="customer-edit-actions">
+                            <button className="button small" type="button" disabled={customerEditSaving || !customerEdit.customerName.trim()} onClick={() => void saveCustomerEdit()}>
+                              {customerEditSaving ? "保存中..." : "保存"}
+                            </button>
+                            <button className="button secondary small" type="button" disabled={customerEditSaving} onClick={cancelCustomerEdit}>取消</button>
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr key={customer.customerCode}>
+                          <td>{customer.customerCode}</td>
+                          <td>{customer.customerName}</td>
+                          <td>{customer.customerContact || "-"}</td>
+                          <td>{customer.customerPostalCode || "-"}</td>
+                          <td>{customer.customerAddress || "-"}</td>
+                          <td>{customer.customerTelephone || "-"}</td>
+                          <td>{customer.customerEmail || "-"}</td>
+                          <td className="customer-edit-actions">
+                            <button className="button small" type="button" disabled={editingCustomerCode !== null} onClick={() => startCustomerEdit(customer)}>編集</button>
+                            <button className="button secondary small" type="button" disabled={editingCustomerCode !== null} onClick={() => selectCustomerFromList(customer)}>選択</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}

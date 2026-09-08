@@ -499,3 +499,10 @@ header .version-badge { display: none; }
 .purchase-order-section th, .purchase-order-section td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .purchase-order-section th { background: #eef2f7; font-size: 11px; }
 .detail-header-actions { display: flex; gap: 8px; align-items: center; }
+
+.customer-list-toolbar { display: flex; gap: 10px; align-items: center; }
+.customer-list-toolbar input { flex: 1 1 auto; min-height: 42px; border: 1px solid var(--line); border-radius: 8px; padding: 0 12px; font: inherit; }
+.customer-list-message { margin: 0; padding: 0 18px 10px; background: white; font-size: 12px; color: var(--primary); font-weight: 700; }
+.customer-list-body input { width: 100%; min-width: 100px; min-height: 36px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 12px; }
+.customer-edit-actions, .customer-list-body td:last-child { white-space: nowrap; }
+.customer-edit-actions { display: flex; gap: 5px; }
