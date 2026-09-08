@@ -11,6 +11,7 @@ import {
   type QuotationDraft,
 } from "@/lib/quotation-draft";
 import { DEFAULT_FILM_COMPOSITION, QUOTATION_RESTORE_KEY } from "@/lib/quotation-shared";
+import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
 
 type QuoteForm = {
   quotationNumber: string;
@@ -82,6 +83,7 @@ type QuoteForm = {
   notes: string;
   sealText: string;
   footerNote: string;
+  purchaseOrderJson: string;
 };
 
 const defaultQuote: QuoteForm = {
@@ -154,6 +156,7 @@ const defaultQuote: QuoteForm = {
   notes: "上記金額には充填・加工費とフィルム費用を含みます。仕様変更時は再度お見積りいたします。",
   sealText: "検討済",
   footerNote: "本お見積りに関するご不明点は、下記連絡先までお気軽にお問い合わせください。",
+  purchaseOrderJson: "",
 };
 
 function isFiniteNumber(value: string) {
@@ -242,6 +245,7 @@ export default function PrintableQuotationPage() {
   const [saveError, setSaveError] = useState("");
   const [mobileDrawer, setMobileDrawer] = useState<"left" | "right" | null>(null);
   const [isMobileWorkspace, setIsMobileWorkspace] = useState(false);
+  const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrderSnapshot | null>(null);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 1200px)");
@@ -264,7 +268,11 @@ export default function PrintableQuotationPage() {
     try {
       const restoreRaw = sessionStorage.getItem(QUOTATION_RESTORE_KEY);
       if (restoreRaw) {
-        const restored = JSON.parse(restoreRaw) as Partial<QuoteForm> & { resultHash?: unknown };
+        const restored = JSON.parse(restoreRaw) as Partial<QuoteForm> & {
+          resultHash?: unknown;
+          purchaseOrder?: PurchaseOrderSnapshot;
+          purchaseOrderJson?: string;
+        };
         const restoredForm = { ...defaultQuote };
         (Object.keys(defaultQuote) as (keyof QuoteForm)[]).forEach((key) => {
           const value = restored[key];
@@ -272,6 +280,10 @@ export default function PrintableQuotationPage() {
         });
         // eslint-disable-next-line react-hooks/set-state-in-effect -- 履歴復元はSSR後にしか読めないsessionStorage値を反映する意図的な初期化です。
         setForm(restoredForm);
+        try {
+          const rawPurchaseOrder = restored.purchaseOrderJson ?? (restored.purchaseOrder ? JSON.stringify(restored.purchaseOrder) : "");
+          setPurchaseOrder(rawPurchaseOrder ? JSON.parse(rawPurchaseOrder) as PurchaseOrderSnapshot : null);
+        } catch { setPurchaseOrder(null); }
         setSourceVersion(typeof restored.resultHash === "string" ? restored.resultHash : "");
         sessionStorage.removeItem(QUOTATION_RESTORE_KEY);
         setStorageLoaded(true);
@@ -305,7 +317,9 @@ export default function PrintableQuotationPage() {
           filmMeterPrice: draft.filmMeterPrice,
           filmOrderLengthM: draft.filmOrderLengthM,
           targetMargin: draft.targetMargin,
+          purchaseOrderJson: draft.purchaseOrder ? JSON.stringify(draft.purchaseOrder) : "",
         }));
+        setPurchaseOrder(draft.purchaseOrder ?? null);
         setSourceVersion(draft.resultHash);
       }
     } catch {
@@ -382,6 +396,7 @@ export default function PrintableQuotationPage() {
             copperAmountDisplay: shownTotals.copperAmount,
             customUnitDisplay: shownTotals.customUnit,
             customAmountDisplay: shownTotals.customAmount,
+            purchaseOrder: purchaseOrder,
             filmUnitDisplay: shownTotals.filmUnit,
             filmPouchUnitDisplay: shownTotals.filmPouchUnit,
             filmAmountDisplay: shownTotals.filmAmount,

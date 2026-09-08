@@ -1,5 +1,6 @@
 import { D } from "./decimal";
 import type { CostResult } from "./calculation";
+import { buildPurchaseOrderSnapshot, type PurchaseContext, type PurchaseOrderSnapshot } from "./purchase-order";
 
 export const QUOTATION_DRAFT_KEY = "pouch-quotation-draft-v1";
 
@@ -39,6 +40,7 @@ export interface QuotationDraft {
   orderPatternCount?: string;
   deliverablePatternLengthM?: string;
   recommendedQuantity?: string;
+  purchaseOrder?: PurchaseOrderSnapshot;
 }
 
 export function buildQuotationDraft(
@@ -57,7 +59,7 @@ export function buildQuotationDraft(
     customerAddress?: string;
     customerTelephone?: string;
     customerEmail?: string;
-  },
+  } & PurchaseContext,
 ): QuotationDraft {
   const fillingCost = D(result.costPerPieceComponents.bulk)
     .plus(result.costPerPieceComponents.variableProcessing)
@@ -93,6 +95,7 @@ export function buildQuotationDraft(
       deliverablePatternLengthM: result.deliverablePatternLengthM ?? "5500",
       recommendedQuantity: result.recommendedQuantity ?? result.quantity,
     } : {}),
+    purchaseOrder: buildPurchaseOrderSnapshot(result, context),
   };
 }
 

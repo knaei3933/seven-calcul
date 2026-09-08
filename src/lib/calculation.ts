@@ -61,6 +61,7 @@ export interface CostResult {
     overseasShippingCostYen: string;
     shippingTrips: number;
     copperPlateCostYen: string;
+    materialWidthMm: string;
     finalHeatSealWidthMm: string;
   };
   warnings: WarningCode[];
@@ -338,8 +339,9 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
         customsCostYen: gravureRoll.customsCostYen,
         overseasShippingCostYen: gravureRoll.overseasShippingCostYen,
         shippingTrips: gravureRoll.shippingTrips,
-        copperPlateCostYen: gravureRoll.copperPlateCostYen,
-        finalHeatSealWidthMm: gravureRoll.finalHeatSealWidthMm,
+      copperPlateCostYen: gravureRoll.copperPlateCostYen,
+      materialWidthMm: gravureRoll.materialWidthMm,
+      finalHeatSealWidthMm: gravureRoll.finalHeatSealWidthMm,
       },
     } : {}),
     warnings,

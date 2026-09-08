@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
+import { sizeMaster } from "@/lib/constants";
+import { D } from "@/lib/decimal";
+import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
 import { analyzeQuotation, filmCompositionOf, printingMethodOf } from "@/lib/quotation-history";
 import {
   DEFAULT_FILM_COMPOSITION,
@@ -15,7 +18,7 @@ import {
 const statusLabels: Record<QuotationStatus, string> = {
   draft: "下書き",
   sent: "送付済み",
-  approved: "承認",
+  approved: "成約",
   rejected: "見送り",
   expired: "期限切れ",
 };
@@ -30,6 +33,7 @@ export default function QuotationHistoryPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const requestOrder = useRef(0);
   const selectedRecord = records.find((record) => record.id === selectedId) ?? null;
+  const [purchaseRecord, setPurchaseRecord] = useState<QuotationRecord | null>(null);
 
   const load = useCallback(async (search: string, statusFilter: string) => {
     const order = ++requestOrder.current;
@@ -55,6 +59,15 @@ export default function QuotationHistoryPage() {
     const timer = setTimeout(() => void load(query, status), 180);
     return () => clearTimeout(timer);
   }, [load, query, status]);
+
+  useEffect(() => {
+    if (!purchaseRecord) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPurchaseRecord(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [purchaseRecord]);
 
   useEffect(() => {
     if (!selectedRecord) return;
@@ -153,6 +166,13 @@ export default function QuotationHistoryPage() {
                   </td>
                   <td className="history-actions">
                     <button className="button small" type="button" onClick={() => setSelectedId(record.id)}>詳細</button>
+                    <button
+                      className="button small"
+                      type="button"
+                      disabled={record.status !== "approved"}
+                      title={record.status === "approved" ? "カネイ貿易向け発注内容を表示" : "成約処理後に表示できます"}
+                      onClick={() => setPurchaseRecord(record)}
+                    >発注内容</button>
                     <button className="button secondary small" type="button" onClick={() => restore(record)}>復元</button>
                     <button className="button danger small" type="button" onClick={() => void remove(record)}>削除</button>
                   </td>
@@ -164,13 +184,16 @@ export default function QuotationHistoryPage() {
       </section>
 
       {selectedRecord ? (
-        <QuotationDetailModal record={selectedRecord} onClose={() => setSelectedId(null)} />
+        <QuotationDetailModal record={selectedRecord} onClose={() => setSelectedId(null)} onPurchase={setPurchaseRecord} />
+      ) : null}
+      {purchaseRecord ? (
+        <PurchaseOrderModal record={purchaseRecord} onClose={() => setPurchaseRecord(null)} />
       ) : null}
     </main>
   );
 }
 
-function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; onClose: () => void }) {
+function QuotationDetailModal({ record, onClose, onPurchase }: { record: QuotationRecord; onClose: () => void; onPurchase: (record: QuotationRecord) => void }) {
   const analysis = analyzeQuotation(record);
   const composition = filmCompositionOf(record);
   const payloadEntries = Object.entries(record.payload);
@@ -209,7 +232,12 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
             <h2 id="history-detail-title">{record.quotationNumber}</h2>
             <p data-testid="history-film-composition">{record.customerName || "得意先未設定"} / {record.productName} / フィルム構成 {composition || DEFAULT_FILM_COMPOSITION}</p>
           </div>
-          <button className="button secondary small" type="button" onClick={onClose}>閉じる</button>
+          <div className="detail-header-actions">
+            {record.status === "approved" ? (
+              <button className="button small" type="button" onClick={() => onPurchase(record)}>発注内容</button>
+            ) : null}
+            <button className="button secondary small" type="button" onClick={onClose}>閉じる</button>
+          </div>
         </header>
 
         <div className="detail-scroll">
@@ -434,6 +462,216 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
         </div>
       </div>
       <div className="history-detail-overlay" onClick={onClose} aria-hidden="true" />
+    </div>
+  );
+}
+
+function fallbackPurchaseOrder(record: QuotationRecord): PurchaseOrderSnapshot {
+  const quantity = Number(record.quantity) || 0;
+  const match = record.sizeSummary.match(/([0-9.]+)\s*×\s*([0-9.]+)/);
+  const width = match ? Number(match[1]) : 0;
+  const length = match ? Number(match[2]) : 0;
+  const size = Object.values(sizeMaster).find((item) => Number(item.widthMm) === width && Number(item.lengthMm) === length);
+  const lanes = size?.lanes ?? 4;
+  const pitchMm = size ? D(size.lengthMm).plus(size.pitchAddMm).toString() : String(length + 6);
+  const webWidthMm = size?.webWidthMm ?? 500;
+  const lossRate = 0.1;
+  const colorCount = Number(record.payload.colorCount) || 0;
+  const requiredLengthM = pitchMm && lanes > 0 && quantity > 0
+    ? D(quantity).div(1 - lossRate).times(pitchMm).div(1000).div(lanes).toString()
+    : "0";
+  const orderLengthM = D(record.filmOrderLengthM).toString();
+  const effectiveLengthM = D(orderLengthM).minus(D(orderLengthM).times(lossRate)).toString();
+
+  if (printingMethodOf(record) === "gravure") {
+    const savedDeliverable = typeof record.payload.deliverablePatternLengthM === "string"
+      ? record.payload.deliverablePatternLengthM
+      : "0";
+    const deliverablePatternLengthM = savedDeliverable
+      ? D(savedDeliverable).toString()
+      : D(orderLengthM).div(Number(record.payload.orderPatternCount) || 1).toString();
+    return {
+      printingMethod: "gravure",
+      pouchQuantity: record.quantity,
+      filmComposition: typeof record.payload.filmComposition === "string" ? record.payload.filmComposition : "PET12+AL7+PET12+LLDPE50",
+      requiredLengthM,
+      orderLengthM,
+      effectiveLengthM: record.payload.deliverablePatternLengthM
+        ? D(String(record.payload.deliverablePatternLengthM ?? 0)).times(Number(record.payload.orderPatternCount) || 1).toString()
+        : effectiveLengthM,
+      lossM: D(orderLengthM).minus(D(savedDeliverable)).toString(),
+      lossRate: String(lossRate),
+      webWidthMm,
+      lanes,
+      pitchMm,
+      prodMultiplier: size?.prodMultiplier ?? 1,
+      colorCount,
+      skuColorCounts: [],
+      skuOrderDetails: [],
+      orderPatternCount: Number(record.payload.orderPatternCount) || 1,
+      deliverablePatternLengthM,
+      productionPatternLengthM: orderLengthM,
+      gravureLossM: D(orderLengthM).minus(D(savedDeliverable)).toString(),
+      copperPlate: {
+        quantity: colorCount,
+        plateWidthMm: D(webWidthMm).plus(100).toString(),
+        diameterMm: 42,
+        minimumPriceYen: "32000",
+        calculatedPriceYen: D(String(record.payload.copperPlateCostPerPiece ?? 0)).times(quantity).toString(),
+        priceYen: D(String(record.payload.copperPlateCostPerPiece ?? 0)).times(quantity).toString(),
+      },
+    };
+  }
+
+  return {
+    printingMethod: "digital",
+    pouchQuantity: record.quantity,
+    filmComposition: typeof record.payload.filmComposition === "string" ? record.payload.filmComposition : "PET12+AL7+PET12+LLDPE50",
+    requiredLengthM,
+    orderLengthM,
+    effectiveLengthM,
+    lossM: D(orderLengthM).times(lossRate).toString(),
+    lossRate: String(lossRate),
+    webWidthMm,
+    lanes,
+    pitchMm,
+    prodMultiplier: size?.prodMultiplier ?? 1,
+    colorCount,
+    skuColorCounts: [],
+    skuOrderDetails: [],
+  };
+}
+
+function resolvePurchaseOrder(record: QuotationRecord): { order: PurchaseOrderSnapshot | null; legacy: boolean } {
+  try {
+    const value = record.payload.purchaseOrder as Record<string, unknown> | undefined;
+    if (value && typeof value === "object" && typeof value.printingMethod === "string") {
+      return { order: value as unknown as PurchaseOrderSnapshot, legacy: false };
+    }
+    if (typeof record.payload.purchaseOrderJson === "string" && record.payload.purchaseOrderJson.trim()) {
+      return { order: JSON.parse(record.payload.purchaseOrderJson) as PurchaseOrderSnapshot, legacy: false };
+    }
+  } catch {
+    // 壊れたsnapshotはlegacy再構築に任せる。
+  }
+  return { order: fallbackPurchaseOrder(record), legacy: true };
+}
+
+function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onClose: () => void }) {
+  const { order, legacy } = resolvePurchaseOrder(record);
+  return (
+    <div className="purchase-order-layer" role="dialog" aria-modal="true" aria-labelledby="purchase-order-title">
+      <div className="purchase-order-panel">
+        <header className="purchase-order-header">
+          <div>
+            <span className="side-kicker">PURCHASE ORDER</span>
+            <h2 id="purchase-order-title">カネイ貿易 発注内容</h2>
+            <p>{record.quotationNumber} ／ {record.customerName || "-"} ／ {record.productName}</p>
+          </div>
+          <button className="button secondary small" type="button" onClick={onClose}>閉じる</button>
+        </header>
+
+        <div className="purchase-order-body">
+          {legacy ? <p className="warning">旧形式の見積履歴のため、一部項目は保存済み情報から再構築しています。新しい見積書では全項目が自動保存されます。</p> : null}
+          {!order ? <p className="error">発注内容を構築できませんでした。</p> : (
+            <>
+              <section className="purchase-order-section">
+                <h3>発注サマリー</h3>
+                <dl className="purchase-order-grid">
+                  <div><dt>発注先</dt><dd>カネイ貿易</dd></div>
+                  <div><dt>印刷方式</dt><dd>{order.printingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}</dd></div>
+                  <div><dt>発注数量</dt><dd>{formatNumber(record.quantity, 0)} 枚</dd></div>
+                  <div><dt>フィルム構成</dt><dd>{order.filmComposition}</dd></div>
+                  <div><dt>原反幅</dt><dd>{formatNumber(order.webWidthMm, 0)} mm</dd></div>
+                  <div><dt>列数</dt><dd>{formatNumber(order.lanes, 0)} 列</dd></div>
+                  <div><dt>発注長</dt><dd>{formatNumber(order.orderLengthM, 0)} m</dd></div>
+                  <div><dt>印刷色数</dt><dd>{order.colorCount > 0 ? `${formatNumber(order.colorCount, 0)} 色` : "旧データ（要確認）"}</dd></div>
+                </dl>
+              </section>
+
+              <section className="purchase-order-section">
+                <h3>フィルム発注の計算根拠</h3>
+                <dl className="purchase-order-grid">
+                  <div><dt>必要長</dt><dd>{formatNumber(order.requiredLengthM, 3)} m</dd></div>
+                  <div><dt>発注長</dt><dd>{formatNumber(order.orderLengthM, 0)} m</dd></div>
+                  <div><dt>ロス</dt><dd>{formatNumber(order.lossM, 0)} m</dd></div>
+                  <div><dt>有効長</dt><dd>{formatNumber(order.effectiveLengthM, 0)} m</dd></div>
+                </dl>
+                {order.printingMethod === "digital" ? (
+                  <ol>
+                    <li>必要長 ＝ 発注枚数 ÷ (1 − ロス率 {formatNumber(Number(order.lossRate) * 100, 1)}%) × ピッチ {formatNumber(order.pitchMm, 0)}mm ÷ 1000 ÷ {formatNumber(order.lanes, 0)}列 ＝ {formatNumber(order.requiredLengthM, 3)}m</li>
+                    <li>SKUごとに必要長を100m単位へ切り上げ、最低発注長を満たした合計が発注長 {formatNumber(order.orderLengthM, 0)}m。</li>
+                    <li>原反幅 {formatNumber(order.webWidthMm, 0)}mm は、このサイズを {formatNumber(order.lanes, 0)}列で生産する登録済み確認幅です。1列あたり {formatNumber(D(order.webWidthMm).div(order.lanes).toString(), 1)}mm 確保できます。</li>
+                    {order.prodMultiplier > 1 ? <li>このサイズは大ロット切替のため生産倍率 {formatNumber(order.prodMultiplier, 0)}倍、検討幅 736mm を使用します。</li> : null}
+                  </ol>
+                ) : (
+                  <ol>
+                    <li>必要納品長 ＝ {formatNumber(order.requiredLengthM, 3)}m。</li>
+                    <li>発注パターン ＝ ceil(必要納品長 ÷ {formatNumber(order.deliverablePatternLengthM ?? "0", 0)}m) ＝ {formatNumber(order.orderPatternCount ?? 1, 0)}回。</li>
+                    <li>発注（製作）長 ＝ パターン数 × 製作パターン長 ＝ {formatNumber(order.orderLengthM, 0)}m。納品可能長は {formatNumber(order.deliverablePatternLengthM ?? "0", 0)}m、ロスは {formatNumber(order.gravureLossM ?? "0", 0)}m。</li>
+                    <li>原反幅 {formatNumber(order.webWidthMm, 0)}mm はグラビア用に確保する幅です（最小500mm / 最大1100mm）。</li>
+                  </ol>
+                )}
+              </section>
+
+              <section className="purchase-order-section">
+                <h3>SKU別 内訳</h3>
+                {order.skuOrderDetails.length ? (
+                  <table>
+                    <thead><tr><th>SKU</th><th>品名</th><th>数量</th><th>色数</th><th>必要長</th><th>発注長</th><th>原反幅 / 生産</th></tr></thead>
+                    <tbody>
+                      {order.skuOrderDetails.map((sku, index) => (
+                        <tr key={`${sku.skuCode}-${index}`}>
+                          <td>{sku.skuCode}</td>
+                          <td>{sku.name || "-"}</td>
+                          <td>{formatNumber(sku.quantity, 0)} 枚</td>
+                          <td>{formatNumber(sku.colorCount, 0)} 色</td>
+                          <td>{formatNumber(sku.requiredLengthM, 3)} m</td>
+                          <td>{formatNumber(sku.orderLengthM, 0)} m</td>
+                          <td>{formatNumber(sku.webWidthMm, 0)}mm × {formatNumber(sku.multiplier, 0)}倍</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p>旧形式の履歴のためSKU別内訳は保存されていません。見積書の仕様をご確認ください。</p>
+                )}
+              </section>
+
+              {order.printingMethod === "gravure" ? (
+                <section className="purchase-order-section">
+                  <h3>新規銅版 発注</h3>
+                  {order.copperPlate ? (
+                    <>
+                      <dl className="purchase-order-grid">
+                        <div><dt>銅版数</dt><dd>{formatNumber(order.copperPlate.quantity, 0)} 本</dd></div>
+                        <div><dt>版幅</dt><dd>{formatNumber(order.copperPlate.plateWidthMm, 0)} mm</dd></div>
+                        <div><dt>外径</dt><dd>{formatNumber(order.copperPlate.diameterMm, 0)} cm</dd></div>
+                        <div><dt>金額</dt><dd>{formatCurrency(order.copperPlate.priceYen, 0)}</dd></div>
+                      </dl>
+                      <ol>
+                        <li>銅版数 ＝ 印刷色数。</li>
+                        <li>版幅 ＝ 原反幅 {formatNumber(order.webWidthMm, 0)}mm ＋ 端代100mm ＝ {formatNumber(order.copperPlate.plateWidthMm, 0)}mm。</li>
+                        <li>金額 ＝ MAX(¥32,000, 銅版数 × 版幅cm × 単価 × 外径cm)。小数は切り上げ。</li>
+                      </ol>
+                    </>
+                  ) : <p>銅版情報が保存されていません。</p>}
+                </section>
+              ) : null}
+
+              <section className="purchase-order-section">
+                <h3>発注時確認事項</h3>
+                <ul>
+                  <li>フィルム構成・幅・発注長・色数を発注書と照合してください。</li>
+                  <li>グラビアは成約案件ごとに新規銅版が必要です。</li>
+                  <li>仕様変更がある場合は、本発注内容を作成し直してください。</li>
+                </ul>
+              </section>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="purchase-order-overlay" onClick={onClose} aria-hidden="true" />
     </div>
   );
 }

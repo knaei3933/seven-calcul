@@ -374,12 +374,18 @@ export default function QuotationPage() {
           customerTelephone: form.customerTelephone,
           customerEmail: form.customerEmail,
           customerContact: form.customerContact,
+          filmComposition: "PET12+AL7+PET12+LLDPE50",
+          webWidthMm: effectiveSize.webWidthMm,
+          lanes: effectiveSize.lanes,
+          pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
+          prodMultiplier: effectiveSize.prodMultiplier,
+          colorCount: Math.max(...form.skus.map((sku) => Number(sku.colorCount) || 0)),
         })),
       );
     } catch {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
-  }, [customerPrice, effectiveMargin, form.connected, form.customerAddress, form.customerCode, form.customerContact, form.customerEmail, form.customerName, form.customerPostalCode, form.customerTelephone, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]);
+  }, [customerPrice, effectiveMargin, form.connected, form.customerAddress, form.customerCode, form.customerContact, form.customerEmail, form.customerName, form.customerPostalCode, form.customerTelephone, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
 
   const openCustomerList = async () => {
     setCustomerListOpen(true);
