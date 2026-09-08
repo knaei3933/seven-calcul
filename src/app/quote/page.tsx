@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { D, Decimal, parseDecimal } from "@/lib/decimal";
+import { ceilTo, D, Decimal, parseDecimal } from "@/lib/decimal";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import {
   QUOTATION_DRAFT_KEY,
@@ -441,10 +441,15 @@ export default function PrintableQuotationPage() {
     const fillingSellingUnit = parsedFillingCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
     const copperSellingUnit = parsedCopperCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
     const filmSellingUnit = parsedFilmCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
-    const customSellingUnit = parsedCustomLotCost.div(parsedCustomQuantity).div(D(1).minus(parsedTargetMargin ?? D(0)));
+    const customLotSaleBase = parsedCustomLotCost
+      .div(parsedCustomQuantity)
+      .div(D(1).minus(parsedTargetMargin ?? D(0)));
+    const customSellingUnit = ceilTo(customLotSaleBase, 1000);
+    const customSaleTotal = customSellingUnit.times(parsedCustomQuantity);
+    const customSalePerPiece = customSaleTotal.div(quantity);
     const filmMeterDisplayUnit = parsedFilmMeterPrice;
     // 目標総額にフィルム販売額を含めないと、充填・加工の残額計算が不正になる。
-    const pricePerPiece = fillingSellingUnit.plus(copperSellingUnit).plus(filmSellingUnit).plus(customSellingUnit);
+    const pricePerPiece = fillingSellingUnit.plus(copperSellingUnit).plus(filmSellingUnit).plus(customSalePerPiece);
     const subtotalBeforeAdjustment = pricePerPiece.times(quantity);
     const subtotal = subtotalBeforeAdjustment.floor();
     const roundingAdjustment = subtotal.minus(subtotalBeforeAdjustment);
@@ -454,7 +459,9 @@ export default function PrintableQuotationPage() {
       fillingSellingUnit,
       copperSellingUnit,
       filmSellingUnit,
-      customSellingUnit,
+      customSalePerPiece,
+      customUnit: customSellingUnit,
+      customSaleTotal,
       filmMeterDisplayUnit,
       filmOrderLength: parsedFilmOrderLength,
       roundingAdjustment,
@@ -477,8 +484,10 @@ export default function PrintableQuotationPage() {
       ?? totals.copperSellingUnit.toDecimalPlaces(2, Decimal.ROUND_UP);
     const copperAmount = parseDecimal(form.copperAmountDisplay) ?? copperUnit.times(totals.quantity);
     const customQuantity = parseDecimal(form.customQuantity) ?? D(1);
-    const customUnit = parseDecimal(form.customUnitDisplay)
-      ?? ((parsedCustomLotCost ?? D(0)).div(customQuantity).div(D(1).minus(parsedTargetMargin ?? D(0))).toDecimalPlaces(2, Decimal.ROUND_UP));
+    const customUnitOverride = parseDecimal(form.customUnitDisplay);
+    const customUnit = customUnitOverride
+      ? ceilTo(customUnitOverride, 1000)
+      : totals.customUnit;
 
     const isGravure = form.printingMethod === "gravure";
     let fillingUnit: Decimal;
@@ -955,9 +964,9 @@ export default function PrintableQuotationPage() {
                         <strong><EditableText value={form.customItemName} label="金型項目名" onCommit={(next) => update("customItemName", next.trim())} /></strong>
                         <small><EditableText value={form.customItemDescription} label="金型説明" multiline onCommit={(next) => update("customItemDescription", next)} /></small>
                       </td>
-                      <td><EditableText value={moneyDisplay(shownTotals.customUnit, form.customUnitDisplay, 2)} label="金型単価" className="money" onCommit={commitCustomUnit} /> /式</td>
+                      <td><EditableText value={moneyDisplay(shownTotals.customUnit, form.customUnitDisplay, 0)} label="金型単価" className="money" onCommit={commitCustomUnit} /> /式</td>
                       <td><EditableText value={numberDisplay(form.customQuantity)} label="金型数量" className="money" onCommit={commitCustomQuantity} /> 式</td>
-                      <td><EditableText value={moneyDisplay(shownTotals.customAmount, form.customAmountDisplay)} label="金型金額" className="money" onCommit={commitCustomAmount} /></td>
+                      <td><EditableText value={moneyDisplay(shownTotals.customAmount, form.customAmountDisplay, 0)} label="金型金額" className="money" onCommit={commitCustomAmount} /></td>
                     </tr>
                   ) : null}
                   {form.printingMethod === "gravure" ? (
