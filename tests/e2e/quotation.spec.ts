@@ -5,11 +5,14 @@ test("Japanese quotation UI calculates, validates, and separates customer output
   await expect(page.getByRole("heading", { name: "パウチ参考原価・販売価格シミュレーター" })).toBeVisible();
   await expect(page.getByTestId("quote-gate")).toContainText("参考見積・色数別単価は参考入力（印刷色数とは未連動）・仕入先確認待ち");
   await expect(page.getByTestId("calculate-desktop")).toBeEnabled();
+  await expect(page.getByTestId("bulk-usage")).toHaveCount(0);
+  await page.getByTestId("calculate-desktop").click();
+  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
   await expect(page.getByTestId("bulk-usage")).toContainText("41,000 ml");
   await expect(page.getByTestId("customer-total")).toContainText("￥");
   await expect(page.locator(".quote-sheet")).not.toContainText("総原価");
   await expect(page.locator(".quote-sheet")).not.toContainText("成功報酬");
-  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "provisional");
+  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
   await expect(page.getByTestId("input-summary")).toContainText("50×60 / 1連 / 10,000枚 / SKU 1件（充填物1 10,000枚）");
   await page.locator('[data-testid="parameters"] > summary').click();
   await expect(page.getByLabel("海外配送費 / 回 (円)")).toBeVisible();
@@ -21,7 +24,9 @@ test("Japanese quotation UI calculates, validates, and separates customer output
 
 test("A4 quotation page imports simulator costs and prepares PDF printing", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("customer-total")).toContainText("￥");
+  await expect(page.getByTestId("customer-total")).toHaveText("-");
+  await page.getByTestId("calculate-desktop").click();
+  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
   await page.getByRole("link", { name: "見積書発行" }).click();
   await expect(page).toHaveURL(/\/quote$/);
   await expect(page.getByRole("heading", { name: "お見積書" })).toBeVisible();
@@ -36,6 +41,7 @@ test("A4 quotation page imports simulator costs and prepares PDF printing", asyn
     await page.getByTestId("quote-editor-right").getByRole("button", { name: "閉じる" }).click();
   } else {
     await page.getByTestId("quote-editor-left").getByLabel("得意先名").fill("E2E株式会社");
+    await page.getByTestId("quote-editor-right").locator("summary", { hasText: "明細・金額" }).click();
     await page.getByTestId("quote-editor-right").getByLabel("充填・加工 単価（空欄=自動）").fill("99");
   }
 
