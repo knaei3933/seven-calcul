@@ -403,10 +403,8 @@ export default function PrintableQuotationPage() {
     const copperSellingUnit = parsedCopperCost.div(D(1).minus(margin));
     const filmSellingUnit = parsedFilmCost.div(D(1).minus(margin));
     const filmMeterDisplayUnit = parsedFilmMeterPrice;
-    // 그라비아는 목표 총액에 필름 판매금액도 포함해야 잔액을 m당 판매단가로 배분할 수 있다.
-    const pricePerPiece = form.printingMethod === "gravure"
-      ? fillingSellingUnit.plus(copperSellingUnit).plus(filmSellingUnit)
-      : fillingSellingUnit.plus(copperSellingUnit);
+    // 目標総額にフィルム販売額を含めないと、充填・加工の残額計算が不正になる。
+    const pricePerPiece = fillingSellingUnit.plus(copperSellingUnit).plus(filmSellingUnit);
     const subtotalBeforeAdjustment = pricePerPiece.times(quantity);
     const subtotal = subtotalBeforeAdjustment.floor();
     const roundingAdjustment = subtotal.minus(subtotalBeforeAdjustment);
