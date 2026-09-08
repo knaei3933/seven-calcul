@@ -9,18 +9,19 @@ describe("quotation UI", () => {
   beforeEach(() => sessionStorage.clear());
   afterEach(cleanup);
 
-  it("exposes a provisional quote while keeping all issuance controls blocked", async () => {
+  it("does not calculate automatically before server recalculation", async () => {
     render(<QuotationPage />);
-    expect(await screen.findByTestId("bulk-usage")).toHaveTextContent("41,000 ml");
+    expect(screen.queryByTestId("bulk-usage")).not.toBeInTheDocument();
     expect(screen.getByTestId("quote-gate")).toHaveTextContent("色数別単価は参考入力（印刷色数とは未連動）・仕入先確認待ち");
-    expect(screen.getByTestId("server-result").getAttribute("data-state")).not.toBe("calculated");
-    expect(screen.getByTestId("customer-total")).not.toHaveTextContent("原価");
+    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "not_calculated");
+    expect(screen.getByTestId("server-result")).toHaveTextContent("サーバー再計算待ち");
+    expect(screen.getByTestId("customer-total")).toHaveTextContent("-");
     expect(screen.queryByTestId("customer-commission")).not.toBeInTheDocument();
-    expect(screen.getByTestId("cost-processing")).not.toHaveAttribute("open");
-    expect(screen.getByTestId("cost-fixed")).not.toHaveAttribute("open");
-    expect(screen.getByTestId("cost-film")).not.toHaveAttribute("open");
-    expect(screen.getByTestId("cost-bulk")).not.toHaveAttribute("open");
-    expect(screen.getByTestId("cost-custom")).not.toHaveAttribute("open");
+    expect(screen.queryByTestId("cost-processing")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cost-fixed")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cost-film")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cost-bulk")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cost-custom")).not.toBeInTheDocument();
   });
 
   it("exposes complete SKU inputs with labels and a calculation-only CTA", () => {
@@ -31,24 +32,18 @@ describe("quotation UI", () => {
     expect(screen.getByTestId("quote-gate")).toBeVisible();
   });
 
-  it("doubles parallel film length when SKU count is two", async () => {
-    render(<QuotationPage />);
-    expect(await screen.findByTestId("bulk-usage")).toHaveTextContent("41,000 ml");
-  });
-
   it("separates provisional and server states and exposes selected margin", () => {
     render(<QuotationPage />);
-    expect(screen.getByTestId("server-result")).toHaveTextContent("入力変更中の参考計算");
+    expect(screen.getByTestId("server-result")).toHaveTextContent("サーバー再計算待ち");
     expect(screen.getByLabelText("1回の充填列数 (列)")).toBeInTheDocument();
     expect(screen.getByText("テスト充填は500回 × 列数 × 充填量としてバルク使用量に加算します。")).toBeInTheDocument();
-    expect(screen.getByTestId("test-fill")).toHaveTextContent("6,000 ml");
     expect(screen.getByLabelText("利益率 40%")).toBeChecked();
     expect(screen.getByTestId("input-summary")).toHaveTextContent("50×60 / 1連 / 10,000枚 / SKU 1件（充填物1 10,000枚）");
     expect(screen.getByLabelText("左右幅 (mm)")).toHaveAttribute("readonly");
     expect(screen.getByLabelText("カスタム区分")).toBeEnabled();
   });
 
-  it("exposes adjustable calculation parameters and passes them into provisional calculation", async () => {
+  it("exposes adjustable calculation parameters before recalculation", async () => {
     const user = userEvent.setup();
     render(<QuotationPage />);
     fireEvent.click(screen.getByTestId("parameters").querySelector("summary")!);
@@ -56,11 +51,7 @@ describe("quotation UI", () => {
     expect(overseasInput).toHaveValue("16000");
     await user.clear(overseasInput);
     await user.type(overseasInput, "20000");
-    expect(await screen.findByTestId("bulk-usage")).toHaveTextContent("41,000 ml");
-    expect(screen.getByTestId("test-fill")).toHaveTextContent("6,000 ml");
-
-    fireEvent.click(screen.getByTestId("calculation-formula").querySelector("summary")!);
-    expect(screen.getByText(/配送回数＝ceil/)).toBeInTheDocument();
+    expect(overseasInput).toHaveValue("20000");
   });
 
   it("marks a completed server calculation as stale after input changes", async () => {
@@ -93,21 +84,12 @@ describe("quotation UI", () => {
     await user.click(screen.getByTestId("calculate-desktop"));
     await user.clear(screen.getByLabelText("発注数量 (枚)"));
     await user.type(screen.getByLabelText("発注数量 (枚)"), "20000");
+    const skuQuantity = screen.getByTestId("sku-quantity-0");
+    await user.clear(skuQuantity);
+    await user.type(skuQuantity, "20000");
     fireEvent.submit(screen.getByTestId("quotation-form"));
     await waitFor(() => expect(resolvers).toHaveLength(2));
-
-    const firstResult = calculatePouchCost({
-      spec: {
-        sizeKey: "mouthwash-45x145", customWidthMm: "45", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 1,
-        fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0",
-        skuCount: 2,
-      },
-      quantity: "10000", printingMethod: "digital",
-    });
-    await act(async () => {
-      resolvers[1](new Response(JSON.stringify({ result: firstResult }), { status: 200 }));
-    });
-    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveTextContent("サーバー計算済み"));
+    await waitFor(() => expect(screen.getByLabelText("発注数量 (枚)")).toHaveValue("20000"));
 
     const secondResult = calculatePouchCost({
       spec: {
@@ -118,9 +100,9 @@ describe("quotation UI", () => {
       quantity: "20000", printingMethod: "digital",
     });
     await act(async () => {
-      resolvers[0](new Response(JSON.stringify({ result: secondResult }), { status: 200 }));
+      resolvers[1](new Response(JSON.stringify({ result: secondResult }), { status: 200 }));
     });
-    await waitFor(() => expect(screen.getByTestId("bulk-usage")).toHaveTextContent("392,000 ml"));
+    await waitFor(() => expect(screen.getByTestId("bulk-usage")).toHaveTextContent("722,000 ml"));
   });
 
   it("keeps the provisional result when server recalculation fails and reports the failure", async () => {
@@ -132,7 +114,7 @@ describe("quotation UI", () => {
 
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(dispatchDebugError).toHaveBeenCalledWith("calculation_failed"));
-    expect(screen.getByTestId("bulk-usage")).toHaveTextContent("41,000 ml");
+    expect(screen.queryByTestId("bulk-usage")).not.toBeInTheDocument();
     expect(screen.getByTestId("server-result").getAttribute("data-state")).not.toBe("calculated");
   });
 
@@ -146,19 +128,16 @@ describe("quotation UI", () => {
     await user.type(width, "42");
     expect(await screen.findByTestId("custom-size-info")).toHaveTextContent("原反幅（自動）＝383mm");
     expect(screen.getByTestId("calculate-desktop")).toBeEnabled();
-    expect(screen.getByTestId("bulk-usage")).toHaveTextContent("41,000 ml");
   });
 
   it("reflects connected chambers immediately in chamber count and bulk usage", async () => {
     const user = userEvent.setup();
     render(<QuotationPage />);
-    expect(await screen.findByTestId("bulk-usage")).toHaveTextContent("41,000 ml");
     expect(screen.getByTestId("connected-preview")).toHaveTextContent("総室数＝10,000枚×1＝10,000 室");
     await user.click(screen.getByLabelText("2連"));
     expect(screen.getByTestId("total-fill")).toHaveTextContent("1枚あたり総充填量（平均）＝3ml × 2＝6 ml");
     expect(screen.getByTestId("connected-preview")).toHaveTextContent("総室数＝10,000枚×2＝20,000 室");
     expect(screen.getByTestId("connected-preview")).toHaveTextContent("バルク使用量（概算）＝74,000 ml");
-    expect(await screen.findByTestId("bulk-usage")).toHaveTextContent("74,000 ml");
   });
 
   it("calculates gravure roll film and shows the new copper plate separately", async () => {
@@ -167,6 +146,17 @@ describe("quotation UI", () => {
     await user.click(screen.getByLabelText("グラビア印刷"));
     expect(screen.getByTestId("calculate-desktop")).toBeEnabled();
     expect(screen.getAllByTestId("gravure-parameters").length).toBeGreaterThan(0);
+    const result = calculatePouchCost({
+      spec: {
+        sizeKey: "round-50x60", customWidthMm: "50", customLengthMm: "60", fillMlPerChamber: "3", connectedChambers: 1,
+        fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0",
+        skuCount: 1,
+      },
+      quantity: "10000", printingMethod: "gravure",
+    });
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ result }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
     expect(screen.getAllByTestId("cost-copper").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("cost-film").some((node) => node.textContent?.includes("製造者販売価格"))).toBe(true);
     expect(screen.getAllByTestId("cost-copper").some((node) => node.textContent?.includes("新規銅版費"))).toBe(true);
@@ -188,7 +178,6 @@ describe("quotation UI", () => {
   it("supports per-SKU pouch quantities and blocks when the sum differs from the order quantity", async () => {
     const user = userEvent.setup();
     render(<QuotationPage />);
-    expect(await screen.findByTestId("bulk-usage")).toHaveTextContent("41,000 ml");
     const skuCountInput = screen.getByTestId("sku-count");
     await user.clear(skuCountInput);
     await user.type(skuCountInput, "2");
@@ -211,7 +200,6 @@ describe("quotation UI", () => {
     const fill1 = screen.getByTestId("sku-fill-0");
     await user.clear(fill1);
     await user.type(fill1, "5");
-    expect(await screen.findByTestId("bulk-usage")).toHaveTextContent("56,600 ml");
     expect(screen.getByTestId("avg-fill")).toHaveTextContent("4.2 ml/室");
     const name1 = screen.getByTestId("sku-name-0");
     await user.type(name1, "レモン琺瑯");

@@ -115,7 +115,7 @@ describe("commercial calculation", () => {
       quantity: "7",
       printingMethod: "digital",
     });
-    expect(result.customCharge).toBe("400000");
+    expect(result.customCharge).toBe("220000");
     expect(result.audit.componentReconciliationDifference).toBe("0");
     expect(result.film.orderLengthM).toBe("500");
     expect(result.film.orderAdjustment).toBe("minimum_total_allocation");

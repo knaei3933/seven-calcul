@@ -69,7 +69,7 @@ export const defaultParameters: CostParameters = {
   inspectionSpeed: "1500",
   setupTime: "3",
   cleanupTime: "2",
-  customPouchCharge: "400000",
+  customPouchCharge: "220000",
   hopperInitialChargeMl: "2000",
   pressureInitialChargeMl: "8000",
   digitalFilmMinTotalM: "500",

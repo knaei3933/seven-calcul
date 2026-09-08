@@ -115,6 +115,9 @@ export default function QuotationPage() {
           };
           if (saved.form) setForm((old) => ({ ...old, ...saved.form }));
           if (saved.parameters) setParameters((old) => ({ ...old, ...saved.parameters }));
+          if (saved.parameters?.customPouchCharge === "400000") {
+            setParameters((old) => ({ ...old, customPouchCharge: "220000" }));
+          }
           if (saved.gravureParameters) setGravureParameters(normalizeGravureParameters(saved.gravureParameters));
           if (saved.machineBreakdown) setMachineBreakdown((old) => ({ ...old, ...saved.machineBreakdown }));
           if (typeof saved.productionSpeedManual === "boolean") {
@@ -239,12 +242,6 @@ export default function QuotationPage() {
     gravureParameters: normalizedGravureParameters,
   }), [spec, form.quantity, form.printingMethod, targetMarginList, effectiveParameters, normalizedGravureParameters]);
 
-  const provisionalResult = useMemo(() => {
-    if (blocker) return null;
-    try { return calculatePouchCost(calculationInput); } catch { return null; }
-  }, [blocker, calculationInput]);
-
-
   const inputSha256 = useMemo(() => createHash("sha256").update(JSON.stringify(calculationInput)).digest("hex"), [calculationInput]);
   const staleResult = serverResult !== null && serverResult.inputSha256 !== inputSha256;
 
@@ -271,9 +268,9 @@ export default function QuotationPage() {
     }
   };
 
-  const displayed = serverResult?.result ?? provisionalResult;
-  const resultShown: ReturnType<typeof calculatePouchCost> | null = staleResult && provisionalResult ? provisionalResult : displayed;
-  const customerPrice = displayed?.sellingPrices.find((price) => Number(price.margin) === Number(effectiveMargin));
+  // 조건変更後は自動試算を見せず、必ずサーバー再計算結果へ切り替える。
+  const resultShown: ReturnType<typeof calculatePouchCost> | null = staleResult ? null : serverResult?.result ?? null;
+  const customerPrice = resultShown?.sellingPrices.find((price: { margin: string; pricePerPiece: string; totalSales: string; profit: string }) => Number(price.margin) === Number(effectiveMargin));
 
   useEffect(() => {
     if (!resultShown || !customerPrice) return;
@@ -581,8 +578,8 @@ export default function QuotationPage() {
           </section>
           <section className="panel" aria-labelledby="result-title">
             <p className="input-summary" data-testid="input-summary">{`${form.widthMm}×${form.lengthMm} / ${form.connected}連 / ${formatNumber(form.quantity)}枚 / SKU ${form.skuCount}件（${form.skus.map((sku, index) => `${skuDisplayName(index)} ${formatNumber(sku.quantity)}枚`).join("＋")}）`}</p>
-            <div className="result-header" data-testid="server-result" data-state={staleResult ? "stale" : pending ? "calculating" : serverResult ? "calculated" : "provisional"}><h2 id="result-title">原価・利益試算</h2><span>{pending ? "計算中" : staleResult ? "再計算が必要" : serverResult ? `サーバー計算済み ${calculatedAt ?? ""}` : "入力変更中の参考計算"}</span></div>
-            {!resultShown ? <div className="empty">条件を整えると暫定計算を表示します。</div> : pending ? <div className="skeleton" aria-live="polite"><div /><div style={{ width: "70%" }} /><div style={{ width: "45%" }} /></div> : (
+            <div className="result-header" data-testid="server-result" data-state={staleResult ? "stale" : pending ? "calculating" : serverResult ? "calculated" : "not_calculated"}><h2 id="result-title">原価・利益試算</h2><span>{pending ? "計算中" : staleResult ? "再計算が必要" : serverResult ? `サーバー計算済み ${calculatedAt ?? ""}` : "サーバー再計算待ち"}</span></div>
+            {!resultShown ? <div className="empty">「サーバーで再計算する」を実行すると結果を表示します。</div> : pending ? <div className="skeleton" aria-live="polite"><div /><div style={{ width: "70%" }} /><div style={{ width: "45%" }} /></div> : (
               <>
                 <p className="total-label">発注数量 {formatNumber(resultShown.quantity)} 枚 基準・1枚あたり原価</p>
                 <p className="total">
@@ -845,7 +842,7 @@ export default function QuotationPage() {
     if (!skuQuantitiesValid) items.push("SKU別発注枚数の合計を発注数量に合わせてください");
     return items.map((item, i) => <li key={i}>{item}</li>);
   }
-  function warningCodes() { return displayed?.warnings ?? ["seven_template_unconfirmed", "tax_rounding_unconfirmed", "digital_color_price_not_applied"]; }
+  function warningCodes() { return resultShown?.warnings ?? ["seven_template_unconfirmed", "tax_rounding_unconfirmed", "digital_color_price_not_applied"]; }
 }
 
 function bulkFillMlOf(result: ReturnType<typeof calculatePouchCost>) { return D(result.bulkUsageMl).minus(result.initialChargeMl).minus(result.testFillMl); }
