@@ -255,18 +255,30 @@ function QuotationDetailModal({ record, onClose }: { record: QuotationRecord; on
                     <td>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</td>
 	                    <td>{formatCurrency(analysis.filmAmount.minus(analysis.filmCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td>
 	                  </tr>
-	                  {printingMethodOf(record) === "gravure" ? (
-	                    <tr>
-	                      <td>新規銅版</td>
-	                      <td>{formatCurrency(analysis.copperCostUnit.toFixed(2), 2)}</td>
-	                      <td>{formatCurrency(analysis.copperUnit.toFixed(2), 2)}</td>
-	                      <td>{formatCurrency(analysis.copperUnit.minus(analysis.copperCostUnit).toFixed(2), 2)}</td>
-	                      <td>{analysis.copperUnit.gt(0) ? `${formatNumber(analysis.copperUnit.minus(analysis.copperCostUnit).div(analysis.copperUnit).times(100).toNumber(), 2)}%` : "-"}</td>
-	                      <td>{formatCurrency(analysis.copperCostUnit.times(analysis.quantity).toFixed(0), 0)}</td>
-	                      <td>{formatCurrency(analysis.copperAmount.toFixed(0), 0)}</td>
-	                      <td>{formatCurrency(analysis.copperAmount.minus(analysis.copperCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td>
-	                    </tr>
-	                  ) : null}
+                  {analysis.customCostUnit.gt(0) ? (
+                    <tr>
+                      <td>金型</td>
+                      <td>{formatCurrency(analysis.customCostUnit.toFixed(2), 2)}</td>
+                      <td>{formatCurrency(analysis.customUnit.toFixed(2), 2)}</td>
+                      <td>{formatCurrency(analysis.customUnit.minus(analysis.customCostUnit).toFixed(2), 2)}</td>
+                      <td>{analysis.customUnit.gt(0) ? `${formatNumber(analysis.customUnit.minus(analysis.customCostUnit).div(analysis.customUnit).times(100).toNumber(), 2)}%` : "-"}</td>
+                      <td>{formatCurrency(analysis.customCostUnit.times(analysis.quantity).toFixed(0), 0)}</td>
+                      <td>{formatCurrency(analysis.customAmount.toFixed(0), 0)}</td>
+                      <td>{formatCurrency(analysis.customAmount.minus(analysis.customCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td>
+                    </tr>
+                  ) : null}
+                  {printingMethodOf(record) === "gravure" ? (
+                    <tr>
+                      <td>新規銅版</td>
+                      <td>{formatCurrency(analysis.copperCostUnit.toFixed(2), 2)}</td>
+                      <td>{formatCurrency(analysis.copperUnit.toFixed(2), 2)}</td>
+                      <td>{formatCurrency(analysis.copperUnit.minus(analysis.copperCostUnit).toFixed(2), 2)}</td>
+                      <td>{analysis.copperUnit.gt(0) ? `${formatNumber(analysis.copperUnit.minus(analysis.copperCostUnit).div(analysis.copperUnit).times(100).toNumber(), 2)}%` : "-"}</td>
+                      <td>{formatCurrency(analysis.copperCostUnit.times(analysis.quantity).toFixed(0), 0)}</td>
+                      <td>{formatCurrency(analysis.copperAmount.toFixed(0), 0)}</td>
+                      <td>{formatCurrency(analysis.copperAmount.minus(analysis.copperCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td>
+                    </tr>
+                  ) : null}
                   {analysis.adjustment.abs().gt(0) ? (
                     <tr>
                       <td>端数調整</td>

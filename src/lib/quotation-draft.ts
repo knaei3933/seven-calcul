@@ -19,12 +19,17 @@ export interface QuotationDraft {
   quantity: string;
   targetMargin: string;
   fillingCostPerPiece: string;
+  customLotCost: string;
   filmCostPerPiece: string;
   filmMeterPrice: string;
   filmOrderLengthM: string;
   totalCostPerPiece: string;
   calculationVersion: string;
   resultHash: string;
+  customerCode?: string;
+  customerPostalCode?: string;
+  customerAddress?: string;
+  customerTelephone?: string;
   printingMethod?: string;
   copperPlateCostPerPiece?: string;
   orderPatternCount?: string;
@@ -41,6 +46,10 @@ export function buildQuotationDraft(
     skuNames: string[];
     targetMargin: string;
     printingMethod?: string;
+    customerCode?: string;
+    customerPostalCode?: string;
+    customerAddress?: string;
+    customerTelephone?: string;
   },
 ): QuotationDraft {
   const fillingCost = D(result.costPerPieceComponents.bulk)
@@ -54,7 +63,8 @@ export function buildQuotationDraft(
     sizeSummary: `${context.widthMm}×${context.lengthMm}mm / ${context.connected}連`,
     quantity: result.quantity,
     targetMargin: context.targetMargin,
-    fillingCostPerPiece: fillingCost.toString(),
+    customLotCost: result.customCharge,
+    fillingCostPerPiece: fillingCost.minus(result.costPerPieceComponents.custom).toString(),
     filmCostPerPiece: result.costPerPieceComponents.film,
     filmMeterPrice: result.film.unitPrice,
     filmOrderLengthM: result.film.orderLengthM,
@@ -62,6 +72,10 @@ export function buildQuotationDraft(
     calculationVersion: result.audit.calculationVersion,
     resultHash: result.audit.resultJsonSha256,
     printingMethod: context.printingMethod,
+    customerCode: context.customerCode,
+    customerPostalCode: context.customerPostalCode,
+    customerAddress: context.customerAddress,
+    customerTelephone: context.customerTelephone,
     ...(context.printingMethod === "gravure" ? {
       copperPlateCostPerPiece: result.copperPlateCostPerPiece,
       orderPatternCount: String(result.orderPatternCount ?? 1),

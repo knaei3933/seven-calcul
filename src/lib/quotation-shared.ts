@@ -40,3 +40,17 @@ export interface QuotationRecord extends QuotationRecordInput {
 }
 
 export type { QuotationPayload } from "./quotation-history-types";
+
+export interface CustomerMasterInput {
+  customerCode: string;
+  customerName: string;
+  customerPostalCode: string;
+  customerAddress: string;
+  customerContact: string;
+  customerTelephone: string;
+}
+
+export interface CustomerMaster extends CustomerMasterInput {
+  createdAt: string;
+  updatedAt: string;
+}

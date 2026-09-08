@@ -11,6 +11,7 @@ import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { QUOTATION_DRAFT_KEY, buildQuotationDraft } from "@/lib/quotation-draft";
 import { deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calculations";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
+import type { CustomerMasterInput } from "@/lib/quotation-shared";
 
 const warningLabels: Record<string, string> = {
   seven_template_unconfirmed: "Seven書式は未確認です",
@@ -73,6 +74,12 @@ const parameterGroups = [
 export default function QuotationPage() {
   const initialSize = sizeMaster["round-50x60"];
   const [form, setForm] = useState({
+    customerCode: "",
+    customerName: "",
+    customerPostalCode: "",
+    customerAddress: "",
+    customerContact: "",
+    customerTelephone: "",
     sizeKey: "round-50x60" as SizeKey,
     custom: false,
     widthMm: "50",
@@ -100,6 +107,75 @@ export default function QuotationPage() {
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
   const [productionSpeedManual, setProductionSpeedManual] = useState(false);
+  const [customerStatus, setCustomerStatus] = useState<{ loading: boolean; found: boolean; message: string; saving: boolean }>({
+    loading: false,
+    found: false,
+    message: "",
+    saving: false,
+  });
+
+  useEffect(() => {
+    const code = form.customerCode.trim();
+    if (!code) {
+      const timer = setTimeout(() => setCustomerStatus({ loading: false, found: false, message: "", saving: false }), 0);
+      return () => clearTimeout(timer);
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      setCustomerStatus((old) => ({ ...old, loading: true, message: "" }));
+      fetch(`/api/customers/${encodeURIComponent(code)}`, { signal: controller.signal })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.customer) throw new Error("customer_not_found");
+          const customer = payload.customer as CustomerMasterInput;
+          setForm((old) => ({
+            ...old,
+            customerCode: code,
+            customerName: customer.customerName || "",
+            customerPostalCode: customer.customerPostalCode || "",
+            customerAddress: customer.customerAddress || "",
+            customerContact: customer.customerContact || "",
+            customerTelephone: customer.customerTelephone || "",
+          }));
+          setCustomerStatus({ loading: false, found: true, message: `顧客コード ${code} を読み込みました。`, saving: false });
+        })
+        .catch((error) => {
+          if (error.name === "AbortError") return;
+          setCustomerStatus({ loading: false, found: false, message: "登録されていない顧客コードです。入力後に保存できます。", saving: false });
+        });
+    }, 250);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [form.customerCode]);
+
+  const saveCustomerMaster = async () => {
+    const code = form.customerCode.trim();
+    if (!code || !form.customerName.trim()) {
+      setCustomerStatus({ loading: false, found: false, message: "保存には顧客コードと会社名が必要です。", saving: false });
+      return;
+    }
+    setCustomerStatus((old) => ({ ...old, saving: true, message: "" }));
+    try {
+      const response = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerCode: code,
+          customerName: form.customerName,
+          customerPostalCode: form.customerPostalCode,
+          customerAddress: form.customerAddress,
+          customerContact: form.customerContact,
+          customerTelephone: form.customerTelephone,
+        }),
+      });
+      if (!response.ok) throw new Error();
+      setCustomerStatus({ loading: false, found: true, message: `顧客コード ${code} を保存しました。`, saving: false });
+    } catch {
+      setCustomerStatus({ loading: false, found: false, message: "顧客マスタを保存できませんでした。", saving: false });
+    }
+  };
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -284,12 +360,16 @@ export default function QuotationPage() {
           skuNames: form.skus.map((sku, index) => sku.name.trim() || `充填物${index + 1}`),
           targetMargin: effectiveMargin,
           printingMethod: form.printingMethod,
+          customerCode: form.customerCode,
+          customerPostalCode: form.customerPostalCode,
+          customerAddress: form.customerAddress,
+          customerTelephone: form.customerTelephone,
         })),
       );
     } catch {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
-  }, [customerPrice, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]);
+  }, [customerPrice, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]); // eslint-disable-line react-hooks/exhaustive-deps -- 顧客編集フィールドは値変更時に下書きを作り直さない。
 
   useEffect(() => {
     if (!simulatorStateLoaded) return;
@@ -342,6 +422,31 @@ export default function QuotationPage() {
         <form onSubmit={submit} className="layout" noValidate data-testid="quotation-form" data-state={staleResult ? "stale" : "current"}>
           <section className="panel" aria-labelledby="input-title">
             <h2 id="input-title">見積条件</h2>
+            <fieldset className="parameter-group" data-testid="customer-block">
+              <legend>顧客情報</legend>
+              <div className="field-row">
+                <Field label="顧客コード" htmlFor="customer-code">
+                  <input id="customer-code" inputMode="numeric" value={form.customerCode} onChange={(e) => set("customerCode", e.target.value)} />
+                  <p className="help">コード入力後に登録済み顧客情報を自動読込します。</p>
+                </Field>
+                <div className="field">
+                  <span>顧客マスタ</span>
+                  <button className="button secondary small" type="button" disabled={customerStatus.saving || !form.customerCode.trim() || !form.customerName.trim()} onClick={() => void saveCustomerMaster()}>
+                    {customerStatus.saving ? "保存中..." : "保存 / 更新"}
+                  </button>
+                  {customerStatus.loading ? <p className="help">読み込み中...</p> : customerStatus.message ? <p className="help">{customerStatus.message}</p> : null}
+                </div>
+              </div>
+              <div className="field-row">
+                <Field label="会社名" htmlFor="customer-name"><input id="customer-name" value={form.customerName} onChange={(e) => set("customerName", e.target.value)} /></Field>
+                <Field label="担当者" htmlFor="customer-contact"><input id="customer-contact" value={form.customerContact} onChange={(e) => set("customerContact", e.target.value)} /></Field>
+              </div>
+              <div className="field-row">
+                <Field label="郵便番号" htmlFor="customer-postal"><input id="customer-postal" value={form.customerPostalCode} onChange={(e) => set("customerPostalCode", e.target.value)} /></Field>
+                <Field label="電話番号" htmlFor="customer-telephone"><input id="customer-telephone" value={form.customerTelephone} onChange={(e) => set("customerTelephone", e.target.value)} /></Field>
+              </div>
+              <Field label="住所" htmlFor="customer-address"><input id="customer-address" value={form.customerAddress} onChange={(e) => set("customerAddress", e.target.value)} /></Field>
+            </fieldset>
             <Field label="サイズ" htmlFor="size"><select id="size" value={form.sizeKey} onChange={(e) => { const key = e.target.value as SizeKey; const s = sizeMaster[key]; set("sizeKey", key); patchForm({ widthMm: s.widthMm, lengthMm: s.lengthMm }); }}>{Object.values(sizeMaster).map((size) => <option key={size.key} value={size.key}>{size.label}</option>)}</select></Field>
             <div className="field"><label htmlFor="custom"><input id="custom" type="checkbox" checked={form.custom} onChange={(e) => { const checked = e.target.checked; if (checked) patchForm({ custom: true }); else patchForm({ custom: false, widthMm: standardSize.widthMm, lengthMm: standardSize.lengthMm }); }} /> カスタム区分</label><p className="help">チェックすると左右幅・長さを自由入力できます。列数は選択サイズを引き継ぎ、原反幅・価格帯・配送単位は幅から自動判定します（参考計算）。</p></div>
             <div className="field-row">
