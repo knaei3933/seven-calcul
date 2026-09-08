@@ -460,3 +460,19 @@ header .version-badge { display: none; }
 .customer-list-body button { border: 1px solid var(--primary); background: white; color: var(--primary); border-radius: 6px; padding: 5px 9px; font-weight: 800; cursor: pointer; }
 .customer-list-body button:hover { background: var(--primary); color: white; }
 .button-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.customer-panel { margin-bottom: 0; }
+.customer-panel h2 { margin: 0 0 10px; font-size: 18px; color: #17223a; }
+.customer-toolbar { display: grid; grid-template-columns: 105px minmax(180px, 1.5fr) minmax(120px, .9fr) 115px minmax(190px, 1.5fr) 130px minmax(160px, 1.1fr) 155px; gap: 10px; align-items: end; }
+.customer-toolbar .field-row { display: contents; }
+.customer-toolbar .field, .customer-toolbar .parameter-label { min-width: 0; }
+.customer-toolbar .field > span { display: block; min-height: 20px; margin-bottom: 5px; font-size: 11px; font-weight: 800; color: var(--muted); }
+.customer-toolbar .help { margin: 3px 0 0; font-size: 10px; line-height: 1.2; }
+.customer-toolbar .button-row { display: grid; gap: 6px; }
+@media (max-width: 1500px) {
+  .customer-toolbar { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .customer-toolbar .customer-actions-cell { grid-column: span 2; }
+}
+@media (max-width: 900px) {
+  .customer-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

@@ -463,38 +463,40 @@ export default function QuotationPage() {
         <header className="app-header">
           <div><h1>パウチ参考原価・販売価格シミュレーター</h1><p>販売数量は連結後パウチ「枚」、充填は区画「室」で計算します。</p></div>
         </header>
+        <section className="panel customer-panel" aria-labelledby="customer-block-title">
+          <h2 id="customer-block-title">顧客情報</h2>
+          <div className="customer-toolbar">
+              <div className="field-row">
+            <Field label="顧客コード" htmlFor="customer-code">
+              <input id="customer-code" inputMode="numeric" value={form.customerCode} onChange={(e) => set("customerCode", e.target.value)} />
+              <p className="help">コード入力後に登録済み顧客情報を自動読込します。</p>
+            </Field>
+            <div className="field">
+              <span>顧客マスタ</span>
+              <div className="button-row">
+                <button className="button secondary small" type="button" onClick={() => { setCustomerListOpen(true); }}>顧客一覧</button>
+                <button className="button secondary small" type="button" disabled={customerStatus.saving || !form.customerCode.trim() || !form.customerName.trim()} onClick={() => void saveCustomerMaster()}>
+                  {customerStatus.saving ? "保存中..." : "保存 / 更新"}
+                </button>
+              </div>
+              {customerStatus.loading ? <p className="help">読み込み中...</p> : customerStatus.message ? <p className="help">{customerStatus.message}</p> : null}
+            </div>
+          </div>
+          <div className="field-row">
+            <Field label="会社名" htmlFor="customer-name"><input id="customer-name" value={form.customerName} onChange={(e) => set("customerName", e.target.value)} /></Field>
+            <Field label="担当者" htmlFor="customer-contact"><input id="customer-contact" value={form.customerContact} onChange={(e) => set("customerContact", e.target.value)} /></Field>
+          </div>
+          <div className="field-row">
+            <Field label="郵便番号" htmlFor="customer-postal"><input id="customer-postal" value={form.customerPostalCode} onChange={(e) => set("customerPostalCode", e.target.value)} /></Field>
+            <Field label="電話番号" htmlFor="customer-telephone"><input id="customer-telephone" value={form.customerTelephone} onChange={(e) => set("customerTelephone", e.target.value)} /></Field>
+          </div>
+          <Field label="住所" htmlFor="customer-address"><input id="customer-address" value={form.customerAddress} onChange={(e) => set("customerAddress", e.target.value)} /></Field>
+          <Field label="メールアドレス" htmlFor="customer-email"><input id="customer-email" inputMode="email" value={form.customerEmail} onChange={(e) => set("customerEmail", e.target.value)} /></Field>
+          </div>
+        </section>
         <form onSubmit={submit} className="layout" noValidate data-testid="quotation-form" data-state={staleResult ? "stale" : "current"}>
           <section className="panel" aria-labelledby="input-title">
-            <h2 id="input-title">見積条件</h2>
-            <fieldset className="parameter-group" data-testid="customer-block">
-              <legend>顧客情報</legend>
-              <div className="field-row">
-                <Field label="顧客コード" htmlFor="customer-code">
-                  <input id="customer-code" inputMode="numeric" value={form.customerCode} onChange={(e) => set("customerCode", e.target.value)} />
-                  <p className="help">コード入力後に登録済み顧客情報を自動読込します。</p>
-                </Field>
-                <div className="field">
-                  <span>顧客マスタ</span>
-                  <div className="button-row">
-                    <button className="button secondary small" type="button" onClick={() => { setCustomerListOpen(true); }}>顧客一覧</button>
-                    <button className="button secondary small" type="button" disabled={customerStatus.saving || !form.customerCode.trim() || !form.customerName.trim()} onClick={() => void saveCustomerMaster()}>
-                      {customerStatus.saving ? "保存中..." : "保存 / 更新"}
-                    </button>
-                  </div>
-                  {customerStatus.loading ? <p className="help">読み込み中...</p> : customerStatus.message ? <p className="help">{customerStatus.message}</p> : null}
-                </div>
-              </div>
-              <div className="field-row">
-                <Field label="会社名" htmlFor="customer-name"><input id="customer-name" value={form.customerName} onChange={(e) => set("customerName", e.target.value)} /></Field>
-                <Field label="担当者" htmlFor="customer-contact"><input id="customer-contact" value={form.customerContact} onChange={(e) => set("customerContact", e.target.value)} /></Field>
-              </div>
-              <div className="field-row">
-                <Field label="郵便番号" htmlFor="customer-postal"><input id="customer-postal" value={form.customerPostalCode} onChange={(e) => set("customerPostalCode", e.target.value)} /></Field>
-                <Field label="電話番号" htmlFor="customer-telephone"><input id="customer-telephone" value={form.customerTelephone} onChange={(e) => set("customerTelephone", e.target.value)} /></Field>
-              </div>
-              <Field label="住所" htmlFor="customer-address"><input id="customer-address" value={form.customerAddress} onChange={(e) => set("customerAddress", e.target.value)} /></Field>
-              <Field label="メールアドレス" htmlFor="customer-email"><input id="customer-email" inputMode="email" value={form.customerEmail} onChange={(e) => set("customerEmail", e.target.value)} /></Field>
-            </fieldset>
+            <h2 id="input-title">製品情報</h2>
             <Field label="サイズ" htmlFor="size"><select id="size" value={form.sizeKey} onChange={(e) => { const key = e.target.value as SizeKey; const s = sizeMaster[key]; set("sizeKey", key); patchForm({ widthMm: s.widthMm, lengthMm: s.lengthMm }); }}>{Object.values(sizeMaster).map((size) => <option key={size.key} value={size.key}>{size.label}</option>)}</select></Field>
             <div className="field"><label htmlFor="custom"><input id="custom" type="checkbox" checked={form.custom} onChange={(e) => { const checked = e.target.checked; if (checked) patchForm({ custom: true }); else patchForm({ custom: false, widthMm: standardSize.widthMm, lengthMm: standardSize.lengthMm }); }} /> カスタム区分</label><p className="help">チェックすると左右幅・長さを自由入力できます。列数は選択サイズを引き継ぎ、原反幅・価格帯・配送単位は幅から自動判定します（参考計算）。</p></div>
             <div className="field-row">
