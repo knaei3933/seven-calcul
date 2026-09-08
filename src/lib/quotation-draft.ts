@@ -30,6 +30,7 @@ export interface QuotationDraft {
   customerPostalCode?: string;
   customerAddress?: string;
   customerTelephone?: string;
+  customerEmail?: string;
   printingMethod?: string;
   copperPlateCostPerPiece?: string;
   orderPatternCount?: string;
@@ -50,6 +51,7 @@ export function buildQuotationDraft(
     customerPostalCode?: string;
     customerAddress?: string;
     customerTelephone?: string;
+    customerEmail?: string;
   },
 ): QuotationDraft {
   const fillingCost = D(result.costPerPieceComponents.bulk)
@@ -76,6 +78,7 @@ export function buildQuotationDraft(
     customerPostalCode: context.customerPostalCode,
     customerAddress: context.customerAddress,
     customerTelephone: context.customerTelephone,
+    customerEmail: context.customerEmail,
     ...(context.printingMethod === "gravure" ? {
       copperPlateCostPerPiece: result.copperPlateCostPerPiece,
       orderPatternCount: String(result.orderPatternCount ?? 1),

@@ -11,7 +11,7 @@ import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { QUOTATION_DRAFT_KEY, buildQuotationDraft } from "@/lib/quotation-draft";
 import { deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calculations";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
-import type { CustomerMasterInput } from "@/lib/quotation-shared";
+import type { CustomerMaster, CustomerMasterInput } from "@/lib/quotation-shared";
 
 const warningLabels: Record<string, string> = {
   seven_template_unconfirmed: "Seven書式は未確認です",
@@ -80,6 +80,7 @@ export default function QuotationPage() {
     customerAddress: "",
     customerContact: "",
     customerTelephone: "",
+    customerEmail: "",
     sizeKey: "round-50x60" as SizeKey,
     custom: false,
     widthMm: "50",
@@ -107,6 +108,10 @@ export default function QuotationPage() {
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
   const [productionSpeedManual, setProductionSpeedManual] = useState(false);
+  const [customerListOpen, setCustomerListOpen] = useState(false);
+  const [customerList, setCustomerList] = useState<CustomerMaster[]>([]);
+  const [customerListQuery, setCustomerListQuery] = useState("");
+  const [customerListLoading, setCustomerListLoading] = useState(false);
   const [customerStatus, setCustomerStatus] = useState<{ loading: boolean; found: boolean; message: string; saving: boolean }>({
     loading: false,
     found: false,
@@ -136,6 +141,7 @@ export default function QuotationPage() {
             customerAddress: customer.customerAddress || "",
             customerContact: customer.customerContact || "",
             customerTelephone: customer.customerTelephone || "",
+            customerEmail: customer.customerEmail || "",
           }));
           setCustomerStatus({ loading: false, found: true, message: `顧客コード ${code} を読み込みました。`, saving: false });
         })
@@ -168,6 +174,7 @@ export default function QuotationPage() {
           customerAddress: form.customerAddress,
           customerContact: form.customerContact,
           customerTelephone: form.customerTelephone,
+          customerEmail: form.customerEmail,
         }),
       });
       if (!response.ok) throw new Error();
@@ -364,12 +371,49 @@ export default function QuotationPage() {
           customerPostalCode: form.customerPostalCode,
           customerAddress: form.customerAddress,
           customerTelephone: form.customerTelephone,
+          customerEmail: form.customerEmail,
         })),
       );
     } catch {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
   }, [customerPrice, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]); // eslint-disable-line react-hooks/exhaustive-deps -- 顧客編集フィールドは値変更時に下書きを作り直さない。
+
+  const openCustomerList = async () => {
+    setCustomerListOpen(true);
+    setCustomerListLoading(true);
+    try {
+      const response = await fetch(`/api/customers?q=${encodeURIComponent(customerListQuery)}`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error();
+      setCustomerList(payload.customers as CustomerMaster[]);
+    } catch {
+      setCustomerList([]);
+    } finally {
+      setCustomerListLoading(false);
+    }
+  };
+
+  const selectCustomerFromList = (customer: CustomerMaster) => {
+    setForm((old) => ({
+      ...old,
+      customerCode: customer.customerCode,
+      customerName: customer.customerName,
+      customerPostalCode: customer.customerPostalCode,
+      customerAddress: customer.customerAddress,
+      customerContact: customer.customerContact,
+      customerTelephone: customer.customerTelephone,
+      customerEmail: customer.customerEmail,
+    }));
+    setCustomerStatus({ loading: false, found: true, message: `顧客コード ${customer.customerCode} を選択しました。`, saving: false });
+    setCustomerListOpen(false);
+  };
+
+  useEffect(() => {
+    if (!customerListOpen) return;
+    const timer = setTimeout(() => { void openCustomerList(); }, 200);
+    return () => clearTimeout(timer);
+  }, [customerListOpen, customerListQuery]); // eslint-disable-line react-hooks/exhaustive-deps -- 検索語変更時に一覧を再取得する。
 
   useEffect(() => {
     if (!simulatorStateLoaded) return;
@@ -431,9 +475,12 @@ export default function QuotationPage() {
                 </Field>
                 <div className="field">
                   <span>顧客マスタ</span>
-                  <button className="button secondary small" type="button" disabled={customerStatus.saving || !form.customerCode.trim() || !form.customerName.trim()} onClick={() => void saveCustomerMaster()}>
-                    {customerStatus.saving ? "保存中..." : "保存 / 更新"}
-                  </button>
+                  <div className="button-row">
+                    <button className="button secondary small" type="button" onClick={() => { setCustomerListOpen(true); }}>顧客一覧</button>
+                    <button className="button secondary small" type="button" disabled={customerStatus.saving || !form.customerCode.trim() || !form.customerName.trim()} onClick={() => void saveCustomerMaster()}>
+                      {customerStatus.saving ? "保存中..." : "保存 / 更新"}
+                    </button>
+                  </div>
                   {customerStatus.loading ? <p className="help">読み込み中...</p> : customerStatus.message ? <p className="help">{customerStatus.message}</p> : null}
                 </div>
               </div>
@@ -446,6 +493,7 @@ export default function QuotationPage() {
                 <Field label="電話番号" htmlFor="customer-telephone"><input id="customer-telephone" value={form.customerTelephone} onChange={(e) => set("customerTelephone", e.target.value)} /></Field>
               </div>
               <Field label="住所" htmlFor="customer-address"><input id="customer-address" value={form.customerAddress} onChange={(e) => set("customerAddress", e.target.value)} /></Field>
+              <Field label="メールアドレス" htmlFor="customer-email"><input id="customer-email" inputMode="email" value={form.customerEmail} onChange={(e) => set("customerEmail", e.target.value)} /></Field>
             </fieldset>
             <Field label="サイズ" htmlFor="size"><select id="size" value={form.sizeKey} onChange={(e) => { const key = e.target.value as SizeKey; const s = sizeMaster[key]; set("sizeKey", key); patchForm({ widthMm: s.widthMm, lengthMm: s.lengthMm }); }}>{Object.values(sizeMaster).map((size) => <option key={size.key} value={size.key}>{size.label}</option>)}</select></Field>
             <div className="field"><label htmlFor="custom"><input id="custom" type="checkbox" checked={form.custom} onChange={(e) => { const checked = e.target.checked; if (checked) patchForm({ custom: true }); else patchForm({ custom: false, widthMm: standardSize.widthMm, lengthMm: standardSize.lengthMm }); }} /> カスタム区分</label><p className="help">チェックすると左右幅・長さを自由入力できます。列数は選択サイズを引き継ぎ、原反幅・価格帯・配送単位は幅から自動判定します（参考計算）。</p></div>
@@ -936,6 +984,48 @@ export default function QuotationPage() {
           </div>
         </form>
       </div>
+      {customerListOpen ? (
+        <div className="customer-list-layer" role="dialog" aria-modal="true" aria-labelledby="customer-list-title">
+          <div className="customer-list-panel">
+            <header className="customer-list-header">
+              <div>
+                <span className="side-kicker">CUSTOMER LIST</span>
+                <h2 id="customer-list-title">顧客一覧</h2>
+              </div>
+              <button className="button secondary small" type="button" onClick={() => setCustomerListOpen(false)}>閉じる</button>
+            </header>
+            <div className="customer-list-toolbar">
+              <input
+                aria-label="顧客検索"
+                placeholder="コード・会社名・住所・メールで検索"
+                value={customerListQuery}
+                onChange={(event) => setCustomerListQuery(event.target.value)}
+              />
+            </div>
+            <div className="customer-list-body">
+              {customerListLoading ? <p>読み込み中...</p> : customerList.length === 0 ? <p>登録済み顧客はありません。</p> : (
+                <table>
+                  <thead><tr><th>コード</th><th>会社名</th><th>担当者</th><th>住所</th><th>電話</th><th>メール</th><th></th></tr></thead>
+                  <tbody>
+                    {customerList.map((customer) => (
+                      <tr key={customer.customerCode}>
+                        <td>{customer.customerCode}</td>
+                        <td>{customer.customerName}</td>
+                        <td>{customer.customerContact || "-"}</td>
+                        <td>{customer.customerAddress || "-"}</td>
+                        <td>{customer.customerTelephone || "-"}</td>
+                        <td>{customer.customerEmail || "-"}</td>
+                        <td><button type="button" onClick={() => selectCustomerFromList(customer)}>選択</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+          <div className="customer-list-overlay" onClick={() => setCustomerListOpen(false)} aria-hidden="true" />
+        </div>
+      ) : null}
     </main>
   );
 

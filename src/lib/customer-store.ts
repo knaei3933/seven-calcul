@@ -10,6 +10,7 @@ interface CustomerRow {
   address: string;
   contact: string;
   telephone: string;
+  email: string;
   created_at: string;
   updated_at: string;
 }
@@ -30,11 +31,17 @@ async function getDatabase(): Promise<DatabaseSync> {
       address TEXT NOT NULL DEFAULT '',
       contact TEXT NOT NULL DEFAULT '',
       telephone TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(customer_name);
   `);
+  try {
+    database.exec("ALTER TABLE customers ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+  } catch {
+    // 기존 DB에 email 컬럼이 이미 있는 경우는 무시한다.
+  }
   return database;
 }
 
@@ -53,6 +60,7 @@ export function validateCustomerInput(value: unknown): CustomerMasterInput | nul
     customerAddress: text(input.customerAddress),
     customerContact: text(input.customerContact),
     customerTelephone: text(input.customerTelephone),
+    customerEmail: text(input.customerEmail),
   };
 }
 
@@ -64,6 +72,7 @@ function mapRow(row: CustomerRow): CustomerMaster {
     customerAddress: row.address,
     customerContact: row.contact,
     customerTelephone: row.telephone,
+    customerEmail: row.email,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -73,16 +82,17 @@ export async function saveCustomer(value: CustomerMasterInput): Promise<Customer
   const db = await getDatabase();
   const now = new Date().toISOString();
   db.prepare(`
-    INSERT INTO customers (customer_code,customer_name,postal_code,address,contact,telephone,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?)
+    INSERT INTO customers (customer_code,customer_name,postal_code,address,contact,telephone,email,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?)
     ON CONFLICT(customer_code) DO UPDATE SET
       customer_name=excluded.customer_name,
       postal_code=excluded.postal_code,
       address=excluded.address,
       contact=excluded.contact,
       telephone=excluded.telephone,
+      email=excluded.email,
       updated_at=excluded.updated_at
-  `).run(value.customerCode, value.customerName, value.customerPostalCode, value.customerAddress, value.customerContact, value.customerTelephone, now, now);
+  `).run(value.customerCode, value.customerName, value.customerPostalCode, value.customerAddress, value.customerContact, value.customerTelephone, value.customerEmail, now, now);
   const row = db.prepare("SELECT * FROM customers WHERE customer_code = ?").get(value.customerCode) as CustomerRow | undefined;
   if (!row) throw new Error("customer_save_failed");
   return mapRow(row);
@@ -101,8 +111,8 @@ export async function listCustomers(query = "", limit = 100): Promise<CustomerMa
   const search = `%${query.trim()}%`;
   const rows = db.prepare(`
     SELECT * FROM customers
-    WHERE customer_code LIKE ? OR customer_name LIKE ? OR address LIKE ?
+    WHERE customer_code LIKE ? OR customer_name LIKE ? OR address LIKE ? OR email LIKE ?
     ORDER BY updated_at DESC LIMIT ?
-  `).all(search, search, search, safeLimit) as unknown as CustomerRow[];
+  `).all(search, search, search, search, safeLimit) as unknown as CustomerRow[];
   return rows.map(mapRow);
 }

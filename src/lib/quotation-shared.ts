@@ -48,6 +48,7 @@ export interface CustomerMasterInput {
   customerAddress: string;
   customerContact: string;
   customerTelephone: string;
+  customerEmail: string;
 }
 
 export interface CustomerMaster extends CustomerMasterInput {

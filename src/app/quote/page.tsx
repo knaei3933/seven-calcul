@@ -22,6 +22,7 @@ type QuoteForm = {
   customerPostalCode: string;
   customerAddress: string;
   customerTelephone: string;
+  customerEmail: string;
   documentEnglish: string;
   documentHeading: string;
   issuerName: string;
@@ -93,6 +94,7 @@ const defaultQuote: QuoteForm = {
   customerPostalCode: "",
   customerAddress: "",
   customerTelephone: "",
+  customerEmail: "",
   documentEnglish: "QUOTATION",
   documentHeading: "お見積書",
   issuerName: sevenChemical.name,
@@ -864,7 +866,7 @@ export default function PrintableQuotationPage() {
             <p className="customer-address"><EditableText value={form.customerAddress || "得意先住所未入力"} label="得意先住所" onCommit={(next) => update("customerAddress", next.trim())} /></p>
             <p className="customer"><EditableText value={form.customerName || "得意先名未入力"} label="得意先名" onCommit={(next) => update("customerName", next.trim())} /></p>
             <p><EditableText value={`${form.customerContact ? `${form.customerContact} 御中` : "御中"}`} label="得意先担当者" onCommit={(next) => update("customerContact", next.replace(/御中$/, "").trim())} /></p>
-            <p className="help">顧客コード: {form.customerCode || "-"}</p>
+            <p className="help">顧客コード: {form.customerCode || "-"} ／ メール: {form.customerEmail || "-"}</p>
             <p className="greeting"><EditableText value={form.greeting} label="宛先文言" multiline onCommit={(next) => update("greeting", next)} /></p>
           </section>
 
@@ -1049,6 +1051,7 @@ export default function PrintableQuotationPage() {
               <label className="wide">得意先住所<input value={form.customerAddress} onChange={(event) => update("customerAddress", event.target.value)} /></label>
               <label>得意先担当者<input value={form.customerContact} onChange={(event) => update("customerContact", event.target.value)} placeholder="◯◯様" /></label>
               <label>得意先電話番号<input value={form.customerTelephone} onChange={(event) => update("customerTelephone", event.target.value)} /></label>
+              <label>得意先メールアドレス<input value={form.customerEmail} onChange={(event) => update("customerEmail", event.target.value)} /></label>
               <label className="wide">宛先文言<textarea rows={4} value={form.greeting} onChange={(event) => update("greeting", event.target.value)} /></label>
             </div>
           </details>

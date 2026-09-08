@@ -445,3 +445,18 @@ header .version-badge { display: none; }
   .sheet-editable { background: transparent !important; border-bottom-color: transparent !important; box-shadow: none !important; }
   .sheet-footer { margin-top: 6mm !important; }
 }
+
+.customer-list-layer { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 18px; }
+.customer-list-overlay { position: absolute; inset: 0; background: rgba(15, 23, 42, .48); }
+.customer-list-panel { position: relative; z-index: 1; width: min(1080px, 100%); max-height: min(86vh, 780px); overflow: hidden; display: grid; grid-template-rows: auto auto minmax(0, 1fr); border: 1px solid var(--line); border-radius: 14px; background: #f8fafc; box-shadow: 0 24px 70px rgba(15,23,42,.24); }
+.customer-list-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; background: white; border-bottom: 1px solid var(--line); }
+.customer-list-header h2 { margin: 0; font-size: 20px; color: #17223a; }
+.customer-list-toolbar { padding: 12px 18px; background: white; border-bottom: 1px solid var(--line); }
+.customer-list-toolbar input { width: 100%; min-height: 42px; border: 1px solid var(--line); border-radius: 8px; padding: 0 12px; font: inherit; }
+.customer-list-body { overflow: auto; padding: 14px 16px 18px; }
+.customer-list-body table { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 13px; }
+.customer-list-body th, .customer-list-body td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.customer-list-body th { position: sticky; top: 0; background: #eef2f7; color: #243447; font-size: 11px; text-transform: uppercase; }
+.customer-list-body button { border: 1px solid var(--primary); background: white; color: var(--primary); border-radius: 6px; padding: 5px 9px; font-weight: 800; cursor: pointer; }
+.customer-list-body button:hover { background: var(--primary); color: white; }
+.button-row { display: flex; gap: 6px; flex-wrap: wrap; }
