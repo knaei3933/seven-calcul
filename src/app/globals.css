@@ -468,10 +468,11 @@ header .version-badge { display: none; }
 .customer-toolbar .field, .customer-toolbar .parameter-label { min-width: 0; }
 .customer-toolbar .field > span { display: block; min-height: 20px; margin-bottom: 5px; font-size: 11px; font-weight: 800; color: var(--muted); }
 .customer-toolbar .help { margin: 3px 0 0; font-size: 10px; line-height: 1.2; }
-.customer-toolbar .button-row { display: grid; gap: 6px; }
-@media (max-width: 1500px) {
+.customer-toolbar .button-row { display: flex; flex-wrap: nowrap; gap: 6px; }
+.customer-toolbar .button-row .button { flex: 1 0 auto; padding-left: 6px; padding-right: 6px; white-space: nowrap; }
+@media (max-width: 1200px) {
   .customer-toolbar { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .customer-toolbar .customer-actions-cell { grid-column: span 2; }
+  .customer-toolbar .button-row { flex-wrap: wrap; }
 }
 @media (max-width: 900px) {
   .customer-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
