@@ -108,6 +108,8 @@ export default function QuotationPage() {
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
   const [productionSpeedManual, setProductionSpeedManual] = useState(false);
+  type CustomerDraft = Pick<typeof form, 'customerName' | 'customerCode' | 'customerPostalCode' | 'customerAddress' | 'customerContact' | 'customerTelephone' | 'customerEmail'>;
+  const [customerDraft, setCustomerDraft] = useState<CustomerDraft | null>(null);
   const [customerListOpen, setCustomerListOpen] = useState(false);
   const [customerList, setCustomerList] = useState<CustomerMaster[]>([]);
   const [customerListQuery, setCustomerListQuery] = useState("");
@@ -341,6 +343,15 @@ export default function QuotationPage() {
       if (!response.ok) throw new Error(payload.error ?? "calculation_failed");
       if (requestOrder !== requestOrderRef.current) return;
       setServerResult({ result: payload.result, inputSha256: requestedInputSha256 });
+      setCustomerDraft({
+        customerName: form.customerName,
+        customerCode: form.customerCode,
+        customerPostalCode: form.customerPostalCode,
+        customerAddress: form.customerAddress,
+        customerContact: form.customerContact,
+        customerTelephone: form.customerTelephone,
+        customerEmail: form.customerEmail,
+      });
       setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (error) {
       if (requestOrder === requestOrderRef.current) {
@@ -356,7 +367,7 @@ export default function QuotationPage() {
   const customerPrice = resultShown?.sellingPrices.find((price: { margin: string; pricePerPiece: string; totalSales: string; profit: string }) => Number(price.margin) === Number(effectiveMargin));
 
   useEffect(() => {
-    if (!resultShown || !customerPrice) return;
+    if (!resultShown || !customerPrice || !customerDraft) return;
     try {
       sessionStorage.setItem(
         QUOTATION_DRAFT_KEY,
@@ -367,14 +378,15 @@ export default function QuotationPage() {
           skuNames: form.skus.map((sku, index) => sku.name.trim() || `充填物${index + 1}`),
           targetMargin: effectiveMargin,
           printingMethod: form.printingMethod,
-          customerName: form.customerName,
-          customerCode: form.customerCode,
-          customerPostalCode: form.customerPostalCode,
-          customerAddress: form.customerAddress,
-          customerTelephone: form.customerTelephone,
-          customerEmail: form.customerEmail,
-          customerContact: form.customerContact,
+          customerName: customerDraft.customerName,
+          customerCode: customerDraft.customerCode,
+          customerPostalCode: customerDraft.customerPostalCode,
+          customerAddress: customerDraft.customerAddress,
+          customerTelephone: customerDraft.customerTelephone,
+          customerEmail: customerDraft.customerEmail,
+          customerContact: customerDraft.customerContact,
           filmComposition: "PET12+AL7+PET12+LLDPE50",
+          lossRate: parameters.lossRate,
           webWidthMm: effectiveSize.webWidthMm,
           lanes: effectiveSize.lanes,
           pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
@@ -385,7 +397,7 @@ export default function QuotationPage() {
     } catch {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
-  }, [customerPrice, effectiveMargin, form.connected, form.customerAddress, form.customerCode, form.customerContact, form.customerEmail, form.customerName, form.customerPostalCode, form.customerTelephone, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
+  }, [customerDraft, customerPrice, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
 
   const openCustomerList = async () => {
     setCustomerListOpen(true);
@@ -420,7 +432,14 @@ export default function QuotationPage() {
   useEffect(() => {
     if (!customerListOpen) return;
     const timer = setTimeout(() => { void openCustomerList(); }, 200);
-    return () => clearTimeout(timer);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCustomerListOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("keydown", onKeyDown);
+    };
   }, [customerListOpen, customerListQuery]); // eslint-disable-line react-hooks/exhaustive-deps -- 検索語変更時に一覧を再取得する。
 
   useEffect(() => {

@@ -589,6 +589,17 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
                 </dl>
               </section>
 
+              {order.customMold && Number(order.customMold.costYen) > 0 ? (
+                <section className="purchase-order-section">
+                  <h3>カスタム金型 発注</h3>
+                  <dl className="purchase-order-grid">
+                    <div><dt>数量</dt><dd>{formatNumber(order.customMold.quantity, 0)} 式</dd></div>
+                    <div><dt>発注金額</dt><dd>{formatCurrency(order.customMold.costYen, 0)}</dd></div>
+                  </dl>
+                  <p>カスタム仕様の金型・治具费用です。仕様変更時は再見積りしてください。</p>
+                </section>
+              ) : null}
+
               <section className="purchase-order-section">
                 <h3>フィルム発注の計算根拠</h3>
                 <dl className="purchase-order-grid">

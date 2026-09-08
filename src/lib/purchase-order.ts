@@ -31,6 +31,10 @@ export type PurchaseOrderSnapshot = {
   deliverablePatternLengthM?: string;
   productionPatternLengthM?: string;
   gravureLossM?: string;
+  customMold?: {
+    quantity: string;
+    costYen: string;
+  };
   copperPlate?: {
     quantity: number;
     plateWidthMm: string;
@@ -48,6 +52,7 @@ export type PurchaseContext = {
   pitchMm: string;
   prodMultiplier: number;
   colorCount: number;
+  lossRate: string;
 };
 
 export function buildPurchaseOrderSnapshot(result: CostResult, context: PurchaseContext): PurchaseOrderSnapshot {
@@ -63,7 +68,7 @@ export function buildPurchaseOrderSnapshot(result: CostResult, context: Purchase
     orderLengthM: result.film.orderLengthM,
     effectiveLengthM: result.film.effectiveLengthM,
     lossM: result.film.lossM,
-    lossRate: "0.10",
+    lossRate: context.lossRate,
     webWidthMm: result.gravure
       ? Number(result.gravure.materialWidthMm)
       : result.film.skuCosts[0]?.webWidthMm ?? context.webWidthMm,
@@ -82,6 +87,10 @@ export function buildPurchaseOrderSnapshot(result: CostResult, context: Purchase
       webWidthMm: sku.webWidthMm,
       multiplier: sku.multiplier,
     })),
+    customMold: result.customCharge ? {
+      quantity: "1",
+      costYen: result.customCharge,
+    } : undefined,
     orderPatternCount: result.orderPatternCount,
     deliverablePatternLengthM: result.deliverablePatternLengthM,
     productionPatternLengthM: result.film.orderLengthM,
