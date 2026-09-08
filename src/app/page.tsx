@@ -495,8 +495,13 @@ export default function QuotationPage() {
           <div className="customer-toolbar">
               <div className="field-row">
             <Field label="顧客コード" htmlFor="customer-code">
-              <input id="customer-code" inputMode="numeric" value={form.customerCode} onChange={(e) => set("customerCode", e.target.value)} />
-              <p className="help">コード入力後に登録済み顧客情報を自動読込します。</p>
+              <input
+                id="customer-code"
+                inputMode="numeric"
+                aria-describedby="customer-code-help"
+                value={form.customerCode}
+                onChange={(e) => set("customerCode", e.target.value)}
+              />
             </Field>
             <div className="field">
               <span>顧客マスタ</span>
@@ -520,6 +525,9 @@ export default function QuotationPage() {
           <Field label="住所" htmlFor="customer-address"><input id="customer-address" value={form.customerAddress} onChange={(e) => set("customerAddress", e.target.value)} /></Field>
           <Field label="メールアドレス" htmlFor="customer-email"><input id="customer-email" inputMode="email" value={form.customerEmail} onChange={(e) => set("customerEmail", e.target.value)} /></Field>
           </div>
+          <p className="help customer-toolbar-note" id="customer-code-help">
+            顧客コード入力後に登録済み顧客情報を自動読込します。未登録コードは入力後に保存できます。
+          </p>
         </section>
         <form onSubmit={submit} className="layout" noValidate data-testid="quotation-form" data-state={staleResult ? "stale" : "current"}>
           <section className="panel" aria-labelledby="input-title">
