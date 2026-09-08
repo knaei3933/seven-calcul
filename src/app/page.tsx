@@ -376,6 +376,9 @@ export default function QuotationPage() {
       sessionStorage.setItem(
         QUOTATION_DRAFT_KEY,
         JSON.stringify(buildQuotationDraft(resultShown, {
+          quotationNumber: "",
+          sourceHash: resultShown.audit.resultJsonSha256,
+          resultHash: resultShown.audit.resultJsonSha256,
           widthMm: form.widthMm,
           lengthMm: form.lengthMm,
           connected: form.connected,
@@ -390,7 +393,9 @@ export default function QuotationPage() {
           customerEmail: customerDraft.customerEmail,
           customerContact: customerDraft.customerContact,
           filmComposition: "PET12+AL7+PET12+LLDPE50",
+          parameters: effectiveParameters,
           lossRate: parameters.lossRate,
+          bulkUnitPrice: form.bulkPrice,
           webWidthMm: effectiveSize.webWidthMm,
           lanes: effectiveSize.lanes,
           pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),

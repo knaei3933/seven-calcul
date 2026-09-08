@@ -55,3 +55,7 @@ export interface CustomerMaster extends CustomerMasterInput {
   createdAt: string;
   updatedAt: string;
 }
+
+export type ChecklistAudience = "CUSTOMER" | "INTERNAL_QA";
+
+export const checklistAudiences: ChecklistAudience[] = ["CUSTOMER", "INTERNAL_QA"];

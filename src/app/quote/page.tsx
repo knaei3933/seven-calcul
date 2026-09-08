@@ -12,6 +12,7 @@ import {
 } from "@/lib/quotation-draft";
 import { DEFAULT_FILM_COMPOSITION, QUOTATION_RESTORE_KEY } from "@/lib/quotation-shared";
 import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
+import type { CalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 
 type QuoteForm = {
   quotationNumber: string;
@@ -242,10 +243,12 @@ export default function PrintableQuotationPage() {
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState("");
+  const [checklistUrl, setChecklistUrl] = useState("");
   const [saveError, setSaveError] = useState("");
   const [mobileDrawer, setMobileDrawer] = useState<"left" | "right" | null>(null);
   const [isMobileWorkspace, setIsMobileWorkspace] = useState(false);
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrderSnapshot | null>(null);
+  const [calculationChecklistSnapshot, setCalculationChecklistSnapshot] = useState<CalculationChecklistSnapshot | null>(null);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 1200px)");
@@ -272,6 +275,7 @@ export default function PrintableQuotationPage() {
           resultHash?: unknown;
           purchaseOrder?: PurchaseOrderSnapshot;
           purchaseOrderJson?: string;
+          calculationChecklistSnapshot?: CalculationChecklistSnapshot;
         };
         const restoredForm = { ...defaultQuote };
         (Object.keys(defaultQuote) as (keyof QuoteForm)[]).forEach((key) => {
@@ -282,6 +286,8 @@ export default function PrintableQuotationPage() {
         setForm(restoredForm);
         try {
           const rawPurchaseOrder = restored.purchaseOrderJson ?? (restored.purchaseOrder ? JSON.stringify(restored.purchaseOrder) : "");
+          const rawChecklistSnapshot = restored.calculationChecklistSnapshot;
+          setCalculationChecklistSnapshot(rawChecklistSnapshot ? rawChecklistSnapshot as CalculationChecklistSnapshot : null);
           setPurchaseOrder(rawPurchaseOrder ? JSON.parse(rawPurchaseOrder) as PurchaseOrderSnapshot : null);
         } catch { setPurchaseOrder(null); }
         setSourceVersion(typeof restored.resultHash === "string" ? restored.resultHash : "");
@@ -320,6 +326,7 @@ export default function PrintableQuotationPage() {
           purchaseOrderJson: draft.purchaseOrder ? JSON.stringify(draft.purchaseOrder) : "",
         }));
         setPurchaseOrder(draft.purchaseOrder ?? null);
+        setCalculationChecklistSnapshot(draft.calculationChecklistSnapshot ?? null);
         setSourceVersion(draft.resultHash);
       }
     } catch {
@@ -397,6 +404,7 @@ export default function PrintableQuotationPage() {
             customUnitDisplay: shownTotals.customUnit,
             customAmountDisplay: shownTotals.customAmount,
             purchaseOrder: purchaseOrder,
+            calculationChecklistSnapshot: calculationChecklistSnapshot,
             filmUnitDisplay: shownTotals.filmUnit,
             filmPouchUnitDisplay: shownTotals.filmPouchUnit,
             filmAmountDisplay: shownTotals.filmAmount,
@@ -412,6 +420,7 @@ export default function PrintableQuotationPage() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "save_failed");
+      setChecklistUrl(`/checklists/${payload.record.id}`);
       setSavedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
       return true;
     } catch {
@@ -841,6 +850,7 @@ export default function PrintableQuotationPage() {
           <button className="button secondary" type="button" onClick={() => router.push("/")}>シミュレーターから取込</button>
           <button className="button secondary" type="button" data-testid="save-history" disabled={!valid || saving} onClick={() => void saveToHistory()}>{saving ? "保存中..." : savedAt ? `履歴保存済 ${savedAt}` : "履歴に保存"}</button>
           <button className="button" type="button" data-testid="print-pdf" disabled={!valid || saving} onClick={() => void printPdf()}>PDF出力（A4）</button>
+          {checklistUrl ? <a className="button secondary" href={checklistUrl}>計算確認チェックリスト</a> : null}
         </div>
         {saveError ? <p className="error" role="alert" data-testid="save-error">{saveError}</p> : null}
       </section>

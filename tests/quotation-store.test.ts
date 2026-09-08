@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { analyzeQuotation } from "@/lib/quotation-history";
+import { calculatePouchCost } from "@/lib/calculation";
+import { buildCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-store-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
-const { getQuotation, saveQuotation } = await import("@/lib/quotation-store");
+const { createChecklistsForQuotation, getChecklistsForQuotation, getQuotation, saveQuotation, updateChecklistItem } = await import("@/lib/quotation-store");
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
@@ -84,5 +86,67 @@ describe("quotation persistence with a manually edited selling price", () => {
     expect(analysis.profitRate.toFixed(8)).toBe("38.27160494");
     expect(analysis.totalProfit.toNumber()).toBe(31000);
     expect(analysis.storedProfitRate.toFixed(8)).toBe("38.27160494");
+  });
+
+  it("creates separate customer and internal QA calculation checklists", async () => {
+    const result = calculatePouchCost({
+      spec: {
+        sizeKey: "round-50x60", customWidthMm: "50", customLengthMm: "60", fillMlPerChamber: "3", connectedChambers: 1,
+        fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+      },
+      quantity: "10000", printingMethod: "digital",
+    });
+    const snapshot = buildCalculationChecklistSnapshot(result, {
+      quotationNumber: "S7-CHECKLIST-001",
+      customerName: "チェック株式会社",
+      printingMethod: "digital",
+      sourceHash: "checklist-hash",
+      filmComposition: "PET12+AL7+PET12+LLDPE50",
+    });
+    const quotationInput: QuotationRecordInput = {
+      quotationNumber: "S7-CHECKLIST-001",
+      status: "draft",
+      issueDate: "2026-09-08",
+      validUntil: "2026-10-08",
+      customerName: "チェック株式会社",
+      customerContact: "QA",
+      productName: "チェックパウチ",
+      sizeSummary: "50×60mm / 1連",
+      quantity: "10000",
+      fillingCostPerPiece: "1",
+      filmCostPerPiece: "1",
+      filmMeterPrice: "328",
+      filmOrderLengthM: "500",
+      targetMargin: "0.4",
+      taxRatePercent: "10",
+      pricePerPiece: "3.5",
+      subtotal: "35000",
+      tax: "3500",
+      grandTotal: "38500",
+      deliveryDate: "",
+      paymentTerms: "",
+      notes: "",
+      calculationVersion: "checklist-test",
+      resultHash: "checklist-hash",
+      payload: {
+        calculationChecklistSnapshot: snapshot,
+      },
+    };
+    const saved = await saveQuotation(quotationInput);
+    const created = await createChecklistsForQuotation(saved, snapshot);
+    expect(created).toHaveLength(2);
+    expect(created.map((record) => record.audience)).toEqual(["CUSTOMER", "INTERNAL_QA"]);
+    expect(created.every((record) => record.totalCount > 10)).toBe(true);
+    expect(created.every((record) => record.acceptedCount === 0)).toBe(true);
+
+    const updated = await updateChecklistItem(saved.id, "CUSTOMER", "film.total", true, "テスト顧客");
+    const records = await getChecklistsForQuotation(saved.id);
+    const customerRecord = records.find((record) => record.audience === "CUSTOMER")!;
+    const internalRecord = records.find((record) => record.audience === "INTERNAL_QA")!;
+    expect(updated!.acceptedCount).toBeGreaterThan(0);
+    expect(customerRecord.acceptedCount).toBeGreaterThan(0);
+    expect(internalRecord.acceptedCount).toBe(0);
+    expect(customerRecord.items.find((item) => item.id === "film.total")!.accepted).toBe(true);
+    expect(internalRecord.items.find((item) => item.id === "film.total")!.accepted).toBe(false);
   });
 });

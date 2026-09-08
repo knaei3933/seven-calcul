@@ -166,6 +166,7 @@ export default function QuotationHistoryPage() {
                   </td>
                   <td className="history-actions">
                     <button className="button small" type="button" onClick={() => setSelectedId(record.id)}>詳細</button>
+                    <a className="button secondary small" href={`/checklists/${record.id}`}>チェックリスト</a>
                     <button
                       className="button small"
                       type="button"

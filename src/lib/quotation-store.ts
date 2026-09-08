@@ -3,7 +3,9 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { quotationStatuses, type QuotationStatus } from "./quotation-shared";
 import { QUOTATION_RESTORE_KEY } from "./quotation-shared";
-import type { QuotationRecord, QuotationRecordInput } from "./quotation-shared";
+import { D } from "./decimal";
+import type { QuotationRecord, QuotationRecordInput, ChecklistAudience } from "./quotation-shared";
+import { buildChecklistItems, type CalculationChecklistSnapshot, type ChecklistAudience as ChecklistAudienceValue, type ChecklistRecord } from "./calculation-checklist";
 
 export { QUOTATION_RESTORE_KEY, quotationStatuses };
 export type { QuotationRecord, QuotationRecordInput, QuotationStatus };
@@ -81,6 +83,19 @@ async function getDatabase(): Promise<DatabaseSync> {
     );
     CREATE INDEX IF NOT EXISTS idx_quotations_updated_at ON quotations(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_quotations_customer ON quotations(customer_name);
+    CREATE TABLE IF NOT EXISTS quotation_checklists (
+      quotation_id INTEGER NOT NULL,
+      audience TEXT NOT NULL CHECK(audience IN ('CUSTOMER','INTERNAL_QA')),
+      checklist_version TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('in_progress','completed')),
+      snapshot_json TEXT NOT NULL,
+      items_json TEXT NOT NULL,
+      checked_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (quotation_id, audience),
+      FOREIGN KEY (quotation_id) REFERENCES quotations(id)
+    );
   `);
   return database;
 }
@@ -227,6 +242,14 @@ export async function getQuotation(id: number): Promise<QuotationRecord | null> 
   return row ? mapRow(row) : null;
 }
 
+export async function getQuotationByNumber(quotationNumber: string): Promise<QuotationRecord | null> {
+  const db = await getDatabase();
+  const code = quotationNumber.trim();
+  if (!code) return null;
+  const row = db.prepare("SELECT * FROM quotations WHERE quotation_number = ?").get(code) as DatabaseRow | undefined;
+  return row ? mapRow(row) : null;
+}
+
 export async function updateQuotationStatus(id: number, status: QuotationStatus): Promise<QuotationRecord | null> {
   const db = await getDatabase();
   if (!Number.isInteger(id) || id <= 0 || !quotationStatuses.includes(status)) return null;
@@ -240,4 +263,121 @@ export async function deleteQuotation(id: number): Promise<boolean> {
   if (!Number.isInteger(id) || id <= 0) return false;
   const result = db.prepare("DELETE FROM quotations WHERE id = ?").run(id);
   return Number(result.changes) > 0;
+}
+
+interface ChecklistRow {
+  quotation_id: number;
+  audience: ChecklistAudienceValue;
+  checklist_version: string;
+  status: string;
+  snapshot_json: string;
+  items_json: string;
+  checked_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapChecklistRow(row: ChecklistRow): ChecklistRecord {
+  const items = JSON.parse(row.items_json) as import("./calculation-checklist").ChecklistItem[];
+  const accepted = items.filter((item) => item.accepted).length;
+  return {
+    quotationId: Number(row.quotation_id),
+    audience: row.audience,
+    checklistVersion: row.checklist_version,
+    status: row.status as "in_progress" | "completed",
+    snapshot: JSON.parse(row.snapshot_json) as CalculationChecklistSnapshot,
+    items,
+    acceptedCount: accepted,
+    totalCount: items.length,
+    progressPercent: items.length > 0 ? Number(D(accepted).div(items.length).times(100).toString()) : 0,
+    checkedBy: row.checked_by || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function calculateChecklistProgress(items: import("./calculation-checklist").ChecklistItem[]) {
+  const accepted = items.filter((item) => item.accepted).length;
+  const total = items.length;
+  const percent = total > 0 ? Number(D(accepted).div(total).times(100).toString()) : 0;
+  return {
+    accepted,
+    total,
+    percent,
+    status: accepted === total ? "completed" : "in_progress",
+  };
+}
+
+export async function createChecklistsForQuotation(record: QuotationRecord, snapshot: CalculationChecklistSnapshot): Promise<ChecklistRecord[]> {
+  const db = await getDatabase();
+  const existing = db.prepare("SELECT COUNT(*) n FROM quotation_checklists WHERE quotation_id = ?").get(record.id) as { n: number };
+  if (existing.n > 0) {
+    const rows = db.prepare("SELECT * FROM quotation_checklists WHERE quotation_id = ? ORDER BY audience").all(record.id) as unknown as ChecklistRow[];
+    return rows.map(mapChecklistRow);
+  }
+
+  const itemTemplates = buildChecklistItems(snapshot);
+  const audiences: ChecklistAudienceValue[] = ["CUSTOMER", "INTERNAL_QA"];
+  const now = new Date().toISOString();
+  const insert = db.prepare(`
+    INSERT INTO quotation_checklists (
+      quotation_id,audience,checklist_version,status,snapshot_json,items_json,checked_by,created_at,updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?)
+  `);
+  for (const audience of audiences) {
+    insert.run(
+      record.id,
+      audience,
+      snapshot.checklistVersion,
+      "in_progress",
+      JSON.stringify(snapshot),
+      JSON.stringify(itemTemplates),
+      audience === "CUSTOMER" ? record.customerName || "고객" : "카네이무역 내부 QA",
+      now,
+      now,
+    );
+  }
+  const rows = db.prepare("SELECT * FROM quotation_checklists WHERE quotation_id = ? ORDER BY audience").all(record.id) as unknown as ChecklistRow[];
+  return rows.map(mapChecklistRow);
+}
+
+export async function getChecklistsForQuotation(quotationId: number): Promise<ChecklistRecord[]> {
+  const db = await getDatabase();
+  if (!Number.isInteger(quotationId) || quotationId <= 0) return [];
+  const rows = db.prepare("SELECT * FROM quotation_checklists WHERE quotation_id = ? ORDER BY audience").all(quotationId) as unknown as ChecklistRow[];
+  return rows.map(mapChecklistRow);
+}
+
+export async function updateChecklistItem(
+  quotationId: number,
+  audience: ChecklistAudienceValue,
+  itemId: string,
+  accepted: boolean,
+  checkedBy: string,
+): Promise<ChecklistRecord | null> {
+  const db = await getDatabase();
+  const row = db.prepare("SELECT * FROM quotation_checklists WHERE quotation_id = ? AND audience = ?").get(quotationId, audience) as ChecklistRow | undefined;
+  if (!row) return null;
+  const items = JSON.parse(row.items_json) as import("./calculation-checklist").ChecklistItem[];
+  const item = items.find((entry) => entry.id === itemId);
+  if (!item) return null;
+  item.accepted = accepted;
+  item.checkedAt = accepted ? new Date().toISOString() : null;
+  item.checkedBy = accepted ? checkedBy || null : null;
+  const progress = calculateChecklistProgress(items);
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE quotation_checklists
+    SET items_json = ?, status = ?, checked_by = ?, updated_at = ?
+    WHERE quotation_id = ? AND audience = ?
+  `).run(
+    JSON.stringify(items),
+    progress.status,
+    progress.status === "completed" ? checkedBy : "",
+    now,
+    quotationId,
+    audience,
+  );
+  const updated = db.prepare("SELECT * FROM quotation_checklists WHERE quotation_id = ? AND audience = ?").get(quotationId, audience) as ChecklistRow | undefined;
+  return updated ? mapChecklistRow(updated) : null;
 }
