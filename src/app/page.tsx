@@ -367,17 +367,19 @@ export default function QuotationPage() {
           skuNames: form.skus.map((sku, index) => sku.name.trim() || `充填物${index + 1}`),
           targetMargin: effectiveMargin,
           printingMethod: form.printingMethod,
+          customerName: form.customerName,
           customerCode: form.customerCode,
           customerPostalCode: form.customerPostalCode,
           customerAddress: form.customerAddress,
           customerTelephone: form.customerTelephone,
           customerEmail: form.customerEmail,
+          customerContact: form.customerContact,
         })),
       );
     } catch {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
-  }, [customerPrice, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]); // eslint-disable-line react-hooks/exhaustive-deps -- 顧客編集フィールドは値変更時に下書きを作り直さない。
+  }, [customerPrice, effectiveMargin, form.connected, form.customerAddress, form.customerCode, form.customerContact, form.customerEmail, form.customerName, form.customerPostalCode, form.customerTelephone, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]);
 
   const openCustomerList = async () => {
     setCustomerListOpen(true);

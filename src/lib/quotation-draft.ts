@@ -20,13 +20,16 @@ export interface QuotationDraft {
   targetMargin: string;
   fillingCostPerPiece: string;
   customLotCost: string;
+  customQuantity: string;
   filmCostPerPiece: string;
   filmMeterPrice: string;
   filmOrderLengthM: string;
   totalCostPerPiece: string;
   calculationVersion: string;
   resultHash: string;
+  customerName?: string;
   customerCode?: string;
+  customerContact?: string;
   customerPostalCode?: string;
   customerAddress?: string;
   customerTelephone?: string;
@@ -47,7 +50,9 @@ export function buildQuotationDraft(
     skuNames: string[];
     targetMargin: string;
     printingMethod?: string;
+    customerName?: string;
     customerCode?: string;
+    customerContact?: string;
     customerPostalCode?: string;
     customerAddress?: string;
     customerTelephone?: string;
@@ -66,6 +71,7 @@ export function buildQuotationDraft(
     quantity: result.quantity,
     targetMargin: context.targetMargin,
     customLotCost: result.customCharge,
+    customQuantity: "1",
     fillingCostPerPiece: fillingCost.minus(result.costPerPieceComponents.custom).toString(),
     filmCostPerPiece: result.costPerPieceComponents.film,
     filmMeterPrice: result.film.unitPrice,
@@ -74,6 +80,8 @@ export function buildQuotationDraft(
     calculationVersion: result.audit.calculationVersion,
     resultHash: result.audit.resultJsonSha256,
     printingMethod: context.printingMethod,
+    customerName: context.customerName,
+    customerContact: context.customerContact,
     customerCode: context.customerCode,
     customerPostalCode: context.customerPostalCode,
     customerAddress: context.customerAddress,
