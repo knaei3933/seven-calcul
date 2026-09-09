@@ -243,7 +243,9 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
   const filmCostTotal = analysis.filmCostUnit.times(analysis.quantity);
   const copperCostTotal = analysis.copperCostUnit.times(analysis.quantity);
   const customCostTotal = analysis.customCostUnit.times(analysis.quantity);
-  const filmAcquisitionTotal = analysis.filmMeterPrice.times(analysis.filmOrderLength);
+  const filmMeterCost = analysis.filmOrderLength.gt(0)
+    ? filmCostTotal.div(analysis.filmOrderLength)
+    : D(0);
   const copperCostPerColor = copperColorCountValue.gt(0) ? copperCostTotal.div(copperColorCountValue) : D(0);
   const storedCostDifference = analysis.costUnit.minus(analysis.storedCostUnit);
   const profitVerificationDifference = finalProfit.minus(analysis.storedProfitUnit.times(analysis.quantity));
@@ -369,11 +371,11 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
                   <header><span>04</span><h2>原価内訳・逆算検証</h2></header>
                   <table className="history-cost-table">
                     <thead>
-                      <tr><th>項目</th><th>原価 /枚</th><th>数量</th><th>原価総額</th><th>見積総額</th><th>差益総額</th></tr>
+                      <tr><th>項目</th><th>原価単価</th><th>数量</th><th>原価総額</th><th>見積総額</th><th>差益総額</th></tr>
                     </thead>
                     <tbody>
                       <tr><td>充填・加工</td><td>{formatCurrency(analysis.fillingCostUnit.toFixed(4), 4)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.fillingCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.fillingAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.fillingAmount.minus(analysis.fillingCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr>
-                      <tr><td>フィルム</td><td>{formatCurrency(analysis.filmCostUnit.toFixed(4), 4)}</td><td>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</td><td>{formatCurrency(analysis.filmCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.filmAmount.minus(analysis.filmCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr>
+                      <tr><td>フィルム</td><td>{formatCurrency(filmMeterCost.toFixed(2), 2)} /m</td><td>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</td><td>{formatCurrency(filmCostTotal.toFixed(0), 0)}</td><td>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.filmAmount.minus(filmCostTotal).toFixed(0), 0)}</td></tr>
                       <tr><td>新規銅版</td><td>{formatCurrency(analysis.copperCostUnit.toFixed(4), 4)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.copperCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.copperAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.copperAmount.minus(analysis.copperCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr>
                       {analysis.customCostUnit.gt(0) ? <tr><td>金型</td><td>{formatCurrency(analysis.customCostUnit.toFixed(4), 4)}</td><td>1 式</td><td>{formatCurrency(analysis.customCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.customAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.customAmount.minus(analysis.customCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr> : null}
                     </tbody>
@@ -395,16 +397,16 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
                         <td>{formatCurrency(fillingCostTotal.toFixed(0), 0)}</td>
                       </tr>
                       <tr>
-                        <td>フィルム仕入</td>
-                        <td>購入m単価 × 発注長</td>
-                        <td>{formatCurrency(analysis.filmMeterPrice.toFixed(2), 2)} × {formatNumber(analysis.filmOrderLength.toNumber(), 0)}m</td>
-                        <td>{formatCurrency(filmAcquisitionTotal.toFixed(0), 0)}</td>
-                      </tr>
-                      <tr>
-                        <td>フィルム原価配賦</td>
+                        <td>フィルム原価総額</td>
                         <td>保存原価/枚 × 発注数量</td>
                         <td>{formatCurrency(analysis.filmCostUnit.toFixed(4), 4)} × {formatNumber(analysis.quantity.toNumber(), 0)}</td>
                         <td>{formatCurrency(filmCostTotal.toFixed(0), 0)}</td>
+                      </tr>
+                      <tr>
+                        <td>フィルム換算m単価</td>
+                        <td>フィルム原価総額 ÷ 発注長</td>
+                        <td>{formatCurrency(filmCostTotal.toFixed(0), 0)} ÷ {formatNumber(analysis.filmOrderLength.toNumber(), 0)}m</td>
+                        <td>{formatCurrency(filmMeterCost.toFixed(2), 2)} /m</td>
                       </tr>
                       <tr>
                         <td>銅版原価</td>
@@ -468,8 +470,6 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
                   <dl className="history-facts">
                     <div><dt>納期</dt><dd>{record.deliveryDate || "-"}</dd></div>
                     <div><dt>支払条件</dt><dd>{record.paymentTerms || "-"}</dd></div>
-                    <div><dt>フィルム購入単価</dt><dd>{formatCurrency(analysis.filmMeterPrice.toFixed(0), 0)} /m</dd></div>
-                    <div><dt>フィルム発注長</dt><dd>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</dd></div>
                     <div><dt>計算バージョン</dt><dd>{record.calculationVersion || "-"}</dd></div>
                     <div><dt>作成 / 更新</dt><dd>{new Date(record.createdAt).toLocaleString("ja-JP")} / {new Date(record.updatedAt).toLocaleString("ja-JP")}</dd></div>
                     {printingMethodOf(record) === "gravure" ? (
