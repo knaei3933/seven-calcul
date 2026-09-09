@@ -385,8 +385,11 @@ export default function QuotationPage() {
         bulkUnitPrice: form.bulkPrice,
         gravureParameters: normalizedGravureParameters,
       });
-      sessionStorage.setItem(CURRENT_CHECKLIST_SNAPSHOT_KEY, JSON.stringify(preliminarySnapshot));
+      const checklistSnapshotJson = JSON.stringify(preliminarySnapshot);
+      sessionStorage.setItem(CURRENT_CHECKLIST_SNAPSHOT_KEY, checklistSnapshotJson);
+      localStorage.setItem("pouch-current-checklist-snapshot-persistent-v1", checklistSnapshotJson);
       sessionStorage.removeItem("pouch-current-checklist-confirmations-v1");
+      localStorage.removeItem("pouch-current-checklist-confirmations-persistent-v1");
       setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (error) {
       if (requestOrder === requestOrderRef.current) {

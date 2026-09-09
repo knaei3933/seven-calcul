@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   CHECKLIST_VERSION,
   CURRENT_CHECKLIST_SNAPSHOT_KEY,
@@ -13,6 +14,8 @@ import {
 
 const SNAPSHOT_KEY = CURRENT_CHECKLIST_SNAPSHOT_KEY;
 const CONFIRMATIONS_KEY = "pouch-current-checklist-confirmations-v1";
+const LOCAL_SNAPSHOT_KEY = "pouch-current-checklist-snapshot-persistent-v1";
+const LOCAL_CONFIRMATIONS_KEY = "pouch-current-checklist-confirmations-persistent-v1";
 
 type ConfirmationState = {
   accepted: boolean;
@@ -39,10 +42,48 @@ export default function CurrentChecklistPage() {
   const [reviewerName, setReviewerName] = useState("");
   const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
 
+  function readFirstRawValue(keys: string[]): string | null {
+    for (const key of keys) {
+      const value = sessionStorage.getItem(key) ?? localStorage.getItem(key);
+      if (value) return value;
+    }
+    return null;
+  }
+
+  function writeRawValues(keys: string[], value: string) {
+    for (const key of keys) {
+      try {
+        sessionStorage.setItem(key, value);
+      } catch {
+        // sessionStorage가 사용 불가능한 경우 localStorage만 유지한다.
+      }
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        // private mode 등 저장 실패 시에도 화면은 유지한다.
+      }
+    }
+  }
+
+  function removeRawValues(keys: string[]) {
+    for (const key of keys) {
+      try {
+        sessionStorage.removeItem(key);
+      } catch {
+        // 무시: 저장소 접근 불가능 상태에서도 삭제 시도를 계속한다.
+      }
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // 무시: 저장소 접근 불가능 상태에서도 삭제 시도를 계속한다.
+      }
+    }
+  }
+
   useEffect(() => {
     queueMicrotask(() => {
       try {
-        const rawSnapshot = sessionStorage.getItem(SNAPSHOT_KEY);
+        const rawSnapshot = readFirstRawValue([SNAPSHOT_KEY, LOCAL_SNAPSHOT_KEY]);
         if (!rawSnapshot) {
           setMissing(true);
           return;
@@ -53,7 +94,7 @@ export default function CurrentChecklistPage() {
           return;
         }
         setSnapshot(parsedSnapshot);
-        const rawConfirmations = sessionStorage.getItem(CONFIRMATIONS_KEY);
+        const rawConfirmations = readFirstRawValue([CONFIRMATIONS_KEY, LOCAL_CONFIRMATIONS_KEY]);
         if (rawConfirmations) {
           const parsed = JSON.parse(rawConfirmations) as PreliminaryConfirmations;
           if (parsed.CUSTOMER || parsed.INTERNAL_QA) {
@@ -101,7 +142,7 @@ export default function CurrentChecklistPage() {
 
   function persist(next: PreliminaryConfirmations, sourceHash: string) {
     try {
-      sessionStorage.setItem(CONFIRMATIONS_KEY, JSON.stringify({ sourceHash, ...next }));
+      writeRawValues([CONFIRMATIONS_KEY, LOCAL_CONFIRMATIONS_KEY], JSON.stringify({ sourceHash, ...next }));
     } catch {
       // プライベートモード等で保存できない場合も画面は維持する。
     }
@@ -145,7 +186,11 @@ export default function CurrentChecklistPage() {
       <main className="checklist-page">
         <section className="panel">
           <h1>計算確認チェックリスト</h1>
-          <p className="empty">現在の計算結果がありません。原価シミュレーターでサーバー再計算を実行してから開いてください。</p>
+          <p className="empty">
+            表示できる保存前計算がありません。最新の入力条件を反映するため、原価シミュレーターで「サーバーで再計算する」を実行してください。
+            <br />
+            <Link className="button" href="/">原価シミュレーターへ移動</Link>
+          </p>
         </section>
       </main>
     );
