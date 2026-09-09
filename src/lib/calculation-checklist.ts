@@ -5,6 +5,8 @@ import { D } from "./decimal";
 
 export type ChecklistAudience = "CUSTOMER" | "INTERNAL_QA";
 
+export const CURRENT_CHECKLIST_SNAPSHOT_KEY = "pouch-current-checklist-snapshot-v1";
+
 export type ChecklistItemState = {
   accepted: boolean;
   checkedAt: string | null;
@@ -41,6 +43,7 @@ export type CalculationChecklistSnapshot = {
   checklistVersion: string;
   calculationVersion: string;
   sourceHash: string;
+  resultHash: string;
   printingMethod: string;
   quotationNumber: string;
   customerName: string;
@@ -87,6 +90,7 @@ export type CalculationChecklistContext = {
   customerCode?: string;
   printingMethod: string;
   sourceHash: string;
+  resultHash: string;
   filmComposition: string;
   bulkUnitPrice?: string;
   widthMm?: string;
@@ -108,6 +112,7 @@ export function buildCalculationChecklistSnapshot(
     checklistVersion: "2026-09.1",
     calculationVersion: result.audit.calculationVersion,
     sourceHash: context.sourceHash,
+    resultHash: context.resultHash,
     printingMethod: context.printingMethod,
     quotationNumber: context.quotationNumber,
     customerName: context.customerName ?? "",

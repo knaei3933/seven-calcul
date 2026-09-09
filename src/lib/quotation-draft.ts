@@ -116,6 +116,7 @@ export function buildQuotationDraft(
       customerCode: context.customerCode,
       printingMethod: context.printingMethod ?? "digital",
       sourceHash: context.resultHash,
+      resultHash: context.resultHash,
       widthMm: context.widthMm,
       lengthMm: context.lengthMm,
       parameters: context.parameters,

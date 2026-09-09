@@ -6,6 +6,8 @@ import { calculatePouchCost } from "@/lib/calculation";
 import { defaultParameters, defaultProductionSpeedForFillMl, machineChargeBasis, sizeMaster } from "@/lib/constants";
 import { displayAmount } from "@/lib/calculation";
 import { D } from "@/lib/decimal";
+import { CURRENT_CHECKLIST_SNAPSHOT_KEY, buildCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
+import Link from "next/link";
 import { defaultGravureRollParameters, type GravureRollParameters } from "@/lib/gravure-roll";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { QUOTATION_DRAFT_KEY, buildQuotationDraft } from "@/lib/quotation-draft";
@@ -356,6 +358,27 @@ export default function QuotationPage() {
         customerTelephone: form.customerTelephone,
         customerEmail: form.customerEmail,
       });
+      const preliminarySnapshot = buildCalculationChecklistSnapshot(payload.result, {
+        quotationNumber: "保存前",
+        customerName: form.customerName,
+        customerCode: form.customerCode,
+        printingMethod: form.printingMethod,
+        sourceHash: payload.result.audit.resultJsonSha256,
+        resultHash: payload.result.audit.resultJsonSha256,
+        widthMm: form.widthMm,
+        lengthMm: form.lengthMm,
+        parameters: effectiveParameters,
+        filmComposition: "PET12+AL7+PET12+LLDPE50",
+        webWidthMm: effectiveSize.webWidthMm,
+        lanes: effectiveSize.lanes,
+        pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
+        prodMultiplier: effectiveSize.prodMultiplier,
+        colorCount: Math.max(...form.skus.map((sku) => Number(sku.colorCount) || 0)),
+        lossRate: parameters.lossRate,
+        bulkUnitPrice: form.bulkPrice,
+      });
+      sessionStorage.setItem(CURRENT_CHECKLIST_SNAPSHOT_KEY, JSON.stringify(preliminarySnapshot));
+      sessionStorage.removeItem("pouch-current-checklist-confirmations-v1");
       setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (error) {
       if (requestOrder === requestOrderRef.current) {
@@ -1079,6 +1102,11 @@ export default function QuotationPage() {
               </div>
             </div>
             <button className="button" type="submit" data-testid="calculate-desktop" disabled={blocker || pending}>{pending ? "計算中..." : "サーバーで再計算する"}</button>
+            {resultShown ? (
+              <Link className="button secondary" href="/checklists/current" data-testid="current-checklist-link">
+                計算確認チェックリスト（保存前）
+              </Link>
+            ) : null}
             <div className="action-note"><strong>サーバー計算済み</strong>は参照計算を意味し、見積確定ではありません。</div>
           </section>
           <div className="mobile-actions" data-testid="mobile-actions">

@@ -101,6 +101,7 @@ describe("quotation persistence with a manually edited selling price", () => {
       customerName: "チェック株式会社",
       printingMethod: "digital",
       sourceHash: "checklist-hash",
+      resultHash: "checklist-result-hash",
       filmComposition: "PET12+AL7+PET12+LLDPE50",
     });
     const quotationInput: QuotationRecordInput = {
