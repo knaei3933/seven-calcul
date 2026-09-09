@@ -553,18 +553,24 @@ export default function QuotationPage() {
 
   useEffect(() => {
     if (!simulatorStateLoaded) return;
+    const simulatorStateJson = JSON.stringify({
+      version: 1,
+      form,
+      parameters,
+      gravureParameters: normalizedGravureParameters,
+      machineBreakdown,
+      productionSpeedManual,
+      serverResult,
+      calculatedAt,
+      customerDraft,
+    });
     try {
-      sessionStorage.setItem(SIMULATOR_STATE_KEY, JSON.stringify({
-        version: 1,
-        form,
-        parameters,
-        gravureParameters: normalizedGravureParameters,
-        machineBreakdown,
-        productionSpeedManual,
-        serverResult,
-        calculatedAt,
-        customerDraft,
-      }));
+      sessionStorage.setItem(SIMULATOR_STATE_KEY, simulatorStateJson);
+    } catch {
+      // private mode 등 저장 실패 시에도 계산은 계속 동작한다.
+    }
+    try {
+      localStorage.setItem("pouch-simulator-state-persistent-v1", simulatorStateJson);
     } catch {
       // private mode 등 저장 실패 시에도 계산은 계속 동작한다.
     }

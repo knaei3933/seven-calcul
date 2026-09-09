@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { buildCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
+import { defaultParameters, sizeMaster } from "@/lib/constants";
+import { deriveCustomSizeMaster } from "@/lib/size-calculations";
+import type { SizeKey } from "@/lib/types";
 import {
   CHECKLIST_VERSION,
   CURRENT_CHECKLIST_SNAPSHOT_KEY,
@@ -16,6 +20,8 @@ const SNAPSHOT_KEY = CURRENT_CHECKLIST_SNAPSHOT_KEY;
 const CONFIRMATIONS_KEY = "pouch-current-checklist-confirmations-v1";
 const LOCAL_SNAPSHOT_KEY = "pouch-current-checklist-snapshot-persistent-v1";
 const LOCAL_CONFIRMATIONS_KEY = "pouch-current-checklist-confirmations-persistent-v1";
+const SIMULATOR_SESSION_KEY = "pouch-simulator-state-v1";
+const SIMULATOR_LOCAL_KEY = "pouch-simulator-state-persistent-v1";
 
 type ConfirmationState = {
   accepted: boolean;
@@ -80,15 +86,76 @@ export default function CurrentChecklistPage() {
     }
   }
 
+  function buildSnapshotFromSimulatorFallback(raw: string | null) {
+    if (!raw) return null;
+    try {
+      const saved = JSON.parse(raw) as {
+        form?: {
+          sizeKey?: SizeKey;
+          custom?: boolean;
+          widthMm?: string;
+          lengthMm?: string;
+          bulkPrice?: string;
+          skus?: { name?: string; quantity?: string; fillMl?: string; colorCount?: string }[];
+        };
+        parameters?: typeof defaultParameters;
+        gravureParameters?: Parameters<typeof buildCalculationChecklistSnapshot>[1]["gravureParameters"];
+        serverResult?: { result?: Parameters<typeof buildCalculationChecklistSnapshot>[0] };
+      };
+      const result = saved.serverResult?.result;
+      const form = saved.form;
+      if (!result || !form?.widthMm || !form.lengthMm) return null;
+
+      const standardSize = sizeMaster[form.sizeKey ?? "round-50x60"];
+      const dimensionsValid = Number(form.widthMm) > 0 && Number(form.lengthMm) > 0;
+      const effectiveSize = form.custom && dimensionsValid
+        ? deriveCustomSizeMaster(standardSize, form.widthMm, form.lengthMm)
+        : standardSize;
+      const skus = form.skus?.length
+        ? form.skus.map((sku, index) => ({
+          name: sku.name?.trim() || `充填物${index + 1}`,
+          quantity: sku.quantity ?? "0",
+          fillMl: sku.fillMl ?? "0",
+          colorCount: sku.colorCount ?? "0",
+        }))
+        : [];
+
+      return buildCalculationChecklistSnapshot(result, {
+        quotationNumber: "保存前",
+        printingMethod: result.gravure ? "gravure" : "digital",
+        sourceHash: result.audit.resultJsonSha256,
+        resultHash: result.audit.resultJsonSha256,
+        widthMm: form.widthMm,
+        lengthMm: form.lengthMm,
+        parameters: { ...defaultParameters, ...(saved.parameters ?? {}) },
+        filmComposition: "PET12+AL7+PET12+LLDPE50",
+        webWidthMm: effectiveSize.webWidthMm,
+        lanes: effectiveSize.lanes,
+        pitchMm: String(Number(effectiveSize.lengthMm) + Number(effectiveSize.pitchAddMm)),
+        pitchAddMm: effectiveSize.pitchAddMm,
+        prodMultiplier: effectiveSize.prodMultiplier,
+        colorCount: Math.max(0, ...skus.map((sku) => Number(sku.colorCount) || 0)),
+        skus,
+        bulkUnitPrice: form.bulkPrice ?? "0",
+        gravureParameters: saved.gravureParameters,
+      });
+    } catch {
+      return null;
+    }
+  }
+
   useEffect(() => {
     queueMicrotask(() => {
       try {
         const rawSnapshot = readFirstRawValue([SNAPSHOT_KEY, LOCAL_SNAPSHOT_KEY]);
-        if (!rawSnapshot) {
-          setMissing(true);
-          return;
+        let parsedSnapshot = rawSnapshot ? readCalculationChecklistSnapshot(JSON.parse(rawSnapshot)) : null;
+        if (!parsedSnapshot) {
+          parsedSnapshot = buildSnapshotFromSimulatorFallback(readFirstRawValue([SIMULATOR_SESSION_KEY, SIMULATOR_LOCAL_KEY]));
+          if (parsedSnapshot) {
+            writeRawValues([SNAPSHOT_KEY, LOCAL_SNAPSHOT_KEY], JSON.stringify(parsedSnapshot));
+            removeRawValues([CONFIRMATIONS_KEY, LOCAL_CONFIRMATIONS_KEY]);
+          }
         }
-        const parsedSnapshot = readCalculationChecklistSnapshot(JSON.parse(rawSnapshot));
         if (!parsedSnapshot || parsedSnapshot.checklistVersion !== CHECKLIST_VERSION) {
           setMissing(true);
           return;
