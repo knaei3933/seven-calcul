@@ -152,76 +152,137 @@ export default function CurrentChecklistPage() {
   }
 
   return (
-    <main className="checklist-page">
-      <section className="panel checklist-header">
-        <h1>計算確認チェックリスト（保存前）</h1>
-        <p>原価シミュレーターで再計算した入力条件・計算式・結果を確認できます。確認状態はブラウザに一時保存されます。</p>
-        {snapshot.checklistVersion !== CHECKLIST_VERSION ? (
-          <p className="warning">保存済みの一時データが旧形式です。最新の入力値を反映するため、原価シミュレーターで「サーバーで再計算する」を実行してください。</p>
-        ) : null}
-      </section>
-
-      <div className="checklist-tabs" role="tablist">
-        {(["CUSTOMER", "INTERNAL_QA"] as ChecklistAudience[]).map((audience) => (
-          <button
-            key={audience}
-            type="button"
-            role="tab"
-            aria-selected={activeAudience === audience}
-            className={activeAudience === audience ? "button" : "button secondary"}
-            onClick={() => setActiveAudience(audience)}
-          >
-            {audienceLabels[audience]}
-          </button>
-        ))}
-      </div>
-
-      <section className="panel checklist-progress-panel">
-        <h2>確認進捗</h2>
-        <p>{acceptedCount} / {activeItems.length} 項目確認（{progressPercent}%）</p>
-        <div className="progress"><div style={{ width: `${progressPercent}%` }} /></div>
-        <label>
-          確認者
-          <input value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} placeholder={activeAudience === "CUSTOMER" ? "顧客" : "カネイ貿易 社内QA"} />
-        </label>
-      </section>
-
-      {grouped.map(([category, checklistItems]) => (
-        <section key={category} className="panel checklist-category">
-          <h3>{category}</h3>
-          <div className="checklist-items">
-            {checklistItems.map((item) => {
-              const state = confirmations[activeAudience]?.[item.id];
-              const accepted = state?.accepted ?? false;
-              return (
-                <article key={item.id} className={accepted ? "checklist-item accepted" : "checklist-item"}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={accepted}
-                      disabled={updatingItemId === item.id}
-                      onChange={(event) => void toggleItem(item, event.target.checked)}
-                    />
-                    <div>
-                        <strong>{item.variable}</strong>
-                        <p>{item.explanation}</p>
-                        <dl>
-                          <div><dt>入力値</dt><dd>{item.inputs || "-"}</dd></div>
-                          <div><dt>計算式</dt><dd>{item.formula}</dd></div>
-                        <div><dt>代入値</dt><dd>{item.substitution}</dd></div>
-                        <div><dt>結果</dt><dd>{item.unit ? `${item.result} ${item.unit}` : item.result}</dd></div>
-                      </dl>
-                      {accepted ? (
-                        <small>確認済み：{state?.checkedBy || "-"} / {state?.checkedAt ? new Date(state.checkedAt).toLocaleString("ja-JP") : "-"}</small>
-                      ) : <small className="unchecked">未確認</small>}
-                    </div>
-                  </label>
-                </article>
-              );
-            })}
+    <main className="checklist-page current-checklist">
+      <section className="panel current-console">
+        <div className="current-console-head">
+          <div>
+            <p className="current-eyebrow">SAVE前 CALCULATION CHECK</p>
+            <h1>計算確認チェックリスト（保存前）</h1>
+            <p>原価シミュレーターで再計算した値を分野順に確認します。確認状態はブラウザに一時保存されます。</p>
           </div>
-        </section>
-      ))}
+          <div className="current-progress" aria-live="polite">
+            <small>確認進捗</small>
+            <strong>{acceptedCount}<span> / {activeItems.length}</span></strong>
+            <em>{progressPercent}%</em>
+          </div>
+        </div>
+
+        <div className="current-progress-bar" aria-hidden="true">
+          <div style={{ width: `${progressPercent}%` }} />
+        </div>
+
+        <div className="current-controls">
+          <div className="checklist-tabs" role="tablist">
+            {(["CUSTOMER", "INTERNAL_QA"] as ChecklistAudience[]).map((audience) => (
+              <button
+                key={audience}
+                type="button"
+                role="tab"
+                aria-selected={activeAudience === audience}
+                className={activeAudience === audience ? "button" : "button secondary"}
+                onClick={() => setActiveAudience(audience)}
+              >
+                {audienceLabels[audience]}
+              </button>
+            ))}
+          </div>
+          <label className="current-reviewer">
+            確認者
+            <input value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} placeholder={activeAudience === "CUSTOMER" ? "顧客" : "カネイ貿易 社内QA"} />
+          </label>
+        </div>
+
+        <nav className="current-nav" aria-label="確認分野">
+          {grouped.map(([category, checklistItems], index) => {
+            const accepted = checklistItems.filter((item) => item.accepted).length;
+            return (
+              <a key={category} href={`#check-group-${index}`}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <strong>{category}</strong>
+                <small>{accepted}/{checklistItems.length}</small>
+              </a>
+            );
+          })}
+        </nav>
+      </section>
+
+      {grouped.map(([category, checklistItems], groupIndex) => {
+        const acceptedCountByGroup = checklistItems.filter((item) => item.accepted).length;
+        const complete = acceptedCountByGroup === checklistItems.length;
+        return (
+          <section
+            key={category}
+            id={`check-group-${groupIndex}`}
+            className={complete ? "current-group complete" : "current-group"}
+          >
+            <header className="current-group-head">
+              <span className="current-group-no">{String(groupIndex + 1).padStart(2, "0")}</span>
+              <div>
+                <h2>{category}</h2>
+                <p>{checklistItems.length}項目を確認します。</p>
+              </div>
+              <span className="current-group-state">{complete ? "確認済" : `${acceptedCountByGroup}/${checklistItems.length}`}</span>
+            </header>
+
+            <div className="current-items">
+              {checklistItems.map((item) => {
+                const state = confirmations[activeAudience]?.[item.id];
+                const accepted = state?.accepted ?? false;
+                return (
+                  <article key={item.id} className={accepted ? "current-item accepted" : "current-item"}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={accepted}
+                        disabled={updatingItemId === item.id}
+                        onChange={(event) => void toggleItem(item, event.target.checked)}
+                      />
+                      <span className="current-checkbox" aria-hidden="true" />
+                      <div className="current-item-main">
+                        <div className="current-item-title">
+                          <strong>{item.variable}</strong>
+                          <small>{accepted ? "確認済み" : "未確認"}</small>
+                        </div>
+                        <p>{item.explanation}</p>
+
+                        <dl className="current-calc">
+                          <div className="current-step">
+                            <dt>入力値</dt>
+                            <dd>{item.inputs || "-"}</dd>
+                          </div>
+                          <div className="current-step">
+                            <dt>計算式</dt>
+                            <dd>{item.formula}</dd>
+                          </div>
+                          <div className="current-step">
+                            <dt>代入値</dt>
+                            <dd>{item.substitution}</dd>
+                          </div>
+                          <div className="current-result">
+                            <dt>結果</dt>
+                            <dd>
+                              <strong>{item.result}</strong>
+                              {item.unit ? <span>{item.unit}</span> : null}
+                            </dd>
+                          </div>
+                        </dl>
+
+                        {accepted ? (
+                          <small className="current-status accepted">
+                            確認済み：{state?.checkedBy || "-"} ／ {state?.checkedAt ? new Date(state.checkedAt).toLocaleString("ja-JP") : "-"}
+                          </small>
+                        ) : (
+                          <small className="current-status">チェックして確認を記録してください。</small>
+                        )}
+                      </div>
+                    </label>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
     </main>
   );
 }

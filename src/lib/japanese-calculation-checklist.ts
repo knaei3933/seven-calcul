@@ -130,5 +130,18 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
     }
   }
 
-  return items;
+  const categoryOrder = [
+    "基本条件",
+    "生産条件",
+    "充填・加工費",
+    "バルク費用",
+    "フィルム費用",
+    "グラビアフィルム・銅版",
+    "原価・販売価格",
+  ];
+  return items.sort((left, right) => {
+    const leftIndex = categoryOrder.indexOf(left.category);
+    const rightIndex = categoryOrder.indexOf(right.category);
+    return (leftIndex < 0 ? categoryOrder.length : leftIndex) - (rightIndex < 0 ? categoryOrder.length : rightIndex);
+  });
 }

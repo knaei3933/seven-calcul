@@ -41,6 +41,14 @@ describe("calculation checklist snapshot", () => {
     expect(snapshot.pitchMm).toBe("88");
 
     const items = buildChecklistItems(snapshot);
+    expect([...new Set(items.map((item) => item.category))]).toEqual([
+      "基本条件",
+      "生産条件",
+      "充填・加工費",
+      "バルク費用",
+      "フィルム費用",
+      "原価・販売価格",
+    ]);
     const size = items.find((item) => item.id === "basic.size")!;
     const pitch = items.find((item) => item.id === "basic.pitch")!;
     expect(size.result).toBe("50 × 80");
