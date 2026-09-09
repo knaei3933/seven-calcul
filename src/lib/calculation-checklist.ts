@@ -69,6 +69,7 @@ export type CalculationChecklistSnapshot = {
   totalFillMlPerPouch: string;
   fillingMethod: string;
   fillingLanes: number;
+  productionLanes?: number;
   bulkUnitPrice: string;
   bulkLossRate: string;
   bulkUsageMl: string;
@@ -144,6 +145,7 @@ export type CalculationChecklistContext = {
   pitchMm?: string;
   pitchAddMm?: string;
   prodMultiplier?: number;
+  productionLanes?: number;
   colorCount?: number;
   skus?: {
     name?: string;
@@ -187,6 +189,7 @@ export function buildCalculationChecklistSnapshot(
     totalFillMlPerPouch: result.totalFillMlPerPouch,
     fillingMethod: result.fillingMethod,
     fillingLanes: result.fillingLanes,
+    productionLanes: context.lanes,
     bulkUnitPrice: context.bulkUnitPrice ?? "0",
     bulkLossRate: context.parameters?.bulkLossRate ?? result.bulkLossRate,
     bulkUsageMl: result.bulkUsageMl,
