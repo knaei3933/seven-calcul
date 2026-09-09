@@ -258,6 +258,107 @@ header .version-badge { display: none; }
 .raw-grid span { display: block; color: var(--muted); font-size: 10px; font-weight: 800; }
 .raw-grid strong { display: block; overflow-wrap: anywhere; font-size: 12px; font-weight: 600; }
 .payload-json { width: 100%; margin-top: 8px; font: 11px/1.5 ui-monospace, monospace; }
+.detail-tabbar { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); gap: 8px; }
+.history-a4 {
+  width: 100%;
+  min-height: 297mm;
+  height: auto;
+  font-size: 9.6pt;
+  overflow: visible;
+}
+.history-a4-section {
+  margin-top: 6mm;
+  border: 0;
+  border-top: .3mm solid #cbd5e1;
+  padding-top: 3.5mm;
+  break-inside: avoid;
+}
+.history-a4-section header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3mm;
+  align-items: center;
+  margin-bottom: 3mm;
+}
+.history-a4-section header span {
+  color: #1f3a5f;
+  font-size: 11pt;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.history-a4-section header h2 {
+  margin: 0;
+  color: #17213a;
+  font-size: 13pt;
+}
+.history-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2.5mm 6mm;
+  margin: 0;
+}
+.history-facts div {
+  display: grid;
+  grid-template-columns: 26mm minmax(0, 1fr);
+  gap: 3mm;
+  border-bottom: .2mm dotted #cbd5e1;
+  padding: 1mm 0;
+}
+.history-facts dt { color: #526075; font-size: 8.4pt; font-weight: 700; }
+.history-facts dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.history-line-table { width: 100%; border-collapse: collapse; }
+.history-line-table th,
+.history-line-table td {
+  border-bottom: .2mm solid #cbd5e1;
+  padding: 2mm 1.5mm;
+  text-align: left;
+  vertical-align: top;
+}
+.history-line-table th { color: #526075; font-size: 8.4pt; }
+.history-line-table td:nth-child(2),
+.history-line-table td:nth-child(3),
+.history-line-table td:last-child,
+.history-line-table th:nth-child(2),
+.history-line-table th:nth-child(3),
+.history-line-table th:last-child { text-align: right; }
+.history-line-table small { color: #526075; font-size: 7.6pt; }
+.history-line-table tfoot th { border-bottom: 0; text-align: right; font-size: 9.4pt; }
+.history-line-table tfoot tr:last-child th,
+.history-line-table tfoot tr:last-child td { border-top: .5mm solid #1f3a5f; border-bottom: 0; font-weight: 900; }
+.history-calc-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3mm;
+}
+.history-calc-cards article {
+  border: .2mm solid #cbd5e1;
+  border-radius: 2mm;
+  padding: 3mm;
+  break-inside: avoid;
+}
+.history-calc-cards h3 { margin: 0 0 2mm; font-size: 9.8pt; }
+.history-calc-cards dl { display: grid; gap: 1.5mm; margin: 0; }
+.history-calc-cards dl div { display: flex; justify-content: space-between; gap: 3mm; }
+.history-calc-cards dt { color: #526075; font-size: 8pt; }
+.history-calc-cards dd { margin: 0; font-weight: 800; }
+.history-total-note {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3mm;
+  margin-top: 3mm;
+  border: .2mm solid #1f3a5f;
+  border-radius: 2mm;
+  padding: 3mm;
+}
+.history-total-note div { display: grid; gap: .8mm; }
+.history-total-note span { color: #526075; font-size: 7.8pt; font-weight: 800; }
+.history-total-note strong { font-size: 10pt; }
+.history-a4-footer {
+  margin-top: 5mm;
+  color: #526075;
+  font-size: 7.8pt;
+  text-align: right;
+}
 
 /* 見積書画面：中央プレビュー＋左右エッジ編集 */
 .quote-page { max-width: 1720px; display: flex; flex-direction: column; gap: 16px; }
@@ -446,6 +547,37 @@ header .version-badge { display: none; }
   .a4-sheet { width: 209mm !important; height: 296mm !important; min-height: 296mm !important; margin: 0 auto !important; border: 0 !important; border-top: 2.2mm solid #1f3a5f !important; box-shadow: none !important; overflow: hidden !important; print-color-adjust: exact !important; -webkit-print-color-adjust: exact !important; }
   .sheet-editable { background: transparent !important; border-bottom-color: transparent !important; box-shadow: none !important; }
   .sheet-footer { margin-top: 6mm !important; }
+  body:has(.printable-detail) .global-header { display: none !important; }
+  body:has(.printable-detail) main { height: auto !important; overflow: visible !important; }
+  body:has(.printable-detail) .history-toolbar,
+  body:has(.printable-detail) .history-table-wrap { display: none !important; }
+  .printable-detail { position: static !important; inset: auto !important; display: block !important; background: white !important; }
+  .printable-detail .history-detail-overlay,
+  .printable-detail .history-detail-header,
+  .printable-detail .detail-tabbar { display: none !important; }
+  .printable-detail .history-detail-panel {
+    display: block !important;
+    grid-column: auto !important;
+    width: 210mm !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: white !important;
+    box-shadow: none !important;
+  }
+  .printable-detail .detail-scroll { display: block !important; overflow: visible !important; padding: 0 !important; }
+  .history-a4 {
+    width: 210mm !important;
+    min-height: 296mm !important;
+    margin: 0 auto !important;
+    border: 0 !important;
+    border-top: 2.2mm solid #1f3a5f !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
 }
 
 .customer-list-layer { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 18px; }

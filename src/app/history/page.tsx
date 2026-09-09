@@ -195,6 +195,7 @@ export default function QuotationHistoryPage() {
 }
 
 function QuotationDetailModal({ record, onClose, onPurchase }: { record: QuotationRecord; onClose: () => void; onPurchase: (record: QuotationRecord) => void }) {
+  const [detailTab, setDetailTab] = useState<"document" | "data">("document");
   const analysis = analyzeQuotation(record);
   const composition = filmCompositionOf(record);
   const payloadEntries = Object.entries(record.payload);
@@ -223,9 +224,20 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
       quantity: `${formatNumber(analysis.quantity.toNumber(), 0)} 枚`, amount: analysis.copperAmount,
     });
   }
+  const payloadText = (key: string, fallback = "") => {
+    const value = record.payload[key];
+    return typeof value === "string" && value.trim() ? value : fallback;
+  };
+  const issuerName = payloadText("issuerName", "株式会社セブン化学");
+  const issuerEnglishName = payloadText("issuerEnglishName", "SEVEN CHEMICAL CO., LTD.");
+  const issuerPostalCode = payloadText("issuerPostalCode", "〒582-0017");
+  const issuerAddress = payloadText("issuerAddress", "大阪府柏原市太平寺1丁目12番1号");
+  const issuerTelephone = payloadText("issuerTelephone", "TEL 072-971-0726");
+  const issuerWebsite = payloadText("issuerWebsite", "https://7chemical.co.jp/");
+  const issuerRepresentative = payloadText("representative", "代表取締役社長 吾藤 靖");
 
   return (
-    <div className="history-detail-layer no-print" role="dialog" aria-modal="true" aria-labelledby="history-detail-title">
+    <div className="history-detail-layer printable-detail" role="dialog" aria-modal="true" aria-labelledby="history-detail-title">
       <div className="history-detail-panel">
         <header className="history-detail-header">
           <div>
@@ -234,6 +246,7 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
             <p data-testid="history-film-composition">{record.customerName || "得意先未設定"} / {record.productName} / フィルム構成 {composition || DEFAULT_FILM_COMPOSITION}</p>
           </div>
           <div className="detail-header-actions">
+            <button className="button small" type="button" onClick={() => window.print()}>PDF出力</button>
             {record.status === "approved" ? (
               <button className="button small" type="button" onClick={() => onPurchase(record)}>発注内容</button>
             ) : null}
@@ -242,6 +255,114 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
         </header>
 
         <div className="detail-scroll">
+          <nav className="detail-tabbar no-print" aria-label="詳細表示切替">
+            <button className={detailTab === "document" ? "button" : "button secondary"} type="button" onClick={() => setDetailTab("document")}>A4帳票</button>
+            <button className={detailTab === "data" ? "button" : "button secondary"} type="button" onClick={() => setDetailTab("data")}>詳細データ</button>
+          </nav>
+
+          {detailTab === "document" ? (
+            <article className="a4-sheet history-a4" aria-label="見積詳細A4帳票">
+              <header className="sheet-header">
+                <div className="issuer">
+                  <div className="issuer-logo">
+                    <span className="logo-mark large" aria-hidden="true">7</span>
+                    <div>
+                      <strong>{issuerName}</strong>
+                      <small>{issuerEnglishName}</small>
+                    </div>
+                  </div>
+                  <address>
+                    {issuerRepresentative}<br />
+                    {issuerPostalCode} {issuerAddress}<br />
+                    {issuerTelephone} / {issuerWebsite}
+                  </address>
+                </div>
+                <div className="document-title">
+                  <p className="english">QUOTATION RECORD</p>
+                  <h2>見積詳細記録</h2>
+                  <dl>
+                    <div><dt>見積番号</dt><dd>{record.quotationNumber}</dd></div>
+                    <div><dt>発行日</dt><dd>{record.issueDate}</dd></div>
+                  </dl>
+                </div>
+              </header>
+
+              <section className="history-a4-section">
+                <header><span>01</span><h2>基本情報</h2></header>
+                <dl className="history-facts">
+                  <div><dt>得意先</dt><dd>{record.customerName || "-"}</dd></div>
+                  <div><dt>担当</dt><dd>{record.customerContact || "-"}</dd></div>
+                  <div><dt>状態</dt><dd>{statusLabels[record.status]}</dd></div>
+                  <div><dt>有効期限</dt><dd>{record.validUntil || "-"}</dd></div>
+                  <div><dt>品名</dt><dd>{record.productName}</dd></div>
+                  <div><dt>仕様</dt><dd>{record.sizeSummary}</dd></div>
+                  <div><dt>印刷方式</dt><dd>{printingMethodOf(record) === "gravure" ? "グラビア印刷（ロール）" : "デジタル印刷"}</dd></div>
+                  <div><dt>発注数量</dt><dd>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</dd></div>
+                </dl>
+              </section>
+
+              <section className="history-a4-section">
+                <header><span>02</span><h2>お見積金額</h2></header>
+                <table className="history-line-table">
+                  <thead><tr><th>品目</th><th>単価</th><th>数量</th><th>金額</th></tr></thead>
+                  <tbody>
+                    <tr><td>充填・加工費</td><td>{formatCurrency(analysis.fillingUnit.toFixed(2), 2)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.fillingAmount.toFixed(0), 0)}</td></tr>
+                    <tr><td>フィルム費用<br /><small>{composition || DEFAULT_FILM_COMPOSITION}</small></td><td>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toFixed(0), 0)} /m` : "-"}</td><td>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</td><td>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</td></tr>
+                    {printingMethodOf(record) === "gravure" ? <tr><td>新規銅版費</td><td>{formatCurrency(analysis.copperUnit.toFixed(2), 2)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.copperAmount.toFixed(0), 0)}</td></tr> : null}
+                    {analysis.customCostUnit.gt(0) ? <tr><td>金型費用</td><td>{formatCurrency(analysis.customUnit.toFixed(2), 2)}</td><td>1 式</td><td>{formatCurrency(analysis.customAmount.toFixed(0), 0)}</td></tr> : null}
+                  </tbody>
+                  <tfoot>
+                    <tr><th colSpan={3}>小計（税抜）</th><td>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</td></tr>
+                    <tr><th colSpan={3}>消費税</th><td>{formatCurrency(analysis.tax.toFixed(0), 0)}</td></tr>
+                    <tr><th colSpan={3}>税込合計</th><td>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</td></tr>
+                  </tfoot>
+                </table>
+              </section>
+
+              <section className="history-a4-section">
+                <header><span>03</span><h2>原価・利益確認</h2></header>
+                <div className="history-calc-cards">
+                  {rows.map((row) => (
+                    <article key={row.name}>
+                      <h3>{row.name}</h3>
+                      <dl>
+                        <div><dt>原価 /枚</dt><dd>{formatCurrency(row.cost.toFixed(2), 2)}</dd></div>
+                        <div><dt>見積 /枚</dt><dd>{formatCurrency(row.selling.toFixed(2), 2)}</dd></div>
+                        <div><dt>差益 /枚</dt><dd>{formatCurrency(row.profit.toFixed(2), 2)}</dd></div>
+                        <div><dt>差益総額</dt><dd>{formatCurrency(row.amount.minus(row.cost.times(analysis.quantity)).toFixed(0), 0)}</dd></div>
+                      </dl>
+                    </article>
+                  ))}
+                </div>
+                <div className="history-total-note">
+                  <div><span>総原価</span><strong>{formatCurrency(costTotal.toFixed(0), 0)}</strong></div>
+                  <div><span>税抜見積</span><strong>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</strong></div>
+                  <div><span>総利益</span><strong>{formatCurrency(finalProfit.toFixed(0), 0)}</strong></div>
+                  <div><span>利益率</span><strong>{formatNumber(finalProfitRate.toNumber(), 1)}%</strong></div>
+                </div>
+              </section>
+
+              <section className="history-a4-section">
+                <header><span>04</span><h2>条件・管理</h2></header>
+                <dl className="history-facts">
+                  <div><dt>納期</dt><dd>{record.deliveryDate || "-"}</dd></div>
+                  <div><dt>支払条件</dt><dd>{record.paymentTerms || "-"}</dd></div>
+                  <div><dt>フィルム構成</dt><dd>{composition || DEFAULT_FILM_COMPOSITION}</dd></div>
+                  <div><dt>フィルム購入単価</dt><dd>{formatCurrency(analysis.filmMeterPrice.toFixed(0), 0)} /m</dd></div>
+                  <div><dt>フィルム発注長</dt><dd>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</dd></div>
+                  {printingMethodOf(record) === "gravure" ? (
+                    <>
+                      <div><dt>発注パターン</dt><dd>{formatNumber(analysis.orderPatternCount.toNumber(), 0)} 回</dd></div>
+                      <div><dt>納品パターン長</dt><dd>{formatNumber(analysis.deliverablePatternLengthM.toNumber(), 0)} m</dd></div>
+                    </>
+                  ) : null}
+                  <div><dt>備考</dt><dd>{record.notes || "-"}</dd></div>
+                </dl>
+                <footer className="history-a4-footer">本記録は原価シミュレーターの保存データから生成しています。</footer>
+              </section>
+            </article>
+          ) : (
+          <>
           <section className="profit-summary" aria-label="損益サマリー">
             <div className="profit-summary-head">
               <div>
@@ -460,6 +581,7 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
             </div>
             <textarea className="payload-json" readOnly rows={10} value={JSON.stringify(record.payload, null, 2)} aria-label="保存payload JSON" />
           </details>
+          </>)}
         </div>
       </div>
       <div className="history-detail-overlay" onClick={onClose} aria-hidden="true" />
