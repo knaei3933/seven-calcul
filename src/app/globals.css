@@ -643,6 +643,37 @@ header .version-badge { display: none; }
   }
   .history-a4-section { margin-top: 4mm !important; padding-top: 2.5mm !important; }
   .history-a4-section header { margin-bottom: 2mm !important; }
+  .printable-detail .history-a4:first-of-type .history-a4-section { margin-top: 3mm !important; padding-top: 2mm !important; }
+  .printable-detail .history-a4:first-of-type .history-a4-section:last-of-type {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+  }
+  .printable-detail .history-a4:first-of-type .history-a4-section:last-of-type header {
+    margin-bottom: 1.2mm !important;
+  }
+  .printable-detail .history-a4:first-of-type .history-a4-section:last-of-type header span { font-size: 8.6pt !important; }
+  .printable-detail .history-a4:first-of-type .history-a4-section:last-of-type header h2 { font-size: 10.4pt !important; }
+  .printable-detail .history-a4:first-of-type .history-calc-cards {
+    gap: 1.4mm !important;
+  }
+  .printable-detail .history-a4:first-of-type .history-calc-cards article {
+    padding: 1.6mm 1.8mm !important;
+    border-width: .18mm !important;
+  }
+  .printable-detail .history-a4:first-of-type .history-calc-cards h3 {
+    margin: 0 0 1mm !important;
+    font-size: 8.2pt !important;
+  }
+  .printable-detail .history-a4:first-of-type .history-calc-cards dl { gap: .6mm !important; }
+  .printable-detail .history-a4:first-of-type .history-calc-cards dt,
+  .printable-detail .history-a4:first-of-type .history-calc-cards dd { font-size: 6.9pt !important; line-height: 1.25 !important; }
+  .printable-detail .history-a4:first-of-type .history-total-note {
+    margin-top: 1.4mm !important;
+    padding: 1.5mm 2mm !important;
+    gap: 1.6mm !important;
+  }
+  .printable-detail .history-a4:first-of-type .history-total-note span { font-size: 6.4pt !important; }
+  .printable-detail .history-a4:first-of-type .history-total-note strong { font-size: 8.2pt !important; }
   .history-line-table th,
   .history-line-table td,
   .history-cost-table th,
