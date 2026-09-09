@@ -811,8 +811,9 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
   const { order, legacy } = resolvePurchaseOrder(record);
   const analysis = analyzeQuotation(record);
   const filmOrderLength = D(order?.orderLengthM ?? record.filmOrderLengthM);
-  const filmOrderUnit = D(record.filmMeterPrice);
-  const filmOrderTotal = filmOrderUnit.times(filmOrderLength);
+  const filmCostTotal = analysis.filmCostUnit.times(analysis.quantity);
+  const filmOrderUnit = filmOrderLength.gt(0) ? filmCostTotal.div(filmOrderLength) : D(record.filmMeterPrice);
+  const filmOrderTotal = filmOrderLength.gt(0) ? filmCostTotal : filmOrderUnit.times(filmOrderLength);
   const copperQuantity = D(order?.copperPlate?.quantity ?? order?.colorCount ?? 1);
   const copperOrderUnit = D(order?.copperPlate?.unitPriceYen ?? analysis.copperCostUnit.times(analysis.quantity).div(copperQuantity));
   const copperOrderTotal = copperOrderUnit.times(copperQuantity);
