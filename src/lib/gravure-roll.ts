@@ -204,7 +204,9 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
     if (usageLength.minus(requiredLengthM).abs().gt("0.0000001")) throw new Error("invalid_sku_length_sum");
   }
 
-  const smallWidthTier = pouchWidthMm.lte(D(params.smallWidthThresholdMm));
+  // 소폭 12,000m 고정단가는 필요납품장이 표준 5,500m를 초과할 때만 사용한다。
+  const smallWidthTier = pouchWidthMm.lte(D(params.smallWidthThresholdMm))
+    && requiredLengthM.gt(D(params.deliverablePatternLengthM));
   const patternLength = smallWidthTier
     ? D(params.smallWidthOrderPatternLengthM)
     : D(params.deliverablePatternLengthM);

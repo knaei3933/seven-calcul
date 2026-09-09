@@ -844,7 +844,7 @@ export default function QuotationPage() {
                   <span className="total-sub">総原価 <strong>{formatCurrency(displayAmount(resultShown.costTotal))}</strong> ／ 参考: フィルム発注 {formatNumber(resultShown.film.orderLengthM)}m で製造可能 {formatNumber(resultShown.film.actualQuantity)} 枚（余剰 ≈ {formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）</span>
                 </p>
                 <p className="help">{form.printingMethod === "gravure"
-                  ? `グラビアは幅${formatNumber(normalizedGravureParameters.smallWidthThresholdMm)}mm以下は${formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・${formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作、その他は5,500m納品・6,000m製作パターンで計算します。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
+                  ? `グラビアは、幅${formatNumber(normalizedGravureParameters.smallWidthThresholdMm)}mm以下で必要納品長が5,500mを超える場合は${formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・${formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作に切り替えます。それ以外は5,500m納品・6,000m製作パターンです。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
                   : "「単価計算用数量」は発注したフィルムから実際に作れる枚数（ロス控除後・500枚単位）です。フィルム発注を100m単位で切り上げるため、発注枚数より多くなることがあります。"}</p>
                 <div className="cost-breakdown">
                   <details className="cost-block" data-testid="cost-processing">
@@ -912,7 +912,7 @@ export default function QuotationPage() {
                               <>
                                 <p>① 必要納品長は合計 {formatNumber(f.requiredLengthM)}m です。</p>
                                 {resultShown.gravure?.smallWidthTier ? (
-                                  <p>② パウチ幅が小幅閾値以下のため、{formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・{formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作パターンを使います。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
+                                  <p>② パウチ幅が小幅閾値以下で、必要納品長が標準5,500mを超えたため、{formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・{formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作パターンを使います。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
                                 ) : (
                                   <p>② 5,500m発注パターンへ切り上げます。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
                                 )}
