@@ -106,7 +106,9 @@ a { color: var(--primary); }
 .film-price-row.head { color: var(--muted); }
 .film-price-row input { min-width: 0; width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; font: inherit; text-align: right; }
 .film-price-row input.invalid { border-color: var(--danger); background: #fff1f0; }
-.formula-vars th, .formula-vars td { text-align: left; vertical-align: top; }
+.formula-vars { table-layout: fixed; }
+.formula-vars th, .formula-vars td { text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.formula-vars th:first-child, .formula-vars td:first-child { width: 190px; min-width: 180px; white-space: nowrap; }
 .formula-vars td:nth-child(2) { white-space: nowrap; font-weight: 700; }
 .formula-vars td:last-child { color: var(--muted); font-weight: 400; font-size: 12px; }
 .machine-breakdown { display: grid; gap: 8px; border: 1px dashed var(--line); border-radius: 8px; padding: 10px; margin: 2px 0 10px; background: #fcfdff; }
