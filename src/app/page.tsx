@@ -15,8 +15,11 @@ import { deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calcula
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
 import type { CustomerMaster, CustomerMasterInput } from "@/lib/quotation-shared";
 
-const MARGIN_OPTIONS = ["0.4", "0.5"] as const;
-type TargetMargin = (typeof MARGIN_OPTIONS)[number] | "custom";
+const MARGIN_OPTIONS = {
+  digital: ["0.45", "0.4", "0.35"],
+  gravure: ["0.3", "0.25", "0.2"],
+} as const;
+type TargetMargin = string;
 const MACHINE_BREAKDOWN_DEFAULTS = { ...machineChargeBasis } as const;
 type MachineBreakdownKey = keyof typeof MACHINE_BREAKDOWN_DEFAULTS;
 const MACHINE_BREAKDOWN_LABELS: Record<MachineBreakdownKey, string> = {
@@ -27,6 +30,13 @@ const MACHINE_BREAKDOWN_LABELS: Record<MachineBreakdownKey, string> = {
   annualOperatingHours: "年間稼働時間 (時間/年)",
 };
 const SIMULATOR_STATE_KEY = "pouch-simulator-state-v1";
+
+function withMarginForPrintingMethod<T extends { printingMethod: PrintingMethod; targetMargin: string }>(form: T): T {
+  const options: readonly string[] = MARGIN_OPTIONS[form.printingMethod];
+  return form.targetMargin === "custom" || options.includes(form.targetMargin)
+    ? form
+    : { ...form, targetMargin: MARGIN_OPTIONS[form.printingMethod][0] };
+}
 
 const parameterGroups = [
   {
@@ -198,7 +208,7 @@ export default function QuotationPage() {
             calculatedAt?: string | null;
             customerDraft?: CustomerDraft | null;
           };
-          if (saved.form) setForm((old) => ({ ...old, ...saved.form }));
+          if (saved.form) setForm((old) => withMarginForPrintingMethod({ ...old, ...saved.form }));
           if (saved.parameters) setParameters((old) => ({ ...old, ...saved.parameters }));
           if (saved.parameters?.customPouchCharge === "400000") {
             setParameters((old) => ({ ...old, customPouchCharge: "220000" }));
@@ -238,9 +248,10 @@ export default function QuotationPage() {
     : standardSize;
   const effectiveMargin = form.targetMargin === "custom" ? form.customMargin : form.targetMargin;
   const marginValid = isNumericInput(effectiveMargin) && Number(effectiveMargin) > 0 && Number(effectiveMargin) < 1;
+  const marginOptions = MARGIN_OPTIONS[form.printingMethod];
   const targetMarginList = useMemo(() => {
     const seen = new Set<number>();
-    return [...MARGIN_OPTIONS, effectiveMargin]
+    return [...marginOptions, effectiveMargin]
       .filter((value) => {
         const numeric = Number(value);
         if (!Number.isFinite(numeric) || numeric <= 0 || numeric >= 1 || seen.has(numeric)) return false;
@@ -248,7 +259,7 @@ export default function QuotationPage() {
         return true;
       })
       .sort((a, b) => Number(a) - Number(b));
-  }, [effectiveMargin]);
+  }, [effectiveMargin, marginOptions]);
   const skuCount = Number(form.skuCount);
   const skuInputsReady = Number.isInteger(skuCount) && skuCount > 0;
   const skuQuantitySum = form.skus.reduce((total, sku) => total + (isNumericInput(sku.quantity) ? Number(sku.quantity) : 0), 0);
@@ -717,6 +728,14 @@ export default function QuotationPage() {
                   </fieldset>
                 ))}
               </div>
+            <div className="field" data-testid="printing-method-block">
+              <span id="printing-label">印刷方式</span>
+              <div className="radio-cards" role="radiogroup" aria-labelledby="printing-label">
+                <label><input type="radio" name="printing-method" aria-label="デジタル印刷" checked={form.printingMethod === "digital"} onChange={() => patchForm({ printingMethod: "digital", targetMargin: MARGIN_OPTIONS.digital[0] })} />デジタル印刷</label>
+                <label><input type="radio" name="printing-method" aria-label="グラビア印刷" checked={form.printingMethod === "gravure"} onChange={() => patchForm({ printingMethod: "gravure", targetMargin: MARGIN_OPTIONS.gravure[0] })} />グラビア印刷</label>
+              </div>
+              <p className="help">グラビア選択時はロールフィルム用の原反・印刷・ラミネート・銅版費を計算します。他の生産資源はデジタル計算と同じモデルを使います。</p>
+            </div>
               <p className="help">SKUごとに製品名・発注枚数・充填量・色数を設定できます。発注枚数の合計が発注数量（{formatNumber(form.quantity)}枚）と一致する必要があります。SKU数を変更すると均等割りします（製品名 未入力時は 充填物1, 2, 3…）。</p>
               {!skuQuantitiesValid ? <p className="error" role="alert" data-testid="sku-sum-error">SKU合計 {formatNumber(skuQuantitySum)} 枚 ≠ 発注数量 {formatNumber(form.quantity)} 枚。各SKUの発注枚数を調整してください。</p> : null}
             </div>
@@ -757,14 +776,6 @@ export default function QuotationPage() {
                 <p className="effective-speed" data-testid="effective-speed">{formatNumber(effectiveProductionSpeedPerMinute)} 枚/分（{formatNumber(effectiveProductionSpeed)} 枚/h）</p>
                 <p className="help">{form.connected}連は1回に{lanesPerCycle}枚（{form.lanes}列÷{form.connected}連）なので、速度も比例して変わります。</p>
               </div>
-            </div>
-            <div className="field">
-              <span id="printing-label">印刷方式</span>
-              <div className="radio-cards" role="radiogroup" aria-labelledby="printing-label">
-                <label><input type="radio" name="printing-method" aria-label="デジタル印刷" checked={form.printingMethod === "digital"} onChange={() => set("printingMethod", "digital")} />デジタル印刷</label>
-                <label><input type="radio" name="printing-method" aria-label="グラビア印刷" checked={form.printingMethod === "gravure"} onChange={() => set("printingMethod", "gravure")} />グラビア印刷</label>
-              </div>
-              <p className="help">グラビア選択時はロールフィルム用の原反・印刷・ラミネート・銅版費を計算します。他の生産資源はデジタル計算と同じモデルを使います。</p>
             </div>
             <Field label="バルク単価 (円/ml)" htmlFor="bulk"><input id="bulk" inputMode="decimal" value={form.bulkPrice} onChange={(e) => set("bulkPrice", e.target.value)} /></Field>
             <details className="parameters" data-testid="parameters">
@@ -1107,7 +1118,7 @@ export default function QuotationPage() {
               <div className="field target-margin-preview">
                 <span id="margin-label">目標利益率（参考値）</span>
                 <div className="radio-cards" role="radiogroup" aria-labelledby="margin-label">
-                  {MARGIN_OPTIONS.map((margin) => (
+                  {marginOptions.map((margin) => (
                     <label key={margin}>
                       <input type="radio" name="target-margin" aria-label={`利益率 ${formatNumber(Number(margin) * 100, 0)}%`} checked={form.targetMargin === margin} onChange={() => set("targetMargin", margin)} />
                       {formatNumber(Number(margin) * 100, 0)}%
@@ -1141,6 +1152,11 @@ export default function QuotationPage() {
           </section>
           <div className="mobile-actions" data-testid="mobile-actions">
             <button className="button" type="submit" disabled={blocker || pending}>{pending ? "計算中..." : "サーバーで再計算する"}</button>
+            {resultShown ? (
+              <Link className="button secondary" href="/checklists/current" data-testid="current-checklist-link-mobile">
+                計算確認チェックリスト（保存前）
+              </Link>
+            ) : null}
           </div>
         </form>
       </div>
