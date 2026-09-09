@@ -13,15 +13,6 @@ import { deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calcula
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
 import type { CustomerMaster, CustomerMasterInput } from "@/lib/quotation-shared";
 
-const warningLabels: Record<string, string> = {
-  seven_template_unconfirmed: "Seven書式は未確認です",
-  tax_rounding_unconfirmed: "税区分・端数処理は未確認です",
-  digital_color_price_not_applied: "色数別単価は参考入力（印刷色数とは未連動）・仕入先確認待ち",
-  custom_size_mapping_unconfirmed: "カスタム寸法の変換ルールは未設定です",
-  filling_lanes_differ_from_film_lanes: "充填列数とフィルム生産列数が一致しません",
-};
-
-const TAX_ROUNDING_CONFIRMED = false;
 const MARGIN_OPTIONS = ["0.4", "0.5"] as const;
 type TargetMargin = (typeof MARGIN_OPTIONS)[number] | "custom";
 const MACHINE_BREAKDOWN_DEFAULTS = { ...machineChargeBasis } as const;
@@ -283,10 +274,7 @@ export default function QuotationPage() {
     && positiveParameters(effectiveParameters)
     && (form.printingMethod !== "gravure" || positiveGravureParameters(normalizedGravureParameters))
     && skuQuantitiesValid;
-  const colorPriceUnapplied = true;
-  const taxRoundingUnconfirmed = !TAX_ROUNDING_CONFIRMED;
   const blocker = !skuInputsReady || !skuQuantitiesValid || dimensionMismatch || !marginValid || !positive;
-  const issuanceBlocker = blocker || colorPriceUnapplied || taxRoundingUnconfirmed;
 
   const spec = useCallback((): PouchSpec => ({
     sizeKey: form.sizeKey,
@@ -726,32 +714,6 @@ export default function QuotationPage() {
               </div>
               <p className="help">グラビア選択時はロールフィルム用の原反・印刷・ラミネート・銅版費を計算します。他の生産資源はデジタル計算と同じモデルを使います。</p>
             </div>
-            <div className="field">
-              <span id="margin-label">目標利益率（参考値）</span>
-              <div className="radio-cards" role="radiogroup" aria-labelledby="margin-label">
-                {MARGIN_OPTIONS.map((margin) => (
-                  <label key={margin}>
-                    <input type="radio" name="target-margin" aria-label={`利益率 ${formatNumber(Number(margin) * 100, 0)}%`} checked={form.targetMargin === margin} onChange={() => set("targetMargin", margin)} />
-                    {formatNumber(Number(margin) * 100, 0)}%
-                  </label>
-                ))}
-                <label>
-                  <input type="radio" name="target-margin" aria-label="利益率 カスタム" checked={form.targetMargin === "custom"} onChange={() => set("targetMargin", "custom")} />
-                  カスタム
-                </label>
-              </div>
-              {form.targetMargin === "custom" ? (
-                <Field label="カスタム利益率 (%)" htmlFor="custom-margin">
-                  <input
-                    id="custom-margin"
-                    inputMode="decimal"
-                    value={isNumericInput(form.customMargin) ? formatNumber(Number(form.customMargin) * 100, 3) : form.customMargin}
-                    aria-invalid={!marginValid}
-                    onChange={(e) => { const percent = Number(e.target.value); set("customMargin", e.target.value.trim() === "" ? "" : Number.isFinite(percent) ? formatNumber(percent / 100, 6) : e.target.value); }}
-                  />
-                </Field>
-              ) : null}
-            </div>
             <Field label="バルク単価 (円/ml)" htmlFor="bulk"><input id="bulk" inputMode="decimal" value={form.bulkPrice} onChange={(e) => set("bulkPrice", e.target.value)} /></Field>
             <details className="parameters" data-testid="parameters">
               <summary>計算パラメータ調整</summary>
@@ -1084,16 +1046,37 @@ export default function QuotationPage() {
           </section>
           <section className="panel" aria-labelledby="validation-title">
             <h2 id="validation-title">検証・出力プレビュー</h2>
-            <div className={issuanceBlocker ? "blocker" : "warning"} role={issuanceBlocker ? "alert" : "status"}>
-              <strong>{issuanceBlocker ? "確定見積不可" : "参考計算（未確認項目あり）"}</strong>
-              <ul>{issuanceBlocker ? blockers() : warningCodes().map((code) => <li key={code}>{warningLabels[code]}</li>)}</ul>
-            </div>
             <div className={staleResult ? "quote-sheet provisional-quote stale-result" : "quote-sheet provisional-quote"}>
               <h3>お見積書（プレビュー）</h3>
-              <p className="quote-gate" data-testid="quote-gate">参考見積・色数別単価は参考入力（印刷色数とは未連動）・仕入先確認待ち / 税・切上げ規則未確定のため発行・確定不可</p>
               <p className="help">宛先・発行日・有効期限はSeven書式確定後に設定します。</p>
               <dl><div><dt>品名</dt><dd>パウチ製品</dd></div><div><dt>数量</dt><dd>{formatNumber(form.quantity)} 枚</dd></div><div><dt>適用利益率</dt><dd>{formatNumber(Number(effectiveMargin) * 100, 3)}%（参考値）</dd></div><div><dt>単価</dt><dd>{customerPrice ? formatCurrency(customerPrice.pricePerPiece) : "-"}</dd></div></dl>
               <div className="quote-total"><span>参考税抜金額</span><span data-testid="customer-total">{customerPrice ? formatCurrency(displayAmount(customerPrice.totalSales)) : "-"}</span></div>
+              <div className="field target-margin-preview">
+                <span id="margin-label">目標利益率（参考値）</span>
+                <div className="radio-cards" role="radiogroup" aria-labelledby="margin-label">
+                  {MARGIN_OPTIONS.map((margin) => (
+                    <label key={margin}>
+                      <input type="radio" name="target-margin" aria-label={`利益率 ${formatNumber(Number(margin) * 100, 0)}%`} checked={form.targetMargin === margin} onChange={() => set("targetMargin", margin)} />
+                      {formatNumber(Number(margin) * 100, 0)}%
+                    </label>
+                  ))}
+                  <label>
+                    <input type="radio" name="target-margin" aria-label="利益率 カスタム" checked={form.targetMargin === "custom"} onChange={() => set("targetMargin", "custom")} />
+                    カスタム
+                  </label>
+                </div>
+                {form.targetMargin === "custom" ? (
+                  <Field label="カスタム利益率 (%)" htmlFor="custom-margin">
+                    <input
+                      id="custom-margin"
+                      inputMode="decimal"
+                      value={isNumericInput(form.customMargin) ? formatNumber(Number(form.customMargin) * 100, 3) : form.customMargin}
+                      aria-invalid={!marginValid}
+                      onChange={(e) => { const percent = Number(e.target.value); set("customMargin", e.target.value.trim() === "" ? "" : Number.isFinite(percent) ? formatNumber(percent / 100, 6) : e.target.value); }}
+                    />
+                  </Field>
+                ) : null}
+              </div>
             </div>
             <button className="button" type="submit" data-testid="calculate-desktop" disabled={blocker || pending}>{pending ? "計算中..." : "サーバーで再計算する"}</button>
             <div className="action-note"><strong>サーバー計算済み</strong>は参照計算を意味し、見積確定ではありません。</div>
@@ -1172,15 +1155,6 @@ export default function QuotationPage() {
     </main>
   );
 
-  function blockers() {
-    const items = [...(positive ? [] : ["正の数値を入力してください"])];
-    if (!marginValid) items.push("利益率は0〜100%の間で入力してください");
-    if (dimensionMismatch) items.push("標準サイズ寸法不一致");
-    if (!skuInputsReady) items.push("SKU数は1以上の整数で入力してください");
-    if (!skuQuantitiesValid) items.push("SKU別発注枚数の合計を発注数量に合わせてください");
-    return items.map((item, i) => <li key={i}>{item}</li>);
-  }
-  function warningCodes() { return resultShown?.warnings ?? ["seven_template_unconfirmed", "tax_rounding_unconfirmed", "digital_color_price_not_applied"]; }
 }
 
 function bulkFillMlOf(result: ReturnType<typeof calculatePouchCost>) { return D(result.bulkUsageMl).minus(result.initialChargeMl).minus(result.testFillMl); }

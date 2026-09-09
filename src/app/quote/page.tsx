@@ -287,7 +287,6 @@ export default function PrintableQuotationPage() {
           const value = restored[key];
           if (typeof value === "string") restoredForm[key] = value;
         });
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- 履歴復元はSSR後にしか読めないsessionStorage値を反映する意図的な初期化です。
         setForm(restoredForm);
         try {
           const rawPurchaseOrder = restored.purchaseOrderJson ?? (restored.purchaseOrder ? JSON.stringify(restored.purchaseOrder) : "");

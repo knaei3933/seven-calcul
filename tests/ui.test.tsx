@@ -12,7 +12,6 @@ describe("quotation UI", () => {
   it("does not calculate automatically before server recalculation", async () => {
     render(<QuotationPage />);
     expect(screen.queryByTestId("bulk-usage")).not.toBeInTheDocument();
-    expect(screen.getByTestId("quote-gate")).toHaveTextContent("色数別単価は参考入力（印刷色数とは未連動）・仕入先確認待ち");
     expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "not_calculated");
     expect(screen.getByTestId("server-result")).toHaveTextContent("サーバー再計算待ち");
     expect(screen.getByTestId("customer-total")).toHaveTextContent("-");
@@ -29,7 +28,6 @@ describe("quotation UI", () => {
     expect(screen.getByLabelText("SKU数（並列生産数）")).toBeInTheDocument();
     expect(screen.getByText(/SKUごとに製品名・発注枚数・充填量・色数を設定でき/)).toBeInTheDocument();
     expect(screen.getByTestId("calculate-desktop")).toBeEnabled();
-    expect(screen.getByTestId("quote-gate")).toBeVisible();
   });
 
   it("separates provisional and server states and exposes selected margin", () => {
