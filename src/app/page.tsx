@@ -201,6 +201,9 @@ export default function QuotationPage() {
             gravureParameters?: Partial<GravureRollParameters>;
             machineBreakdown?: Partial<Record<MachineBreakdownKey, string>>;
             productionSpeedManual?: boolean;
+            serverResult?: ServerCalculation;
+            calculatedAt?: string | null;
+            customerDraft?: CustomerDraft | null;
           };
           if (saved.form) setForm((old) => ({ ...old, ...saved.form }));
           if (saved.parameters) setParameters((old) => ({ ...old, ...saved.parameters }));
@@ -213,6 +216,15 @@ export default function QuotationPage() {
             setProductionSpeedManual(saved.productionSpeedManual);
           } else if (saved.parameters?.productionSpeedPerMinute) {
             setProductionSpeedManual(true);
+          }
+          if (saved.serverResult?.result && typeof saved.serverResult.inputSha256 === "string") {
+            setServerResult(saved.serverResult);
+          }
+          if (typeof saved.calculatedAt === "string") {
+            setCalculatedAt(saved.calculatedAt);
+          }
+          if (saved.customerDraft && typeof saved.customerDraft === "object") {
+            setCustomerDraft(saved.customerDraft);
           }
         }
       } catch {
@@ -519,11 +531,14 @@ export default function QuotationPage() {
         gravureParameters: normalizedGravureParameters,
         machineBreakdown,
         productionSpeedManual,
+        serverResult,
+        calculatedAt,
+        customerDraft,
       }));
     } catch {
       // private mode 등 저장 실패 시에도 계산은 계속 동작한다.
     }
-  }, [form, machineBreakdown, normalizedGravureParameters, parameters, productionSpeedManual, simulatorStateLoaded]);
+  }, [calculatedAt, customerDraft, form, machineBreakdown, normalizedGravureParameters, parameters, productionSpeedManual, serverResult, simulatorStateLoaded]);
 
   const lanesPerCycle = Number(form.lanes) > 0 ? Math.max(1, Math.floor(Number(form.lanes) / Number(form.connected))) : 1;
   const effectiveProductionSpeedPerMinute = Number(form.lanes) > 0
