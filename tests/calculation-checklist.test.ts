@@ -60,4 +60,59 @@ describe("calculation checklist snapshot", () => {
   it("rejects stale checklist snapshots with missing separated dimensions", () => {
     expect(readCalculationChecklistSnapshot({ checklistVersion: "2026-09.1", quantity: "1" })).toBeNull();
   });
+
+  it("hides gravure film cost components and shows the confirmed supply price", () => {
+    const result = calculatePouchCost({
+      spec: {
+        sizeKey: "round-50x60",
+        customWidthMm: "50",
+        customLengthMm: "60",
+        fillMlPerChamber: "3",
+        connectedChambers: 1,
+        fillingMethod: "hopper",
+        fillingLanes: 4,
+        isCustom: false,
+        colorCount: 2,
+        bulkUnitPrice: "0",
+        skuCount: 1,
+      },
+      quantity: "10000",
+      printingMethod: "gravure",
+    });
+    const snapshot = buildCalculationChecklistSnapshot(result, {
+      quotationNumber: "保存前",
+      printingMethod: "gravure",
+      sourceHash: "source",
+      resultHash: "result",
+      filmComposition: "PET12+AL7+PET12+LLDPE50",
+      widthMm: "50",
+      lengthMm: "60",
+      pitchMm: "66",
+      pitchAddMm: "6",
+      webWidthMm: 500,
+      skus: [{ name: "テスト", quantity: "10000", fillMl: "3", colorCount: "2" }],
+    });
+    const items = buildChecklistItems(snapshot);
+    const gravureItems = items.filter((item) => item.id.startsWith("gravure."));
+    const serialized = gravureItems.map((item) => [
+      item.variable, item.explanation, item.inputs, item.formula, item.substitution,
+    ].join("\n")).join("\n");
+
+    expect(gravureItems.map((item) => item.id)).toEqual([
+      "gravure.pattern-count",
+      "gravure.production-length",
+      "gravure.sale-meter-price",
+      "gravure.film-total",
+      "gravure.copper-plate-unit",
+      "gravure.copper-plate",
+    ]);
+    expect(serialized).not.toContain("原材料費");
+    expect(serialized).not.toContain("印刷費");
+    expect(serialized).not.toContain("ラミネート費");
+    expect(serialized).not.toContain("製造マージン");
+    expect(serialized).not.toContain("通関料");
+    expect(serialized).not.toContain("海外配送費");
+    expect(serialized).not.toContain("供給価格調整");
+    expect(items.find((item) => item.id === "gravure.sale-meter-price")!.unit).toBe("円/m");
+  });
 });

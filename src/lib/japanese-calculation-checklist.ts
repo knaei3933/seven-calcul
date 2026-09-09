@@ -1,5 +1,4 @@
-import { D, Decimal } from "./decimal";
-import { GRAVURE_ROLL_MATERIAL_STRUCTURE } from "./gravure-roll";
+import { D } from "./decimal";
 import type { CalculationChecklistSnapshot, ChecklistItem } from "./calculation-checklist";
 
 function number(value: unknown, maximumFractionDigits = 2): string {
@@ -121,61 +120,77 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
   });
 
   if (snapshot.gravure) {
-    const g = snapshot.gravure;
-    const gp = snapshot.gravureParameters;
     const gravure = "グラビアフィルム・銅版";
-    const productionPatternLength = gp?.productionPatternLengthM ?? snapshot.productionPatternLengthM;
-    const deliverablePatternLength = gp?.deliverablePatternLengthM ?? snapshot.deliverablePatternLengthM;
-    const materialLayerCosts = GRAVURE_ROLL_MATERIAL_STRUCTURE.map((layer, index) => {
-      const effectiveWidthMm = index === GRAVURE_ROLL_MATERIAL_STRUCTURE.length - 1
-        ? D(g.materialWidthMm).plus(10)
-        : D(g.materialWidthMm);
-      const unitPrice = layer.materialId === "AL"
-        ? gp?.alUnitPriceYenPerKg ?? "0"
-        : layer.materialId === "LLDPE"
-          ? gp?.lldpeUnitPriceYenPerKg ?? "0"
-          : gp?.petUnitPriceYenPerKg ?? "0";
-      const label = `${layer.label}(${layer.density}kg/m³)`;
-      const amount = D(layer.thicknessMicron).div(1000)
-        .times(effectiveWidthMm.div(1000))
-        .times(snapshot.film.orderLengthM)
-        .times(layer.density)
-        .times(unitPrice);
-      return { label, amount };
-    });
-    const materialCostTerms = materialLayerCosts.map((layer) => `${layer.label}=${number(layer.amount)}円`);
-    const printingTerms = skus.length
-      ? skus.map((sku) => number(D(g.materialWidthMm).div(1000)
-        .times(D(snapshot.film.orderLengthM).times(sku.requiredLengthM).div(snapshot.film.requiredLengthM))
-        .times(sku.colorCount)
-        .times(gp?.printingUnitPriceYenPerM ?? 0)))
-      : [number(D(g.materialWidthMm).div(1000)
-        .times(snapshot.film.orderLengthM)
-        .times(g.copperPlateCount)
-        .times(gp?.printingUnitPriceYenPerM ?? 0))];
-    const plateWidthMm = D(g.materialWidthMm).plus(gp?.copperPlateWidthExtraMm ?? 100);
-    const plateWidthCm = plateWidthMm.div(10);
-    const calculatedCopperPlatePrice = plateWidthCm
-      .times(gp?.newCopperPlateUnitPriceYen ?? 0)
-      .times(gp?.copperPlateMinimumDiameterMm ?? 420)
-      .toDecimalPlaces(0, Decimal.ROUND_CEIL);
-    add("gravure.pattern-count", gravure, "発注パターン数", "必要長を納品パターン長で切り上げた回数です。", `必要長 = ${number(snapshot.film.requiredLengthM)}m／納品パターン = ${number(deliverablePatternLength)}m`, "ceil(必要長 ÷ 納品パターン長)", `${number(snapshot.film.requiredLengthM)} ÷ ${number(deliverablePatternLength)} の切り上げ`, String(snapshot.orderPatternCount), "回");
-    add("gravure.material-width", gravure, "原反幅", "グラビア製造に適用する原反幅です。パウチ左右幅ではありません。", `パウチ左右幅 = ${number(pouchWidth)}mm／原反幅 = ${number(g.materialWidthMm)}mm`, "最小500mmまたはサイズ基準幅", `適用幅 = ${number(g.materialWidthMm)}mm`, number(g.materialWidthMm), "mm");
-    add("gravure.production-length", gravure, "製作長", "発注パターンに対応する製作長です。", `パターン数 = ${snapshot.orderPatternCount}回／製作パターン = ${number(productionPatternLength)}m`, "パターン数 × 製作パターン長", `${snapshot.orderPatternCount} × ${number(productionPatternLength)}`, number(snapshot.film.orderLengthM), "m");
-    add("gravure.deliverable-length", gravure, "納品可能長", "ロスを除いて納品できる長さです。", `パターン数 = ${snapshot.orderPatternCount}回／納品パターン = ${number(deliverablePatternLength)}m`, "パターン数 × 納品パターン長", `${snapshot.orderPatternCount} × ${number(deliverablePatternLength)}`, number(snapshot.film.effectiveLengthM), "m");
-    add("gravure.loss-length", gravure, "グラビア製作ロス", "製作長と納品可能長の差です。", `製作長 = ${number(snapshot.film.orderLengthM)}m／納品可能長 = ${number(snapshot.film.effectiveLengthM)}m`, "製作長 − 納品可能長", `${number(snapshot.film.orderLengthM)} − ${number(snapshot.film.effectiveLengthM)}`, number(snapshot.film.lossM), "m");
-    add("gravure.material-cost", gravure, "原材料費", "PET・AL・LLDPE各層の原材料費です。小幅固定単価適用時は0円として固定単価側に含めます。", `製作長 = ${number(snapshot.film.orderLengthM)}m／原反幅 = ${number(g.materialWidthMm)}mm／PET単価 = ${number(gp?.petUnitPriceYenPerKg ?? 0)}円/kg／AL単価 = ${number(gp?.alUnitPriceYenPerKg ?? 0)}円/kg／LLDPE単価 = ${number(gp?.lldpeUnitPriceYenPerKg ?? 0)}円/kg`, "Σ(層厚 × 幅 × 長さ × 比重 × 原料単価)", `${materialCostTerms.join(" + ")} = ${number(g.materialCostYen)}`, number(g.materialCostYen), "円");
-    add("gravure.printing-cost", gravure, "印刷費", "色数と製作長に応じたグラビア印刷費です。", `製作長 = ${number(snapshot.film.orderLengthM)}m／幅 = ${number(g.materialWidthMm)}mm／単価 = ${number(gp?.printingUnitPriceYenPerM ?? 0)}円/m／SKU色数 = ${skus.map((sku) => `${sku.colorCount}色`).join("・") || `${g.copperPlateCount}色`}`, "幅m × (製作長 × SKU必要長比) × SKU色数 × 印刷単価", `${printingTerms.join(" + ")} = ${number(g.printingCostYen)}`, number(g.printingCostYen), "円");
-    add("gravure.lamination-cost", gravure, "ラミネート費", "ラミネート加工費です。", `製作長 = ${number(snapshot.film.orderLengthM)}m／幅 = ${number(g.materialWidthMm)}mm／回数 = ${snapshot.gravure ? 3 : 0}回／単価 = ${number(gp?.laminationUnitPriceYenPerMWithAl ?? 0)}円/m`, "幅m × 製作長 × ラミ回数 × 単価", `${number(D(g.materialWidthMm).div(1000))} × ${number(snapshot.film.orderLengthM)} × 3 × ${number(gp?.laminationUnitPriceYenPerMWithAl ?? 0)}`, number(g.laminationCostYen), "円");
-    add("gravure.manufacturer-margin", gravure, "製造マージン", "製造者販売価格に含まれるマージンです。", `フィルム製造費 = ${number(g.filmCostYen)}円／率 = ${percent(gp?.manufacturerMarginRate ?? 0.2)}`, "フィルム製造費 × 製造マージン率", `${number(g.filmCostYen)} × ${gp?.manufacturerMarginRate ?? "0.2"}`, number(g.manufacturerMarginCostYen), "円");
-    add("gravure.film-cost", gravure, "製造者販売価格", "原材料・印刷・ラミネートと製造マージンを含みます。", `フィルム製造費 = ${number(g.filmCostYen)}円／製造マージン = ${number(g.manufacturerMarginCostYen)}円`, "フィルム製造費 + 製造マージン", `${number(g.filmCostYen)} + ${number(g.manufacturerMarginCostYen)}`, number(g.customsBaseCostYen), "円");
-    add("gravure.customs", gravure, "通関料", "製造者販売価格基準の通関費用です。", `基準価格 = ${number(g.customsBaseCostYen)}円／税率 = ${percent(gp?.customsRate ?? 0.05)}`, "製造者販売価格 × 税率", `${number(g.customsBaseCostYen)} × ${gp?.customsRate ?? "0.05"}`, number(g.customsCostYen), "円");
-    add("gravure.shipping", gravure, "海外配送費", "納品可能長基準の海外配送費です。", `回数 = ${g.shippingTrips}回／単価 = ${number(gp?.overseasShippingPerTripYen ?? 11000)}円/回`, "回数 × 海外配送単価", `${g.shippingTrips} × ${number(gp?.overseasShippingPerTripYen ?? 11000)}`, number(g.overseasShippingCostYen), "円");
-    add("gravure.seller-adjustment", gravure, "供給価格調整", "カネイ貿易供給価格としてフィルム費用へ含める調整額です。", `フィルム費用基準 = ${number(D(g.customsBaseCostYen).plus(D(g.customsCostYen)).plus(D(g.overseasShippingCostYen)))}円／調整率 = ${percent(p.sellerProfitRate)}`, "フィルム費用基準 × 調整率", `${number(D(g.customsBaseCostYen).plus(D(g.customsCostYen)).plus(D(g.overseasShippingCostYen)))} × ${p.sellerProfitRate}`, number(snapshot.sellerProfitCost), "円");
-    add("gravure.film-total", gravure, "フィルム費用合計", "製造者販売価格・通関・海外配送・供給価格調整を含みます。", `製造者販売価格 = ${number(g.customsBaseCostYen)}円／通関 = ${number(g.customsCostYen)}円／海外配送 = ${number(g.overseasShippingCostYen)}円／供給調整 = ${number(snapshot.sellerProfitCost)}円`, "製造者販売価格 + 通関料 + 海外配送費 + 供給価格調整", `${number(g.customsBaseCostYen)} + ${number(g.customsCostYen)} + ${number(g.overseasShippingCostYen)} + ${number(snapshot.sellerProfitCost)}`, number(snapshot.film.filmTotal), "円");
-    if (g.copperPlateCostYen) {
-      add("gravure.copper-plate-unit", gravure, "新規銅版単価", "1色1本の新規銅版単価です。", `版幅 = ${number(plateWidthMm)}mm = ${number(plateWidthCm)}cm／外径 = ${number(gp?.copperPlateMinimumDiameterMm ?? 420)}cm／銅版加工単価 = ${number(gp?.newCopperPlateUnitPriceYen ?? 0)}円`, "MAX(¥32,000, 版幅cm × 銅版加工単価 × 外径cm)", `MAX(¥32,000, ${number(plateWidthCm)} × ${number(gp?.newCopperPlateUnitPriceYen ?? 0)} × ${number(gp?.copperPlateMinimumDiameterMm ?? 420)} = ¥${number(calculatedCopperPlatePrice)}) = ¥${number(g.copperPlateUnitPriceYen)}`, number(g.copperPlateUnitPriceYen), "円/色");
-      add("gravure.copper-plate", gravure, "新規銅版費", "色数に応じた新規銅版費用です。", `銅版単価 = ${number(g.copperPlateUnitPriceYen)}円/色／色数 = ${g.copperPlateCount}色`, "銅版単価 × 色数", `${number(g.copperPlateUnitPriceYen)} × ${g.copperPlateCount}`, number(g.copperPlateCostYen), "円");
+    const productionLength = snapshot.film.orderLengthM;
+    const saleMeterUnit = D(snapshot.film.filmTotal).div(D(productionLength));
+    const saleMeterDisplay = number(saleMeterUnit, 2);
+    add(
+      "gravure.pattern-count",
+      gravure,
+      "発注パターン数",
+      "必要長を納品パターン長で切り上げた発注回数です。",
+      `必要長 = ${number(snapshot.film.requiredLengthM)}m／納品パターン = ${number(snapshot.deliverablePatternLengthM)}m`,
+      "ceil(必要長 ÷ 納品パターン長)",
+      `${number(snapshot.film.requiredLengthM)} ÷ ${number(snapshot.deliverablePatternLengthM)} の切り上げ = ${snapshot.orderPatternCount}`,
+      String(snapshot.orderPatternCount),
+      "回",
+    );
+    add(
+      "gravure.production-length",
+      gravure,
+      "製作長",
+      "グラビアフィルムの製作発注長です。",
+      `発注パターン = ${snapshot.orderPatternCount}回`,
+      "保存された製作長を使用します。",
+      `製作長 = ${number(productionLength)}m`,
+      number(productionLength),
+      "m",
+    );
+    add(
+      "gravure.sale-meter-price",
+      gravure,
+      "適用フィルム販売単価",
+      "外部供給価格として確定したm当たり販売単価です。構成原価は表示しません。",
+      `フィルム費用合計 = ${number(snapshot.film.filmTotal)}円／製作長 = ${number(productionLength)}m`,
+      "フィルム費用合計 ÷ 製作長",
+      `${number(snapshot.film.filmTotal)} ÷ ${number(productionLength)} = ${saleMeterDisplay}`,
+      saleMeterDisplay,
+      "円/m",
+    );
+    add(
+      "gravure.film-total",
+      gravure,
+      "フィルム費用合計",
+      "外部供給価格として確定したフィルム費用です。",
+      `適用販売単価 = ${saleMeterDisplay}円/m／製作長 = ${number(productionLength)}m`,
+      "適用販売単価 × 製作長（確定合計）",
+      `確定合計 = ${number(snapshot.film.filmTotal)}円`,
+      number(snapshot.film.filmTotal),
+      "円",
+    );
+    if (snapshot.gravure.copperPlateCostYen) {
+      add(
+        "gravure.copper-plate-unit",
+        gravure,
+        "新規銅版単価",
+        "1色1本の新規銅版の外部供給単価です。",
+        `色数 = ${snapshot.gravure.copperPlateCount}色`,
+        "確定銅版供給単価を使用します。",
+        `確定単価 = ${number(snapshot.gravure.copperPlateUnitPriceYen)}円/色`,
+        number(snapshot.gravure.copperPlateUnitPriceYen),
+        "円/色",
+      );
+      add(
+        "gravure.copper-plate",
+        gravure,
+        "新規銅版費",
+        "色数に応じた新規銅版の外部供給価格です。",
+        `銅版単価 = ${number(snapshot.gravure.copperPlateUnitPriceYen)}円/色／色数 = ${snapshot.gravure.copperPlateCount}色`,
+        "銅版単価 × 色数",
+        `${number(snapshot.gravure.copperPlateUnitPriceYen)} × ${snapshot.gravure.copperPlateCount} = ${number(snapshot.gravure.copperPlateCostYen)}`,
+        number(snapshot.gravure.copperPlateCostYen),
+        "円",
+      );
     }
   }
 

@@ -25,6 +25,7 @@ export default async function ChecklistPage({ params }: PageProps) {
 
   const savedChecklists = await getChecklistsForQuotation(id);
   const payloadSnapshot = readCalculationChecklistSnapshot(quotation.payload.calculationChecklistSnapshot);
+  if (payloadSnapshot) payloadSnapshot.checklistVersion = CHECKLIST_VERSION;
   const hasLegacyChecklists = savedChecklists.length > 0
     && savedChecklists.every((record) => record.checklistVersion.startsWith("legacy-"));
   const hasOutdatedChecklists = savedChecklists.length > 0

@@ -9,7 +9,7 @@ import { buildJapaneseChecklistItems } from "./japanese-calculation-checklist";
 export type ChecklistAudience = "CUSTOMER" | "INTERNAL_QA";
 
 export const CURRENT_CHECKLIST_SNAPSHOT_KEY = "pouch-current-checklist-snapshot-v1";
-export const CHECKLIST_VERSION = "2026-09.2";
+export const CHECKLIST_VERSION = "2026-09.3";
 export const LEGACY_CHECKLIST_VERSION = "legacy-2026-09.3";
 
 export type ChecklistItemState = {
@@ -117,7 +117,8 @@ export function readCalculationChecklistSnapshot(value: unknown): CalculationChe
   const hasText = (...values: unknown[]) => values.every((entry) => typeof entry === "string" && entry.trim() !== "");
   const film = snapshot.film;
   const parameters = snapshot.parameters;
-  return snapshot.checklistVersion === CHECKLIST_VERSION
+  const supportedVersions = ["2026-09.2", CHECKLIST_VERSION];
+  return supportedVersions.includes(snapshot.checklistVersion ?? "")
     && hasText(snapshot.quantity, snapshot.totalCostPerPiece, snapshot.pouchWidthMm, snapshot.pouchLengthMm, snapshot.pitchMm, snapshot.pitchAddMm, snapshot.materialWidthMm)
     && typeof snapshot.connectedChambers === "number"
     && Array.isArray(snapshot.skus) && snapshot.skus.length > 0
@@ -125,7 +126,7 @@ export function readCalculationChecklistSnapshot(value: unknown): CalculationChe
     && hasText(film.requiredLengthM, film.orderLengthM, film.unitPrice, film.filmTotal)
     && Array.isArray(snapshot.sellingPrices)
     && !!parameters && typeof parameters === "object"
-    ? snapshot as CalculationChecklistSnapshot
+    ? { ...snapshot, checklistVersion: CHECKLIST_VERSION } as CalculationChecklistSnapshot
     : null;
 }
 
