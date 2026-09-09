@@ -30,7 +30,12 @@ export default async function ChecklistPage({ params }: PageProps) {
     && savedChecklists.every((record) => record.checklistVersion.startsWith("legacy-"));
   const hasOutdatedChecklists = savedChecklists.length > 0
     && savedChecklists.some((record) => record.checklistVersion !== CHECKLIST_VERSION);
-  const shouldRebuild = savedChecklists.length === 0 || hasLegacyChecklists || (!!payloadSnapshot && hasOutdatedChecklists);
+  const hasStaleResultHash = savedChecklists.length > 0
+    && !!payloadSnapshot
+    && savedChecklists.some((record) => record.snapshot?.resultHash !== payloadSnapshot.resultHash);
+  const shouldRebuild = savedChecklists.length === 0
+    || hasLegacyChecklists
+    || (!!payloadSnapshot && (hasOutdatedChecklists || hasStaleResultHash));
   const checklists = shouldRebuild
     ? payloadSnapshot
       ? await createChecklistsForQuotation(quotation, payloadSnapshot)

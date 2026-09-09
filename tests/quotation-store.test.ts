@@ -160,8 +160,28 @@ describe("quotation persistence with a manually edited selling price", () => {
     expect(internalRecord.acceptedCount).toBe(0);
     expect(customerRecord.items.find((item) => item.id === "film.total")!.accepted).toBe(true);
     expect(internalRecord.items.find((item) => item.id === "film.total")!.accepted).toBe(false);
-  });
 
+    const changedSnapshot = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
+    changedSnapshot.resultHash = "checklist-hash-updated";
+    changedSnapshot.quantity = "20000";
+    const updatedInput: QuotationRecordInput = {
+      ...quotationInput,
+      quantity: "20000",
+      resultHash: "checklist-hash-updated",
+      payload: {
+        calculationChecklistSnapshot: changedSnapshot,
+      },
+    };
+    const updatedQuotation = await saveQuotation(updatedInput);
+    const rebuilt = await createChecklistsForQuotation(updatedQuotation, changedSnapshot);
+    const rebuiltCustomerItem = rebuilt[0]!.items.find((item) => item.id === "basic.quantity")!;
+
+    expect(rebuilt[0]!.snapshot.resultHash).toBe("checklist-hash-updated");
+    expect(rebuiltCustomerItem.result).toBe("20,000");
+    expect(rebuiltCustomerItem.substitution).toContain("20,000");
+    expect(await getChecklistsForQuotation(updatedQuotation.id)).toHaveLength(2);
+  });
+  
   it("rebuilds persistent checklists for quotations saved before checklist snapshots", async () => {
     const quotationInput: QuotationRecordInput = {
       quotationNumber: "S7-LEGACY-CHECKLIST-001",
