@@ -11,6 +11,8 @@ import {
   type QuotationDraft,
 } from "@/lib/quotation-draft";
 import { DEFAULT_FILM_COMPOSITION, QUOTATION_RESTORE_KEY } from "@/lib/quotation-shared";
+
+const LAST_CHECKLIST_URL_KEY = "pouch-last-checklist-url-v1";
 import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
 import type { CalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 
@@ -271,7 +273,10 @@ export default function PrintableQuotationPage() {
     try {
       const restoreRaw = sessionStorage.getItem(QUOTATION_RESTORE_KEY);
       if (restoreRaw) {
-        const restored = JSON.parse(restoreRaw) as Partial<QuoteForm> & {
+        const checklistUrl = sessionStorage.getItem(LAST_CHECKLIST_URL_KEY) ?? "";
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sessionStorageはSSR後にしか読めない意図的な復元処理です。
+      setChecklistUrl(checklistUrl);
+      const restored = JSON.parse(restoreRaw) as Partial<QuoteForm> & {
           resultHash?: unknown;
           purchaseOrder?: PurchaseOrderSnapshot;
           purchaseOrderJson?: string;
@@ -298,6 +303,7 @@ export default function PrintableQuotationPage() {
 
       const raw = sessionStorage.getItem(QUOTATION_DRAFT_KEY);
       const draft = parseQuotationDraft(JSON.parse(raw ?? "null"));
+      setChecklistUrl(sessionStorage.getItem(LAST_CHECKLIST_URL_KEY) ?? "");
       if (draft) {
         setForm((old) => ({
           ...old,
@@ -420,7 +426,9 @@ export default function PrintableQuotationPage() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "save_failed");
-      setChecklistUrl(`/checklists/${payload.record.id}`);
+      const checklistUrl = `/checklists/${payload.record.id}`;
+      setChecklistUrl(checklistUrl);
+      sessionStorage.setItem(LAST_CHECKLIST_URL_KEY, checklistUrl);
       setSavedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
       return true;
     } catch {
@@ -850,7 +858,15 @@ export default function PrintableQuotationPage() {
           <button className="button secondary" type="button" onClick={() => router.push("/")}>シミュレーターから取込</button>
           <button className="button secondary" type="button" data-testid="save-history" disabled={!valid || saving} onClick={() => void saveToHistory()}>{saving ? "保存中..." : savedAt ? `履歴保存済 ${savedAt}` : "履歴に保存"}</button>
           <button className="button" type="button" data-testid="print-pdf" disabled={!valid || saving} onClick={() => void printPdf()}>PDF出力（A4）</button>
-          {checklistUrl ? <a className="button secondary" href={checklistUrl}>計算確認チェックリスト</a> : null}
+          {checklistUrl ? (
+            <a className="button secondary" href={checklistUrl} title="保存した見積書の計算確認チェックリストを開きます">
+              計算確認チェックリスト
+            </a>
+          ) : (
+            <button className="button secondary" type="button" disabled title="履歴に保存後に開けます">
+              計算確認チェックリスト
+            </button>
+          )}
         </div>
         {saveError ? <p className="error" role="alert" data-testid="save-error">{saveError}</p> : null}
       </section>
