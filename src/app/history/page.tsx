@@ -809,6 +809,17 @@ function resolvePurchaseOrder(record: QuotationRecord): { order: PurchaseOrderSn
 
 function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onClose: () => void }) {
   const { order, legacy } = resolvePurchaseOrder(record);
+  const analysis = analyzeQuotation(record);
+  const filmOrderLength = D(order?.orderLengthM ?? record.filmOrderLengthM);
+  const filmOrderUnit = D(record.filmMeterPrice);
+  const filmOrderTotal = filmOrderUnit.times(filmOrderLength);
+  const copperQuantity = D(order?.copperPlate?.quantity ?? order?.colorCount ?? 1);
+  const copperOrderUnit = D(order?.copperPlate?.unitPriceYen ?? analysis.copperCostUnit.times(analysis.quantity).div(copperQuantity));
+  const copperOrderTotal = copperOrderUnit.times(copperQuantity);
+  const moldQuantity = D(order?.customMold?.quantity ?? "1");
+  const moldOrderTotal = D(order?.customMold?.costYen ?? String(record.payload.customLotCost ?? "0"));
+  const moldOrderUnit = moldQuantity.gt(0) ? moldOrderTotal.div(moldQuantity) : D(0);
+  const purchaseOrderTotal = filmOrderTotal.plus(copperOrderTotal).plus(moldOrderTotal);
   return (
     <div className="purchase-order-layer" role="dialog" aria-modal="true" aria-labelledby="purchase-order-title">
       <div className="purchase-order-panel">
@@ -837,6 +848,39 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
                   <div><dt>発注長</dt><dd>{formatNumber(order.orderLengthM, 0)} m</dd></div>
                   <div><dt>印刷色数</dt><dd>{order.colorCount > 0 ? `${formatNumber(order.colorCount, 0)} 色` : "旧データ（要確認）"}</dd></div>
                 </dl>
+                <table className="purchase-order-total-table">
+                  <thead>
+                    <tr><th>発注項目</th><th>発注単価</th><th>数量</th><th>発注金額</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>フィルム</td>
+                      <td>{formatCurrency(filmOrderUnit.toFixed(2), 2)} /m</td>
+                      <td>{formatNumber(filmOrderLength.toNumber(), 0)} m</td>
+                      <td>{formatCurrency(filmOrderTotal.toFixed(0), 0)}</td>
+                    </tr>
+                    {order.copperPlate ? (
+                      <tr>
+                        <td>新規銅版</td>
+                        <td>{formatCurrency(copperOrderUnit.toFixed(0), 0)} /色</td>
+                        <td>{formatNumber(copperQuantity.toNumber(), 0)} 色</td>
+                        <td>{formatCurrency(copperOrderTotal.toFixed(0), 0)}</td>
+                      </tr>
+                    ) : null}
+                    {order.customMold && Number(order.customMold.costYen) > 0 ? (
+                      <tr>
+                        <td>カスタム金型</td>
+                        <td>{formatCurrency(moldOrderUnit.toFixed(0), 0)} /式</td>
+                        <td>{formatNumber(moldQuantity.toNumber(), 0)} 式</td>
+                        <td>{formatCurrency(moldOrderTotal.toFixed(0), 0)}</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                  <tfoot>
+                    <tr><th colSpan={3}>発注金額合計（税抜）</th><td>{formatCurrency(purchaseOrderTotal.toFixed(0), 0)}</td></tr>
+                  </tfoot>
+                </table>
+                <p className="purchase-order-note">発注単価・金額は保存済み見積データの仕入基準値から再計算しています。</p>
               </section>
 
               {order.customMold && Number(order.customMold.costYen) > 0 ? (

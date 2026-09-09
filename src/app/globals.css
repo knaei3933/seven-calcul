@@ -739,6 +739,40 @@ header .version-badge { display: none; }
 .purchase-order-section table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .purchase-order-section th, .purchase-order-section td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .purchase-order-section th { background: #eef2f7; font-size: 11px; }
+.purchase-order-total-table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 13px; }
+.purchase-order-total-table th,
+.purchase-order-total-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 9px 8px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.purchase-order-total-table thead th {
+  color: var(--primary);
+  font-size: 11px;
+  background: #f1f5f9;
+}
+.purchase-order-total-table td:nth-child(2),
+.purchase-order-total-table td:nth-child(3),
+.purchase-order-total-table td:last-child,
+.purchase-order-total-table th:nth-child(2),
+.purchase-order-total-table th:nth-child(3),
+.purchase-order-total-table th:last-child { text-align: right; white-space: nowrap; }
+.purchase-order-total-table tfoot th,
+.purchase-order-total-table tfoot td {
+  border-top: 2px solid #1f3a5f;
+  border-bottom: 0;
+  background: #f8fafc;
+  font-size: 14px;
+  font-weight: 900;
+}
+.purchase-order-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
 .detail-header-actions { display: flex; gap: 8px; align-items: center; }
 
 .customer-list-toolbar { display: flex; gap: 10px; align-items: center; }
