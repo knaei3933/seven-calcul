@@ -261,6 +261,7 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
           </nav>
 
           {detailTab === "document" ? (
+          <>
             <article className="a4-sheet history-a4" aria-label="見積詳細A4帳票">
               <header className="sheet-header">
                 <div className="issuer">
@@ -341,26 +342,65 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
                   <div><span>利益率</span><strong>{formatNumber(finalProfitRate.toNumber(), 1)}%</strong></div>
                 </div>
               </section>
-
-              <section className="history-a4-section">
-                <header><span>04</span><h2>条件・管理</h2></header>
-                <dl className="history-facts">
-                  <div><dt>納期</dt><dd>{record.deliveryDate || "-"}</dd></div>
-                  <div><dt>支払条件</dt><dd>{record.paymentTerms || "-"}</dd></div>
-                  <div><dt>フィルム構成</dt><dd>{composition || DEFAULT_FILM_COMPOSITION}</dd></div>
-                  <div><dt>フィルム購入単価</dt><dd>{formatCurrency(analysis.filmMeterPrice.toFixed(0), 0)} /m</dd></div>
-                  <div><dt>フィルム発注長</dt><dd>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</dd></div>
-                  {printingMethodOf(record) === "gravure" ? (
-                    <>
-                      <div><dt>発注パターン</dt><dd>{formatNumber(analysis.orderPatternCount.toNumber(), 0)} 回</dd></div>
-                      <div><dt>納品パターン長</dt><dd>{formatNumber(analysis.deliverablePatternLengthM.toNumber(), 0)} m</dd></div>
-                    </>
-                  ) : null}
-                  <div><dt>備考</dt><dd>{record.notes || "-"}</dd></div>
-                </dl>
-                <footer className="history-a4-footer">本記録は原価シミュレーターの保存データから生成しています。</footer>
-              </section>
             </article>
+              <article className="a4-sheet history-a4" aria-label="見積原価詳細A4帳票">
+                <header className="history-page2-header">
+                  <div>
+                    <span>QUOTATION COST DETAIL</span>
+                    <h2>原価計算詳細</h2>
+                    <small>{record.quotationNumber} ／ {record.customerName || "-"} ／ {record.productName}</small>
+                  </div>
+                  <div><strong>PAGE 2 / 2</strong><small>内部管理用</small></div>
+                </header>
+
+                <section className="history-a4-section">
+                  <header><span>04</span><h2>原価内訳・逆算検証</h2></header>
+                  <table className="history-cost-table">
+                    <thead>
+                      <tr><th>項目</th><th>原価 /枚</th><th>数量</th><th>原価総額</th><th>見積総額</th><th>差益総額</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>充填・加工</td><td>{formatCurrency(analysis.fillingCostUnit.toFixed(4), 4)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.fillingCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.fillingAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.fillingAmount.minus(analysis.fillingCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr>
+                      <tr><td>フィルム</td><td>{formatCurrency(analysis.filmCostUnit.toFixed(4), 4)}</td><td>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</td><td>{formatCurrency(analysis.filmCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.filmAmount.minus(analysis.filmCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr>
+                      <tr><td>新規銅版</td><td>{formatCurrency(analysis.copperCostUnit.toFixed(4), 4)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.copperCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.copperAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.copperAmount.minus(analysis.copperCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr>
+                      {analysis.customCostUnit.gt(0) ? <tr><td>金型</td><td>{formatCurrency(analysis.customCostUnit.toFixed(4), 4)}</td><td>1 式</td><td>{formatCurrency(analysis.customCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.customAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.customAmount.minus(analysis.customCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr> : null}
+                    </tbody>
+                    <tfoot><tr><th colSpan={3}>総原価 / 税抜見積 / 総利益</th><td>{formatCurrency(costTotal.toFixed(0), 0)}</td><td>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</td><td>{formatCurrency(finalProfit.toFixed(0), 0)}</td></tr></tfoot>
+                  </table>
+                </section>
+
+                <section className="history-a4-section">
+                  <header><span>05</span><h2>計算式・根拠</h2></header>
+                  <ol className="history-formula-list">
+                    <li><strong>総原価 /枚</strong>＝充填・加工 {formatCurrency(analysis.fillingCostUnit.toFixed(4), 4)} ＋ フィルム {formatCurrency(analysis.filmCostUnit.toFixed(4), 4)} ＋ 銅版 {formatCurrency(analysis.copperCostUnit.toFixed(4), 4)} ＋ 金型 {formatCurrency(analysis.customCostUnit.toFixed(4), 4)} ＝ {formatCurrency(analysis.costUnit.toFixed(4), 4)}</li>
+                    <li><strong>フィルム原価</strong>＝購入単価 {formatCurrency(analysis.filmMeterPrice.toFixed(0), 0)}/m × 発注長 {formatNumber(analysis.filmOrderLength.toNumber(), 0)}m。1枚当たりは総フィルム原価 ÷ 発注数量 {formatNumber(analysis.quantity.toNumber(), 0)}枚。</li>
+                    <li><strong>最終利益</strong>＝税抜見積 {formatCurrency(analysis.subtotal.toFixed(0), 0)} − 総原価 {formatCurrency(costTotal.toFixed(0), 0)} ＝ {formatCurrency(finalProfit.toFixed(0), 0)}。</li>
+                    <li><strong>利益率</strong>＝最終利益 ÷ 税抜見積 × 100 ＝ {formatNumber(finalProfitRate.toNumber(), 2)}%。マークアップ率＝{formatNumber(analysis.markupRate.toNumber(), 2)}%。</li>
+                    <li><strong>逆算整合</strong>＝表示単価 {formatCurrency(analysis.sellingUnit.toFixed(4), 4)} − 保存原価単価 {formatCurrency(analysis.storedCostUnit ? analysis.storedCostUnit.toFixed(4) : analysis.costUnit.toFixed(4), 4)} ＝ {formatCurrency(analysis.storedProfitUnit.toFixed(4), 4)}（保存利益率 {formatNumber(analysis.storedProfitRate.toNumber(), 2)}%）。</li>
+                  </ol>
+                </section>
+
+                <section className="history-a4-section">
+                  <header><span>06</span><h2>条件・管理</h2></header>
+                  <dl className="history-facts">
+                    <div><dt>納期</dt><dd>{record.deliveryDate || "-"}</dd></div>
+                    <div><dt>支払条件</dt><dd>{record.paymentTerms || "-"}</dd></div>
+                    <div><dt>フィルム購入単価</dt><dd>{formatCurrency(analysis.filmMeterPrice.toFixed(0), 0)} /m</dd></div>
+                    <div><dt>フィルム発注長</dt><dd>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</dd></div>
+                    <div><dt>計算バージョン</dt><dd>{record.calculationVersion || "-"}</dd></div>
+                    <div><dt>作成 / 更新</dt><dd>{new Date(record.createdAt).toLocaleString("ja-JP")} / {new Date(record.updatedAt).toLocaleString("ja-JP")}</dd></div>
+                    {printingMethodOf(record) === "gravure" ? (
+                      <>
+                        <div><dt>発注パターン</dt><dd>{formatNumber(analysis.orderPatternCount.toNumber(), 0)} 回</dd></div>
+                        <div><dt>納品パターン長</dt><dd>{formatNumber(analysis.deliverablePatternLengthM.toNumber(), 0)} m</dd></div>
+                      </>
+                    ) : null}
+                    <div><dt>備考</dt><dd>{record.notes || "-"}</dd></div>
+                  </dl>
+                  <footer className="history-a4-footer">金額は保存済みDB値と表示overrideを優先して再構築しています。</footer>
+                </section>
+              </article>
+          </>
           ) : (
           <>
           <section className="profit-summary" aria-label="損益サマリー">

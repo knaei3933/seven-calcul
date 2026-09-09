@@ -266,6 +266,36 @@ header .version-badge { display: none; }
   font-size: 9.6pt;
   overflow: visible;
 }
+.history-a4 + .history-a4 { margin-top: 18px; }
+.history-page2-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 6mm;
+  border-bottom: 1px solid #8b96a6;
+  padding-bottom: 3mm;
+}
+.history-page2-header span { color: #1f3a5f; font-size: 7.8pt; font-weight: 800; letter-spacing: .16em; }
+.history-page2-header h2 { margin: 1mm 0 1mm; font-size: 16pt; }
+.history-page2-header small { display: block; color: #526075; font-size: 7.8pt; }
+.history-page2-header > div:last-child { text-align: right; }
+.history-page2-header > div:last-child strong { display: block; color: #1f3a5f; font-size: 10pt; }
+.history-page2-header > div:last-child small { color: #526075; }
+.history-cost-table { width: 100%; border-collapse: collapse; font-size: 8.4pt; }
+.history-cost-table th,
+.history-cost-table td {
+  border-bottom: .2mm solid #cbd5e1;
+  padding: 1.8mm 1.2mm;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.history-cost-table th:first-child,
+.history-cost-table td:first-child { text-align: left; }
+.history-cost-table thead th { color: #526075; font-size: 7.8pt; white-space: nowrap; }
+.history-cost-table tfoot th,
+.history-cost-table tfoot td { border-top: .5mm solid #1f3a5f; border-bottom: 0; font-weight: 900; }
+.history-formula-list { margin: 0; padding-left: 5mm; display: grid; gap: 1.8mm; font-size: 8.4pt; }
+.history-formula-list strong { margin-right: 1mm; }
 .history-a4-section {
   margin-top: 6mm;
   border: 0;
@@ -578,6 +608,20 @@ header .version-badge { display: none; }
     print-color-adjust: exact !important;
     -webkit-print-color-adjust: exact !important;
   }
+  .history-a4 + .history-a4 {
+    margin-top: 0 !important;
+    break-before: page !important;
+    page-break-before: always !important;
+  }
+  .history-a4-section { margin-top: 4mm !important; padding-top: 2.5mm !important; }
+  .history-a4-section header { margin-bottom: 2mm !important; }
+  .history-line-table th,
+  .history-line-table td,
+  .history-cost-table th,
+  .history-cost-table td { padding: 1.4mm 1mm !important; }
+  .history-calc-cards { gap: 2mm !important; }
+  .history-total-note { gap: 2mm !important; margin-top: 2mm !important; padding: 2mm !important; }
+  .history-formula-list { gap: 1.2mm !important; }
 }
 
 .customer-list-layer { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 18px; }
