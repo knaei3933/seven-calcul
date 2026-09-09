@@ -235,6 +235,18 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
   const issuerTelephone = payloadText("issuerTelephone", "TEL 072-971-0726");
   const issuerWebsite = payloadText("issuerWebsite", "https://7chemical.co.jp/");
   const issuerRepresentative = payloadText("representative", "代表取締役社長 吾藤 靖");
+  const copperColorCountValue = (() => {
+    const value = Number(record.payload.copperColorCount ?? 1);
+    return Number.isFinite(value) && value > 0 ? D(value) : D(1);
+  })();
+  const fillingCostTotal = analysis.fillingCostUnit.times(analysis.quantity);
+  const filmCostTotal = analysis.filmCostUnit.times(analysis.quantity);
+  const copperCostTotal = analysis.copperCostUnit.times(analysis.quantity);
+  const customCostTotal = analysis.customCostUnit.times(analysis.quantity);
+  const filmAcquisitionTotal = analysis.filmMeterPrice.times(analysis.filmOrderLength);
+  const copperCostPerColor = copperColorCountValue.gt(0) ? copperCostTotal.div(copperColorCountValue) : D(0);
+  const storedCostDifference = analysis.costUnit.minus(analysis.storedCostUnit);
+  const profitVerificationDifference = finalProfit.minus(analysis.storedProfitUnit.times(analysis.quantity));
 
   return (
     <div className="history-detail-layer printable-detail" role="dialog" aria-modal="true" aria-labelledby="history-detail-title">
@@ -371,13 +383,84 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
 
                 <section className="history-a4-section">
                   <header><span>05</span><h2>計算式・根拠</h2></header>
-                  <ol className="history-formula-list">
-                    <li><strong>総原価 /枚</strong>＝充填・加工 {formatCurrency(analysis.fillingCostUnit.toFixed(4), 4)} ＋ フィルム {formatCurrency(analysis.filmCostUnit.toFixed(4), 4)} ＋ 銅版 {formatCurrency(analysis.copperCostUnit.toFixed(4), 4)} ＋ 金型 {formatCurrency(analysis.customCostUnit.toFixed(4), 4)} ＝ {formatCurrency(analysis.costUnit.toFixed(4), 4)}</li>
-                    <li><strong>フィルム原価</strong>＝購入単価 {formatCurrency(analysis.filmMeterPrice.toFixed(0), 0)}/m × 発注長 {formatNumber(analysis.filmOrderLength.toNumber(), 0)}m。1枚当たりは総フィルム原価 ÷ 発注数量 {formatNumber(analysis.quantity.toNumber(), 0)}枚。</li>
-                    <li><strong>最終利益</strong>＝税抜見積 {formatCurrency(analysis.subtotal.toFixed(0), 0)} − 総原価 {formatCurrency(costTotal.toFixed(0), 0)} ＝ {formatCurrency(finalProfit.toFixed(0), 0)}。</li>
-                    <li><strong>利益率</strong>＝最終利益 ÷ 税抜見積 × 100 ＝ {formatNumber(finalProfitRate.toNumber(), 2)}%。マークアップ率＝{formatNumber(analysis.markupRate.toNumber(), 2)}%。</li>
-                    <li><strong>逆算整合</strong>＝表示単価 {formatCurrency(analysis.sellingUnit.toFixed(4), 4)} − 保存原価単価 {formatCurrency(analysis.storedCostUnit ? analysis.storedCostUnit.toFixed(4) : analysis.costUnit.toFixed(4), 4)} ＝ {formatCurrency(analysis.storedProfitUnit.toFixed(4), 4)}（保存利益率 {formatNumber(analysis.storedProfitRate.toNumber(), 2)}%）。</li>
-                  </ol>
+                  <table className="history-verify-table">
+                    <thead>
+                      <tr><th>検証項目</th><th>計算式</th><th>代入</th><th>結果</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>充填・加工原価</td>
+                        <td>保存原価/枚 × 発注数量</td>
+                        <td>{formatCurrency(analysis.fillingCostUnit.toFixed(4), 4)} × {formatNumber(analysis.quantity.toNumber(), 0)}</td>
+                        <td>{formatCurrency(fillingCostTotal.toFixed(0), 0)}</td>
+                      </tr>
+                      <tr>
+                        <td>フィルム仕入</td>
+                        <td>購入m単価 × 発注長</td>
+                        <td>{formatCurrency(analysis.filmMeterPrice.toFixed(2), 2)} × {formatNumber(analysis.filmOrderLength.toNumber(), 0)}m</td>
+                        <td>{formatCurrency(filmAcquisitionTotal.toFixed(0), 0)}</td>
+                      </tr>
+                      <tr>
+                        <td>フィルム原価配賦</td>
+                        <td>保存原価/枚 × 発注数量</td>
+                        <td>{formatCurrency(analysis.filmCostUnit.toFixed(4), 4)} × {formatNumber(analysis.quantity.toNumber(), 0)}</td>
+                        <td>{formatCurrency(filmCostTotal.toFixed(0), 0)}</td>
+                      </tr>
+                      <tr>
+                        <td>銅版原価</td>
+                        <td>保存原価/枚 × 発注数量</td>
+                        <td>{formatCurrency(analysis.copperCostUnit.toFixed(4), 4)} × {formatNumber(analysis.quantity.toNumber(), 0)}</td>
+                        <td>{formatCurrency(copperCostTotal.toFixed(0), 0)}</td>
+                      </tr>
+                      <tr>
+                        <td>銅版 色当たり原価</td>
+                        <td>銅版原価総額 ÷ 色数</td>
+                        <td>{formatCurrency(copperCostTotal.toFixed(0), 0)} ÷ {formatNumber(copperColorCountValue.toNumber(), 0)}色</td>
+                        <td>{formatCurrency(copperCostPerColor.toFixed(0), 0)}</td>
+                      </tr>
+                      {analysis.customCostUnit.gt(0) ? (
+                        <tr>
+                          <td>金型原価</td>
+                          <td>ロット原価 ÷ 発注数量</td>
+                          <td>{formatCurrency(analysis.customCostUnit.times(analysis.quantity).toFixed(0), 0)} ÷ {formatNumber(analysis.quantity.toNumber(), 0)}</td>
+                          <td>{formatCurrency(analysis.customCostUnit.toFixed(4), 4)}</td>
+                        </tr>
+                      ) : null}
+                      <tr>
+                        <td>総原価</td>
+                        <td>充填・加工 ＋ フィルム ＋ 銅版 ＋ 金型</td>
+                        <td>{formatCurrency(fillingCostTotal.toFixed(0), 0)} + {formatCurrency(filmCostTotal.toFixed(0), 0)} + {formatCurrency(copperCostTotal.toFixed(0), 0)} + {formatCurrency(customCostTotal.toFixed(0), 0)}</td>
+                        <td>{formatCurrency(costTotal.toFixed(0), 0)}</td>
+                      </tr>
+                      <tr>
+                        <td>最終利益</td>
+                        <td>税抜見積 − 総原価</td>
+                        <td>{formatCurrency(analysis.subtotal.toFixed(0), 0)} − {formatCurrency(costTotal.toFixed(0), 0)}</td>
+                        <td>{formatCurrency(finalProfit.toFixed(0), 0)}</td>
+                      </tr>
+                      <tr>
+                        <td>利益率</td>
+                        <td>最終利益 ÷ 税抜見積 × 100</td>
+                        <td>{formatCurrency(finalProfit.toFixed(0), 0)} ÷ {formatCurrency(analysis.subtotal.toFixed(0), 0)} × 100</td>
+                        <td>{formatNumber(finalProfitRate.toNumber(), 2)}%</td>
+                      </tr>
+                      <tr>
+                        <td>保存値整合</td>
+                        <td>表示原価/枚 − DB保存原価/枚</td>
+                        <td>{formatCurrency(analysis.costUnit.toFixed(4), 4)} − {formatCurrency(analysis.storedCostUnit.toFixed(4), 4)}</td>
+                        <td>{formatCurrency(storedCostDifference.toFixed(4), 4)}</td>
+                      </tr>
+                      <tr>
+                        <td>利益検算整合</td>
+                        <td>表示総利益 − DB保存利益 × 数量</td>
+                        <td>{formatCurrency(finalProfit.toFixed(0), 0)} − {formatCurrency(analysis.storedProfitUnit.times(analysis.quantity).toFixed(0), 0)}</td>
+                        <td>{formatCurrency(profitVerificationDifference.toFixed(0), 0)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p className="history-audit-note">
+                    上記は見積書に表示した金額・override値・DB保存値を優先して再計算した検算です。差分が発生する場合は表示用の丸め・端数調整・手動overrideの影響を確認してください。
+                  </p>
                 </section>
 
                 <section className="history-a4-section">
