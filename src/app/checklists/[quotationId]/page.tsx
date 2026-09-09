@@ -5,7 +5,7 @@ import {
   getChecklistsForQuotation,
   getQuotation,
 } from "@/lib/quotation-store";
-import { readCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
+import { CHECKLIST_VERSION, readCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 import { printingMethodOf } from "@/lib/quotation-history";
 import { CalculationChecklistClient } from "./checklist-client";
 
@@ -27,7 +27,9 @@ export default async function ChecklistPage({ params }: PageProps) {
   const payloadSnapshot = readCalculationChecklistSnapshot(quotation.payload.calculationChecklistSnapshot);
   const hasLegacyChecklists = savedChecklists.length > 0
     && savedChecklists.every((record) => record.checklistVersion.startsWith("legacy-"));
-  const shouldRebuild = savedChecklists.length === 0 || hasLegacyChecklists;
+  const hasOutdatedChecklists = savedChecklists.length > 0
+    && savedChecklists.some((record) => record.checklistVersion !== CHECKLIST_VERSION);
+  const shouldRebuild = savedChecklists.length === 0 || hasLegacyChecklists || (!!payloadSnapshot && hasOutdatedChecklists);
   const checklists = shouldRebuild
     ? payloadSnapshot
       ? await createChecklistsForQuotation(quotation, payloadSnapshot)

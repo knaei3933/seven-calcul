@@ -374,8 +374,15 @@ export default function QuotationPage() {
         pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
         prodMultiplier: effectiveSize.prodMultiplier,
         colorCount: Math.max(...form.skus.map((sku) => Number(sku.colorCount) || 0)),
+        skus: form.skus.map((sku) => ({
+          name: sku.name,
+          quantity: sku.quantity,
+          fillMl: sku.fillMl,
+          colorCount: sku.colorCount,
+        })),
         lossRate: parameters.lossRate,
         bulkUnitPrice: form.bulkPrice,
+        gravureParameters: normalizedGravureParameters,
       });
       sessionStorage.setItem(CURRENT_CHECKLIST_SNAPSHOT_KEY, JSON.stringify(preliminarySnapshot));
       sessionStorage.removeItem("pouch-current-checklist-confirmations-v1");

@@ -12,8 +12,8 @@ type Props = {
 };
 
 const audienceLabels: Record<ChecklistAudience, string> = {
-  CUSTOMER: "고객 확인용",
-  INTERNAL_QA: "내부 QA 확인용",
+  CUSTOMER: "顧客確認用",
+  INTERNAL_QA: "社内QA確認用",
 };
 
 export function CalculationChecklistClient({ quotationId, quotationNumber, customerName, records: initialRecords }: Props) {
@@ -46,7 +46,7 @@ export function CalculationChecklistClient({ quotationId, quotationNumber, custo
           audience: activeAudience,
           itemId,
           accepted: nextAccepted,
-          checkedBy: checkedBy.trim() || (activeAudience === "CUSTOMER" ? customerName || "고객" : "카네이무역 내부 QA"),
+          checkedBy: checkedBy.trim() || (activeAudience === "CUSTOMER" ? customerName || "顧客" : "カネイ貿易 社内QA"),
         }),
       });
       const payload = await response.json();
@@ -91,7 +91,7 @@ export function CalculationChecklistClient({ quotationId, quotationNumber, custo
             </div>
             <label>
               確認者
-              <input value={checkedBy} onChange={(event) => setCheckedBy(event.target.value)} placeholder={activeAudience === "CUSTOMER" ? customerName || "고객" : "카네イ무역 내부 QA"} />
+              <input value={checkedBy} onChange={(event) => setCheckedBy(event.target.value)} placeholder={activeAudience === "CUSTOMER" ? customerName || "顧客" : "カネイ貿易 社内QA"} />
             </label>
             <p className="warning">チェック完了は確認記録です。見積発行・成約処理を自動的に禁止/解除するものではありません。</p>
           </section>
@@ -115,6 +115,7 @@ export function CalculationChecklistClient({ quotationId, quotationNumber, custo
                         <strong>{item.variable}</strong>
                         <p>{item.explanation}</p>
                         <dl>
+                          <div><dt>入力値</dt><dd>{item.inputs || "-"}</dd></div>
                           <div><dt>計算式</dt><dd>{item.formula}</dd></div>
                           <div><dt>代入値</dt><dd>{item.substitution}</dd></div>
                           <div><dt>結果</dt><dd>{item.unit ? `${item.result} ${item.unit}` : item.result}</dd></div>

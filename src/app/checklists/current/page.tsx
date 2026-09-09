@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  CHECKLIST_VERSION,
   CURRENT_CHECKLIST_SNAPSHOT_KEY,
   buildChecklistItems,
   type CalculationChecklistSnapshot,
@@ -21,8 +22,8 @@ type ConfirmationState = {
 type PreliminaryConfirmations = Partial<Record<ChecklistAudience, Record<string, ConfirmationState>>>;
 
 const audienceLabels: Record<ChecklistAudience, string> = {
-  CUSTOMER: "고객 확인용",
-  INTERNAL_QA: "내부 QA 확인용",
+  CUSTOMER: "顧客確認用",
+  INTERNAL_QA: "社内QA確認用",
 };
 
 export default function CurrentChecklistPage() {
@@ -97,7 +98,7 @@ export default function CurrentChecklistPage() {
     try {
       sessionStorage.setItem(CONFIRMATIONS_KEY, JSON.stringify({ sourceHash, ...next }));
     } catch {
-      // private mode 등 저장 실패 시에도 화면 유지。
+      // プライベートモード等で保存できない場合も画面は維持する。
     }
   }
 
@@ -107,7 +108,7 @@ export default function CurrentChecklistPage() {
     setUpdatingItemId(itemId);
     const checkedAt = nextAccepted ? new Date().toISOString() : null;
     const reviewer = nextAccepted
-      ? reviewerName.trim() || (activeAudience === "CUSTOMER" ? "고객" : "카네이무역 내부 QA")
+      ? reviewerName.trim() || (activeAudience === "CUSTOMER" ? "顧客" : "カネイ貿易 社内QA")
       : null;
 
     setConfirmations((old) => ({
@@ -149,7 +150,10 @@ export default function CurrentChecklistPage() {
     <main className="checklist-page">
       <section className="panel checklist-header">
         <h1>計算確認チェックリスト（保存前）</h1>
-        <p>見積書保存前の原価ベース・計算根拠を確認できます。確認状態はブラウザに一時保存されます。</p>
+        <p>原価シミュレーターで再計算した入力条件・計算式・結果を確認できます。確認状態はブラウザに一時保存されます。</p>
+        {snapshot.checklistVersion !== CHECKLIST_VERSION ? (
+          <p className="warning">保存済みの一時データが旧形式です。最新の入力値を反映するため、原価シミュレーターで「サーバーで再計算する」を実行してください。</p>
+        ) : null}
       </section>
 
       <div className="checklist-tabs" role="tablist">
@@ -173,7 +177,7 @@ export default function CurrentChecklistPage() {
         <div className="progress"><div style={{ width: `${progressPercent}%` }} /></div>
         <label>
           確認者
-          <input value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} placeholder={activeAudience === "CUSTOMER" ? "고객" : "카네이무역 내부 QA"} />
+          <input value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} placeholder={activeAudience === "CUSTOMER" ? "顧客" : "カネイ貿易 社内QA"} />
         </label>
       </section>
 
@@ -194,10 +198,11 @@ export default function CurrentChecklistPage() {
                       onChange={(event) => void toggleItem(item, event.target.checked)}
                     />
                     <div>
-                      <strong>{item.variable}</strong>
-                      <p>{item.explanation}</p>
-                      <dl>
-                        <div><dt>計算式</dt><dd>{item.formula}</dd></div>
+                        <strong>{item.variable}</strong>
+                        <p>{item.explanation}</p>
+                        <dl>
+                          <div><dt>入力値</dt><dd>{item.inputs || "-"}</dd></div>
+                          <div><dt>計算式</dt><dd>{item.formula}</dd></div>
                         <div><dt>代入値</dt><dd>{item.substitution}</dd></div>
                         <div><dt>結果</dt><dd>{item.unit ? `${item.result} ${item.unit}` : item.result}</dd></div>
                       </dl>

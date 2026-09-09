@@ -103,6 +103,12 @@ describe("quotation persistence with a manually edited selling price", () => {
       sourceHash: "checklist-hash",
       resultHash: "checklist-result-hash",
       filmComposition: "PET12+AL7+PET12+LLDPE50",
+      skus: [{
+        name: "テスト充填物",
+        quantity: "10000",
+        fillMl: "3",
+        colorCount: "4",
+      }],
     });
     const quotationInput: QuotationRecordInput = {
       quotationNumber: "S7-CHECKLIST-001",
@@ -139,6 +145,11 @@ describe("quotation persistence with a manually edited selling price", () => {
     expect(created.map((record) => record.audience)).toEqual(["CUSTOMER", "INTERNAL_QA"]);
     expect(created.every((record) => record.totalCount > 10)).toBe(true);
     expect(created.every((record) => record.acceptedCount === 0)).toBe(true);
+    const customerItems = created[0]!.items;
+    expect(customerItems.find((item) => item.id === "basic.quantity")!.inputs).toContain("10,000");
+    expect(customerItems.find((item) => item.id === "film.sku.0")!.inputs).toContain("テスト充填物");
+    expect(customerItems.find((item) => item.id === "film.total")!.substitution).toContain("164,000");
+    expect(customerItems.every((item) => !/[가-힣]/u.test(item.category + item.variable + item.explanation + item.formula + item.substitution))).toBe(true);
 
     const updated = await updateChecklistItem(saved.id, "CUSTOMER", "film.total", true, "テスト顧客");
     const records = await getChecklistsForQuotation(saved.id);

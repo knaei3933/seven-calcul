@@ -1,6 +1,7 @@
 import { D } from "./decimal";
 import type { CostResult } from "./calculation";
 import type { CostParameters } from "./types";
+import type { GravureRollParameters } from "./gravure-roll";
 import { buildPurchaseOrderSnapshot, type PurchaseContext, type PurchaseOrderSnapshot } from "./purchase-order";
 import { buildCalculationChecklistSnapshot, type CalculationChecklistSnapshot } from "./calculation-checklist";
 
@@ -72,8 +73,15 @@ export function buildQuotationDraft(
     pitchMm: string;
     prodMultiplier: number;
     colorCount: number;
+    skus?: {
+      name?: string;
+      quantity: string;
+      fillMl: string;
+      colorCount: string;
+    }[];
     lossRate: string;
     bulkUnitPrice: string;
+    gravureParameters?: GravureRollParameters;
   },
 ): QuotationDraft {
   const fillingCost = D(result.costPerPieceComponents.bulk)
@@ -126,8 +134,10 @@ export function buildQuotationDraft(
       pitchMm: context.pitchMm,
       prodMultiplier: context.prodMultiplier,
       colorCount: context.colorCount,
+      skus: context.skus,
       lossRate: context.lossRate,
       bulkUnitPrice: context.bulkUnitPrice,
+      gravureParameters: context.gravureParameters,
     }),
   };
 }
