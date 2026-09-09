@@ -17,7 +17,7 @@ import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/t
 import type { CustomerMaster, CustomerMasterInput } from "@/lib/quotation-shared";
 
 const MARGIN_OPTIONS = {
-  digital: ["0.45", "0.4", "0.35"],
+  digital: ["0.4", "0.35", "0.3"],
   gravure: ["0.3", "0.25", "0.2"],
 } as const;
 type TargetMargin = string;
@@ -1146,12 +1146,14 @@ export default function QuotationPage() {
                 ) : null}
               </div>
             </div>
-            <button className="button" type="submit" data-testid="calculate-desktop" disabled={blocker || pending}>{pending ? "計算中..." : "サーバーで再計算する"}</button>
-            {resultShown ? (
-              <Link className="button secondary" href="/checklists/current" data-testid="current-checklist-link">
-                計算確認チェックリスト（保存前）
-              </Link>
-            ) : null}
+            <div className="primary-action-stack">
+              <button className="button" type="submit" data-testid="calculate-desktop" disabled={blocker || pending}>{pending ? "計算中..." : "サーバーで再計算する"}</button>
+              {resultShown ? (
+                <Link className="button secondary" href="/checklists/current" data-testid="current-checklist-link">
+                  計算確認チェックリスト（保存前）
+                </Link>
+              ) : null}
+            </div>
             <div className="action-note"><strong>サーバー計算済み</strong>は参照計算を意味し、見積確定ではありません。</div>
           </section>
           <div className="mobile-actions" data-testid="mobile-actions">
