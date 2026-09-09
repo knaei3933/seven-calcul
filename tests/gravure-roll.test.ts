@@ -42,12 +42,14 @@ describe("gravure roll calculation", () => {
       parameters: defaultGravureRollParameters(),
     });
     expect(Number(jpy.filmCostYen)).toBeCloseTo(Number(krw.filmCostKRW) * 100 / 850, 4);
-    expect(Number(jpy.copperPlateCostYen)).toBe(
-      Number(Decimal.max("32000", Math.ceil(Number(krw.copperPlateCostKRW) * 100 / 850))),
-    );
+    const calculatedPerColorYen = Math.ceil(Number(krw.copperPlateCostKRW) / baseInput.colors * 100 / 850);
+    const expectedPerColorYen = Number(Decimal.max("32000", calculatedPerColorYen));
+    expect(jpy.copperPlateCount).toBe(baseInput.colors);
+    expect(Number(jpy.copperPlateUnitPriceYen)).toBe(expectedPerColorYen);
+    expect(Number(jpy.copperPlateCostYen)).toBe(expectedPerColorYen * baseInput.colors);
   });
 
-  it("applies a ¥32,000 copper plate minimum and rounds up fractions", () => {
+  it("applies a ¥32,000 minimum to each copper plate and rounds up fractions", () => {
     const belowMinimum = calculateGravureRollCost({
       ...baseInput,
       colors: 1,
@@ -61,8 +63,25 @@ describe("gravure roll calculation", () => {
     });
 
     expect(belowMinimum.copperPlateCostYen).toBe("32000");
-    expect(aboveMinimum.copperPlateCostYen).toBe("62259");
+    expect(aboveMinimum.copperPlateCostYen).toBe("96000");
+    expect(belowMinimum.copperPlateCount).toBe(1);
+    expect(aboveMinimum.copperPlateCount).toBe(3);
+    expect(aboveMinimum.copperPlateUnitPriceYen).toBe("32000");
     expect(Number(aboveMinimum.copperPlateCostYen) % 1).toBe(0);
+  });
+
+  it("applies ¥32,000 per color when a calculated plate is below the minimum", () => {
+    const result = calculateGravureRollCost({
+      ...baseInput,
+      materialWidthMm: "500",
+      colors: 3,
+      quantity: "10000",
+      parameters: defaultGravureRollParameters(),
+    });
+
+    expect(result.copperPlateCount).toBe(3);
+    expect(result.copperPlateUnitPriceYen).toBe("32000");
+    expect(result.copperPlateCostYen).toBe("96000");
   });
 
   it("includes overseas shipping at 500m units and ¥11,000 per trip", () => {

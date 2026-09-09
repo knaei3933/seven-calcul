@@ -55,6 +55,7 @@ type QuoteForm = {
   copperUnitDisplay: string;
   copperAmountDisplay: string;
   copperPlateCostPerPiece: string;
+  copperColorCount: string;
   orderPatternCount: string;
   deliverablePatternLengthM: string;
   recommendedQuantity: string;
@@ -128,6 +129,7 @@ const defaultQuote: QuoteForm = {
   copperUnitDisplay: "",
   copperAmountDisplay: "",
   copperPlateCostPerPiece: "0",
+  copperColorCount: "0",
   orderPatternCount: "0",
   deliverablePatternLengthM: "0",
   recommendedQuantity: "",
@@ -323,6 +325,7 @@ export default function PrintableQuotationPage() {
           fillingCostPerPiece: draft.fillingCostPerPiece,
           printingMethod: draft.printingMethod ?? "digital",
           copperPlateCostPerPiece: draft.copperPlateCostPerPiece ?? "0",
+          copperColorCount: draft.copperColorCount ?? old.copperColorCount,
           orderPatternCount: draft.orderPatternCount ?? "0",
           deliverablePatternLengthM: draft.deliverablePatternLengthM ?? "0",
           recommendedQuantity: draft.recommendedQuantity ?? "",
@@ -406,7 +409,8 @@ export default function PrintableQuotationPage() {
             // 自動計算値はform上は空欄のため、表示用に確定した値を上書きする。
             fillingUnitDisplay: shownTotals.fillingUnit,
             fillingAmountDisplay: shownTotals.fillingAmount,
-            copperUnitDisplay: shownTotals.copperUnit,
+            copperUnitDisplay: shownTotals.copperColorUnit,
+            copperColorCount: shownTotals.copperColorCount,
             copperAmountDisplay: shownTotals.copperAmount,
             customUnitDisplay: shownTotals.customUnit,
             customAmountDisplay: shownTotals.customAmount,
@@ -522,9 +526,18 @@ export default function PrintableQuotationPage() {
     const roundUnit = (value: typeof totals.pricePerPiece) => value.toDecimalPlaces(2, Decimal.ROUND_UP);
     const totalPriceInput = parseDecimal(form.pricePerPieceDisplay) ?? totals.pricePerPiece;
     const targetTotal = totalPriceInput.times(totals.quantity);
-    const copperUnit = parseDecimal(form.copperUnitDisplay)
-      ?? totals.copperSellingUnit.toDecimalPlaces(2, Decimal.ROUND_UP);
-    const copperAmount = parseDecimal(form.copperAmountDisplay) ?? copperUnit.times(totals.quantity);
+    const parsedCopperColorCount = parseDecimal(form.copperColorCount);
+    const copperColorCount = parsedCopperColorCount && parsedCopperColorCount.gt(0)
+      ? parsedCopperColorCount
+      : purchaseOrder?.colorCount && purchaseOrder.colorCount > 0
+        ? D(purchaseOrder.colorCount)
+        : D(1);
+    const copperColorUnit = parseDecimal(form.copperUnitDisplay)
+      ?? (copperColorCount.gt(0)
+        ? totals.copperSellingUnit.times(totals.quantity).div(copperColorCount).toDecimalPlaces(0, Decimal.ROUND_CEIL)
+        : D(0));
+    const copperAmount = parseDecimal(form.copperAmountDisplay) ?? copperColorUnit.times(copperColorCount);
+    const copperUnit = totals.quantity.gt(0) ? copperAmount.div(totals.quantity) : D(0);
     const customQuantity = parseDecimal(form.customQuantity) ?? D(1);
     const customUnitOverride = parseDecimal(form.customUnitDisplay);
     const customUnit = customUnitOverride
@@ -578,6 +591,8 @@ export default function PrintableQuotationPage() {
       fillingAmount: fillingAmount.toString(),
       copperUnit: copperUnit.toString(),
       copperAmount: copperAmount.toString(),
+      copperColorCount: copperColorCount.toString(),
+      copperColorUnit: copperColorUnit.toString(),
       customUnit: customUnit.toString(),
       customAmount: customAmount.toString(),
       customQuantity: customQuantity.toString(),
@@ -635,6 +650,7 @@ export default function PrintableQuotationPage() {
   const applyLineTotals = (fillingUnit: Decimal, filmAmount: Decimal, copperAmount: Decimal, customAmount: Decimal) => {
     const quantity = parseDecimal(form.quantity);
     const orderLength = parseDecimal(form.filmOrderLengthM);
+    const copperColorCount = parseDecimal(form.copperColorCount) ?? D(1);
     if (!quantity || !quantity.gt(0) || !orderLength || !orderLength.gt(0)) return;
     const fillingAmount = fillingUnit.times(quantity);
     const filmMeterUnit = form.printingMethod === "gravure"
@@ -655,7 +671,7 @@ export default function PrintableQuotationPage() {
       filmUnitDisplay: filmMeterUnit.toString(),
       filmPouchUnitDisplay: filmPouchUnit.toString(),
       filmAmountDisplay: clampedFilmAmount.toString(),
-      copperUnitDisplay: copperUnit.toString(),
+      copperUnitDisplay: copperColorCount.gt(0) ? copperAmount.div(copperColorCount).toString() : copperUnit.toString(),
       copperAmountDisplay: copperAmount.toString(),
       customUnitDisplay: customUnit.toString(),
       customAmountDisplay: customAmount.toString(),
@@ -715,7 +731,7 @@ export default function PrintableQuotationPage() {
   };
 
   const commitCopperUnit = (raw: string, node: HTMLElement) => {
-    const quantity = parseDecimal(form.quantity);
+    const quantity = parseDecimal(form.copperColorCount);
     const unit = parseDisplayedNumber(raw);
     if (!shownTotals || !quantity || !quantity.gt(0) || unit === null || unit.lt(0)) {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.copperUnit ?? "0", undefined, 2));
@@ -726,13 +742,35 @@ export default function PrintableQuotationPage() {
   };
 
   const commitCopperAmount = (raw: string, node: HTMLElement) => {
-    const quantity = parseDecimal(form.quantity);
+    const quantity = parseDecimal(form.copperColorCount);
     const amount = parseDisplayedNumber(raw);
     if (!shownTotals || !quantity || !quantity.gt(0) || amount === null || amount.lt(0)) {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.copperAmount ?? "0"));
       return;
     }
     commitCopperUnit(amount.div(quantity).toString(), node);
+  };
+
+  const commitCopperColorQuantity = (raw: string, node: HTMLElement) => {
+    const quantity = parseDisplayedNumber(raw);
+    if (!shownTotals || !quantity || !quantity.gt(0)) {
+      rejectInvalidNumber(node, numberDisplay(form.copperColorCount));
+      return;
+    }
+    applyPatch({
+      copperColorCount: quantity.toString(),
+      copperUnitDisplay: "",
+      copperAmountDisplay: "",
+      fillingUnitDisplay: "",
+      fillingAmountDisplay: "",
+      filmUnitDisplay: "",
+      filmPouchUnitDisplay: "",
+      filmAmountDisplay: "",
+      adjustmentDisplay: "",
+      subtotalDisplay: "",
+      taxDisplay: "",
+      grandTotalDisplay: "",
+    });
   };
 
   const commitCustomUnit = (raw: string, node: HTMLElement) => {
@@ -1027,8 +1065,8 @@ export default function PrintableQuotationPage() {
                         <strong><EditableText value={form.copperItemName} label="銅版費項目名" onCommit={(next) => update("copperItemName", next.trim())} /></strong>
                         <small><EditableText value={form.copperItemDescription} label="銅版費説明" multiline onCommit={(next) => update("copperItemDescription", next)} /></small>
                       </td>
-                      <td><EditableText value={moneyDisplay(shownTotals.copperUnit, form.copperUnitDisplay, 2)} label="銅版費単価" className="money" onCommit={commitCopperUnit} /> /枚</td>
-                      <td><EditableText value={numberDisplay(form.quantity)} label="銅版費数量" className="money" onCommit={commitQuantity} /> 枚</td>
+                      <td><EditableText value={moneyDisplay(shownTotals.copperColorUnit, form.copperUnitDisplay, 0)} label="銅版費単価" className="money" onCommit={commitCopperUnit} /> /色</td>
+                      <td><EditableText value={numberDisplay(form.copperColorCount)} label="銅版費数量" className="money" onCommit={commitCopperColorQuantity} /> 色</td>
                       <td><EditableText value={moneyDisplay(shownTotals.copperAmount, form.copperAmountDisplay)} label="銅版費金額" className="money" onCommit={commitCopperAmount} /></td>
                     </tr>
                   ) : null}
@@ -1173,7 +1211,8 @@ export default function PrintableQuotationPage() {
           <label>金型 項目名<input value={form.customItemName} onChange={(event) => update("customItemName", event.target.value)} /></label>
           <label className="wide">金型 説明<textarea rows={2} value={form.customItemDescription} onChange={(event) => update("customItemDescription", event.target.value)} /></label>
           <label>銅版費 原価 / 枚<input inputMode="decimal" value={form.copperPlateCostPerPiece} onChange={(event) => update("copperPlateCostPerPiece", event.target.value)} /></label>
-          <label>銅版費 単価（空欄=自動）<input inputMode="decimal" value={form.copperUnitDisplay} onChange={(event) => update("copperUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
+          <label>銅版費 単価 /色（空欄=自動）<input inputMode="decimal" value={form.copperUnitDisplay} onChange={(event) => update("copperUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
+          <label>銅版費 色数<input inputMode="decimal" value={form.copperColorCount} onChange={(event) => update("copperColorCount", event.target.value)} /></label>
           <label>銅版費 金額（空欄=自動）<input inputMode="decimal" value={form.copperAmountDisplay} onChange={(event) => update("copperAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>銅版費 項目名<input value={form.copperItemName} onChange={(event) => update("copperItemName", event.target.value)} /></label>
           <label className="wide">銅版費 説明<textarea rows={2} value={form.copperItemDescription} onChange={(event) => update("copperItemDescription", event.target.value)} /></label>

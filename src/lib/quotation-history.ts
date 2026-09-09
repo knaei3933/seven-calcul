@@ -77,9 +77,15 @@ export function analyzeQuotation(record: QuotationRecord) {
     ?? (legacyFillingAmount && quantity.gt(0) ? legacyFillingAmount.div(quantity) : targetFillingUnit);
   const filmUnit = editedNumber(payload.filmPouchUnitDisplay)
     ?? (legacyFilmAmount && quantity.gt(0) ? legacyFilmAmount.div(quantity) : targetFilmUnit);
-  const copperUnit = editedNumber(payload.copperUnitDisplay)
-    ?? (quantity.gt(0) ? copperCostUnit.div(marginDivider) : D(0));
-  const copperAmount = editedNumber(payload.copperAmountDisplay) ?? copperUnit.times(quantity);
+  const copperColorCount = positiveNumber(payload.copperColorCount);
+  const displayedCopperAmount = editedNumber(payload.copperAmountDisplay);
+  const displayedCopperUnit = editedNumber(payload.copperUnitDisplay);
+  // copperUnitDisplay は新版では色単価。旧データはパウチ単価として扱う。
+  const copperAmount = displayedCopperAmount
+    ?? (displayedCopperUnit && copperColorCount ? displayedCopperUnit.times(copperColorCount) : copperCostUnit.div(marginDivider).times(quantity));
+  const copperUnit = displayedCopperUnit && !copperColorCount
+    ? displayedCopperUnit
+    : quantity.gt(0) ? copperAmount.div(quantity) : D(0);
   const customUnit = editedNumber(payload.customUnitDisplay)
     ?? (quantity.gt(0) ? customCostUnit.div(marginDivider) : D(0));
   const customAmount = editedNumber(payload.customAmountDisplay) ?? customUnit.times(quantity);

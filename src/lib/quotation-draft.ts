@@ -40,6 +40,7 @@ export interface QuotationDraft {
   customerEmail?: string;
   printingMethod?: string;
   copperPlateCostPerPiece?: string;
+  copperColorCount?: string;
   orderPatternCount?: string;
   deliverablePatternLengthM?: string;
   recommendedQuantity?: string;
@@ -114,6 +115,7 @@ export function buildQuotationDraft(
     customerEmail: context.customerEmail,
     ...(context.printingMethod === "gravure" ? {
       copperPlateCostPerPiece: result.copperPlateCostPerPiece,
+      copperColorCount: String(result.gravure?.copperPlateCount ?? context.colorCount),
       orderPatternCount: String(result.orderPatternCount ?? 1),
       deliverablePatternLengthM: result.deliverablePatternLengthM ?? "5500",
       recommendedQuantity: result.recommendedQuantity ?? result.quantity,

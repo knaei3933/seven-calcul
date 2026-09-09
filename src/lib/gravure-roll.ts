@@ -114,6 +114,8 @@ export interface GravureRollCostResult {
   customsCostYen: string;
   overseasShippingCostYen: string;
   shippingTrips: number;
+  copperPlateCount: number;
+  copperPlateUnitPriceYen: string;
   copperPlateCostYen: string;
   totalGravureCostYen: string;
   smallWidthTier: boolean;
@@ -266,15 +268,18 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
   const customsCostYen = customsBaseCostYen.times(params.customsRate);
   const plateWidthCm = materialWidthMm.plus(D(params.copperPlateWidthExtraMm)).div(10);
   const plateDiameterCm = D(params.copperPlateMinimumDiameterMm).div(10);
-  const calculatedCopperPlateCostYen = colors
-    .times(plateWidthCm)
+  const copperPlateCount = Math.max(1, colors.toDecimalPlaces(0, Decimal.ROUND_CEIL).toNumber());
+  const calculatedCopperPlatePricePerColorYen = plateWidthCm
     .times(params.newCopperPlateUnitPriceYen)
     .times(plateDiameterCm)
     .toDecimalPlaces(0, Decimal.ROUND_CEIL);
-  const copperPlateCostYen = Decimal.max(
+  const copperPlatePricePerColorYen = Decimal.max(
     GRAVURE_ROLL_COPPER_PLATE_MINIMUM_YEN,
-    calculatedCopperPlateCostYen,
+    calculatedCopperPlatePricePerColorYen,
   );
+  const copperPlateCostYen = copperPlatePricePerColorYen
+    .times(copperPlateCount)
+    .toDecimalPlaces(0, Decimal.ROUND_CEIL);
 
   const perPieceRequiredLength = requiredLengthM.div(quantity);
   const patternCapacity = deliverableLengthM.div(perPieceRequiredLength).toDecimalPlaces(0, Decimal.ROUND_FLOOR);
@@ -301,6 +306,8 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
     customsCostYen: customsCostYen.toString(),
     overseasShippingCostYen: overseasShippingCostYen.toString(),
     shippingTrips,
+    copperPlateCount,
+    copperPlateUnitPriceYen: copperPlatePricePerColorYen.toString(),
     copperPlateCostYen: copperPlateCostYen.toString(),
     totalGravureCostYen: customsBaseCostYen.plus(customsCostYen).plus(overseasShippingCostYen).plus(copperPlateCostYen).toString(),
     smallWidthTier,

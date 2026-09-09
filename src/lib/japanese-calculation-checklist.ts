@@ -109,7 +109,8 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
     add("gravure.customs", gravure, "通関料", "製造者販売価格基準の通関費用です。", `基準価格 = ${number(g.customsBaseCostYen)}円／税率 = ${percent(gp?.customsRate ?? 0.05)}`, "製造者販売価格 × 税率", `${number(g.customsBaseCostYen)} × ${gp?.customsRate ?? "0.05"}`, number(g.customsCostYen), "円");
     add("gravure.shipping", gravure, "海外配送費", "納品可能長基準の海外配送費です。", `回数 = ${g.shippingTrips}回／単価 = ${number(gp?.overseasShippingPerTripYen ?? 11000)}円/回`, "回数 × 海外配送単価", `${g.shippingTrips} × ${number(gp?.overseasShippingPerTripYen ?? 11000)}`, number(g.overseasShippingCostYen), "円");
     if (g.copperPlateCostYen) {
-      add("gravure.copper-plate", gravure, "新規銅版費", "常時新規製作する銅版費用です。", `最小金額 = ${number(32000)}円`, "MAX(32,000円, サイズ・色数による計算額)", "最小額を保証", number(g.copperPlateCostYen), "円");
+      add("gravure.copper-plate-unit", gravure, "新規銅版単価", "1色1本の新規銅版単価です。", `原反幅 = ${number(g.materialWidthMm)}mm／色数 = ${g.copperPlateCount}色`, "MAX(¥32,000, 版幅cm × 単価 × 外径cm)", "各色1本ごとに最小額を保証", number(g.copperPlateUnitPriceYen), "円/色");
+      add("gravure.copper-plate", gravure, "新規銅版費", "色数に応じた新規銅版費用です。", `銅版単価 = ${number(g.copperPlateUnitPriceYen)}円/色／色数 = ${g.copperPlateCount}色`, "銅版単価 × 色数", `${number(g.copperPlateUnitPriceYen)} × ${g.copperPlateCount}`, number(g.copperPlateCostYen), "円");
     }
   }
 

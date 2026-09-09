@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { sizeMaster } from "@/lib/constants";
-import { D } from "@/lib/decimal";
+import { D, Decimal } from "@/lib/decimal";
 import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
 import { analyzeQuotation, filmCompositionOf, printingMethodOf } from "@/lib/quotation-history";
 import {
@@ -518,7 +518,11 @@ function fallbackPurchaseOrder(record: QuotationRecord): PurchaseOrderSnapshot {
         plateWidthMm: D(webWidthMm).plus(100).toString(),
         diameterMm: 42,
         minimumPriceYen: "32000",
-        calculatedPriceYen: D(String(record.payload.copperPlateCostPerPiece ?? 0)).times(quantity).toString(),
+        unitPriceYen: D(String(record.payload.copperPlateCostPerPiece ?? 0))
+          .times(quantity)
+          .div(colorCount)
+          .toDecimalPlaces(0, Decimal.ROUND_CEIL)
+          .toString(),
         priceYen: D(String(record.payload.copperPlateCostPerPiece ?? 0)).times(quantity).toString(),
       },
     };
@@ -664,7 +668,8 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
                       <ol>
                         <li>銅版数 ＝ 印刷色数。</li>
                         <li>版幅 ＝ 原反幅 {formatNumber(order.webWidthMm, 0)}mm ＋ 端代100mm ＝ {formatNumber(order.copperPlate.plateWidthMm, 0)}mm。</li>
-                        <li>金額 ＝ MAX(¥32,000, 銅版数 × 版幅cm × 単価 × 外径cm)。小数は切り上げ。</li>
+                        <li>1本 ＝ MAX(¥32,000, 版幅cm × 単価 × 外径cm)。小数は切り上げ。</li>
+                        <li>金額 ＝ 1本単価 × 銅版数。銅版は印刷色ごとに1本必要です。</li>
                       </ol>
                     </>
                   ) : <p>銅版情報が保存されていません。</p>}

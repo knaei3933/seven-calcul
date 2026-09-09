@@ -40,7 +40,7 @@ export type PurchaseOrderSnapshot = {
     plateWidthMm: string;
     diameterMm: number;
     minimumPriceYen: string;
-    calculatedPriceYen: string;
+    unitPriceYen: string;
     priceYen: string;
   };
 };
@@ -96,11 +96,11 @@ export function buildPurchaseOrderSnapshot(result: CostResult, context: Purchase
     productionPatternLengthM: result.film.orderLengthM,
     gravureLossM: result.film.lossM,
     copperPlate: result.gravure ? {
-      quantity: Number(D(context.colorCount)),
+      quantity: result.gravure.copperPlateCount,
       plateWidthMm: D(result.gravure.finalHeatSealWidthMm).minus(10).plus(100).toString(),
       diameterMm: 42,
       minimumPriceYen: "32000",
-      calculatedPriceYen: result.gravure.copperPlateCostYen,
+      unitPriceYen: result.gravure.copperPlateUnitPriceYen,
       priceYen: result.gravure.copperPlateCostYen,
     } : undefined,
   };

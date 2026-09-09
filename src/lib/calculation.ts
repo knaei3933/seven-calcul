@@ -60,6 +60,8 @@ export interface CostResult {
     customsCostYen: string;
     overseasShippingCostYen: string;
     shippingTrips: number;
+    copperPlateCount: number;
+    copperPlateUnitPriceYen: string;
     copperPlateCostYen: string;
     materialWidthMm: string;
     finalHeatSealWidthMm: string;
@@ -337,8 +339,10 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
         smallWidthManufacturerUnitPriceKRWPerM: gravureRoll.smallWidthManufacturerUnitPriceKRWPerM,
         customsBaseCostYen: gravureRoll.customsBaseCostYen,
         customsCostYen: gravureRoll.customsCostYen,
-        overseasShippingCostYen: gravureRoll.overseasShippingCostYen,
-        shippingTrips: gravureRoll.shippingTrips,
+      overseasShippingCostYen: gravureRoll.overseasShippingCostYen,
+      shippingTrips: gravureRoll.shippingTrips,
+      copperPlateCount: gravureRoll.copperPlateCount,
+      copperPlateUnitPriceYen: gravureRoll.copperPlateUnitPriceYen,
       copperPlateCostYen: gravureRoll.copperPlateCostYen,
       materialWidthMm: gravureRoll.materialWidthMm,
       finalHeatSealWidthMm: gravureRoll.finalHeatSealWidthMm,
