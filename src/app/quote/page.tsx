@@ -245,7 +245,9 @@ export default function PrintableQuotationPage() {
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState("");
+  const [savedRecordId, setSavedRecordId] = useState<number | null>(null);
   const [checklistUrl, setChecklistUrl] = useState("");
+  const [checklistOpening, setChecklistOpening] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [mobileDrawer, setMobileDrawer] = useState<"left" | "right" | null>(null);
   const [isMobileWorkspace, setIsMobileWorkspace] = useState(false);
@@ -352,7 +354,7 @@ export default function PrintableQuotationPage() {
   const update = <K extends keyof QuoteForm>(key: K, value: QuoteForm[K]) =>
     setForm((old) => ({ ...old, [key]: value }));
 
-  const saveToHistory = async () => {
+  const saveToHistory = async (): Promise<string | false> => {
     if (!totals) return false;
     if (!shownTotals) return false;
     setSaving(true);
@@ -426,16 +428,25 @@ export default function PrintableQuotationPage() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "save_failed");
       const checklistUrl = `/checklists/${payload.record.id}`;
+      setSavedRecordId(Number(payload.record.id));
       setChecklistUrl(checklistUrl);
       sessionStorage.setItem(LAST_CHECKLIST_URL_KEY, checklistUrl);
       setSavedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
-      return true;
+      return checklistUrl;
     } catch {
       setSaveError("履歴DBに保存できませんでした。テスト環境ではデータが保持されない場合があります。");
       return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  const openChecklist = async () => {
+    if (!valid || checklistOpening) return;
+    setChecklistOpening(true);
+    const url = await saveToHistory();
+    setChecklistOpening(false);
+    if (url) window.location.assign(url);
   };
 
   const printPdf = async () => {
@@ -857,15 +868,16 @@ export default function PrintableQuotationPage() {
           <button className="button secondary" type="button" onClick={() => router.push("/")}>シミュレーターから取込</button>
           <button className="button secondary" type="button" data-testid="save-history" disabled={!valid || saving} onClick={() => void saveToHistory()}>{saving ? "保存中..." : savedAt ? `履歴保存済 ${savedAt}` : "履歴に保存"}</button>
           <button className="button" type="button" data-testid="print-pdf" disabled={!valid || saving} onClick={() => void printPdf()}>PDF出力（A4）</button>
-          {checklistUrl ? (
-            <a className="button secondary" href={checklistUrl} title="保存した見積書の計算確認チェックリストを開きます">
-              計算確認チェックリスト
-            </a>
-          ) : (
-            <button className="button secondary" type="button" disabled title="履歴に保存後に開けます">
-              計算確認チェックリスト
-            </button>
-          )}
+          <button
+            className="button secondary"
+            type="button"
+            disabled={!valid || saving || checklistOpening}
+            title="現在の見積内容を保存し、計算確認チェックリストを開きます"
+            data-testid="open-checklist"
+            onClick={() => void openChecklist()}
+          >
+            {checklistOpening ? "チェックリスト作成中..." : "計算確認チェックリスト"}
+          </button>
         </div>
         {saveError ? <p className="error" role="alert" data-testid="save-error">{saveError}</p> : null}
       </section>
