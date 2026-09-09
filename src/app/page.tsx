@@ -372,6 +372,7 @@ export default function QuotationPage() {
         webWidthMm: effectiveSize.webWidthMm,
         lanes: effectiveSize.lanes,
         pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
+        pitchAddMm: effectiveSize.pitchAddMm,
         prodMultiplier: effectiveSize.prodMultiplier,
         colorCount: Math.max(...form.skus.map((sku) => Number(sku.colorCount) || 0)),
         skus: form.skus.map((sku) => ({
@@ -429,8 +430,16 @@ export default function QuotationPage() {
           webWidthMm: effectiveSize.webWidthMm,
           lanes: effectiveSize.lanes,
           pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
+          pitchAddMm: effectiveSize.pitchAddMm,
           prodMultiplier: effectiveSize.prodMultiplier,
           colorCount: Math.max(...form.skus.map((sku) => Number(sku.colorCount) || 0)),
+          skus: form.skus.map((sku) => ({
+            name: sku.name,
+            quantity: sku.quantity,
+            fillMl: sku.fillMl,
+            colorCount: sku.colorCount,
+          })),
+          gravureParameters: normalizedGravureParameters,
         })),
       );
     } catch {

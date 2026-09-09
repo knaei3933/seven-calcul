@@ -62,6 +62,8 @@ export type CalculationChecklistSnapshot = {
   pouchWidthMm?: string;
   pouchLengthMm?: string;
   pitchMm?: string;
+  pitchAddMm?: string;
+  materialWidthMm?: string;
   parameters: CostParameters;
   fillMlPerChamber: string;
   totalFillMlPerPouch: string;
@@ -114,8 +116,10 @@ export function readCalculationChecklistSnapshot(value: unknown): CalculationChe
   const hasText = (...values: unknown[]) => values.every((entry) => typeof entry === "string" && entry.trim() !== "");
   const film = snapshot.film;
   const parameters = snapshot.parameters;
-  return hasText(snapshot.checklistVersion, snapshot.quantity, snapshot.totalCostPerPiece)
+  return snapshot.checklistVersion === CHECKLIST_VERSION
+    && hasText(snapshot.quantity, snapshot.totalCostPerPiece, snapshot.pouchWidthMm, snapshot.pouchLengthMm, snapshot.pitchMm, snapshot.pitchAddMm, snapshot.materialWidthMm)
     && typeof snapshot.connectedChambers === "number"
+    && Array.isArray(snapshot.skus) && snapshot.skus.length > 0
     && !!film && typeof film === "object"
     && hasText(film.requiredLengthM, film.orderLengthM, film.unitPrice, film.filmTotal)
     && Array.isArray(snapshot.sellingPrices)
@@ -138,6 +142,7 @@ export type CalculationChecklistContext = {
   lanes?: number;
   webWidthMm?: number;
   pitchMm?: string;
+  pitchAddMm?: string;
   prodMultiplier?: number;
   colorCount?: number;
   skus?: {
@@ -174,6 +179,10 @@ export function buildCalculationChecklistSnapshot(
     pouchWidthMm: context.widthMm,
     pouchLengthMm: context.lengthMm,
     pitchMm: context.pitchMm,
+    pitchAddMm: context.pitchAddMm,
+    materialWidthMm: context.webWidthMm != null
+      ? String(context.webWidthMm)
+      : result.gravure?.materialWidthMm,
     fillMlPerChamber: result.fillMlPerChamber,
     totalFillMlPerPouch: result.totalFillMlPerPouch,
     fillingMethod: result.fillingMethod,

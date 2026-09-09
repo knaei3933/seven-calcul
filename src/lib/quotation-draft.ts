@@ -72,6 +72,7 @@ export function buildQuotationDraft(
     webWidthMm: number;
     lanes: number;
     pitchMm: string;
+    pitchAddMm: string;
     prodMultiplier: number;
     colorCount: number;
     skus?: {
@@ -134,6 +135,7 @@ export function buildQuotationDraft(
       webWidthMm: context.webWidthMm,
       lanes: context.lanes,
       pitchMm: context.pitchMm,
+      pitchAddMm: context.pitchAddMm,
       prodMultiplier: context.prodMultiplier,
       colorCount: context.colorCount,
       skus: context.skus,

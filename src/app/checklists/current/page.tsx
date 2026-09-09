@@ -5,6 +5,7 @@ import {
   CHECKLIST_VERSION,
   CURRENT_CHECKLIST_SNAPSHOT_KEY,
   buildChecklistItems,
+  readCalculationChecklistSnapshot,
   type CalculationChecklistSnapshot,
   type ChecklistAudience,
   type ChecklistItem,
@@ -46,7 +47,11 @@ export default function CurrentChecklistPage() {
           setMissing(true);
           return;
         }
-        const parsedSnapshot = JSON.parse(rawSnapshot) as CalculationChecklistSnapshot;
+        const parsedSnapshot = readCalculationChecklistSnapshot(JSON.parse(rawSnapshot));
+        if (!parsedSnapshot || parsedSnapshot.checklistVersion !== CHECKLIST_VERSION) {
+          setMissing(true);
+          return;
+        }
         setSnapshot(parsedSnapshot);
         const rawConfirmations = sessionStorage.getItem(CONFIRMATIONS_KEY);
         if (rawConfirmations) {
