@@ -11,6 +11,7 @@ import Link from "next/link";
 import { defaultGravureRollParameters, type GravureRollParameters } from "@/lib/gravure-roll";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { QUOTATION_DRAFT_KEY, buildQuotationDraft } from "@/lib/quotation-draft";
+import { calculateAutomaticQuotation } from "@/lib/quotation-pricing";
 import { deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calculations";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
 import type { CustomerMaster, CustomerMasterInput } from "@/lib/quotation-shared";
@@ -417,10 +418,13 @@ export default function QuotationPage() {
 
   // 조건変更後は自動試算を見せず、必ずサーバー再計算結果へ切り替える。
   const resultShown: ReturnType<typeof calculatePouchCost> | null = staleResult ? null : serverResult?.result ?? null;
-  const customerPrice = resultShown?.sellingPrices.find((price: { margin: string; pricePerPiece: string; totalSales: string; profit: string }) => Number(price.margin) === Number(effectiveMargin));
+  const quotationPreview = useMemo(
+    () => resultShown ? calculateAutomaticQuotation(resultShown, effectiveMargin) : null,
+    [effectiveMargin, resultShown],
+  );
 
   useEffect(() => {
-    if (!resultShown || !customerPrice || !customerDraft) return;
+    if (!resultShown || !quotationPreview || !customerDraft) return;
     try {
       sessionStorage.setItem(
         QUOTATION_DRAFT_KEY,
@@ -463,7 +467,7 @@ export default function QuotationPage() {
     } catch {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
-  }, [customerDraft, customerPrice, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, resultShown]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
+  }, [customerDraft, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, quotationPreview, resultShown]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
 
   const startCustomerEdit = (customer: CustomerMaster) => {
     setEditingCustomerCode(customer.customerCode);
@@ -1113,8 +1117,8 @@ export default function QuotationPage() {
             <div className={staleResult ? "quote-sheet provisional-quote stale-result" : "quote-sheet provisional-quote"}>
               <h3>お見積書（プレビュー）</h3>
               <p className="help">宛先・発行日・有効期限はSeven書式確定後に設定します。</p>
-              <dl><div><dt>品名</dt><dd>パウチ製品</dd></div><div><dt>数量</dt><dd>{formatNumber(form.quantity)} 枚</dd></div><div><dt>適用利益率</dt><dd>{formatNumber(Number(effectiveMargin) * 100, 3)}%（参考値）</dd></div><div><dt>単価</dt><dd>{customerPrice ? formatCurrency(customerPrice.pricePerPiece) : "-"}</dd></div></dl>
-              <div className="quote-total"><span>参考税抜金額</span><span data-testid="customer-total">{customerPrice ? formatCurrency(displayAmount(customerPrice.totalSales)) : "-"}</span></div>
+              <dl><div><dt>品名</dt><dd>パウチ製品</dd></div><div><dt>数量</dt><dd>{formatNumber(form.quantity)} 枚</dd></div><div><dt>適用利益率</dt><dd>{formatNumber(Number(effectiveMargin) * 100, 3)}%（参考値）</dd></div><div><dt>単価</dt><dd>{quotationPreview ? formatCurrency(quotationPreview.display.pricePerPiece, 2) : "-"}</dd></div></dl>
+              <div className="quote-total"><span>参考税抜金額</span><span data-testid="customer-total">{quotationPreview ? formatCurrency(quotationPreview.subtotal.toString(), 0) : "-"}</span></div>
               <div className="field target-margin-preview">
                 <span id="margin-label">目標利益率（参考値）</span>
                 <div className="radio-cards" role="radiogroup" aria-labelledby="margin-label">
