@@ -105,6 +105,24 @@ async function getDatabase(): Promise<DatabaseSync> {
       FOREIGN KEY (quotation_id) REFERENCES quotations(id)
     );
   `);
+  // 社名表記を「金井貿易株式会社」へ統一する（旧default・既存DB値を含む）。
+  database.exec(`
+    UPDATE quotation_checklists
+    SET
+      checked_by = CASE checked_by
+        WHEN '카네이무역 내부 QA' THEN '金井貿易株式会社 内部QA'
+        WHEN 'カネイ貿易 社内QA' THEN '金井貿易株式会社 社内QA'
+        ELSE checked_by
+      END,
+      items_json = replace(
+        replace(items_json, 'カネイ貿易 社内QA', '金井貿易株式会社 社内QA'),
+        '카네이무역 内部 QA',
+        '金井貿易株式会社 内部QA'
+      )
+    WHERE checked_by IN ('카네이무역 내부 QA', 'カネイ貿易 社内QA')
+       OR items_json LIKE '%카네이무역%'
+       OR items_json LIKE '%カネイ貿易%'
+  `);
   return database;
 }
 
@@ -343,7 +361,7 @@ export async function createChecklistsForQuotation(record: QuotationRecord, snap
       "in_progress",
       JSON.stringify(snapshot),
       JSON.stringify(itemTemplates),
-      audience === "CUSTOMER" ? record.customerName || "고객" : "카네이무역 내부 QA",
+      audience === "CUSTOMER" ? record.customerName || "顧客" : "金井貿易株式会社 内部QA",
       now,
       now,
     );
@@ -382,7 +400,7 @@ export async function createLegacyChecklistsForQuotation(
       "in_progress",
       JSON.stringify({ printingMethod }),
       JSON.stringify(items),
-      audience === "CUSTOMER" ? record.customerName || "고객" : "카네이무역 내부 QA",
+      audience === "CUSTOMER" ? record.customerName || "顧客" : "金井貿易株式会社 内部QA",
       now,
       now,
     );

@@ -171,7 +171,7 @@ export default function QuotationHistoryPage() {
                       className="button small"
                       type="button"
                       disabled={record.status !== "approved"}
-                      title={record.status === "approved" ? "カネイ貿易向け発注内容を表示" : "成約処理後に表示できます"}
+                      title={record.status === "approved" ? "金井貿易株式会社向け発注内容を表示" : "成約処理後に表示できます"}
                       onClick={() => setPurchaseRecord(record)}
                     >発注内容</button>
                     <button className="button secondary small" type="button" onClick={() => restore(record)}>復元</button>
@@ -815,7 +815,7 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
         <header className="purchase-order-header">
           <div>
             <span className="side-kicker">PURCHASE ORDER</span>
-            <h2 id="purchase-order-title">カネイ貿易 発注内容</h2>
+            <h2 id="purchase-order-title">金井貿易株式会社 発注内容</h2>
             <p>{record.quotationNumber} ／ {record.customerName || "-"} ／ {record.productName}</p>
           </div>
           <button className="button secondary small" type="button" onClick={onClose}>閉じる</button>
@@ -828,7 +828,7 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
               <section className="purchase-order-section">
                 <h3>発注サマリー</h3>
                 <dl className="purchase-order-grid">
-                  <div><dt>発注先</dt><dd>カネイ貿易</dd></div>
+                  <div><dt>発注先</dt><dd>金井貿易株式会社</dd></div>
                   <div><dt>印刷方式</dt><dd>{order.printingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}</dd></div>
                   <div><dt>発注数量</dt><dd>{formatNumber(record.quantity, 0)} 枚</dd></div>
                   <div><dt>フィルム構成</dt><dd>{order.filmComposition}</dd></div>

@@ -221,7 +221,7 @@ export default function CurrentChecklistPage() {
     setUpdatingItemId(itemId);
     const checkedAt = nextAccepted ? new Date().toISOString() : null;
     const reviewer = nextAccepted
-      ? reviewerName.trim() || (activeAudience === "CUSTOMER" ? "顧客" : "カネイ貿易 社内QA")
+      ? reviewerName.trim() || (activeAudience === "CUSTOMER" ? "顧客" : "金井貿易株式会社 社内QA")
       : null;
 
     setConfirmations((old) => ({
@@ -300,7 +300,7 @@ export default function CurrentChecklistPage() {
           </div>
           <label className="current-reviewer">
             確認者
-            <input value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} placeholder={activeAudience === "CUSTOMER" ? "顧客" : "カネイ貿易 社内QA"} />
+            <input value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} placeholder={activeAudience === "CUSTOMER" ? "顧客" : "金井貿易株式会社 社内QA"} />
           </label>
         </div>
 

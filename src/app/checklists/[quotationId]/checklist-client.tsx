@@ -46,7 +46,7 @@ export function CalculationChecklistClient({ quotationId, quotationNumber, custo
           audience: activeAudience,
           itemId,
           accepted: nextAccepted,
-          checkedBy: checkedBy.trim() || (activeAudience === "CUSTOMER" ? customerName || "顧客" : "カネイ貿易 社内QA"),
+          checkedBy: checkedBy.trim() || (activeAudience === "CUSTOMER" ? customerName || "顧客" : "金井貿易株式会社 社内QA"),
         }),
       });
       const payload = await response.json();
@@ -91,7 +91,7 @@ export function CalculationChecklistClient({ quotationId, quotationNumber, custo
             </div>
             <label>
               確認者
-              <input value={checkedBy} onChange={(event) => setCheckedBy(event.target.value)} placeholder={activeAudience === "CUSTOMER" ? customerName || "顧客" : "カネイ貿易 社内QA"} />
+              <input value={checkedBy} onChange={(event) => setCheckedBy(event.target.value)} placeholder={activeAudience === "CUSTOMER" ? customerName || "顧客" : "金井貿易株式会社 社内QA"} />
             </label>
             <p className="warning">チェック完了は確認記録です。見積発行・成約処理を自動的に禁止/解除するものではありません。</p>
           </section>
