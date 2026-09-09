@@ -574,7 +574,11 @@ export default function PrintableQuotationPage() {
           ? roundUnit(remainingFillingAmount.div(totals.quantity))
           : D(0));
     }
-    const filmAmount = filmMeterUnit.times(totals.filmOrderLength);
+    // フィルム金額は円単位で確定する。円未満は四捨五入し、単価は換算値を表示する。
+    const filmAmount = filmMeterUnit.times(totals.filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    if (totals.filmOrderLength.gt(0)) {
+      filmMeterUnit = filmAmount.div(totals.filmOrderLength);
+    }
     const fillingAmount = parseDecimal(form.fillingAmountDisplay) ?? fillingUnit.times(totals.quantity);
     const customAmount = parseDecimal(form.customAmountDisplay) ?? customUnit.times(customQuantity);
     const filmPouchUnit = totals.quantity.gt(0) ? filmAmount.div(totals.quantity) : D(0);
@@ -656,7 +660,8 @@ export default function PrintableQuotationPage() {
     const filmMeterUnit = form.printingMethod === "gravure"
       ? filmAmount.div(orderLength)
       : clampFilmMeterUnit(filmAmount.div(orderLength));
-    const clampedFilmAmount = filmMeterUnit.times(orderLength);
+    const clampedFilmAmount = filmMeterUnit.times(orderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    const displayFilmMeterUnit = orderLength.gt(0) ? clampedFilmAmount.div(orderLength) : filmMeterUnit;
     const filmPouchUnit = clampedFilmAmount.div(quantity);
     const copperUnit = copperAmount.div(quantity);
     const customUnit = customAmount.div(quantity);
@@ -668,7 +673,7 @@ export default function PrintableQuotationPage() {
       pricePerPieceDisplay: price.toString(),
       fillingUnitDisplay: fillingUnit.toString(),
       fillingAmountDisplay: fillingAmount.toString(),
-      filmUnitDisplay: filmMeterUnit.toString(),
+      filmUnitDisplay: displayFilmMeterUnit.toString(),
       filmPouchUnitDisplay: filmPouchUnit.toString(),
       filmAmountDisplay: clampedFilmAmount.toString(),
       copperUnitDisplay: copperColorCount.gt(0) ? copperAmount.div(copperColorCount).toString() : copperUnit.toString(),
@@ -1022,6 +1027,7 @@ export default function PrintableQuotationPage() {
                       <strong><EditableText value={form.filmItemName} label="フィルム項目名" onCommit={(next) => update("filmItemName", next.trim())} /></strong>
                       <small><EditableText value={form.filmItemDescription} label="フィルム説明" multiline onCommit={(next) => update("filmItemDescription", next)} /></small>
                       <small className="film-composition" data-testid="film-composition">構成：<EditableText value={form.filmComposition || DEFAULT_FILM_COMPOSITION} label="フィルム構成" onCommit={(next) => update("filmComposition", next.trim())} /></small>
+                      <small>フィルム金額は円未満を四捨五入します。</small>
                     </td>
                     <td>
                       <strong data-testid="film-meter-price"><EditableText value={moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay)} label="フィルム販売m単価" className="money" onCommit={commitFilmMeterUnit} /> /m</strong>

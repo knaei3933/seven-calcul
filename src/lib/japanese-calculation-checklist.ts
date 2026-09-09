@@ -1,4 +1,4 @@
-import { D } from "./decimal";
+import { D, Decimal } from "./decimal";
 import type { CalculationChecklistSnapshot, ChecklistItem } from "./calculation-checklist";
 
 function number(value: unknown, maximumFractionDigits = 2): string {
@@ -107,7 +107,7 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
     add("film.domestic-shipping", film, "国内配送費", "国内輸送費用です。", `回数 = ${snapshot.film.shippingTrips}回／単価 = ${number(p.domesticShippingPerTrip)}円/回`, "回数 × 国内配送単価", `${snapshot.film.shippingTrips} × ${number(p.domesticShippingPerTrip)}`, number(snapshot.film.domesticShipping), "円");
     add("film.overseas-shipping", film, "海外配送費", "海外輸送費用です。", `回数 = ${snapshot.film.shippingTrips}回／単価 = ${number(p.overseasShippingPerTrip)}円/回`, "回数 × 海外配送単価", `${snapshot.film.shippingTrips} × ${number(p.overseasShippingPerTrip)}`, number(snapshot.film.overseasShipping), "円");
     add("film.customs", film, "通関料", "閾値超過時は固定額、未満は回数×単価です。", `本体費 = ${number(snapshot.film.filmBaseCost)}円／閾値 = ${number(p.customsThreshold)}円`, "閾値超過: 固定額／未満: 回数 × 回単価", snapshot.film.customs === p.customsHighCharge ? `閾値超過 = ${number(p.customsHighCharge)}円` : `${snapshot.film.shippingTrips} × ${number(p.customsPerTrip)}`, number(snapshot.film.customs), "円");
-    add("film.total", film, "フィルム費用合計", "本体費と物流・通関費用の合計です。", `本体費 = ${number(snapshot.film.filmBaseCost)}円／国内 = ${number(snapshot.film.domesticShipping)}円／海外 = ${number(snapshot.film.overseasShipping)}円／通関 = ${number(snapshot.film.customs)}円`, "本体費 + 国内配送 + 海外配送 + 通関料", `${number(snapshot.film.filmBaseCost)} + ${number(snapshot.film.domesticShipping)} + ${number(snapshot.film.overseasShipping)} + ${number(snapshot.film.customs)}`, number(snapshot.film.filmTotal), "円");
+  add("film.total", film, "フィルム費用合計", "本体費と物流・通関費用の合計です。金額は円単位に四捨五入しています。", `本体費 = ${number(snapshot.film.filmBaseCost)}円／国内 = ${number(snapshot.film.domesticShipping)}円／海外 = ${number(snapshot.film.overseasShipping)}円／通関 = ${number(snapshot.film.customs)}円`, "本体費 + 国内配送 + 海外配送 + 通関料（円未満四捨五入）", `${number(snapshot.film.filmBaseCost)} + ${number(snapshot.film.domesticShipping)} + ${number(snapshot.film.overseasShipping)} + ${number(snapshot.film.customs)} = ${number(snapshot.film.filmTotal)}円（円未満四捨五入済み）`, number(snapshot.film.filmTotal), "円");
   }
 
 
@@ -122,7 +122,8 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
   if (snapshot.gravure) {
     const gravure = "グラビアフィルム・銅版";
     const productionLength = snapshot.film.orderLengthM;
-    const saleMeterUnit = D(snapshot.film.filmTotal).div(D(productionLength));
+    const filmTotalYen = D(snapshot.film.filmTotal).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    const saleMeterUnit = filmTotalYen.div(D(productionLength));
     const saleMeterDisplay = number(saleMeterUnit, 2);
     add(
       "gravure.pattern-count",
@@ -150,10 +151,10 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
       "gravure.sale-meter-price",
       gravure,
       "適用フィルム販売単価",
-      "外部供給価格として確定したm当たり販売単価です。構成原価は表示しません。",
-      `フィルム費用合計 = ${number(snapshot.film.filmTotal)}円／製作長 = ${number(productionLength)}m`,
+      "外部供給価格として確定したm当たり販売単価です。構成原価は表示しません。円単位に四捨五入した合計から換算し、2桁まで表示します。",
+      `フィルム費用合計 = ${number(filmTotalYen)}円／製作長 = ${number(productionLength)}m`,
       "フィルム費用合計 ÷ 製作長",
-      `${number(snapshot.film.filmTotal)} ÷ ${number(productionLength)} = ${saleMeterDisplay}`,
+      `${number(filmTotalYen)} ÷ ${number(productionLength)} = ${saleMeterDisplay}`,
       saleMeterDisplay,
       "円/m",
     );
@@ -163,9 +164,9 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
       "フィルム費用合計",
       "外部供給価格として確定したフィルム費用です。",
       `適用販売単価 = ${saleMeterDisplay}円/m／製作長 = ${number(productionLength)}m`,
-      "適用販売単価 × 製作長（確定合計）",
-      `確定合計 = ${number(snapshot.film.filmTotal)}円`,
-      number(snapshot.film.filmTotal),
+      "適用販売単価 × 製作長（確定合計・円未満四捨五入）",
+      `確定合計 = ${number(filmTotalYen)}円（円未満四捨五入済み）`,
+      number(filmTotalYen),
       "円",
     );
     if (snapshot.gravure.copperPlateCostYen) {

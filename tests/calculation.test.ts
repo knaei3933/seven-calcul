@@ -257,17 +257,16 @@ describe("gravure roll integration", () => {
       + Number(result.gravure?.customsCostYen)
       + Number(result.gravure?.overseasShippingCostYen);
     expect(Number(result.sellerProfitBaseCost)).toBeCloseTo(rawGravureFilmTotal, 8);
-    expect(Number(result.film.filmTotal)).toBeCloseTo(rawGravureFilmTotal * 1.12, 8);
+    const yenRoundedFilmTotal = Math.round(rawGravureFilmTotal * 1.12);
+    expect(Number(result.film.filmTotal)).toBe(yenRoundedFilmTotal);
+    expect(Number(result.film.filmTotal) % 1).toBe(0);
     expect(Number(result.gravure?.manufacturerMarginCostYen)).toBeCloseTo(Number(result.gravure?.filmCostYen) * 0.2, 8);
     expect(Number(result.film.overseasShipping)).toBe(121000);
     expect(Number(result.copperPlateCost)).toBeGreaterThan(0);
     expect(result.costComponents.copperPlate).toBe(result.copperPlateCost);
     expect(result.sellerProfitRate).toBe("0.12");
     expect(Number(result.sellerProfitCost)).toBeCloseTo(Number(result.sellerProfitBaseCost) * 0.12, 8);
-    expect(Number(result.costComponents.film)).toBeCloseTo(
-      Number(result.sellerProfitBaseCost) * 1.12,
-      8,
-    );
+    expect(Number(result.costComponents.film)).toBe(yenRoundedFilmTotal);
     expect(result.costPerPieceComponents.copperPlate).toBe(result.copperPlateCostPerPiece);
     expect(result.audit.componentReconciliationDifference).toBe("0");
 

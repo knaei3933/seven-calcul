@@ -921,6 +921,7 @@ export default function QuotationPage() {
                         )}
                       </tbody>
                     </table>
+                    <p className="chain">フィルム費用合計は円単位に四捨五入しています。単価は小数2桁まで表示できます。</p>
                     <div className="chain-steps" data-testid="film-loss-chain">
                       {(() => {
                         const f = resultShown.film;

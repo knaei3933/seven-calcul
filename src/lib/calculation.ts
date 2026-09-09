@@ -257,11 +257,15 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
   const appliesSellerProfit = printingMethod === "gravure";
   const sellerProfitBaseCost = appliesSellerProfit ? D(filmWithSkus.filmTotal) : D(0);
   const sellerProfitCost = sellerProfitBaseCost.times(params.sellerProfitRate);
-  const filmCostWithSellerProfit = D(filmWithSkus.filmTotal).plus(sellerProfitCost);
+  const filmCostWithSellerProfitRaw = D(filmWithSkus.filmTotal).plus(sellerProfitCost);
+  // フィルム費用は見積・発注書の金額単位に合わせて円未満を四捨五入する。
+  const filmCostWithSellerProfit = appliesSellerProfit
+    ? filmCostWithSellerProfitRaw.toDecimalPlaces(0, Decimal.ROUND_HALF_UP)
+    : filmCostWithSellerProfitRaw;
   const filmWithSellerProfit: FilmCostResult = {
     ...filmWithSkus,
     filmBaseCost: filmWithSkus.filmBaseCost,
-    unitPrice: filmWithSkus.unitPrice,
+    unitPrice: appliesSellerProfit && filmWithSkus.orderLengthM ? filmCostWithSellerProfit.div(filmWithSkus.orderLengthM).toString() : filmWithSkus.unitPrice,
     filmTotal: filmCostWithSellerProfit.toString(),
     filmCostPerPiece: filmCostWithSellerProfit.div(quantityD).toString(),
   };
