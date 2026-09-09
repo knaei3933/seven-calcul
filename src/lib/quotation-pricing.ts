@@ -26,6 +26,7 @@ export type AutomaticQuotationTotals = {
   customQuantity: Decimal;
   customSaleTotal: Decimal;
   customSalePerPiece: Decimal;
+  totalCostPerPiece: Decimal;
   copperColorCount: Decimal;
   fillingSellingUnit: Decimal;
   copperSellingUnit: Decimal;
@@ -79,6 +80,7 @@ export function calculateAutomaticQuotation(
   const customLotCost = D(result.customCharge);
   const copperCostPerPiece = D(result.copperPlateCostPerPiece);
   const filmCostPerPiece = D(result.costPerPieceComponents.film);
+  const totalCostPerPiece = D(result.totalCostPerPiece);
   const filmOrderLength = D(result.film.orderLengthM);
   const copperColorCount = D(result.gravure?.copperPlateCount ?? 1);
 
@@ -152,6 +154,7 @@ export function calculateAutomaticQuotation(
     customQuantity,
     customSaleTotal,
     customSalePerPiece,
+    totalCostPerPiece,
     copperColorCount,
     fillingSellingUnit,
     copperSellingUnit,

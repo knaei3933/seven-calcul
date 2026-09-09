@@ -882,7 +882,7 @@ export default function QuotationPage() {
             <div className="result-header" data-testid="server-result" data-state={staleResult ? "stale" : pending ? "calculating" : serverResult ? "calculated" : "not_calculated"}><h2 id="result-title">原価・利益試算</h2><span>{pending ? "計算中" : staleResult ? "再計算が必要" : serverResult ? `サーバー計算済み ${calculatedAt ?? ""}` : "サーバー再計算待ち"}</span></div>
             {!resultShown ? <div className="empty">「サーバーで再計算する」を実行すると結果を表示します。</div> : pending ? <div className="skeleton" aria-live="polite"><div /><div style={{ width: "70%" }} /><div style={{ width: "45%" }} /></div> : (
               <>
-                <p className="total-label">発注数量 {formatNumber(resultShown.quantity)} 枚 基準・1枚あたり原価</p>
+                <p className="total-label">発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</p>
                 <p className="total">
                   {formatCurrency(displayAmount(resultShown.totalCostPerPiece))}<span className="help"> / 枚</span>
                   <span className="total-sub">総原価 <strong>{formatCurrency(displayAmount(resultShown.costTotal))}</strong> ／ 参考: フィルム発注 {formatNumber(resultShown.film.orderLengthM)}m で製造可能 {formatNumber(resultShown.film.actualQuantity)} 枚（余剰 ≈ {formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）</span>
@@ -1117,7 +1117,24 @@ export default function QuotationPage() {
             <div className={staleResult ? "quote-sheet provisional-quote stale-result" : "quote-sheet provisional-quote"}>
               <h3>お見積書（プレビュー）</h3>
               <p className="help">宛先・発行日・有効期限はSeven書式確定後に設定します。</p>
-              <dl><div><dt>品名</dt><dd>パウチ製品</dd></div><div><dt>数量</dt><dd>{formatNumber(form.quantity)} 枚</dd></div><div><dt>適用利益率</dt><dd>{formatNumber(Number(effectiveMargin) * 100, 3)}%（参考値）</dd></div><div><dt>単価</dt><dd>{quotationPreview ? formatCurrency(quotationPreview.display.pricePerPiece, 2) : "-"}</dd></div></dl>
+              <dl>
+                <div>
+                  <dt>品名</dt><dd>パウチ製品</dd>
+                </div>
+                <div><dt>数量</dt><dd>{formatNumber(form.quantity)} 枚</dd></div>
+                <div><dt>適用利益率</dt><dd>{formatNumber(Number(effectiveMargin) * 100, 3)}%（参考値）</dd></div>
+                <div>
+                  <dt>販売単価</dt>
+                  <dd>
+                    {quotationPreview ? (
+                      <>
+                        {formatCurrency(quotationPreview.display.pricePerPiece, 2)}
+                        <span className="help">（原価 {formatCurrency(quotationPreview.totalCostPerPiece.toString(), 2)} /枚）</span>
+                      </>
+                    ) : "-"}
+                  </dd>
+                </div>
+              </dl>
               <div className="quote-total"><span>参考税抜金額</span><span data-testid="customer-total">{quotationPreview ? formatCurrency(quotationPreview.subtotal.toString(), 0) : "-"}</span></div>
               <div className="field target-margin-preview">
                 <span id="margin-label">目標利益率（参考値）</span>
