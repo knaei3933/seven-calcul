@@ -1089,7 +1089,7 @@ export default function PrintableQuotationPage() {
                       <td>
                       <strong><EditableText value={form.copperItemName} label="銅版費項目名" onCommit={(next) => update("copperItemName", next.trim())} /></strong>
                       <small><EditableText value={form.copperItemDescription} label="銅版費説明" multiline onCommit={(next) => update("copperItemDescription", next)} /></small>
-                      <small className="film-composition">銅版単価は目標利益率を反映した供給価格です（最低¥32,000/色）。</small>
+                      <small className="film-composition">印刷色1色につき新規銅版1本を作成します。</small>
                       </td>
                       <td><EditableText value={moneyDisplay(shownTotals.copperColorUnit, form.copperUnitDisplay, 0)} label="銅版費単価" className="money" onCommit={commitCopperUnit} /> /色</td>
                       <td><EditableText value={numberDisplay(form.copperColorCount)} label="銅版費数量" className="money" onCommit={commitCopperColorQuantity} /> 色</td>
@@ -1270,6 +1270,16 @@ export default function PrintableQuotationPage() {
             const percent = Number(raw);
             if (Number.isFinite(percent)) updateTargetMargin((percent / 100).toString());
           }} /></label>
+          {shownTotals && parsedCopperCost && parsedQuantity && parsedTargetMargin && parsedTargetMargin.gt(0) && parsedTargetMargin.lt(1) ? (
+            <div className="chain copper-cost-audit" data-testid="copper-cost-audit">
+              <strong>銅版費の計算確認（非印刷）</strong>
+              <p>
+                原価 = {formatCurrency(parsedCopperCost.times(parsedQuantity).toString())}（{formatCurrency(D(parsedCopperCost.times(parsedQuantity)).div(parseDecimal(form.copperColorCount) ?? D(1)).toString())} /色）<br />
+                目標利益率 = {formatNumber(D(parsedTargetMargin).times(100).toString(), 1)}%<br />
+                見積金額 = {formatCurrency(shownTotals.copperAmount)}（{formatCurrency(shownTotals.copperColorUnit)} /色・1円単位切上げ）
+              </p>
+            </div>
+          ) : null}
         </div>
       </details>
       </>
