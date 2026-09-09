@@ -357,6 +357,25 @@ export default function PrintableQuotationPage() {
   const update = <K extends keyof QuoteForm>(key: K, value: QuoteForm[K]) =>
     setForm((old) => ({ ...old, [key]: value }));
 
+  const updateTargetMargin = (value: string) => applyPatch({
+    targetMargin: value,
+    // 利益率変更後の手動表示値は古いため、自動計算へ戻す。
+    fillingUnitDisplay: "",
+    fillingAmountDisplay: "",
+    filmUnitDisplay: "",
+    filmPouchUnitDisplay: "",
+    filmAmountDisplay: "",
+    copperUnitDisplay: "",
+    copperAmountDisplay: "",
+    customUnitDisplay: "",
+    customAmountDisplay: "",
+    pricePerPieceDisplay: "",
+    adjustmentDisplay: "",
+    subtotalDisplay: "",
+    taxDisplay: "",
+    grandTotalDisplay: "",
+  });
+
   const saveToHistory = async (): Promise<string | false> => {
     if (!totals) return false;
     if (!shownTotals) return false;
@@ -1068,8 +1087,9 @@ export default function PrintableQuotationPage() {
                   {form.printingMethod === "gravure" ? (
                     <tr>
                       <td>
-                        <strong><EditableText value={form.copperItemName} label="銅版費項目名" onCommit={(next) => update("copperItemName", next.trim())} /></strong>
-                        <small><EditableText value={form.copperItemDescription} label="銅版費説明" multiline onCommit={(next) => update("copperItemDescription", next)} /></small>
+                      <strong><EditableText value={form.copperItemName} label="銅版費項目名" onCommit={(next) => update("copperItemName", next.trim())} /></strong>
+                      <small><EditableText value={form.copperItemDescription} label="銅版費説明" multiline onCommit={(next) => update("copperItemDescription", next)} /></small>
+                      <small className="film-composition">銅版単価は目標利益率を反映した供給価格です（最低¥32,000/色）。</small>
                       </td>
                       <td><EditableText value={moneyDisplay(shownTotals.copperColorUnit, form.copperUnitDisplay, 0)} label="銅版費単価" className="money" onCommit={commitCopperUnit} /> /色</td>
                       <td><EditableText value={numberDisplay(form.copperColorCount)} label="銅版費数量" className="money" onCommit={commitCopperColorQuantity} /> 色</td>
@@ -1244,11 +1264,11 @@ export default function PrintableQuotationPage() {
           <label>目標利益率（%）<input inputMode="decimal" value={isFiniteNumber(form.targetMargin) ? D(form.targetMargin).times(100).toDecimalPlaces(2, Decimal.ROUND_DOWN).toString() : ""} onChange={(event) => {
             const raw = event.target.value.trim();
             if (raw === "") {
-              update("targetMargin", "");
+              updateTargetMargin("");
               return;
             }
             const percent = Number(raw);
-            if (Number.isFinite(percent)) update("targetMargin", (percent / 100).toString());
+            if (Number.isFinite(percent)) updateTargetMargin((percent / 100).toString());
           }} /></label>
         </div>
       </details>

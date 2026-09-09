@@ -185,12 +185,16 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
     params,
   );
   const requiredLengthM = sum(skuRequiredLengths);
+  // 銅版はSKU（デザイン）ごとの色数を合算して必要本数を判定する。
+  const copperPlateColors = sum(
+    (spec.skuColorCounts?.length ? spec.skuColorCounts : [spec.colorCount]).map((colors) => D(colors)),
+  );
   const gravureRoll = printingMethod === "gravure"
     ? calculateGravureRollCost({
         requiredLengthM,
         materialWidthMm: Decimal.max(500, size.webWidthMm),
         pouchWidthMm: size.widthMm,
-        colors: spec.colorCount,
+        colors: copperPlateColors,
         quantity,
         skuColorUsage: skuRequiredLengths.map((length, index) => ({
           lengthM: length.toString(),

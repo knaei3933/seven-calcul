@@ -295,6 +295,10 @@ export default function QuotationPage() {
     skuFillMlPerChamber: form.skus.map((sku) => sku.fillMl),
     skuColorCounts: form.skus.map((sku) => sku.colorCount),
   }), [form, skuCount, weightedAvgFill]);
+  const copperPlateColorTotal = form.skus.reduce(
+    (total, sku) => total + (isNonNegativeDecimalInput(sku.colorCount) ? Math.ceil(Number(sku.colorCount)) : 0),
+    0,
+  );
 
   const setParameter = (
     key: "lossRate" | "lossMinM" | "digitalFilmMinSkuM" | "digitalFilmMinTotalM" | "domesticShippingPerTrip" | "overseasShippingPerTrip" | "customsThreshold" | "customsHighCharge" | "customsPerTrip" | "bulkLossRate" | "fillTestRuns" | "hopperInitialChargeMl" | "pressureInitialChargeMl" | "laborPerHour" | "machineChargePerHour" | "productionSpeedPerMinute" | "inspectionSpeed" | "setupTime" | "cleanupTime" | "customPouchCharge" | "sellerProfitRate",

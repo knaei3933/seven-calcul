@@ -300,6 +300,22 @@ describe("gravure roll integration", () => {
 
     expect(Number(skuColors.gravure?.printingCostYen)).toBeCloseTo(Number(sameColors.gravure?.printingCostYen), 8);
   });
+
+  it("counts copper plates for every SKU color when SKU color counts differ", () => {
+    const result = calculatePouchCost({
+      spec: {
+        ...baseSpec,
+        skuCount: 2,
+        skuQuantities: ["5000", "5000"],
+        skuColorCounts: ["2", "3"],
+      },
+      quantity: "10000",
+      printingMethod: "gravure",
+    });
+
+    expect(result.gravure?.copperPlateCount).toBe(5);
+    expect(Number(result.copperPlateCost)).toBe(160000);
+  });
 });
 
 function sameSpec() {
