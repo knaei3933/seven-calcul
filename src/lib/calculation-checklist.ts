@@ -1,11 +1,13 @@
 import type { CostResult } from "./calculation";
-import { defaultParameters } from "./constants";
+import { defaultParameters, sizeMaster } from "./constants";
 import type { CostParameters } from "./types";
+import type { QuotationRecord } from "./quotation-shared";
 import { D } from "./decimal";
 
 export type ChecklistAudience = "CUSTOMER" | "INTERNAL_QA";
 
 export const CURRENT_CHECKLIST_SNAPSHOT_KEY = "pouch-current-checklist-snapshot-v1";
+export const LEGACY_CHECKLIST_VERSION = "legacy-2026-09.3";
 
 export type ChecklistItemState = {
   accepted: boolean;
@@ -29,7 +31,7 @@ export type ChecklistRecord = {
   audience: ChecklistAudience;
   checklistVersion: string;
   status: "in_progress" | "completed";
-  snapshot: CalculationChecklistSnapshot;
+  snapshot: Partial<CalculationChecklistSnapshot>;
   items: ChecklistItem[];
   acceptedCount: number;
   totalCount: number;
@@ -83,6 +85,22 @@ export type CalculationChecklistSnapshot = {
   productionPatternLengthM: string;
   sellerProfitCost: string;
 };
+
+export function readCalculationChecklistSnapshot(value: unknown): CalculationChecklistSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const snapshot = value as Partial<CalculationChecklistSnapshot>;
+  const hasText = (...values: unknown[]) => values.every((entry) => typeof entry === "string" && entry.trim() !== "");
+  const film = snapshot.film;
+  const parameters = snapshot.parameters;
+  return hasText(snapshot.checklistVersion, snapshot.quantity, snapshot.totalCostPerPiece)
+    && typeof snapshot.connectedChambers === "number"
+    && !!film && typeof film === "object"
+    && hasText(film.requiredLengthM, film.orderLengthM, film.unitPrice, film.filmTotal)
+    && Array.isArray(snapshot.sellingPrices)
+    && !!parameters && typeof parameters === "object"
+    ? snapshot as CalculationChecklistSnapshot
+    : null;
+}
 
 export type CalculationChecklistContext = {
   quotationNumber: string;
@@ -259,5 +277,49 @@ export function buildChecklistItems(snapshot: CalculationChecklistSnapshot): Che
     }
   }
 
+  return items;
+}
+
+export function buildLegacyChecklistItems(record: QuotationRecord, printingMethod: string): ChecklistItem[] {
+  const payload = record.payload;
+  const value = (key: string): string => typeof payload[key] === "string" || typeof payload[key] === "number" ? String(payload[key]) : "";
+  const stored = (key: string, fallback = "0"): string => {
+    const raw = value(key) || record[key as keyof QuotationRecord];
+    return typeof raw === "string" && raw.trim() !== "" ? raw : typeof raw === "number" ? String(raw) : fallback;
+  };
+  const sizeMatch = record.sizeSummary.match(/([0-9.]+)\s*×\s*([0-9.]+)/);
+  const widthMm = sizeMatch ? Number(sizeMatch[1]) : 0;
+  const lengthMm = sizeMatch ? Number(sizeMatch[2]) : 0;
+  const size = Object.values(sizeMaster).find((entry) => Number(entry.widthMm) === widthMm && Number(entry.lengthMm) === lengthMm);
+  const lanes = size?.lanes ?? 4;
+  const pitchMm = size ? D(size.lengthMm).plus(size.pitchAddMm).toString() : String(lengthMm + 6);
+  const connected = Number(record.sizeSummary.match(/([1-4])連/)?.[1] ?? 1);
+  const orderLengthM = D(record.filmOrderLengthM);
+  const filmMeterPrice = D(record.filmMeterPrice);
+  const filmAmount = value("filmAmountDisplay") || orderLengthM.times(filmMeterPrice).toString();
+  const fillingUnit = stored("fillingCostPerPiece");
+  const fillingAmount = value("fillingAmountDisplay") || D(record.quantity).times(D(fillingUnit)).toString();
+  const customCost = stored("customLotCost");
+  const totalCostPerPiece = value("totalCostPerPiece") || D(fillingUnit).plus(D(record.filmCostPerPiece)).plus(D(customCost).div(D(record.quantity))).toString();
+  const items: ChecklistItem[] = [];
+  const add = (...arguments_: Parameters<typeof item>) => {
+    items.push(item(...arguments_));
+  };
+
+  add("legacy.quantity", "기본 견적 조건", "발주 수량", "견적서에 저장된 발주 수량입니다.", "저장값", `저장값 = ${record.quantity}`, record.quantity, "枚");
+  add("legacy.connected", "기본 견적 조건", "연결 형식", "저장된 사이즈 요약에서 확인한 연결 수입니다.", "사이즈 요약 파싱", `사이즈 요약 = ${record.sizeSummary}`, String(connected), "連");
+  add("legacy.size", "기본 견적 조건", "파우치 사이즈", "저장된 사이즈 요약입니다.", "저장값", record.sizeSummary, `${widthMm} × ${lengthMm} mm`, "mm");
+  add("legacy.film-order", "필름 계산", "필름 발주 길이", "견적서에 저장된 필름 발주 길이입니다.", "저장값", `저장값 = ${record.filmOrderLengthM}`, record.filmOrderLengthM, "m");
+  add("legacy.film-unit", "필름 계산", "필름 구매 단가", "견적서에 저장된 M당 필름 구매 단가입니다.", "저장값", `저장값 = ${record.filmMeterPrice}`, record.filmMeterPrice, "円/m");
+  add("legacy.film-amount", "필름 계산", "필름 표시 금액", "견적서에 저장된 필름 표시 금액입니다.", "저장된 표시 금액 우선", value("filmAmountDisplay") || "계산 불가", filmAmount, "円");
+  add("legacy.filling-unit", "충전・가공비", "충전・가공 단가", "견적서에 저장된 1개당 충전·가공 단가입니다.", "저장값", `저장값 = ${fillingUnit}`, fillingUnit, "円");
+  add("legacy.filling-amount", "충전・가공비", "충전・가공 금액", "견적서 저장값이 없으면 발주 수량 × 단가로 재계산합니다.", value("fillingAmountDisplay") ? "저장값" : "발주数量 × 단가", `${record.quantity} × ${fillingUnit}`, fillingAmount, "円");
+  if (printingMethod === "gravure") {
+    add("legacy.gravure-pattern", "그라비아 계산", "発注パターン", "저장된 그라비아 발주 패턴 수입니다.", "저장값", `저장값 = ${value("orderPatternCount")}`, value("orderPatternCount"), "回");
+    add("legacy.gravure-delivery", "그라비아 계산", "納品パターン長", "저장된 납품 패턴 길이입니다.", "저장값", `저장값 = ${value("deliverablePatternLengthM")}`, value("deliverablePatternLengthM"), "m");
+    add("legacy.gravure-production", "그라비아 계산", "製作長", "저장된 그라비아 제작 길이입니다.", "저장값", `저장값 = ${record.filmOrderLengthM}`, record.filmOrderLengthM, "m");
+  }
+  add("legacy.custom", "커스텀 / 금형", "金型・カスタム費用", "견적서에 저장된 금형·커스텀 비용입니다. 저장값이 없으면 0円으로 표시합니다.", "저장값", `저장값 = ${customCost}`, customCost, "円");
+  add("legacy.total-cost", "마진 / 합계", "総原価 /枚", "견적서 저장값이 없으면 충전·가공 단가 + 필름 단가 + 커스텀 개당 비용으로 재구성합니다.", value("totalCostPerPiece") ? "저장값" : "충전단가 + 필름단가 + 커스텀/枚", totalCostPerPiece, "円");
   return items;
 }

@@ -5,7 +5,14 @@ import { quotationStatuses, type QuotationStatus } from "./quotation-shared";
 import { QUOTATION_RESTORE_KEY } from "./quotation-shared";
 import { D } from "./decimal";
 import type { QuotationRecord, QuotationRecordInput, ChecklistAudience } from "./quotation-shared";
-import { buildChecklistItems, type CalculationChecklistSnapshot, type ChecklistAudience as ChecklistAudienceValue, type ChecklistRecord } from "./calculation-checklist";
+import {
+  buildChecklistItems,
+  buildLegacyChecklistItems,
+  LEGACY_CHECKLIST_VERSION,
+  type CalculationChecklistSnapshot,
+  type ChecklistAudience as ChecklistAudienceValue,
+  type ChecklistRecord,
+} from "./calculation-checklist";
 
 export { QUOTATION_RESTORE_KEY, quotationStatuses };
 export type { QuotationRecord, QuotationRecordInput, QuotationStatus };
@@ -285,7 +292,7 @@ function mapChecklistRow(row: ChecklistRow): ChecklistRecord {
     audience: row.audience,
     checklistVersion: row.checklist_version,
     status: row.status as "in_progress" | "completed",
-    snapshot: JSON.parse(row.snapshot_json) as CalculationChecklistSnapshot,
+    snapshot: JSON.parse(row.snapshot_json) as Partial<CalculationChecklistSnapshot>,
     items,
     acceptedCount: accepted,
     totalCount: items.length,
@@ -310,10 +317,13 @@ function calculateChecklistProgress(items: import("./calculation-checklist").Che
 
 export async function createChecklistsForQuotation(record: QuotationRecord, snapshot: CalculationChecklistSnapshot): Promise<ChecklistRecord[]> {
   const db = await getDatabase();
-  const existing = db.prepare("SELECT COUNT(*) n FROM quotation_checklists WHERE quotation_id = ?").get(record.id) as { n: number };
-  if (existing.n > 0) {
-    const rows = db.prepare("SELECT * FROM quotation_checklists WHERE quotation_id = ? ORDER BY audience").all(record.id) as unknown as ChecklistRow[];
-    return rows.map(mapChecklistRow);
+  const existing = db.prepare("SELECT checklist_version FROM quotation_checklists WHERE quotation_id = ?").all(record.id) as Array<{ checklist_version: string }>;
+  if (existing.length > 0) {
+    if (!existing.every((row) => row.checklist_version.startsWith("legacy-"))) {
+      const rows = db.prepare("SELECT * FROM quotation_checklists WHERE quotation_id = ? ORDER BY audience").all(record.id) as unknown as ChecklistRow[];
+      return rows.map(mapChecklistRow);
+    }
+    db.prepare("DELETE FROM quotation_checklists WHERE quotation_id = ?").run(record.id);
   }
 
   const itemTemplates = buildChecklistItems(snapshot);
@@ -339,6 +349,45 @@ export async function createChecklistsForQuotation(record: QuotationRecord, snap
   }
   const rows = db.prepare("SELECT * FROM quotation_checklists WHERE quotation_id = ? ORDER BY audience").all(record.id) as unknown as ChecklistRow[];
   return rows.map(mapChecklistRow);
+}
+
+export async function createLegacyChecklistsForQuotation(
+  record: QuotationRecord,
+  printingMethod: "digital" | "gravure",
+): Promise<ChecklistRecord[]> {
+  const db = await getDatabase();
+  const existing = db.prepare("SELECT checklist_version FROM quotation_checklists WHERE quotation_id = ?").all(record.id) as Array<{ checklist_version: string }>;
+  if (existing.length > 0 && existing.every((row) => row.checklist_version === LEGACY_CHECKLIST_VERSION)) {
+    return getChecklistsForQuotation(record.id);
+  }
+  if (existing.length > 0) {
+    db.prepare("DELETE FROM quotation_checklists WHERE quotation_id = ? AND checklist_version LIKE 'legacy-%'").run(record.id);
+  }
+
+  const items = buildLegacyChecklistItems(record, printingMethod);
+  const audiences: ChecklistAudienceValue[] = ["CUSTOMER", "INTERNAL_QA"];
+  const now = new Date().toISOString();
+  const insert = db.prepare(`
+    INSERT INTO quotation_checklists (
+      quotation_id,audience,checklist_version,status,snapshot_json,items_json,checked_by,created_at,updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?)
+  `);
+
+  for (const audience of audiences) {
+    insert.run(
+      record.id,
+      audience,
+      LEGACY_CHECKLIST_VERSION,
+      "in_progress",
+      JSON.stringify({ printingMethod }),
+      JSON.stringify(items),
+      audience === "CUSTOMER" ? record.customerName || "고객" : "카네이무역 내부 QA",
+      now,
+      now,
+    );
+  }
+
+  return getChecklistsForQuotation(record.id);
 }
 
 export async function getChecklistsForQuotation(quotationId: number): Promise<ChecklistRecord[]> {

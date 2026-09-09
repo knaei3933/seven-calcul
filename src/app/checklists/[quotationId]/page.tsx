@@ -1,5 +1,12 @@
 import { notFound } from "next/navigation";
-import { getChecklistsForQuotation, getQuotation } from "@/lib/quotation-store";
+import {
+  createChecklistsForQuotation,
+  createLegacyChecklistsForQuotation,
+  getChecklistsForQuotation,
+  getQuotation,
+} from "@/lib/quotation-store";
+import { readCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
+import { printingMethodOf } from "@/lib/quotation-history";
 import { CalculationChecklistClient } from "./checklist-client";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +23,16 @@ export default async function ChecklistPage({ params }: PageProps) {
   const quotation = await getQuotation(id);
   if (!quotation) notFound();
 
-  const checklists = await getChecklistsForQuotation(id);
+  const savedChecklists = await getChecklistsForQuotation(id);
+  const payloadSnapshot = readCalculationChecklistSnapshot(quotation.payload.calculationChecklistSnapshot);
+  const hasLegacyChecklists = savedChecklists.length > 0
+    && savedChecklists.every((record) => record.checklistVersion.startsWith("legacy-"));
+  const shouldRebuild = savedChecklists.length === 0 || hasLegacyChecklists;
+  const checklists = shouldRebuild
+    ? payloadSnapshot
+      ? await createChecklistsForQuotation(quotation, payloadSnapshot)
+      : await createLegacyChecklistsForQuotation(quotation, printingMethodOf(quotation))
+    : savedChecklists;
 
   return (
     <main className="checklist-page">
@@ -26,6 +42,11 @@ export default async function ChecklistPage({ params }: PageProps) {
         <p className="help">
           このページは計算根拠の確認記録です。チェック完了しても見積発行や成約処理を自動的に禁止/解除しません。
         </p>
+        {checklists[0]?.checklistVersion.startsWith("legacy-") ? (
+          <p className="warning">
+            この見積りはチェックリスト機能導入前に保存されています。保存済み見積り情報から計算根拠を再構築して表示しています。
+          </p>
+        ) : null}
       </section>
 
       {checklists.length === 0 ? (

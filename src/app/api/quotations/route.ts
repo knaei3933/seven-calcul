@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { createChecklistsForQuotation, getQuotationByNumber, listQuotations, saveQuotation, validateQuotationInput } from "@/lib/quotation-store";
-import type { CalculationChecklistSnapshot } from "@/lib/calculation-checklist";
+import { createChecklistsForQuotation, listQuotations, saveQuotation, validateQuotationInput } from "@/lib/quotation-store";
+import { readCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,13 +23,10 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     const input = validateQuotationInput(await request.json());
     if (!input) return NextResponse.json({ error: "invalid_quotation" }, { status: 400 });
-    const existing = await getQuotationByNumber(input.quotationNumber);
     const record = await saveQuotation(input);
-    if (!existing) {
-      const snapshot = input.payload.calculationChecklistSnapshot;
-      if (snapshot && typeof snapshot === "object") {
-        await createChecklistsForQuotation(record, snapshot as CalculationChecklistSnapshot);
-      }
+    const snapshot = readCalculationChecklistSnapshot(input.payload.calculationChecklistSnapshot);
+    if (snapshot) {
+      await createChecklistsForQuotation(record, snapshot);
     }
     return NextResponse.json({ record }, { status: 201 });
   } catch {

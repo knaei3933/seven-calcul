@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { analyzeQuotation } from "@/lib/quotation-history";
 import { calculatePouchCost } from "@/lib/calculation";
-import { buildCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
+import { buildCalculationChecklistSnapshot, buildLegacyChecklistItems } from "@/lib/calculation-checklist";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-store-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
-const { createChecklistsForQuotation, getChecklistsForQuotation, getQuotation, saveQuotation, updateChecklistItem } = await import("@/lib/quotation-store");
+const { createChecklistsForQuotation, createLegacyChecklistsForQuotation, getChecklistsForQuotation, getQuotation, saveQuotation, updateChecklistItem } = await import("@/lib/quotation-store");
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
@@ -149,5 +149,48 @@ describe("quotation persistence with a manually edited selling price", () => {
     expect(internalRecord.acceptedCount).toBe(0);
     expect(customerRecord.items.find((item) => item.id === "film.total")!.accepted).toBe(true);
     expect(internalRecord.items.find((item) => item.id === "film.total")!.accepted).toBe(false);
+  });
+
+  it("rebuilds persistent checklists for quotations saved before checklist snapshots", async () => {
+    const quotationInput: QuotationRecordInput = {
+      quotationNumber: "S7-LEGACY-CHECKLIST-001",
+      status: "draft",
+      issueDate: "2026-09-01",
+      validUntil: "2026-10-01",
+      customerName: "レガシー株式会社",
+      customerContact: "担当者様",
+      productName: "レガシーパウチ",
+      sizeSummary: "60×80mm / 2連",
+      quantity: "50000",
+      fillingCostPerPiece: "4",
+      filmCostPerPiece: "6",
+      filmMeterPrice: "252",
+      filmOrderLengthM: "1200",
+      targetMargin: "0.4",
+      taxRatePercent: "10",
+      pricePerPiece: "20",
+      subtotal: "1000000",
+      tax: "100000",
+      grandTotal: "1100000",
+      deliveryDate: "別途相談",
+      paymentTerms: "別途相談",
+      notes: "legacy quotation",
+      calculationVersion: "legacy",
+      resultHash: "legacy-hash",
+      payload: {},
+    };
+    const saved = await saveQuotation(quotationInput);
+    const items = buildLegacyChecklistItems(saved, "digital");
+    expect(items.length).toBeGreaterThan(5);
+    expect(items.every((item) => item.id && item.result !== "")).toBe(true);
+
+    const created = await createLegacyChecklistsForQuotation(saved, "digital");
+    expect(created).toHaveLength(2);
+    expect(created.every((record) => record.checklistVersion === "legacy-2026-09.3")).toBe(true);
+    expect(created.every((record) => record.totalCount === items.length)).toBe(true);
+
+    const updated = await updateChecklistItem(saved.id, "CUSTOMER", "legacy.quantity", true, "レガシー確認者");
+    expect(updated!.items.find((item) => item.id === "legacy.quantity")!.accepted).toBe(true);
+    expect(await getChecklistsForQuotation(saved.id)).toHaveLength(2);
   });
 });
