@@ -43,20 +43,7 @@ export default async function ChecklistPage({ params }: PageProps) {
     : savedChecklists;
 
   return (
-    <main className="checklist-page">
-      <section className="panel checklist-header">
-        <h1>計算確認チェックリスト</h1>
-        <p>{quotation.quotationNumber} ／ {quotation.customerName || "-"} ／ {quotation.productName}</p>
-        <p className="help">
-          このページは計算根拠の確認記録です。チェック完了しても見積発行や成約処理を自動的に禁止/解除しません。
-        </p>
-        {checklists[0]?.checklistVersion.startsWith("legacy-") ? (
-          <p className="warning">
-            この見積りはチェックリスト機能導入前に保存されています。保存済み見積り情報から計算根拠を再構築して表示しています。
-          </p>
-        ) : null}
-      </section>
-
+    <main className="checklist-page current-checklist">
       {checklists.length === 0 ? (
         <section className="panel">
           <p className="empty">この見積りはチェックリスト機能導入前に保存されています。新しい見積りを保存すると自動生成されます。</p>
@@ -67,6 +54,7 @@ export default async function ChecklistPage({ params }: PageProps) {
           quotationNumber={quotation.quotationNumber}
           customerName={quotation.customerName}
           records={checklists}
+          isLegacy={checklists[0]?.checklistVersion.startsWith("legacy-")}
         />
       )}
     </main>
