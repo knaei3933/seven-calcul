@@ -1,6 +1,5 @@
 "use client";
 
-import { createHash } from "node:crypto";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { calculatePouchCost } from "@/lib/calculation";
 import { defaultParameters, defaultProductionSpeedForFillMl, machineChargeBasis, sizeMaster } from "@/lib/constants";
@@ -105,7 +104,7 @@ export default function QuotationPage() {
   const [parameters, setParameters] = useState<CostParameters>(defaultParameters);
   const [gravureParameters, setGravureParameters] = useState<GravureRollParameters>(() => normalizeGravureParameters(defaultGravureRollParameters()));
   const [machineBreakdown, setMachineBreakdown] = useState<Record<MachineBreakdownKey, string>>(() => ({ ...MACHINE_BREAKDOWN_DEFAULTS }));
-  type ServerCalculation = { result: ReturnType<typeof calculatePouchCost>; inputSha256: string };
+  type ServerCalculation = { result: ReturnType<typeof calculatePouchCost>; inputJson: string };
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -221,7 +220,7 @@ export default function QuotationPage() {
           } else if (saved.parameters?.productionSpeedPerMinute) {
             setProductionSpeedManual(true);
           }
-          if (saved.serverResult?.result && typeof saved.serverResult.inputSha256 === "string") {
+          if (saved.serverResult?.result && typeof saved.serverResult.inputJson === "string") {
             setServerResult(saved.serverResult);
           }
           if (typeof saved.calculatedAt === "string") {
@@ -349,8 +348,8 @@ export default function QuotationPage() {
     gravureParameters: normalizedGravureParameters,
   }), [spec, form.quantity, form.printingMethod, targetMarginList, effectiveParameters, normalizedGravureParameters]);
 
-  const inputSha256 = useMemo(() => createHash("sha256").update(JSON.stringify(calculationInput)).digest("hex"), [calculationInput]);
-  const staleResult = serverResult !== null && serverResult.inputSha256 !== inputSha256;
+  const calculationInputJson = useMemo(() => JSON.stringify(calculationInput), [calculationInput]);
+  const staleResult = serverResult !== null && serverResult.inputJson !== calculationInputJson;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -359,12 +358,12 @@ export default function QuotationPage() {
     setPending(true);
     setServerResult(null);
     try {
-      const requestedInputSha256 = inputSha256;
+      const requestedInputJson = calculationInputJson;
       const response = await fetch("/api/calculate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(calculationInput) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "calculation_failed");
       if (requestOrder !== requestOrderRef.current) return;
-      setServerResult({ result: payload.result, inputSha256: requestedInputSha256 });
+      setServerResult({ result: payload.result, inputJson: requestedInputJson });
       setCustomerDraft({
         customerName: form.customerName,
         customerCode: form.customerCode,
