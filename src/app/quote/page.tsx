@@ -57,6 +57,7 @@ type QuoteForm = {
   copperPlateCostPerPiece: string;
   sascheCandidateId: string;
   sascheCandidatesJson: string;
+  sascheOverToleranceReason: string;
   copperColorCount: string;
   orderPatternCount: string;
   deliverablePatternLengthM: string;
@@ -133,6 +134,7 @@ const defaultQuote: QuoteForm = {
   copperPlateCostPerPiece: "0",
   sascheCandidateId: "",
   sascheCandidatesJson: "[]",
+  sascheOverToleranceReason: "",
   copperColorCount: "0",
   orderPatternCount: "0",
   deliverablePatternLengthM: "0",
@@ -331,6 +333,7 @@ export default function PrintableQuotationPage() {
           copperPlateCostPerPiece: draft.copperPlateCostPerPiece ?? "0",
           sascheCandidateId: draft.sascheCandidate?.id ?? "",
           sascheCandidatesJson: JSON.stringify(draft.sascheCandidates ?? []),
+          sascheOverToleranceReason: draft.sascheOverToleranceReason ?? "",
           copperColorCount: draft.copperColorCount ?? old.copperColorCount,
           orderPatternCount: draft.orderPatternCount ?? "0",
           deliverablePatternLengthM: draft.deliverablePatternLengthM ?? "0",
@@ -638,6 +641,11 @@ export default function PrintableQuotationPage() {
     };
   })();
 
+  const selectedSascheCandidate = (calculationChecklistSnapshot?.sascheCandidates ?? [])
+    .find((candidate) => candidate.id === form.sascheCandidateId) ?? null;
+  const candidateQuantityReductionRatio = selectedSascheCandidate
+    ? Number(selectedSascheCandidate.quantityReductionRatio)
+    : 0;
   const parseDisplayedNumber = (raw: string) => parseDecimal(raw.replace(/[,，]/g, "").replace(/[^\d.+-]/g, ""));
   const applyPatch = (patch: Partial<QuoteForm>) => setForm((old) => ({ ...old, ...patch }));
 
@@ -674,6 +682,8 @@ export default function PrintableQuotationPage() {
     if (!quantity || !quantity.gt(0)) return;
     applyPatch({
       sascheCandidateId: candidate.id,
+      sascheOverToleranceReason: "",
+      quantity: candidate.adjustedQuantity,
       filmOrderLengthM: candidate.outputLengthM,
       filmMeterPrice: candidate.filmUnitPriceYen,
       filmCostPerPiece: D(candidate.filmTotalYen).div(quantity).toString(),
@@ -1286,6 +1296,7 @@ export default function PrintableQuotationPage() {
           <label className="wide">金型 説明<textarea rows={2} value={form.customItemDescription} onChange={(event) => update("customItemDescription", event.target.value)} /></label>
           <label>銅版費 原価 / 枚<input inputMode="decimal" value={form.copperPlateCostPerPiece} onChange={(event) => update("copperPlateCostPerPiece", event.target.value)} /></label>
           {form.printingMethod === "gravure" && (calculationChecklistSnapshot?.sascheCandidates?.length ?? 0) > 0 ? (
+            <>
             <label className="wide">
               Sasche 発注候補（推奨＝バランス）
               <select
@@ -1295,12 +1306,19 @@ export default function PrintableQuotationPage() {
                 {(calculationChecklistSnapshot?.sascheCandidates ?? []).map((candidate) => (
                   <option key={candidate.id} value={candidate.id}>
                     {candidate.laneCount}丁 / {candidate.printTierM}m印刷 / 約{formatNumber(candidate.outputLengthM, 0)}m /
-                    余剰率 {formatNumber(Number(candidate.surplusRatio), 1)}% /
+                    調整後数量 {formatNumber(candidate.adjustedQuantity, 0)}枚 /
+                    数量減 {formatNumber(Number(candidate.quantityReductionRatio), 1)}% /
                     フィルム {formatCurrency(candidate.filmTotalYen, 0)}
                   </option>
                 ))}
               </select>
             </label>
+            {Number(form.copperColorCount) > 0 && Number(form.quantity) > 0 && Number(candidateQuantityReductionRatio) > 15 ? (
+              <p className="warning wide">
+                選択した候補は発注数量を15%以上減らします（{formatNumber(Number(candidateQuantityReductionRatio), 1)}%減）。理由を入力してください。
+              </p>
+            ) : null}
+            </>
           ) : null}
           <label>銅版費 単価 /色（空欄=自動）<input inputMode="decimal" value={form.copperUnitDisplay} onChange={(event) => update("copperUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>銅版費 色数<input inputMode="decimal" value={form.copperColorCount} onChange={(event) => update("copperColorCount", event.target.value)} /></label>

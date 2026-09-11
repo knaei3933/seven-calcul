@@ -18,6 +18,9 @@ export type SascheCandidate = {
   outputLengthM: string;
   requiredLengthM: string;
   quantity: string;
+  adjustedQuantity: string;
+  quantityReductionRatio: string;
+  quantityToleranceExceeded: boolean;
   colorCount: number;
   supplierUnitPriceYenPerM: string;
   sellerMarkup: "1.12";
@@ -60,6 +63,16 @@ function nearestWidthRow(webWidthMm: number) {
     )[0].row;
 }
 
+const QUANTITY_TOLERANCE = 0.15;
+
+function adjustedQuantityForOutput(outputLengthM: Decimal, requiredLengthM: Decimal, quantity: Decimal) {
+  const perPieceRequiredLength = quantity.gt(0) ? requiredLengthM.div(quantity) : D(0);
+  const maxQuantity = perPieceRequiredLength.gt(0)
+    ? outputLengthM.div(perPieceRequiredLength).toDecimalPlaces(0, Decimal.ROUND_FLOOR)
+    : D(0);
+  return maxQuantity;
+}
+
 export function selectSascheCandidate({
   webWidthMm,
   requiredLengthM,
@@ -92,12 +105,20 @@ export function selectSascheCandidate({
       const outputLengthM = D(row.approxLengthM).times(patternCount);
       const filmUnit = D(row.unitPrice).times(SELLER_MARKUP);
       const filmTotal = outputLengthM.times(filmUnit);
+      const perPieceRequiredLength = quantity.gt(0) ? requiredLengthM.div(quantity) : D(0);
+      const maxQuantity = perPieceRequiredLength.gt(0)
+        ? outputLengthM.div(perPieceRequiredLength).toDecimalPlaces(0, Decimal.ROUND_FLOOR)
+        : D(0);
       const surplus = Decimal.max(outputLengthM.minus(requiredLengthM), D(0));
       const shortage = Decimal.max(requiredLengthM.minus(outputLengthM), D(0));
       const surplusRatio = requiredLengthM.gt(0)
         ? surplus.div(requiredLengthM).times(100)
         : D(0);
       const id = `sasche-${row.webWidthMm}-${row.laneCount}-${row.printTierM}-${patternCount}`;
+      const adjustedQuantity = adjustedQuantityForOutput(outputLengthM, requiredLengthM, quantity);
+      const quantityReductionRatio = quantity.gt(0)
+        ? quantity.minus(adjustedQuantity).div(quantity).times(100)
+        : D(0);
       return {
         row,
         patternCount,
@@ -105,12 +126,15 @@ export function selectSascheCandidate({
         baseApproxLengthM: row.approxLengthM,
         supplierUnitPriceYenPerM: row.unitPrice,
         filmUnitPriceYen: filmUnit.toString(),
-        outputLengthM,
+        outputLengthM: outputLengthM.toString(),
         filmUnit,
         filmTotalYen: filmTotal.toString(),
         surplusLengthM: surplus.toString(),
         shortageLengthM: shortage.toString(),
         surplusRatio: surplusRatio.toString(),
+        adjustedQuantity: adjustedQuantity.toString(),
+        quantityReductionRatio: quantityReductionRatio.toString(),
+        quantityToleranceExceeded: quantityReductionRatio.gt(15),
         id,
       };
     });
@@ -136,6 +160,9 @@ export function selectSascheCandidate({
     outputLengthM: recommendedCandidate.outputLengthM.toString(),
     requiredLengthM: requiredLengthM.toString(),
     quantity: quantity.toString(),
+    adjustedQuantity: recommendedCandidate.adjustedQuantity.toString(),
+    quantityReductionRatio: recommendedCandidate.quantityReductionRatio.toString(),
+    quantityToleranceExceeded: recommendedCandidate.quantityToleranceExceeded,
     colorCount: plateCount,
     supplierUnitPriceYenPerM: recommendedCandidate.supplierUnitPriceYenPerM,
     sellerMarkup: SELLER_MARKUP,
@@ -189,6 +216,10 @@ export function buildSascheCandidates({
       const filmTotal = outputLengthM.times(filmUnit);
       const surplus = Decimal.max(outputLengthM.minus(requiredLengthM), D(0));
       const shortage = Decimal.max(requiredLengthM.minus(outputLengthM), D(0));
+      const perPieceRequiredLength = quantity.gt(0) ? requiredLengthM.div(quantity) : D(0);
+      const maxQuantity = perPieceRequiredLength.gt(0)
+        ? outputLengthM.div(perPieceRequiredLength).toDecimalPlaces(0, Decimal.ROUND_FLOOR)
+        : D(0);
       const surplusRatio = requiredLengthM.gt(0)
         ? surplus.div(requiredLengthM).times(100)
         : D(0);
@@ -205,6 +236,11 @@ export function buildSascheCandidates({
         outputLengthM: outputLengthM.toString(),
         requiredLengthM: requiredLengthM.toString(),
         quantity: quantity.toString(),
+        adjustedQuantity: maxQuantity.toString(),
+        quantityReductionRatio: quantity.gt(0)
+          ? quantity.minus(maxQuantity).div(quantity).times(100).toString()
+          : "0",
+        quantityToleranceExceeded: maxQuantity.lt(quantity.times(0.85)),
         colorCount: plateCount,
         supplierUnitPriceYenPerM: row.unitPrice,
         sellerMarkup: SELLER_MARKUP,

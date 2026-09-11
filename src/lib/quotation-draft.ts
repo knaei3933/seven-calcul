@@ -48,6 +48,7 @@ export interface QuotationDraft {
   purchaseOrder?: PurchaseOrderSnapshot;
   sascheCandidate?: SascheCandidate;
   sascheCandidates?: SascheCandidate[];
+  sascheOverToleranceReason?: string;
   calculationChecklistSnapshot?: import("./calculation-checklist").CalculationChecklistSnapshot;
 }
 
