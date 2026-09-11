@@ -195,12 +195,12 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
   const colors = D(input.colors);
   const params = input.parameters;
   const pouchWidthMm = D(input.pouchWidthMm ?? input.materialWidthMm);
-  if (quantity.lte(0) || requiredLengthM.lte(0) || materialWidthMm.lte(0) || colors.lte(0)) throw new Error("invalid_positive_input");
+  if (quantity.lte(0) || requiredLengthM.lte(0) || materialWidthMm.lte(0) || colors.lt(0)) throw new Error("invalid_positive_input");
   const skuColorUsage = input.skuColorUsage?.map((usage) => ({
     lengthM: D(usage.lengthM),
     colors: D(usage.colors),
   }));
-  if (skuColorUsage?.some((usage) => usage.lengthM.lte(0) || usage.colors.lte(0))) throw new Error("invalid_positive_input");
+  if (skuColorUsage?.some((usage) => usage.lengthM.lte(0) || usage.colors.lt(0))) throw new Error("invalid_positive_input");
   if (skuColorUsage) {
     const usageLength = skuColorUsage.reduce((total, usage) => total.plus(usage.lengthM), D(0));
     if (usageLength.minus(requiredLengthM).abs().gt("0.0000001")) throw new Error("invalid_sku_length_sum");
@@ -268,18 +268,24 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
   const customsCostYen = customsBaseCostYen.times(params.customsRate);
   const plateWidthCm = materialWidthMm.plus(D(params.copperPlateWidthExtraMm)).div(10);
   const plateDiameterCm = D(params.copperPlateMinimumDiameterMm).div(10);
-  const copperPlateCount = Math.max(1, colors.toDecimalPlaces(0, Decimal.ROUND_CEIL).toNumber());
+  const copperPlateCount = colors.lte(0)
+    ? 0
+    : Math.max(1, colors.toDecimalPlaces(0, Decimal.ROUND_CEIL).toNumber());
   const calculatedCopperPlatePricePerColorYen = plateWidthCm
     .times(params.newCopperPlateUnitPriceYen)
     .times(plateDiameterCm)
     .toDecimalPlaces(0, Decimal.ROUND_CEIL);
-  const copperPlatePricePerColorYen = Decimal.max(
-    GRAVURE_ROLL_COPPER_PLATE_MINIMUM_YEN,
-    calculatedCopperPlatePricePerColorYen,
-  );
-  const copperPlateCostYen = copperPlatePricePerColorYen
-    .times(copperPlateCount)
-    .toDecimalPlaces(0, Decimal.ROUND_CEIL);
+  const copperPlatePricePerColorYen = copperPlateCount === 0
+    ? D(0)
+    : Decimal.max(
+      GRAVURE_ROLL_COPPER_PLATE_MINIMUM_YEN,
+      calculatedCopperPlatePricePerColorYen,
+    );
+  const copperPlateCostYen = copperPlateCount === 0
+    ? D(0)
+    : copperPlatePricePerColorYen
+      .times(copperPlateCount)
+      .toDecimalPlaces(0, Decimal.ROUND_CEIL);
 
   const perPieceRequiredLength = requiredLengthM.div(quantity);
   const patternCapacity = deliverableLengthM.div(perPieceRequiredLength).toDecimalPlaces(0, Decimal.ROUND_FLOOR);

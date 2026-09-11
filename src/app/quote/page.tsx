@@ -546,7 +546,7 @@ export default function PrintableQuotationPage() {
     const totalPriceInput = parseDecimal(form.pricePerPieceDisplay) ?? totals.pricePerPiece;
     const targetTotal = totalPriceInput.times(totals.quantity);
     const parsedCopperColorCount = parseDecimal(form.copperColorCount);
-    const copperColorCount = parsedCopperColorCount && parsedCopperColorCount.gt(0)
+    const copperColorCount = parsedCopperColorCount && parsedCopperColorCount.gte(0)
       ? parsedCopperColorCount
       : purchaseOrder?.colorCount && purchaseOrder.colorCount > 0
         ? D(purchaseOrder.colorCount)
@@ -1084,7 +1084,7 @@ export default function PrintableQuotationPage() {
                       <td><EditableText value={moneyDisplay(shownTotals.customAmount, form.customAmountDisplay, 0)} label="金型金額" className="money" onCommit={commitCustomAmount} /></td>
                     </tr>
                   ) : null}
-                  {form.printingMethod === "gravure" ? (
+                  {form.printingMethod === "gravure" && Number(form.copperColorCount) > 0 ? (
                     <tr>
                       <td>
                       <strong><EditableText value={form.copperItemName} label="銅版費項目名" onCommit={(next) => update("copperItemName", next.trim())} /></strong>

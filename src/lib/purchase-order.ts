@@ -95,7 +95,7 @@ export function buildPurchaseOrderSnapshot(result: CostResult, context: Purchase
     deliverablePatternLengthM: result.deliverablePatternLengthM,
     productionPatternLengthM: result.film.orderLengthM,
     gravureLossM: result.film.lossM,
-    copperPlate: result.gravure ? {
+    copperPlate: result.gravure && result.gravure.copperPlateCount > 0 ? {
       quantity: result.gravure.copperPlateCount,
       plateWidthMm: D(result.gravure.finalHeatSealWidthMm).minus(10).plus(100).toString(),
       diameterMm: 42,
