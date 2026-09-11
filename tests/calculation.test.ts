@@ -239,9 +239,43 @@ describe("multi-SKU film aggregation", () => {
 });
 
 describe("gravure roll integration", () => {
+  it("selects the cheapest valid Sasche supplier candidate within the width tolerance", () => {
+    const result = calculatePouchCost({
+      spec: { ...baseSpec, sizeKey: "round-60x80", connectedChambers: 1, colorCount: 2 },
+      quantity: "10000",
+      printingMethod: "gravure",
+    });
+
+    expect(result.gravurePricingMode).toBe("sasche");
+    expect(result.gravure?.pricingMode).toBe("sasche");
+    expect(result.sasche?.webWidthMm).toBe(556);
+    expect(result.sasche?.laneCount).toBe(1);
+    expect(result.sasche?.printTierM).toBe(2000);
+    expect(result.film.orderLengthM).toBe("1700");
+    expect(result.costComponents.film).toBe(
+      (1700 * 160.8 * 1.12).toFixed(0),
+    );
+    expect(Number(result.copperPlateCost)).toBeGreaterThan(0);
+  });
+
+  it("supports Sasche film without printing colors and omits copper plates", () => {
+    const result = calculatePouchCost({
+      spec: { ...baseSpec, sizeKey: "round-50x80", connectedChambers: 1, colorCount: 0 },
+      quantity: "10000",
+      printingMethod: "gravure",
+    });
+
+    expect(result.gravurePricingMode).toBe("sasche");
+    expect(result.gravure?.copperPlateCount).toBe(0);
+    expect(result.gravure?.copperPlateUnitPriceYen).toBe("0");
+    expect(result.gravure?.copperPlateCostYen).toBe("0");
+    expect(result.copperPlateCost).toBe("0");
+    expect(Number(result.film.filmTotal)).toBeGreaterThan(0);
+  });
+
   it("replaces only film cost, keeps processing unchanged, and separates copper plates", () => {
     const result = calculatePouchCost({
-      spec: { ...baseSpec, sizeKey: "round-60x80", connectedChambers: 1 },
+      spec: { ...baseSpec, sizeKey: "mouthwash-45x145", connectedChambers: 1 },
       quantity: "10000",
       printingMethod: "gravure",
     });

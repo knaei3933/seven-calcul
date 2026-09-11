@@ -4,6 +4,7 @@ import { D, Decimal, ceilTo, eq, maxD, roundTo2, sum } from "./decimal";
 import { normalizeDigitalFilmOrder, QuotationValidationError, type FilmOrderAdjustment, type FilmSkuOrder } from "./digital-film";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
 import { calculateGravureRollCost, defaultGravureRollParameters, type GravureRollParameters } from "./gravure-roll";
+import { buildSascheGravureRollResult, selectSascheCandidate } from "./sasche-gravure";
 import type { CostParameters, FilmPriceMode, PriceBand, PouchSpec, PrintingMethod, QuotationStatus, SizeMaster } from "./types";
 
 export interface CostResult {
@@ -45,10 +46,21 @@ export interface CostResult {
   film: FilmCostResult;
   copperPlateCost: string;
   copperPlateCostPerPiece: string;
+  gravurePricingMode: "standard" | "sasche";
+  sasche?: {
+    webWidthMm: number;
+    laneCount: 1 | 2;
+    printTierM: 2000 | 4000;
+    approxLengthM: number;
+    supplierUnitPriceYenPerM: string;
+    sellerMarkup: "1.12";
+    matchedWidthDifferenceMm: number;
+  };
   orderPatternCount?: number;
   deliverablePatternLengthM?: string;
   recommendedQuantity?: string;
   gravure?: {
+    pricingMode: "standard" | "sasche";
     materialCostYen: string;
     printingCostYen: string;
     laminationCostYen: string;
@@ -189,19 +201,29 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
   const copperPlateColors = sum(
     (spec.skuColorCounts?.length ? spec.skuColorCounts : [spec.colorCount]).map((colors) => D(colors)),
   );
-  const gravureRoll = printingMethod === "gravure"
-    ? calculateGravureRollCost({
+  const sascheCandidate = printingMethod === "gravure"
+    ? selectSascheCandidate({
+        webWidthMm: size.webWidthMm,
         requiredLengthM,
-        materialWidthMm: Decimal.max(500, size.webWidthMm),
-        pouchWidthMm: size.widthMm,
-        colors: copperPlateColors,
-        quantity,
-        skuColorUsage: skuRequiredLengths.map((length, index) => ({
-          lengthM: length.toString(),
-          colors: spec.skuColorCounts?.[index] ?? spec.colorCount,
-        })),
-        parameters: gravureParameters ?? defaultGravureRollParameters(),
+        quantity: quantityD,
+        colorCount: copperPlateColors,
       })
+    : null;
+  const gravureRoll = printingMethod === "gravure"
+    ? sascheCandidate
+      ? buildSascheGravureRollResult(sascheCandidate)
+      : calculateGravureRollCost({
+          requiredLengthM,
+          materialWidthMm: Decimal.max(500, size.webWidthMm),
+          pouchWidthMm: size.widthMm,
+          colors: copperPlateColors,
+          quantity,
+          skuColorUsage: skuRequiredLengths.map((length, index) => ({
+            lengthM: length.toString(),
+            colors: spec.skuColorCounts?.[index] ?? spec.colorCount,
+          })),
+          parameters: gravureParameters ?? defaultGravureRollParameters(),
+        })
     : null;
   const film = gravureRoll
     ? {
@@ -258,18 +280,18 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
   const copperPlateCost = gravureRoll?.copperPlateCostYen ?? "0";
   const copperPlateCostPerPiece = gravureRoll?.copperPlateCostPerPieceYen ?? "0";
   // デジタルのフィルム単価は仕入価格に供給調整済みのため追加調整しない。
-  const appliesSellerProfit = printingMethod === "gravure";
+  const appliesSellerProfit = printingMethod === "gravure" && !sascheCandidate;
   const sellerProfitBaseCost = appliesSellerProfit ? D(filmWithSkus.filmTotal) : D(0);
   const sellerProfitCost = sellerProfitBaseCost.times(params.sellerProfitRate);
   const filmCostWithSellerProfitRaw = D(filmWithSkus.filmTotal).plus(sellerProfitCost);
   // フィルム費用は見積・発注書の金額単位に合わせて円未満を四捨五入する。
-  const filmCostWithSellerProfit = appliesSellerProfit
+  const filmCostWithSellerProfit = appliesSellerProfit || sascheCandidate
     ? filmCostWithSellerProfitRaw.toDecimalPlaces(0, Decimal.ROUND_HALF_UP)
     : filmCostWithSellerProfitRaw;
   const filmWithSellerProfit: FilmCostResult = {
     ...filmWithSkus,
     filmBaseCost: filmWithSkus.filmBaseCost,
-    unitPrice: appliesSellerProfit && filmWithSkus.orderLengthM ? filmCostWithSellerProfit.div(filmWithSkus.orderLengthM).toString() : filmWithSkus.unitPrice,
+    unitPrice: (appliesSellerProfit || sascheCandidate) && filmWithSkus.orderLengthM ? filmCostWithSellerProfit.div(filmWithSkus.orderLengthM).toString() : filmWithSkus.unitPrice,
     filmTotal: filmCostWithSellerProfit.toString(),
     filmCostPerPiece: filmCostWithSellerProfit.div(quantityD).toString(),
   };
@@ -291,6 +313,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
   });
 
   const warnings = unresolvedWarnings(spec, size, params);
+  const gravurePricingMode: "standard" | "sasche" = printingMethod === "gravure" && sascheCandidate ? "sasche" : "standard";
   const serializedInput = JSON.stringify({ spec, quantity, printingMethod, targetMargins: targetMargins ?? null, parameters: parameters ?? null, gravureParameters: gravureParameters ?? null });
   const result = { quantity: quantityD.toString(), chamberCount: chamberCount.toString(), bulkUsageMl: bulkUsage.toString(), costComponents, costTotal: costTotal.toString(), sellingPrices };
 
@@ -324,6 +347,8 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
     customCharge: customCharge.toString(),
     sellerProfitBaseCost: sellerProfitBaseCost.toString(),
     sellerProfitRate: appliesSellerProfit ? params.sellerProfitRate : "0",
+    gravurePricingMode,
+    ...(sascheCandidate ? { sasche: sascheCandidate } : {}),
     sellerProfitCost: sellerProfitCost.toString(),
     totalCostPerPiece: totalPerPiece.toString(),
     costTotal: costTotal.toString(),
@@ -338,6 +363,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
       deliverablePatternLengthM: gravureRoll.deliverableLengthM,
       recommendedQuantity: gravureRoll.recommendedQuantity,
       gravure: {
+        pricingMode: sascheCandidate ? "sasche" : "standard",
         materialCostYen: gravureRoll.materialCostYen,
         printingCostYen: gravureRoll.printingCostYen,
         laminationCostYen: gravureRoll.laminationCostYen,
@@ -355,6 +381,8 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
       materialWidthMm: gravureRoll.materialWidthMm,
       finalHeatSealWidthMm: gravureRoll.finalHeatSealWidthMm,
       },
+      gravurePricingMode: sascheCandidate ? "sasche" : "standard",
+      ...(sascheCandidate ? { sasche: sascheCandidate } : {}),
     } : {}),
     warnings,
     audit: {

@@ -814,8 +814,10 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
   const filmCostTotal = analysis.filmCostUnit.times(analysis.quantity);
   const filmOrderUnit = filmOrderLength.gt(0) ? filmCostTotal.div(filmOrderLength) : D(record.filmMeterPrice);
   const filmOrderTotal = filmOrderLength.gt(0) ? filmCostTotal : filmOrderUnit.times(filmOrderLength);
-  const copperQuantity = D(order?.copperPlate?.quantity ?? order?.colorCount ?? 1);
-  const copperOrderUnit = D(order?.copperPlate?.unitPriceYen ?? analysis.copperCostUnit.times(analysis.quantity).div(copperQuantity));
+  const copperQuantity = D(order?.copperPlate?.quantity ?? order?.colorCount ?? 0);
+  const copperOrderUnit = copperQuantity.gt(0)
+    ? D(order?.copperPlate?.unitPriceYen ?? analysis.copperCostUnit.times(analysis.quantity).div(copperQuantity))
+    : D(0);
   const copperOrderTotal = copperOrderUnit.times(copperQuantity);
   const moldQuantity = D(order?.customMold?.quantity ?? "1");
   const moldOrderTotal = D(order?.customMold?.costYen ?? String(record.payload.customLotCost ?? "0"));
@@ -847,7 +849,7 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
                   <div><dt>原反幅</dt><dd>{formatNumber(order.webWidthMm, 0)} mm</dd></div>
                   <div><dt>列数</dt><dd>{formatNumber(order.lanes, 0)} 列</dd></div>
                   <div><dt>発注長</dt><dd>{formatNumber(order.orderLengthM, 0)} m</dd></div>
-                  <div><dt>印刷色数</dt><dd>{order.colorCount > 0 ? `${formatNumber(order.colorCount, 0)} 色` : "旧データ（要確認）"}</dd></div>
+                  <div><dt>印刷色数</dt><dd>{order.colorCount >= 0 ? `${formatNumber(order.colorCount, 0)} 色` : "旧データ（要確認）"}</dd></div>
                 </dl>
                 <table className="purchase-order-total-table">
                   <thead>
@@ -860,7 +862,7 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
                       <td>{formatNumber(filmOrderLength.toNumber(), 0)} m</td>
                       <td>{formatCurrency(filmOrderTotal.toFixed(0), 0)}</td>
                     </tr>
-                    {order.copperPlate ? (
+                    {order.copperPlate && copperQuantity.gt(0) && copperOrderTotal.gt(0) ? (
                       <tr>
                         <td>新規銅版</td>
                         <td>{formatCurrency(copperOrderUnit.toFixed(0), 0)} /色</td>
