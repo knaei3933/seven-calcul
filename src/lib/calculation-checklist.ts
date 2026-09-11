@@ -2,6 +2,7 @@ import type { CostResult } from "./calculation";
 import { defaultParameters, sizeMaster } from "./constants";
 import type { CostParameters } from "./types";
 import type { GravureRollParameters } from "./gravure-roll";
+import type { SascheCandidate } from "./sasche-gravure";
 import type { QuotationRecord } from "./quotation-shared";
 import { D } from "./decimal";
 import { buildJapaneseChecklistItems } from "./japanese-calculation-checklist";
@@ -109,6 +110,8 @@ export type CalculationChecklistSnapshot = {
   deliverablePatternLengthM: string;
   productionPatternLengthM: string;
   sellerProfitCost: string;
+  sascheCandidate?: SascheCandidate;
+  sascheCandidates?: SascheCandidate[];
 };
 
 export function readCalculationChecklistSnapshot(value: unknown): CalculationChecklistSnapshot | null {
@@ -231,6 +234,8 @@ export function buildCalculationChecklistSnapshot(
     productionPatternLengthM: result.film.orderLengthM,
     sellerProfitCost: result.sellerProfitCost,
     parameters: context.parameters ?? defaultParameters,
+    sascheCandidate: result.sasche,
+    sascheCandidates: result.sascheCandidates,
   };
 }
 

@@ -5,6 +5,7 @@ import { normalizeDigitalFilmOrder, QuotationValidationError, type FilmOrderAdju
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
 import { calculateGravureRollCost, defaultGravureRollParameters, type GravureRollParameters } from "./gravure-roll";
 import { buildSascheGravureRollResult, selectSascheCandidate } from "./sasche-gravure";
+import type { SascheCandidate } from "./sasche-gravure";
 import type { CostParameters, FilmPriceMode, PriceBand, PouchSpec, PrintingMethod, QuotationStatus, SizeMaster } from "./types";
 
 export interface CostResult {
@@ -47,15 +48,8 @@ export interface CostResult {
   copperPlateCost: string;
   copperPlateCostPerPiece: string;
   gravurePricingMode: "standard" | "sasche";
-  sasche?: {
-    webWidthMm: number;
-    laneCount: 1 | 2;
-    printTierM: 2000 | 4000;
-    approxLengthM: number;
-    supplierUnitPriceYenPerM: string;
-    sellerMarkup: "1.12";
-    matchedWidthDifferenceMm: number;
-  };
+  sasche?: SascheCandidate;
+  sascheCandidates?: SascheCandidate[];
   orderPatternCount?: number;
   deliverablePatternLengthM?: string;
   recommendedQuantity?: string;

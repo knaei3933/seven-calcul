@@ -55,6 +55,8 @@ type QuoteForm = {
   copperUnitDisplay: string;
   copperAmountDisplay: string;
   copperPlateCostPerPiece: string;
+  sascheCandidateId: string;
+  sascheCandidatesJson: string;
   copperColorCount: string;
   orderPatternCount: string;
   deliverablePatternLengthM: string;
@@ -129,6 +131,8 @@ const defaultQuote: QuoteForm = {
   copperUnitDisplay: "",
   copperAmountDisplay: "",
   copperPlateCostPerPiece: "0",
+  sascheCandidateId: "",
+  sascheCandidatesJson: "[]",
   copperColorCount: "0",
   orderPatternCount: "0",
   deliverablePatternLengthM: "0",
@@ -325,6 +329,8 @@ export default function PrintableQuotationPage() {
           fillingCostPerPiece: draft.fillingCostPerPiece,
           printingMethod: draft.printingMethod ?? "digital",
           copperPlateCostPerPiece: draft.copperPlateCostPerPiece ?? "0",
+          sascheCandidateId: draft.sascheCandidate?.id ?? "",
+          sascheCandidatesJson: JSON.stringify(draft.sascheCandidates ?? []),
           copperColorCount: draft.copperColorCount ?? old.copperColorCount,
           orderPatternCount: draft.orderPatternCount ?? "0",
           deliverablePatternLengthM: draft.deliverablePatternLengthM ?? "0",
@@ -431,6 +437,8 @@ export default function PrintableQuotationPage() {
             copperUnitDisplay: shownTotals.copperColorUnit,
             copperColorCount: shownTotals.copperColorCount,
             copperAmountDisplay: shownTotals.copperAmount,
+            sascheCandidate: calculationChecklistSnapshot?.sascheCandidate,
+            sascheCandidates: calculationChecklistSnapshot?.sascheCandidates,
             customUnitDisplay: shownTotals.customUnit,
             customAmountDisplay: shownTotals.customAmount,
             purchaseOrder: purchaseOrder,
@@ -653,6 +661,39 @@ export default function PrintableQuotationPage() {
     range.selectNodeContents(node);
     selection?.removeAllRanges();
     selection?.addRange(range);
+  };
+
+  const selectSascheCandidate = (candidateId: string) => {
+    const candidate = (calculationChecklistSnapshot?.sascheCandidates ?? [])
+      .find((item) => item.id === candidateId);
+    if (!candidate) {
+      applyPatch({ sascheCandidateId: candidateId });
+      return;
+    }
+    const quantity = parseDecimal(form.quantity);
+    if (!quantity || !quantity.gt(0)) return;
+    applyPatch({
+      sascheCandidateId: candidate.id,
+      filmOrderLengthM: candidate.outputLengthM,
+      filmMeterPrice: candidate.filmUnitPriceYen,
+      filmCostPerPiece: D(candidate.filmTotalYen).div(quantity).toString(),
+      copperPlateCostPerPiece: D(candidate.plateTotalYen).div(quantity).toString(),
+      copperColorCount: String(candidate.colorCount),
+      fillingUnitDisplay: "",
+      fillingAmountDisplay: "",
+      filmUnitDisplay: "",
+      filmPouchUnitDisplay: "",
+      filmAmountDisplay: "",
+      copperUnitDisplay: "",
+      copperAmountDisplay: "",
+      customUnitDisplay: "",
+      customAmountDisplay: "",
+      pricePerPieceDisplay: "",
+      adjustmentDisplay: "",
+      subtotalDisplay: "",
+      taxDisplay: "",
+      grandTotalDisplay: "",
+    });
   };
 
   const commitSheetPrice = (raw: string, node: HTMLElement) => {
@@ -1047,6 +1088,13 @@ export default function PrintableQuotationPage() {
                       <small><EditableText value={form.filmItemDescription} label="フィルム説明" multiline onCommit={(next) => update("filmItemDescription", next)} /></small>
                       <small className="film-composition" data-testid="film-composition">構成：<EditableText value={form.filmComposition || DEFAULT_FILM_COMPOSITION} label="フィルム構成" onCommit={(next) => update("filmComposition", next.trim())} /></small>
                       <small>フィルム金額は円未満を四捨五入します。</small>
+                      {calculationChecklistSnapshot?.sascheCandidate ? (
+                        <small className="film-composition">
+                          採用条件：{calculationChecklistSnapshot.sascheCandidate.laneCount}丁 /
+                          {calculationChecklistSnapshot.sascheCandidate.printTierM}m印刷 /
+                          幅{formatNumber(calculationChecklistSnapshot.sascheCandidate.matchedWidthMm, 0)}mm
+                        </small>
+                      ) : null}
                     </td>
                     <td>
                       <strong data-testid="film-meter-price"><EditableText value={moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay)} label="フィルム販売m単価" className="money" onCommit={commitFilmMeterUnit} /> /m</strong>
@@ -1237,6 +1285,23 @@ export default function PrintableQuotationPage() {
           <label>金型 項目名<input value={form.customItemName} onChange={(event) => update("customItemName", event.target.value)} /></label>
           <label className="wide">金型 説明<textarea rows={2} value={form.customItemDescription} onChange={(event) => update("customItemDescription", event.target.value)} /></label>
           <label>銅版費 原価 / 枚<input inputMode="decimal" value={form.copperPlateCostPerPiece} onChange={(event) => update("copperPlateCostPerPiece", event.target.value)} /></label>
+          {form.printingMethod === "gravure" && (calculationChecklistSnapshot?.sascheCandidates?.length ?? 0) > 0 ? (
+            <label className="wide">
+              Sasche 発注候補（推奨＝バランス）
+              <select
+                value={form.sascheCandidateId}
+                onChange={(event) => selectSascheCandidate(event.target.value)}
+              >
+                {(calculationChecklistSnapshot?.sascheCandidates ?? []).map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.laneCount}丁 / {candidate.printTierM}m印刷 / 約{formatNumber(candidate.outputLengthM, 0)}m /
+                    余剰率 {formatNumber(Number(candidate.surplusRatio), 1)}% /
+                    フィルム {formatCurrency(candidate.filmTotalYen, 0)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label>銅版費 単価 /色（空欄=自動）<input inputMode="decimal" value={form.copperUnitDisplay} onChange={(event) => update("copperUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>銅版費 色数<input inputMode="decimal" value={form.copperColorCount} onChange={(event) => update("copperColorCount", event.target.value)} /></label>
           <label>銅版費 金額（空欄=自動）<input inputMode="decimal" value={form.copperAmountDisplay} onChange={(event) => update("copperAmountDisplay", event.target.value)} placeholder="自動計算" /></label>

@@ -4,6 +4,7 @@ import type { CostParameters } from "./types";
 import type { GravureRollParameters } from "./gravure-roll";
 import { buildPurchaseOrderSnapshot, type PurchaseContext, type PurchaseOrderSnapshot } from "./purchase-order";
 import { buildCalculationChecklistSnapshot, type CalculationChecklistSnapshot } from "./calculation-checklist";
+import type { SascheCandidate } from "./sasche-gravure";
 
 export const QUOTATION_DRAFT_KEY = "pouch-quotation-draft-v1";
 
@@ -45,6 +46,8 @@ export interface QuotationDraft {
   deliverablePatternLengthM?: string;
   recommendedQuantity?: string;
   purchaseOrder?: PurchaseOrderSnapshot;
+  sascheCandidate?: SascheCandidate;
+  sascheCandidates?: SascheCandidate[];
   calculationChecklistSnapshot?: import("./calculation-checklist").CalculationChecklistSnapshot;
 }
 
@@ -117,6 +120,8 @@ export function buildQuotationDraft(
     ...(context.printingMethod === "gravure" ? {
       copperPlateCostPerPiece: result.copperPlateCostPerPiece,
       copperColorCount: String(result.gravure?.copperPlateCount ?? context.colorCount),
+      sascheCandidate: result.sasche,
+      sascheCandidates: result.sascheCandidates,
       orderPatternCount: String(result.orderPatternCount ?? 1),
       deliverablePatternLengthM: result.deliverablePatternLengthM ?? "5500",
       recommendedQuantity: result.recommendedQuantity ?? result.quantity,

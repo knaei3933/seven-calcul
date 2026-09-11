@@ -280,27 +280,25 @@ describe("gravure roll integration", () => {
       printingMethod: "gravure",
     });
 
-    expect(result.orderPatternCount).toBe(1);
-    expect(result.deliverablePatternLengthM).toBe("5500");
-    expect(result.film.orderLengthM).toBe("6000");
-    expect(result.film.lossM).toBe("500");
-    expect(result.film.shippingTrips).toBe("11");
-    expect(result.film.overseasShipping).toBe(result.gravure?.overseasShippingCostYen);
-    expect(Number(result.film.customs)).toBeCloseTo(Number(result.gravure?.customsBaseCostYen) * 0.05, 8);
-    const rawGravureFilmTotal = Number(result.gravure?.customsBaseCostYen)
-      + Number(result.gravure?.customsCostYen)
-      + Number(result.gravure?.overseasShippingCostYen);
-    expect(Number(result.sellerProfitBaseCost)).toBeCloseTo(rawGravureFilmTotal, 8);
-    const yenRoundedFilmTotal = Math.round(rawGravureFilmTotal * 1.12);
+    expect(result.gravurePricingMode).toBe("sasche");
+    expect(result.sasche?.webWidthMm).toBe(356);
+    expect(result.sasche?.laneCount).toBe(1);
+    expect(result.sasche?.printTierM).toBe(2000);
+    expect(result.film.orderLengthM).toBe("1700");
+    expect(result.film.lossM).toBe("1280.555555555555555555555555555555555556");
+    expect(result.film.shippingTrips).toBe("0");
+    expect(result.film.overseasShipping).toBe("0");
+    expect(result.film.customs).toBe("0");
+    const yenRoundedFilmTotal = 268464;
     expect(Number(result.film.filmTotal)).toBe(yenRoundedFilmTotal);
     expect(Number(result.film.filmTotal) % 1).toBe(0);
-    expect(Number(result.gravure?.manufacturerMarginCostYen)).toBeCloseTo(Number(result.gravure?.filmCostYen) * 0.2, 8);
-    expect(Number(result.film.overseasShipping)).toBe(121000);
+    expect(Number(result.gravure?.manufacturerMarginCostYen)).toBe(0);
+    expect(Number(result.film.overseasShipping)).toBe(0);
     expect(Number(result.copperPlateCost)).toBeGreaterThan(0);
     expect(result.costComponents.copperPlate).toBe(result.copperPlateCost);
-    expect(result.sellerProfitRate).toBe("0.12");
-    expect(Number(result.sellerProfitCost)).toBeCloseTo(Number(result.sellerProfitBaseCost) * 0.12, 8);
-    expect(Number(result.costComponents.film)).toBe(yenRoundedFilmTotal);
+    expect(result.sellerProfitRate).toBe("0");
+    expect(result.sellerProfitCost).toBe("0");
+    expect(result.costComponents.film).toBe(yenRoundedFilmTotal.toString());
     expect(result.costPerPieceComponents.copperPlate).toBe(result.copperPlateCostPerPiece);
     expect(result.audit.componentReconciliationDifference).toBe("0");
 
@@ -348,7 +346,7 @@ describe("gravure roll integration", () => {
     });
 
     expect(result.gravure?.copperPlateCount).toBe(5);
-    expect(Number(result.copperPlateCost)).toBe(160000);
+    expect(Number(result.copperPlateCost)).toBe(145600);
   });
 });
 
