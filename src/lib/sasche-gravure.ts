@@ -180,8 +180,8 @@ export function buildSascheCandidates({
   const candidates = supplierMatrix
     .filter((row) => row.webWidthMm === matchedWidth.webWidthMm)
     .map((row) => {
-      const patternCount = D(row.approxLengthM)
-        .div(requiredLengthM)
+      const patternCount = requiredLengthM
+        .div(row.approxLengthM)
         .toDecimalPlaces(0, Decimal.ROUND_CEIL)
         .toNumber();
       const outputLengthM = D(row.approxLengthM).times(patternCount);

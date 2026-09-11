@@ -4,7 +4,7 @@ import { D, Decimal, ceilTo, eq, maxD, roundTo2, sum } from "./decimal";
 import { normalizeDigitalFilmOrder, QuotationValidationError, type FilmOrderAdjustment, type FilmSkuOrder } from "./digital-film";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
 import { calculateGravureRollCost, defaultGravureRollParameters, type GravureRollParameters } from "./gravure-roll";
-import { buildSascheGravureRollResult, selectSascheCandidate } from "./sasche-gravure";
+import { buildSascheCandidates, buildSascheGravureRollResult, selectSascheCandidate } from "./sasche-gravure";
 import type { SascheCandidate } from "./sasche-gravure";
 import type { CostParameters, FilmPriceMode, PriceBand, PouchSpec, PrintingMethod, QuotationStatus, SizeMaster } from "./types";
 
@@ -203,6 +203,14 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
         colorCount: copperPlateColors,
       })
     : null;
+  const sascheCandidates = printingMethod === "gravure"
+    ? buildSascheCandidates({
+        webWidthMm: size.webWidthMm,
+        requiredLengthM,
+        quantity: quantityD,
+        colorCount: copperPlateColors,
+      })
+    : [];
   const gravureRoll = printingMethod === "gravure"
     ? sascheCandidate
       ? buildSascheGravureRollResult(sascheCandidate)
@@ -343,6 +351,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
     sellerProfitRate: appliesSellerProfit ? params.sellerProfitRate : "0",
     gravurePricingMode,
     ...(sascheCandidate ? { sasche: sascheCandidate } : {}),
+    sascheCandidates,
     sellerProfitCost: sellerProfitCost.toString(),
     totalCostPerPiece: totalPerPiece.toString(),
     costTotal: costTotal.toString(),
@@ -377,6 +386,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
       },
       gravurePricingMode: sascheCandidate ? "sasche" : "standard",
       ...(sascheCandidate ? { sasche: sascheCandidate } : {}),
+      ...(sascheCandidates.length ? { sascheCandidates } : {}),
     } : {}),
     warnings,
     audit: {
