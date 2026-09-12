@@ -114,6 +114,7 @@ export function selectSascheCandidate({
       const surplusRatio = requiredLengthM.gt(0)
         ? surplus.div(requiredLengthM).times(100)
         : D(0);
+      const quantityAcceptable = outputLengthM.gte(requiredLengthM) || quantityReductionRatio.lte(15);
       const id = `Y-${row.webWidthMm}-${row.laneCount}-${row.printTierM}`;
       return {
         id,
@@ -130,60 +131,34 @@ export function selectSascheCandidate({
         requiredLengthM: requiredLengthM.toString(),
         quantity: quantity.toString(),
         colorCount: plateCount,
-        outputLengthM: outputLengthM.toString(),
-        filmTotalYen: filmTotal.toString(),
         plateUnitPriceYen: plateUnitPrice.toString(),
         plateTotalYen: plateTotal.toString(),
-        surplusLengthM: surplus.toString(),
-        shortageLengthM: shortage.toString(),
-        surplusRatio: surplusRatio.toString(),
         adjustedQuantity: adjustedQuantity.toString(),
         quantityReductionRatio: quantityReductionRatio.toString(),
         quantityToleranceExceeded: quantityReductionRatio.gt(15),
-        feasible: outputLengthM.gte(requiredLengthM),
+        outputLengthM: outputLengthM.toString(),
+        filmTotalYen: filmTotal.toString(),
+        surplusLengthM: surplus.toString(),
+        shortageLengthM: shortage.toString(),
+        surplusRatio: surplusRatio.toString(),
+        feasible: quantityAcceptable,
         recommended: false,
         comparisonRank: 0,
       };
     });
-  const feasibleCandidates = candidates.filter((candidate) => D(candidate.outputLengthM).gte(requiredLengthM));
-  const balancedCandidates = feasibleCandidates.filter((candidate) => D(candidate.surplusRatio).lte(15));
-  const recommendedCandidate = balancedCandidates.length > 0
-    ? balancedCandidates.reduce((best, candidate) =>
+
+  const acceptableCandidates = candidates.filter((candidate) => candidate.feasible);
+  const recommendedCandidate = acceptableCandidates.length > 0
+    ? acceptableCandidates.reduce((best, candidate) =>
         D(candidate.filmTotalYen).lt(D(best.filmTotalYen)) ? candidate : best,
       )
-    : feasibleCandidates.reduce((best, candidate) =>
-        D(candidate.surplusLengthM).lt(D(best.surplusLengthM)) ? candidate : best,
-      );
+    : null;
+  for (const candidate of candidates) {
+    candidate.recommended = recommendedCandidate?.id === candidate.id;
+  }
 
-  return {
-    id: recommendedCandidate.id,
-    webWidthMm: matchedWidth.webWidthMm,
-    matchedWidthMm: matchedWidth.webWidthMm,
-    laneCount: matchedWidth.laneCount,
-    printTierM: recommendedCandidate.printTierM,
-    patternCount: recommendedCandidate.patternCount,
-    filmLabel: "Y",
-    baseApproxLengthM: recommendedCandidate.baseApproxLengthM,
-    outputLengthM: recommendedCandidate.outputLengthM.toString(),
-    requiredLengthM: requiredLengthM.toString(),
-    quantity: quantity.toString(),
-    adjustedQuantity: recommendedCandidate.adjustedQuantity.toString(),
-    quantityReductionRatio: recommendedCandidate.quantityReductionRatio.toString(),
-    quantityToleranceExceeded: recommendedCandidate.quantityToleranceExceeded,
-    colorCount: plateCount,
-    supplierUnitPriceYenPerM: recommendedCandidate.supplierUnitPriceYenPerM,
-    sellerMarkup: SELLER_MARKUP,
-    filmUnitPriceYen: recommendedCandidate.filmUnitPriceYen,
-    filmTotalYen: recommendedCandidate.filmTotalYen,
-    plateUnitPriceYen: plateUnitPrice.toString(),
-    plateTotalYen: plateTotal.toString(),
-    surplusLengthM: recommendedCandidate.surplusLengthM,
-    shortageLengthM: recommendedCandidate.shortageLengthM,
-    surplusRatio: recommendedCandidate.surplusRatio,
-    feasible: true,
-    recommended: true,
-    comparisonRank: 1,
-  };
+  return recommendedCandidate;
+
 }
 
 export function buildSascheCandidates({
@@ -256,7 +231,7 @@ export function buildSascheCandidates({
         adjustedQuantity: adjustedQuantity.toString(),
         quantityReductionRatio: quantityReductionRatio.toString(),
         quantityToleranceExceeded: quantityReductionRatio.gt(15),
-        feasible: outputLengthM.gte(requiredLengthM),
+        feasible: outputLengthM.gte(requiredLengthM) || quantityReductionRatio.lte(15),
         recommended: selected.id === id,
         comparisonRank: 0,
       };
