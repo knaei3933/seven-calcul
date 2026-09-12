@@ -68,6 +68,11 @@ a { color: var(--primary); }
   font-weight: 900;
   letter-spacing: .04em;
 }
+.recommendation-card .selection-status {
+  color: #dc2626;
+  font-size: 13px;
+  font-weight: 900;
+}
 .total { font-size: 28px; font-weight: 800; margin: 4px 0 12px; }
 .total-sub { display: block; font-size: 13px; font-weight: 700; margin-top: 4px; }
 .total-label { font-size: 13px; font-weight: 800; color: var(--ink); margin: 6px 0 0; }

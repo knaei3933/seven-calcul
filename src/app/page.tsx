@@ -1094,7 +1094,7 @@ export default function QuotationPage() {
             <div className="result-header" data-testid="server-result" data-state={staleResult ? "stale" : pending ? "calculating" : serverResult ? "calculated" : "not_calculated"}>
               <h2 id="result-title">原価・利益試算</h2>
               <span className="result-status">
-                {serverResult?.selectedCandidateId ? <span className="selection-status" data-testid="selection-status">選択中</span> : null}
+                {serverResult ? <span className="selection-status" data-testid="selection-status">選択中</span> : null}
                 <span>{pending ? "計算中" : staleResult ? "再計算が必要" : serverResult ? `サーバー計算済み ${calculatedAt ?? ""}` : "サーバー再計算待ち"}</span>
               </span>
             </div>
@@ -1173,6 +1173,7 @@ export default function QuotationPage() {
                           onClick={clearCandidate}
                           disabled={pending}
                         >
+                          {!serverResult.selectedCandidateId ? <span className="selection-status card-selection-status">選択中</span> : null}
                           <span className="recommendation-label">
                             入力値 / {originalRouteText}
                             <em>現在</em>

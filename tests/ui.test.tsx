@@ -209,7 +209,9 @@ describe("quotation UI", () => {
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
     expect(screen.getByText("発注数量・パターン候補")).toBeInTheDocument();
     expect(screen.getByText(/パウチ 50×60mm ／ 1連 ／ 4列/)).toBeInTheDocument();
+    expect(screen.getByTestId("selection-status")).toHaveTextContent("選択中");
     expect(within(screen.getByTestId("input-basis-card")).getByText(/原反 /)).toBeInTheDocument();
+    expect(within(screen.getByTestId("input-basis-card")).getByText("選択中")).toBeInTheDocument();
     expect(screen.getByText(/4色/)).toBeInTheDocument();
     expect(within(screen.getByTestId("input-basis-card")).getByText(/フィルム PET12\+AL7\+PET12\+LLDPE50/)).toBeInTheDocument();
     expect(screen.getByText(/必要長を100m単位|合計最低発注|SKU最低300m/)).toBeInTheDocument();
