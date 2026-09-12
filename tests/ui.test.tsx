@@ -144,9 +144,8 @@ describe("quotation UI", () => {
   it("calculates gravure roll film and shows the new copper plate separately", async () => {
     const user = userEvent.setup();
     render(<QuotationPage />);
-    await user.click(screen.getByLabelText("グラビア印刷"));
+    expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
     expect(screen.getByTestId("calculate-desktop")).toBeEnabled();
-    expect(screen.getAllByTestId("gravure-parameters").length).toBeGreaterThan(0);
     const result = calculatePouchCost({
       spec: {
         sizeKey: "round-50x60", customWidthMm: "50", customLengthMm: "60", fillMlPerChamber: "3", connectedChambers: 1,
@@ -158,6 +157,7 @@ describe("quotation UI", () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify({ result }), { status: 200, headers: { "Content-Type": "application/json" } }));
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+    expect(screen.getAllByTestId("gravure-parameters").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("cost-copper").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("cost-film").some((node) => node.textContent?.includes("製造者販売価格"))).toBe(true);
     expect(screen.getAllByTestId("cost-copper").some((node) => node.textContent?.includes("新規銅版費"))).toBe(true);

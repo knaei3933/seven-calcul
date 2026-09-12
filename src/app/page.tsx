@@ -871,16 +871,6 @@ export default function QuotationPage() {
                   </fieldset>
                 ))}
               </div>
-            {showPrintingMethodSelector ? (
-            <div className="field" data-testid="printing-method-block">
-              <span id="printing-label">印刷方式</span>
-              <div className="radio-cards" role="radiogroup" aria-labelledby="printing-label">
-                <label><input type="radio" name="printing-method" aria-label="デジタル印刷" checked={form.printingMethod === "digital"} onChange={() => patchForm({ printingMethod: "digital", targetMargin: MARGIN_OPTIONS.digital[0] })} />デジタル印刷</label>
-                <label><input type="radio" name="printing-method" aria-label="グラビア印刷" checked={form.printingMethod === "gravure"} onChange={() => patchForm({ printingMethod: "gravure", targetMargin: MARGIN_OPTIONS.gravure[0] })} />グラビア印刷</label>
-              </div>
-              <p className="help">グラビア選択時はロールフィルム用の原反・印刷・ラミネート・銅版費を計算します。他の生産資源はデジタル計算と同じモデルを使います。</p>
-            </div>
-            ) : null}
               <p className="help">SKUごとに製品名・発注枚数・充填量・色数を設定できます。発注枚数の合計が発注数量（{formatNumber(form.quantity)}枚）と一致する必要があります。SKU数を変更すると均等割りします（製品名 未入力時は 充填物1, 2, 3…）。</p>
               {!skuQuantitiesValid ? <p className="error" role="alert" data-testid="sku-sum-error">SKU合計 {formatNumber(skuQuantitySum)} 枚 ≠ 発注数量 {formatNumber(form.quantity)} 枚。各SKUの発注枚数を調整してください。</p> : null}
             </div>
@@ -928,7 +918,7 @@ export default function QuotationPage() {
                   {parameterGroups.map((group) => (
                 <fieldset className="parameter-group" key={group.title}>
                   <legend>{group.title}</legend>
-                  {group.fields.filter((field) => field.key !== "sellerProfitRate" || form.printingMethod === "gravure").map((field) => (
+                  {group.fields.filter((field) => field.key !== "sellerProfitRate" || resultPrintingMethod === "gravure").map((field) => (
                     <label key={field.key} className="parameter-label">
                       {field.label}
                       <input
@@ -939,7 +929,7 @@ export default function QuotationPage() {
                       />
                     </label>
                   ))}
-                  {form.printingMethod === "gravure" ? (
+                  {resultPrintingMethod === "gravure" ? (
                     <fieldset className="parameter-group" data-testid="gravure-parameters">
                       <legend>グラビアロール</legend>
                       <label className="parameter-label">PET 単価 (円/kg)<input inputMode="decimal" value={normalizedGravureParameters.petUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, petUnitPriceYenPerKg: e.target.value }))} /></label>
@@ -1201,7 +1191,7 @@ export default function QuotationPage() {
                       })()}
                     </div>
                   </details>
-                  {form.printingMethod === "gravure" ? (
+                  {resultPrintingMethod === "gravure" ? (
                     <details className="cost-block" data-testid="cost-copper">
                       <summary><h3>③-2 新規銅版費</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.copperPlate))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.copperPlate))} /枚）</small></span></summary>
                       <table className="table breakdown-table">
