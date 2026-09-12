@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { analyzeQuotation } from "@/lib/quotation-history";
 import { calculatePouchCost } from "@/lib/calculation";
+import { buildQuotationDraft } from "@/lib/quotation-draft";
 import { buildCalculationChecklistSnapshot, buildLegacyChecklistItems } from "@/lib/calculation-checklist";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
 
@@ -182,6 +183,113 @@ describe("quotation persistence with a manually edited selling price", () => {
     expect(await getChecklistsForQuotation(updatedQuotation.id)).toHaveLength(2);
   });
   
+  it("rebuilds checklists when the snapshot changes but the calculation hash is unchanged", async () => {
+    const baseSnapshot = buildCalculationChecklistSnapshot(
+      calculatePouchCost({
+        spec: {
+          sizeKey: "round-50x60", customWidthMm: "50", customLengthMm: "60", fillMlPerChamber: "3", connectedChambers: 1,
+          fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 1, bulkUnitPrice: "0", skuCount: 1,
+        },
+        quantity: "10000", printingMethod: "digital",
+      }),
+      {
+        quotationNumber: "S7-SNAPSHOT-REFRESH",
+        printingMethod: "digital",
+        sourceHash: "same-source-hash",
+        resultHash: "same-result-hash",
+        filmComposition: "PET12+AL7+PET12+LLDPE50",
+        skus: [{ name: "旧SKU", quantity: "10000", fillMl: "3", colorCount: "1" }],
+      },
+    );
+    const input: QuotationRecordInput = {
+      quotationNumber: "S7-SNAPSHOT-REFRESH",
+      status: "draft",
+      issueDate: "2026-09-12",
+      validUntil: "2026-10-12",
+      customerName: "スナップショット更新株式会社",
+      customerContact: "QA",
+      productName: "更新テスト",
+      sizeSummary: "50×60mm / 1連",
+      quantity: "10000",
+      fillingCostPerPiece: "1",
+      filmCostPerPiece: "1",
+      filmMeterPrice: "328",
+      filmOrderLengthM: "500",
+      targetMargin: "0.4",
+      taxRatePercent: "10",
+      pricePerPiece: "3.5",
+      subtotal: "35000",
+      tax: "3500",
+      grandTotal: "38500",
+      deliveryDate: "",
+      paymentTerms: "",
+      notes: "",
+      calculationVersion: "snapshot-refresh-test",
+      resultHash: "same-result-hash",
+      payload: { calculationChecklistSnapshot: baseSnapshot },
+    };
+    const saved = await saveQuotation(input);
+    await createChecklistsForQuotation(saved, baseSnapshot);
+
+    const changedSnapshot = {
+      ...baseSnapshot,
+      quantity: "20000",
+      skus: (baseSnapshot.skus ?? []).map((sku) => ({ ...sku, quantity: "20000" })),
+    };
+    const updated = await saveQuotation({ ...input, quantity: "20000", payload: { calculationChecklistSnapshot: changedSnapshot } });
+    const rebuilt = await createChecklistsForQuotation(updated, changedSnapshot);
+    expect(rebuilt[0]!.snapshot.quantity).toBe("20000");
+    expect(rebuilt[0]!.items.find((item) => item.id === "basic.quantity")!.result).toBe("20,000");
+  });
+
+  it("carries a purchase-order snapshot with SKU order details into the quotation draft", () => {
+    const activeResult = calculatePouchCost({
+      spec: {
+        sizeKey: "tube-35x80", fillMlPerChamber: "3", connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4,
+        isCustom: false, colorCount: 2, bulkUnitPrice: "0", skuCount: 2,
+        skuQuantities: ["90000", "60000"], skuNames: ["Serum", "Emulsion"],
+        skuFillMlPerChamber: ["10", "30"], skuColorCounts: ["2", "4"],
+      },
+      quantity: "150000",
+      printingMethod: "gravure",
+      recommendationMode: true,
+      selectedCandidateId: "",
+    });
+    const candidate = activeResult.recommendationCandidates?.find((item) => item.route === "Y");
+    expect(candidate).toBeDefined();
+
+    const draft = buildQuotationDraft(activeResult, {
+      quotationNumber: "",
+      sourceHash: activeResult.audit.resultJsonSha256,
+      resultHash: activeResult.audit.resultJsonSha256,
+      widthMm: "35",
+      lengthMm: "80",
+      connected: "1",
+      skuNames: ["Serum", "Emulsion"],
+      targetMargin: "0.3",
+      printingMethod: activeResult.printingMethod,
+      filmComposition: "PET12+AL7+PET12+LLDPE50",
+      webWidthMm: 356,
+      lanes: 4,
+      pitchMm: "86",
+      pitchAddMm: "6",
+      prodMultiplier: 1,
+      colorCount: 6,
+      skus: candidate!.adjustedSkuQuantities.map((quantity, index) => ({
+        name: index === 0 ? "Serum" : "Emulsion",
+        quantity,
+        fillMl: index === 0 ? "10" : "30",
+        colorCount: index === 0 ? "2" : "4",
+      })),
+      lossRate: "0.1",
+      bulkUnitPrice: "0",
+    });
+
+    expect(draft.purchaseOrder?.printingMethod).toBe("gravure");
+    expect(draft.purchaseOrder?.skuColorCounts).toEqual(["2", "4"]);
+    expect(draft.purchaseOrder?.skuOrderDetails.map((sku) => Number(sku.quantity))).toEqual(candidate!.adjustedSkuQuantities.map(Number));
+  });
+
   it("rebuilds persistent checklists for quotations saved before checklist snapshots", async () => {
     const quotationInput: QuotationRecordInput = {
       quotationNumber: "S7-LEGACY-CHECKLIST-001",

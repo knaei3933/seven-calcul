@@ -678,8 +678,30 @@ export default function PrintableQuotationPage() {
       applyPatch({ sascheCandidateId: candidateId });
       return;
     }
-    const quantity = parseDecimal(form.quantity);
-    if (!quantity || !quantity.gt(0)) return;
+    const currentQuantity = parseDecimal(calculationChecklistSnapshot?.quantity ?? form.quantity);
+    const adjustedQuantity = parseDecimal(candidate.adjustedQuantity);
+    const quantity = adjustedQuantity && adjustedQuantity.gt(0) ? adjustedQuantity : currentQuantity;
+    if (!quantity || !quantity.gt(0) || !currentQuantity || !currentQuantity.gt(0)) return;
+
+    // 充填・加工費は数量により再配賦する。固定ロット・初期投入・試験充填は固定、
+    // 変動加工と本体/ロスバルクは数量比例。
+    const snapshot = calculationChecklistSnapshot;
+    let fillingCostPerPiece = form.fillingCostPerPiece;
+    if (snapshot) {
+      const variableProcessing = D(snapshot.variableProcessingTotal);
+      const fixedLot = D(snapshot.fixedLotCost);
+      const bulkUnitPrice = D(snapshot.bulkUnitPrice ?? "0");
+      const fixedBulkMl = D(snapshot.bulkInitialChargeMl ?? "0").plus(snapshot.bulkTestFillMl ?? "0");
+      const fixedBulkCost = fixedBulkMl.times(bulkUnitPrice);
+      const variableBulkCost = Decimal.max(D(snapshot.bulkCost).minus(fixedBulkCost), D(0));
+      const quantityRatio = quantity.div(currentQuantity);
+      const newProcessingTotal = variableProcessing.times(quantityRatio)
+        .plus(fixedLot)
+        .plus(variableBulkCost.times(quantityRatio))
+        .plus(fixedBulkCost);
+      fillingCostPerPiece = newProcessingTotal.div(quantity).toString();
+    }
+
     applyPatch({
       sascheCandidateId: candidate.id,
       sascheOverToleranceReason: "",
@@ -689,6 +711,7 @@ export default function PrintableQuotationPage() {
       filmCostPerPiece: D(candidate.filmTotalYen).div(quantity).toString(),
       copperPlateCostPerPiece: D(candidate.plateTotalYen).div(quantity).toString(),
       copperColorCount: String(candidate.colorCount),
+      fillingCostPerPiece,
       fillingUnitDisplay: "",
       fillingAmountDisplay: "",
       filmUnitDisplay: "",

@@ -338,14 +338,10 @@ export async function createChecklistsForQuotation(record: QuotationRecord, snap
   const db = await getDatabase();
   const existing = db.prepare("SELECT checklist_version,snapshot_json FROM quotation_checklists WHERE quotation_id = ?").all(record.id) as Array<{ checklist_version: string; snapshot_json: string }>;
   if (existing.length > 0) {
-    const unchanged = existing.every((row) => {
-      if (row.checklist_version !== CHECKLIST_VERSION) return false;
-      try {
-        return JSON.parse(row.snapshot_json)?.resultHash === snapshot.resultHash;
-      } catch {
-        return false;
-      }
-    });
+    const serializedSnapshot = JSON.stringify(snapshot);
+    const unchanged = existing.every((row) =>
+      row.checklist_version === CHECKLIST_VERSION && row.snapshot_json === serializedSnapshot
+    );
     if (unchanged) {
       const rows = db.prepare("SELECT * FROM quotation_checklists WHERE quotation_id = ? ORDER BY audience").all(record.id) as unknown as ChecklistRow[];
       return rows.map(mapChecklistRow);

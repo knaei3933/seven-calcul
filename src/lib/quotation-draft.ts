@@ -84,6 +84,11 @@ export function buildQuotationDraft(
       quantity: string;
       fillMl: string;
       colorCount: string;
+      requiredLengthM?: string;
+      orderLengthM?: string;
+      multiplier?: number;
+      webWidthMm?: number;
+      appliedBand?: string;
     }[];
     lossRate: string;
     bulkUnitPrice: string;
@@ -99,6 +104,34 @@ export function buildQuotationDraft(
   return {
     productSummary,
     sizeSummary: `${context.widthMm}×${context.lengthMm}mm / ${context.connected}連`,
+    purchaseOrder: (() => {
+      const snapshot = buildPurchaseOrderSnapshot(result, {
+        filmComposition: context.filmComposition,
+        webWidthMm: context.webWidthMm,
+        lanes: context.lanes,
+        pitchMm: context.pitchMm,
+        prodMultiplier: context.prodMultiplier,
+        colorCount: result.gravure?.copperPlateCount ?? context.colorCount,
+        lossRate: context.lossRate,
+      });
+      if (context.skus?.length) {
+        snapshot.skuColorCounts = context.skus.map((sku) => String(sku.colorCount ?? 0));
+        snapshot.skuOrderDetails = context.skus.map((sku, index) => {
+          const skuCost = result.film.skuCosts[index];
+          return {
+            skuCode: `SKU-${index + 1}`,
+            name: sku.name?.trim() || `充填物${index + 1}`,
+            quantity: sku.quantity ?? result.quantity,
+            colorCount: sku.colorCount ?? "0",
+            requiredLengthM: sku.requiredLengthM ?? skuCost?.requiredLengthM ?? result.film.requiredLengthM,
+            orderLengthM: sku.orderLengthM ?? skuCost?.orderLengthM ?? result.film.orderLengthM,
+            webWidthMm: sku.webWidthMm ?? skuCost?.webWidthMm ?? context.webWidthMm,
+            multiplier: sku.multiplier ?? skuCost?.multiplier ?? 1,
+          };
+        });
+      }
+      return snapshot;
+    })(),
     quantity: result.quantity,
     targetMargin: context.targetMargin,
     customLotCost: result.customCharge,

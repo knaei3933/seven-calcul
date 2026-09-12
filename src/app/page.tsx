@@ -529,11 +529,39 @@ export default function QuotationPage() {
     () => resultShown ? calculateAutomaticQuotation(resultShown, effectiveMargin) : null,
     [effectiveMargin, resultShown],
   );
-  // 候補はシミュレーター上の参考計算。見積ドラフトは左側入力と一致する元データのみ反映する。
-  const quotationDraftResult = serverResult?.selectedCandidateId ? serverResult.originalResult : resultShown;
+  // 選択したD/K/Y候補をそのまま見積ドラフトへ引き継ぐ。未選択時は入力値基準。
+  const quotationDraftResult = resultShown;
+  const selectedRecommendation = serverResult?.selectedCandidateId
+    ? serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId) ?? null
+    : null;
 
   useEffect(() => {
     if (!quotationDraftResult || !customerDraft) return;
+    const totalDraftQuantity = selectedRecommendation?.adjustedSkuQuantities.reduce<Decimal>(
+      (total, value) => total.plus(D(value)),
+      D(0),
+    ) ?? D(quotationDraftResult.quantity);
+    const draftSkus = form.skus.map((sku, index) => {
+      const quantity = D(selectedRecommendation?.adjustedSkuQuantities[index] ?? sku.quantity);
+      const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate);
+      const orderLengthM = selectedRecommendation?.route === "D"
+        ? D(selectedRecommendation.filmOrders?.[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM)
+        : selectedRecommendation?.route === "K"
+          ? D(selectedRecommendation.skuPatternCounts?.[index] ?? 1).times(normalizedGravureParameters.productionPatternLengthM)
+          : selectedRecommendation?.route === "Y"
+            ? totalDraftQuantity.gt(0)
+              ? D(quotationDraftResult.film.orderLengthM).times(quantity.div(totalDraftQuantity))
+              : D(quotationDraftResult.film.orderLengthM)
+            : quotationDraftResult.film.skuCosts[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM;
+      return {
+        name: sku.name,
+        quantity: quantity.toString(),
+        fillMl: sku.fillMl,
+        colorCount: sku.colorCount,
+        requiredLengthM: requiredLengthM.toString(),
+        orderLengthM: orderLengthM.toString(),
+      };
+    });
     try {
       sessionStorage.setItem(
         QUOTATION_DRAFT_KEY,
@@ -546,7 +574,7 @@ export default function QuotationPage() {
           connected: form.connected,
           skuNames: form.skus.map((sku, index) => sku.name.trim() || `充填物${index + 1}`),
           targetMargin: effectiveMargin,
-          printingMethod: form.printingMethod,
+          printingMethod: quotationDraftResult.printingMethod,
           customerName: customerDraft.customerName,
           customerCode: customerDraft.customerCode,
           customerPostalCode: customerDraft.customerPostalCode,
@@ -563,20 +591,16 @@ export default function QuotationPage() {
           pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
           pitchAddMm: effectiveSize.pitchAddMm,
           prodMultiplier: effectiveSize.prodMultiplier,
-          colorCount: Math.max(...form.skus.map((sku) => Number(sku.colorCount) || 0)),
-          skus: form.skus.map((sku) => ({
-            name: sku.name,
-            quantity: sku.quantity,
-            fillMl: sku.fillMl,
-            colorCount: sku.colorCount,
-          })),
+          colorCount: quotationDraftResult.gravure?.copperPlateCount
+            ?? Math.max(...form.skus.map((sku) => Number(sku.colorCount) || 0)),
+          skus: draftSkus,
           gravureParameters: normalizedGravureParameters,
         })),
       );
     } catch {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
-  }, [customerDraft, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, quotationDraftResult]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
+  }, [customerDraft, effectiveMargin, effectiveSize, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate, quotationDraftResult, selectedRecommendation]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
 
   const startCustomerEdit = (customer: CustomerMaster) => {
     setEditingCustomerCode(customer.customerCode);
