@@ -42,15 +42,17 @@ describe("print recommendation engine", () => {
     expect(first[0].recommended).toBe(true);
   });
 
-  it("keeps practical candidates that satisfy the original quantity", () => {
+  it("keeps fulfilling candidates and omits under-quantity digital fallbacks", () => {
     const candidates = buildPrintCandidates(context(baseSpec, "20000"));
-    const practical = candidates.filter((candidate) => (
-      Math.abs(Number(candidate.adjustedQuantity) - 20000) / 20000 <= 0.15
+    const fulfilling = candidates.filter((candidate) => (
+      Number(candidate.adjustedQuantity) >= 20000
     ));
-    expect(practical.length).toBeGreaterThan(0);
+    expect(fulfilling.length).toBeGreaterThan(0);
+    expect(fulfilling.some((candidate) => candidate.orderLengthM === "1000")).toBe(true);
+    expect(candidates.some((candidate) => candidate.orderLengthM === "500")).toBe(false);
   });
 
-  it("recommends the practical near-quantity Y candidate", () => {
+  it("recommends the smallest practical candidate that satisfies the original quantity", () => {
     const candidates = buildPrintCandidates(context());
     const recommended = candidates.find((candidate) => candidate.recommended)!;
     expect(recommended.route).toBe("Y");
@@ -58,6 +60,14 @@ describe("print recommendation engine", () => {
     expect(recommended.adjustedQuantity).toBe("142325");
     expect(D(recommended.filmTotalYen).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toString()).toBe("385370");
     expect(D(recommended.surplusRatio).lte(D("15"))).toBe(true);
+
+    const smallerOrder = buildPrintCandidates(context(baseSpec, "20000"));
+    const smallestFulfilling = smallerOrder
+      .filter((candidate) => Number(candidate.adjustedQuantity) >= 20000)
+      .sort((left, right) => Number(left.adjustedQuantity) - Number(right.adjustedQuantity))[0];
+    expect(smallestFulfilling.route).toBe("D");
+    expect(smallestFulfilling.orderLengthM).toBe("1000");
+    expect(smallestFulfilling.recommended).toBe(true);
   });
 
   it("preserves a selected digital candidate order length", () => {

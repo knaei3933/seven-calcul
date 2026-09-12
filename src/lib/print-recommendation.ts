@@ -594,12 +594,8 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     .map((draft) => finishCandidate(draft, context.originalQuantity));
 
   const originalQuantity = context.originalQuantity;
-  const practicalPool = candidates.filter((candidate) => {
-    const quantityDeltaRatio = originalQuantity.gt(0)
-      ? D(candidate.adjustedQuantity).minus(originalQuantity).abs().div(originalQuantity)
-      : D(0);
-    return quantityDeltaRatio.lte(D("0.15"));
-  });
+  const fulfilling = candidates.filter((candidate) => D(candidate.adjustedQuantity).gte(originalQuantity));
+  const practicalPool = fulfilling.filter((candidate) => D(candidate.surplusRatio).lte(D("15")));
 
   const byTotal = (items: PrintCandidate[]) => [...items].sort((left, right) => {
     const leftTotal = D(left.filmTotalYen);
@@ -614,16 +610,32 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     return left.id.localeCompare(right.id);
   });
 
-  const satisfying = byTotal(candidates.filter((candidate) => D(candidate.adjustedQuantity).gte(originalQuantity)));
   const rankedPractical = byTotal(practicalPool);
-  const recommendedCandidate = rankedPractical[0] ?? satisfying[0] ?? byTotal(candidates)[0];
+  // If a low-surplus fulfilling order exists, prefer it because the customer
+  // can use most of the film. Otherwise choose the shortest order that still
+  // covers the requested quantity; this prevents 19,000/20,000 style answers.
+  const byOrderThenTotal = (items: PrintCandidate[]) => [...items].sort((left, right) => {
+    const leftLength = D(left.orderLengthM);
+    const rightLength = D(right.orderLengthM);
+    if (!leftLength.eq(rightLength)) return leftLength.lt(rightLength) ? -1 : 1;
+    const leftTotal = D(left.filmTotalYen);
+    const rightTotal = D(right.filmTotalYen);
+    if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
+    return left.id.localeCompare(right.id);
+  });
+  const fulfillingRanked = practicalPool.length ? byTotal(practicalPool) : byOrderThenTotal(fulfilling);
+  const recommendedCandidate = fulfillingRanked[0] ?? byTotal(candidates)[0];
 
   // Keep one practical/cheapest representative for D/K/Y. This prevents a large
   // volume K candidate from disappearing merely because pattern rounding exceeds 15%.
   const routeRepresentatives = (["D", "K", "Y"] as const)
     .map((route) => {
-      const practicalRoute = rankedPractical.filter((candidate) => candidate.route === route);
-      if (practicalRoute.length) return practicalRoute[0];
+      const practicalRoute = practicalPool.filter((candidate) => candidate.route === route);
+      if (practicalRoute.length) return byTotal(practicalRoute)[0];
+      // Do not surface an under-quantity route fallback while fulfilling route
+      // candidates exist (for example D-500m when the order needs 20,000 pcs).
+      const fulfillingRoute = fulfilling.filter((candidate) => candidate.route === route);
+      if (fulfillingRoute.length) return byOrderThenTotal(fulfillingRoute)[0];
       const routeCandidates = candidates.filter((candidate) => candidate.route === route);
       return [...routeCandidates].sort((left, right) => {
         const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
@@ -635,11 +647,18 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
         return left.id.localeCompare(right.id);
       })[0];
     })
-    .filter((candidate): candidate is PrintCandidate => Boolean(candidate));
+    .filter((candidate): candidate is PrintCandidate => Boolean(candidate))
+    .sort((left, right) => left.id.localeCompare(right.id));
 
   const selectedIds = new Set(recommendedCandidate ? [recommendedCandidate.id] : []);
   routeRepresentatives.forEach((candidate) => selectedIds.add(candidate.id));
-  const remaining = byTotal(candidates.filter((candidate) => !selectedIds.has(candidate.id)))
+  // The primary contract is to satisfy the entered quantity. Under-quantity
+  // candidates are useful only when no route can cover the demand, so they must
+  // not displace fulfilling alternatives in the normal candidate list.
+  const representedRoutes = new Set(routeRepresentatives.map((candidate) => candidate.route));
+  const remaining = byOrderThenTotal(fulfilling.filter((candidate) => (
+    !selectedIds.has(candidate.id) && !representedRoutes.has(candidate.route)
+  )))
     .slice(0, Math.max(0, 4 - selectedIds.size));
 
   const display = [recommendedCandidate, ...routeRepresentatives, ...remaining]
