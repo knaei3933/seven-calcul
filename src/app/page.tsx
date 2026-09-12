@@ -110,7 +110,10 @@ export default function QuotationPage() {
     originalResult: CostResult;
     candidates: PrintCandidate[];
     inputJson: string;
+    requestNonQuantityJson?: string;
     selectedCandidateId: string;
+    originalQuantity?: string;
+    originalSkuQuantities?: string[];
   };
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
@@ -357,7 +360,27 @@ export default function QuotationPage() {
   }), [spec, form.quantity, form.printingMethod, targetMarginList, effectiveParameters, normalizedGravureParameters]);
 
   const calculationInputJson = useMemo(() => JSON.stringify(calculationInput), [calculationInput]);
-  const staleResult = serverResult !== null && serverResult.inputJson !== calculationInputJson;
+  const selectedRecommendationForStale = serverResult?.selectedCandidateId
+    ? serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId) ?? null
+    : null;
+  const selectedQuantitiesMatchForm = !selectedRecommendationForStale || (
+    D(form.quantity).eq(selectedRecommendationForStale.adjustedQuantity)
+    && form.skus.every((sku, index) => (
+      !isPositiveDecimalInput(selectedRecommendationForStale.adjustedSkuQuantities[index])
+      || D(sku.quantity).eq(selectedRecommendationForStale.adjustedSkuQuantities[index])
+    ))
+  );
+  const nonQuantityInput = useMemo(() => {
+    const { spec, ...rest } = calculationInput;
+    const { skuQuantities: _skuQuantities, ...nonQuantitySpec } = spec;
+    const { quantity: _quantity, ...nonQuantityRest } = rest;
+    return JSON.stringify({ spec: nonQuantitySpec, ...nonQuantityRest });
+  }, [calculationInput]);
+  const staleResult = serverResult !== null && (
+    selectedRecommendationForStale
+      ? !selectedQuantitiesMatchForm || serverResult.requestNonQuantityJson !== nonQuantityInput
+      : serverResult.inputJson !== calculationInputJson
+  );
 
   const writeChecklistSnapshot = useCallback((
     result: CostResult,
@@ -431,8 +454,19 @@ export default function QuotationPage() {
         originalResult,
         candidates,
         inputJson: calculationInputJson,
+        requestNonQuantityJson: nonQuantityInput,
         selectedCandidateId: candidate.id,
+        originalQuantity: form.quantity,
+        originalSkuQuantities: form.skus.map((sku) => sku.quantity),
       });
+      setForm((old) => ({
+        ...old,
+        quantity: D(candidate.adjustedQuantity).toString(),
+        skus: old.skus.map((sku, index) => ({
+          ...sku,
+          quantity: D(candidate.adjustedSkuQuantities[index] ?? candidate.adjustedQuantity).toString(),
+        })),
+      }));
       const adjustedQuantities = candidate.adjustedSkuQuantities;
       const totalAdjustedQuantity = adjustedQuantities.reduce<Decimal>(
         (total, value) => total.plus(D(value)),
@@ -468,6 +502,17 @@ export default function QuotationPage() {
 
   const clearCandidate = () => {
     if (!serverResult) return;
+    const restoredQuantity = serverResult.originalQuantity ?? D(serverResult.originalResult.quantity).toString();
+    const restoredSkuQuantities = serverResult.originalSkuQuantities
+      ?? form.skus.map((_, index) => D(serverResult.originalResult.film.skuCosts[index]?.quantity ?? serverResult.originalResult.quantity).toString());
+    setForm((old) => ({
+      ...old,
+      quantity: restoredQuantity,
+      skus: old.skus.map((sku, index) => ({
+        ...sku,
+        quantity: restoredSkuQuantities[index] ?? restoredQuantity,
+      })),
+    }));
     setRecommendationPanelOpen(true);
     setServerResult({
       ...serverResult,
@@ -475,7 +520,12 @@ export default function QuotationPage() {
       selectedCandidateId: "",
     });
     if (serverResult.originalResult.audit.resultJsonSha256 !== serverResult.result.audit.resultJsonSha256) {
-      writeChecklistSnapshot(serverResult.originalResult);
+      writeChecklistSnapshot(serverResult.originalResult, form.skus.map((sku, index) => ({
+        name: sku.name,
+        quantity: restoredSkuQuantities[index] ?? restoredQuantity,
+        fillMl: sku.fillMl,
+        colorCount: sku.colorCount,
+      })));
     }
   };
 
@@ -487,6 +537,7 @@ export default function QuotationPage() {
     setServerResult(null);
     try {
       const requestedInputJson = calculationInputJson;
+      const requestedNonQuantityJson = nonQuantityInput;
       const response = await fetch("/api/calculate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -504,7 +555,10 @@ export default function QuotationPage() {
         originalResult,
         candidates,
         inputJson: requestedInputJson,
+        requestNonQuantityJson: requestedNonQuantityJson,
         selectedCandidateId: "",
+        originalQuantity: form.quantity,
+        originalSkuQuantities: form.skus.map((sku) => sku.quantity),
       });
       setCustomerDraft({
         customerName: form.customerName,
@@ -1043,7 +1097,7 @@ export default function QuotationPage() {
                 <p className="total-label">発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</p>
                 {serverResult?.selectedCandidateId ? (
                   <p className="help" data-testid="active-candidate-note">
-                    選択候補（{resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}）基準で表示しています。左側の入力発注数は {formatNumber(form.quantity)} 枚のままです。
+                    選択候補（{resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}）基準で表示しています。左側の入力発注数は {formatNumber(form.quantity)} 枚に自動反映されています。
                   </p>
                 ) : null}
                 <p className="total">
@@ -1103,7 +1157,7 @@ export default function QuotationPage() {
                     <section className="panel recommendation-panel" aria-labelledby="recommendation-title">
                       <h3 id="recommendation-title">発注数量・パターン候補</h3>
                       <p className="help">
-                        D=デジタル、K=韓国輸入、Y=国内調達。候補を選ぶと結果カードが候補基準に切り替わります。左側の入力数値は変わりません。
+                        D=デジタル、K=韓国輸入、Y=国内調達。候補を選ぶと結果と左側の発注数が候補基準に切り替わります。「入力値」で元の数量へ戻ります。
                       </p>
                       <div className="recommendation-grid">
                         <button
