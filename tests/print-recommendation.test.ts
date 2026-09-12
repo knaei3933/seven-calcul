@@ -29,11 +29,11 @@ function context(spec: PouchSpec = baseSpec, quantity = "133000") {
 }
 
 describe("print recommendation engine", () => {
-  it("returns a deterministic route-balanced candidate list capped at four", () => {
+  it("returns a deterministic route-balanced candidate list capped at three", () => {
     const first = buildPrintCandidates(context());
     const second = buildPrintCandidates(context());
     expect(first.length).toBeGreaterThan(0);
-    expect(first.length).toBeLessThanOrEqual(4);
+    expect(first.length).toBeLessThanOrEqual(3);
     expect(first.map((candidate) => candidate.id)).toEqual(second.map((candidate) => candidate.id));
     expect(first.some((candidate) => candidate.route === "D")).toBe(true);
     expect(first.some((candidate) => candidate.route === "K")).toBe(true);
@@ -42,14 +42,14 @@ describe("print recommendation engine", () => {
     expect(first[0].recommended).toBe(true);
   });
 
-  it("keeps nondominated under-quantity candidates as comparison alternatives", () => {
+  it("caps displayed alternatives at one route-balanced candidate per route", () => {
     const candidates = buildPrintCandidates(context(baseSpec, "20000"));
-    const underQuantity = candidates.find((candidate) => candidate.orderLengthM === "500");
     const fulfilling = candidates.filter((candidate) => (
       Number(candidate.adjustedQuantity) >= 20000
     ));
-    expect(underQuantity).toBeDefined();
-    expect(D(underQuantity!.quantityShortfallRatio).gt(0)).toBe(true);
+    expect(candidates).toHaveLength(3);
+    expect(new Set(candidates.map((candidate) => candidate.route))).toEqual(new Set(["D", "K", "Y"]));
+    expect(candidates.some((candidate) => candidate.orderLengthM === "500")).toBe(false);
     expect(fulfilling.some((candidate) => candidate.orderLengthM === "1000")).toBe(true);
     expect(fulfilling.some((candidate) => candidate.recommended)).toBe(true);
   });

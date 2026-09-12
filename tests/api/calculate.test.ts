@@ -63,7 +63,7 @@ describe("calculate API recommendations", () => {
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.candidates.length).toBeGreaterThan(0);
-    expect(payload.candidates.length).toBeLessThanOrEqual(4);
+    expect(payload.candidates.length).toBeLessThanOrEqual(3);
     expect(payload.candidates[0].recommended).toBe(true);
     const recommended = payload.candidates.find((candidate: any) => candidate.recommended);
     expect(recommended).toBeDefined();

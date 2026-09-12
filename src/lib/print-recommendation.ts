@@ -95,6 +95,8 @@ export type PrintCandidateContext = {
   gravureParameters: GravureRollParameters;
 };
 
+const PRINT_CANDIDATE_LIMIT = 3;
+
 type CandidateDraft = Omit<PrintCandidate, "recommended" | "quantityDelta" | "quantityShortfallRatio"> & { __internal?: true };
 
 function floorTo(value: Decimal, unit: string | number): Decimal {
@@ -658,9 +660,10 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
   const recommendedCandidate = fulfillingRanked[0] ?? byTotal(candidates)[0];
   const pareto = paretoCandidates(candidates);
 
-  // Keep one economically representative candidate for D/K/Y. Pareto selection
-  // deliberately keeps an under-quantity candidate when it is the cheapest
-  // purchase, while the recommended candidate separately guarantees quantity.
+  // Show at most one representative per D/K/Y route. If the recommended
+  // candidate belongs to a route, it replaces that route's alternative so the
+  // three-card limit can cover all production routes instead of duplicating a
+  // route (for example two D rows plus Y and K).
   const routeRepresentatives = (["D", "K", "Y"] as const)
     .map((route) => {
       const paretoRoute = pareto.filter((candidate) => candidate.route === route);
@@ -680,21 +683,33 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
         return left.id.localeCompare(right.id);
       })[0];
     })
-    .filter((candidate): candidate is PrintCandidate => Boolean(candidate))
-    .sort((left, right) => left.id.localeCompare(right.id));
-
-  const selectedIds = new Set(recommendedCandidate ? [recommendedCandidate.id] : []);
-  routeRepresentatives.forEach((candidate) => selectedIds.add(candidate.id));
-  // Additional rows remain quantity-fulfilling because the Pareto/route cards
-  // above already expose economically optimal under-quantity alternatives.
-  const representedRoutes = new Set(routeRepresentatives.map((candidate) => candidate.route));
-  const remaining = byOrderThenTotal(fulfilling.filter((candidate) => (
-    !selectedIds.has(candidate.id) && !representedRoutes.has(candidate.route)
-  )))
-    .slice(0, Math.max(0, 4 - selectedIds.size));
-
-  const display = [recommendedCandidate, ...routeRepresentatives, ...remaining]
     .filter((candidate): candidate is PrintCandidate => Boolean(candidate));
+  const paretoOrder = new Map(pareto.map((candidate, index) => [candidate.id, index]));
+
+  const routeCandidatesForDisplay = routeRepresentatives.map((candidate) => (
+    recommendedCandidate && candidate.route === recommendedCandidate.route
+      ? recommendedCandidate
+      : candidate
+  ));
+  const uniqueRouteCandidates = routeCandidatesForDisplay.filter((candidate, index, items) => (
+    items.findIndex((item) => item.id === candidate.id) === index
+  ));
+  const rankedAlternatives = uniqueRouteCandidates
+    .filter((candidate) => !recommendedCandidate || candidate.id !== recommendedCandidate.id)
+    .sort((left, right) => {
+      const leftRank = paretoOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+      const rightRank = paretoOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      return left.id.localeCompare(right.id);
+    });
+
+  const displayCandidates = [
+    ...(recommendedCandidate ? [recommendedCandidate] : []),
+    ...rankedAlternatives,
+  ].slice(0, PRINT_CANDIDATE_LIMIT);
+  const selectedIds = new Set(displayCandidates.map((candidate) => candidate.id));
+
+  const display = displayCandidates;
   const uniqueDisplay: PrintCandidate[] = [];
   const displayIds = new Set<string>();
   for (const candidate of display) {
@@ -704,6 +719,6 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
   }
 
   return uniqueDisplay
-    .slice(0, 4)
+    .slice(0, PRINT_CANDIDATE_LIMIT)
     .map((candidate) => ({ ...candidate, recommended: recommendedCandidate?.id === candidate.id }));
 }
