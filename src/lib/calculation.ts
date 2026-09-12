@@ -6,9 +6,12 @@ import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnit
 import { calculateGravureRollCost, defaultGravureRollParameters, type GravureRollParameters } from "./gravure-roll";
 import { buildSascheCandidates, buildSascheGravureRollResult, selectSascheCandidate } from "./sasche-gravure";
 import type { SascheCandidate } from "./sasche-gravure";
+import type { GravureRollCostResult } from "./gravure-roll";
+import { buildPrintCandidates, createPrintCandidateContext, type PrintCandidate } from "./print-recommendation";
 import type { CostParameters, FilmPriceMode, PriceBand, PouchSpec, PrintingMethod, QuotationStatus, SizeMaster } from "./types";
 
 export interface CostResult {
+  printingMethod: PrintingMethod;
   quantity: string;
   connectedChambers: 1 | 2 | 3 | 4;
   chamberCount: string;
@@ -50,6 +53,8 @@ export interface CostResult {
   gravurePricingMode: "standard" | "sasche";
   sasche?: SascheCandidate;
   sascheCandidates?: SascheCandidate[];
+  recommendationCandidates?: PrintCandidate[];
+  selectedCandidateId?: string;
   orderPatternCount?: number;
   deliverablePatternLengthM?: string;
   recommendedQuantity?: string;
@@ -131,7 +136,17 @@ export interface CalculationInput {
   parameters?: Partial<CostParameters>;
   gravureParameters?: GravureRollParameters;
   targetMargins?: string[];
+  recommendationMode?: boolean;
+  selectedCandidateId?: string;
 }
+
+type RecommendationOptions = {
+  aggregateDigitalPrice?: boolean;
+  filmOrderOverride?: FilmSkuOrder[];
+  suppressAutomaticSasche?: boolean;
+  sascheCandidateOverride?: SascheCandidate;
+  gravureRollOverride?: GravureRollCostResult;
+};
 
 const DEFAULT_TARGET_MARGINS = ["0.4", "0.5"] as const;
 
@@ -150,7 +165,9 @@ function resolveTargetMargins(targetMargins?: string[]): string[] {
   return valid.sort((a, b) => a.numeric - b.numeric).map((item) => item.value);
 }
 
-export function calculatePouchCost({ spec, quantity, printingMethod, parameters, gravureParameters, targetMargins }: CalculationInput): CostResult {
+function calculatePouchCostCore(
+  { spec, quantity, printingMethod, parameters, gravureParameters, targetMargins, recommendation }: Omit<CalculationInput, "recommendationMode" | "selectedCandidateId"> & { recommendation?: RecommendationOptions },
+): CostResult {
   const quantityD = D(quantity);
   if (quantityD.lte(0) || D(spec.fillMlPerChamber).lte(0) || spec.fillingLanes <= 0) throw validationError("invalid_positive_input");
   const params = {
@@ -183,25 +200,30 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
       })
     : Array.from({ length: spec.skuCount }, () => D(spec.fillMlPerChamber));
   const skuRequiredLengths = skuQuantitiesList.map((skuQuantity) => calculateRequiredProductionLength(size, skuQuantity, params.lossRate));
-  const { orders: digitalOrders, adjustment: orderAdjustment } = normalizeDigitalFilmOrder(
-    skuRequiredLengths.map((requiredLength, index) => ({
-      skuCode: `SKU-${index + 1}`,
-      requiredLengthM: requiredLength.toString(),
-    })),
-    params,
-  );
+  const { orders: digitalOrders, adjustment: orderAdjustment } = recommendation?.filmOrderOverride
+    ? {
+        orders: recommendation.filmOrderOverride,
+        adjustment: "none" as FilmOrderAdjustment,
+      }
+    : normalizeDigitalFilmOrder(
+        skuRequiredLengths.map((requiredLength, index) => ({
+          skuCode: `SKU-${index + 1}`,
+          requiredLengthM: requiredLength.toString(),
+        })),
+        params,
+      );
   const requiredLengthM = sum(skuRequiredLengths);
   // 銅版はSKU（デザイン）ごとの色数を合算して必要本数を判定する。
   const copperPlateColors = sum(
     (spec.skuColorCounts?.length ? spec.skuColorCounts : [spec.colorCount]).map((colors) => D(colors)),
   );
   const sascheCandidate = printingMethod === "gravure"
-    ? selectSascheCandidate({
+    ? recommendation?.sascheCandidateOverride ?? (recommendation?.suppressAutomaticSasche ? null : selectSascheCandidate({
         webWidthMm: size.webWidthMm,
         requiredLengthM,
         quantity: quantityD,
         colorCount: copperPlateColors,
-      })
+      }))
     : null;
   const sascheCandidates = printingMethod === "gravure"
     ? buildSascheCandidates({
@@ -212,7 +234,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
       })
     : [];
   const gravureRoll = printingMethod === "gravure"
-    ? sascheCandidate
+    ? recommendation?.gravureRollOverride ?? (sascheCandidate
       ? buildSascheGravureRollResult(sascheCandidate)
       : calculateGravureRollCost({
           requiredLengthM,
@@ -225,7 +247,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
             colors: spec.skuColorCounts?.[index] ?? spec.colorCount,
           })),
           parameters: gravureParameters ?? defaultGravureRollParameters(),
-        })
+        }))
     : null;
   const film = gravureRoll
     ? {
@@ -246,7 +268,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
         orderAdjustment,
         skuCosts: [],
       }
-    : calculateFilmCost(size, quantityD, printingMethod, params, digitalOrders, orderAdjustment);
+    : calculateFilmCost(size, quantityD, printingMethod, params, digitalOrders, orderAdjustment, recommendation?.aggregateDigitalPrice);
   const skuCosts = film.skuCosts.map((skuCost, index) => ({
     ...skuCost,
     name: (spec.skuNames?.[index] ?? "").trim() || `充填物${index + 1}`,
@@ -320,6 +342,7 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
   const result = { quantity: quantityD.toString(), chamberCount: chamberCount.toString(), bulkUsageMl: bulkUsage.toString(), costComponents, costTotal: costTotal.toString(), sellingPrices };
 
   return {
+    printingMethod,
     quantity: quantityD.toString(),
     connectedChambers: spec.connectedChambers,
     chamberCount: chamberCount.toString(),
@@ -400,6 +423,87 @@ export function calculatePouchCost({ spec, quantity, printingMethod, parameters,
   };
 }
 
+export function calculatePouchCost(input: CalculationInput): CostResult {
+  const { recommendationMode, selectedCandidateId, ...coreInput } = input;
+  const recommendation: RecommendationOptions | undefined = recommendationMode
+    ? {
+        aggregateDigitalPrice: true,
+        suppressAutomaticSasche: coreInput.printingMethod === "gravure",
+      }
+    : undefined;
+  const original = calculatePouchCostCore({ ...coreInput, recommendation });
+
+  if (!recommendationMode) return original;
+
+  const params = {
+    ...defaultParameters,
+    ...coreInput.parameters,
+    productionSpeedPerMinute: coreInput.parameters?.productionSpeedPerMinute
+      ?? String(defaultProductionSpeedForFillMl(coreInput.spec.fillMlPerChamber)),
+  } as CostParameters;
+  const context = createPrintCandidateContext({
+    spec: coreInput.spec,
+    quantity: coreInput.quantity,
+    parameters: params,
+    gravureParameters: coreInput.gravureParameters ?? defaultGravureRollParameters(),
+  });
+  const candidates = buildPrintCandidates(context);
+  const attach = (result: CostResult): CostResult => ({ ...result, recommendationCandidates: candidates, selectedCandidateId: selectedCandidateId ?? "" });
+  if (!selectedCandidateId) return attach(original);
+
+  const selected = candidates.find((candidate) => candidate.id === selectedCandidateId);
+  if (!selected) return attach(original);
+
+  const adjustedQuantity = sum(selected.adjustedSkuQuantities.map((value) => D(value)));
+  const adjustedSpec: PouchSpec = {
+    ...coreInput.spec,
+    skuQuantities: selected.adjustedSkuQuantities,
+  };
+  const adjustedInput = {
+    ...coreInput,
+    spec: adjustedSpec,
+    quantity: adjustedQuantity.toString(),
+    printingMethod: selected.printingMethod,
+  };
+
+  if (selected.route === "D" && selected.filmOrders) {
+    const candidateResult = calculatePouchCostCore({
+      ...adjustedInput,
+      recommendation: {
+        aggregateDigitalPrice: true,
+        filmOrderOverride: selected.filmOrders.map((order) => ({ ...order })),
+      },
+    });
+    return attach(candidateResult);
+  }
+
+  if (selected.route === "K" && selected.gravureRoll) {
+    const candidateResult = calculatePouchCostCore({
+      ...adjustedInput,
+      recommendation: {
+        aggregateDigitalPrice: false,
+        suppressAutomaticSasche: true,
+        gravureRollOverride: selected.gravureRoll,
+      },
+    });
+    return attach(candidateResult);
+  }
+
+  if (selected.route === "Y" && selected.sasche) {
+    const candidateResult = calculatePouchCostCore({
+      ...adjustedInput,
+      recommendation: {
+        aggregateDigitalPrice: false,
+        sascheCandidateOverride: selected.sasche,
+        gravureRollOverride: undefined,
+      },
+    });
+    return attach(candidateResult);
+  }
+
+  return attach(original);
+}
+
 export function approvedCommission(amount: string, status: QuotationStatus, parameters: Partial<CostParameters> = {}): { eligible: boolean; commissionAmount: string | null } {
   if (status !== "approved") return { eligible: false, commissionAmount: null };
   return { eligible: true, commissionAmount: D(amount).times(parameters.commissionRate ?? defaultParameters.commissionRate).toString() };
@@ -430,6 +534,7 @@ function calculateFilmCost(
   params: CostParameters,
   digitalOrders: FilmSkuOrder[],
   orderAdjustment: FilmOrderAdjustment,
+  aggregateDigitalPrice = false,
 ): FilmCostResult {
   if (printingMethod !== "digital") throw validationError("gravure_not_configured");
   const pitch = D(size.lengthMm).plus(size.pitchAddMm);
@@ -437,7 +542,7 @@ function calculateFilmCost(
     const required = D(sku.requiredLengthM);
     // Excel規則: 35mm幅品・Xraラウンドは必要長が900m超で736mm幅・2倍生産に切替（検討長さ＝発注×2・200m刻み）
     const useLargeLot = Boolean(size.largeLotWebWidthMm) && required.gt(900);
-    const orderLength = useLargeLot
+    const orderLength = useLargeLot && !aggregateDigitalPrice
       ? Decimal.max(500, ceilTo(required.div(2), 100))
       : D(sku.orderLengthM);
     const multiplier = useLargeLot ? 2 : 1;
@@ -448,25 +553,31 @@ function calculateFilmCost(
     const pricing = actual.div(500).floor().times(500);
     if (pricing.lte(0)) throw validationError("no_priceable_quantity");
     const appliedBand: PriceBand = useLargeLot ? "571to740" : size.priceBand;
-    const unitPrice = filmUnitPrice(appliedBand, orderLength, params);
-    const baseCost = orderLength.times(unitPrice);
     const webWidthMm = useLargeLot ? size.largeLotWebWidthMm! : size.webWidthMm;
-    return { skuCode: sku.skuCode, required, orderLength, multiplier, considered, appliedBand, webWidthMm, loss, effective, actual, pricing, unitPrice, baseCost };
+    return { skuCode: sku.skuCode, required, orderLength, multiplier, considered, appliedBand, webWidthMm, loss, effective, actual, pricing, unitPrice: D(0), baseCost: D(0) };
+  });
+  const priceTierLength = aggregateDigitalPrice
+    ? sum(skuResults.map((sku) => sku.orderLength))
+    : D(0);
+  const skuRows = skuResults.map((sku) => {
+    const unitPrice = filmUnitPrice(sku.appliedBand, aggregateDigitalPrice ? priceTierLength : sku.orderLength, params);
+    const baseCost = sku.orderLength.times(unitPrice);
+    return { ...sku, unitPrice, baseCost };
   });
 
-  const required = sum(skuResults.map((sku) => sku.required));
-  const orderLength = sum(skuResults.map((sku) => sku.orderLength));
-  const loss = sum(skuResults.map((sku) => sku.loss));
-  const effective = sum(skuResults.map((sku) => sku.effective));
-  const actual = sum(skuResults.map((sku) => sku.actual));
-  const pricing = sum(skuResults.map((sku) => sku.pricing));
-  const baseCost = sum(skuResults.map((sku) => sku.baseCost));
+  const required = sum(skuRows.map((sku) => sku.required));
+  const orderLength = sum(skuRows.map((sku) => sku.orderLength));
+  const loss = sum(skuRows.map((sku) => sku.loss));
+  const effective = sum(skuRows.map((sku) => sku.effective));
+  const actual = sum(skuRows.map((sku) => sku.actual));
+  const pricing = sum(skuRows.map((sku) => sku.pricing));
+  const baseCost = sum(skuRows.map((sku) => sku.baseCost));
   const unitPrice = orderLength.eq(0) ? D(0) : baseCost.div(orderLength);
 
   const anyLargeLot = skuResults.some((sku) => sku.multiplier === 2);
   const webWidth = anyLargeLot ? size.largeLotWebWidthMm ?? size.webWidthMm : size.webWidthMm;
   const shippingUnit = D(shippingUnitForWidth(webWidth, params));
-  const productionEquivalentLength = sum(skuResults.map((sku) => sku.orderLength.times(sku.multiplier)));
+  const productionEquivalentLength = sum(skuRows.map((sku) => sku.orderLength.times(sku.multiplier)));
   const shippingTrips = productionEquivalentLength.div(shippingUnit).ceil();
   const domestic = shippingTrips.times(params.domesticShippingPerTrip);
   const overseas = shippingTrips.times(params.overseasShippingPerTrip);

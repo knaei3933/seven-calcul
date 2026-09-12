@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { calculatePouchCost } from "@/lib/calculation";
+import type { CostResult } from "@/lib/calculation";
 import { defaultParameters, defaultProductionSpeedForFillMl, machineChargeBasis, sizeMaster } from "@/lib/constants";
 import { displayAmount } from "@/lib/calculation";
 import { D } from "@/lib/decimal";
@@ -14,6 +14,7 @@ import { calculateAutomaticQuotation } from "@/lib/quotation-pricing";
 import { deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calculations";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
 import type { CustomerMaster, CustomerMasterInput } from "@/lib/quotation-shared";
+import type { PrintCandidate } from "@/lib/print-recommendation";
 
 const MARGIN_OPTIONS = {
   digital: ["0.4", "0.35", "0.3"],
@@ -104,14 +105,19 @@ export default function QuotationPage() {
   const [parameters, setParameters] = useState<CostParameters>(defaultParameters);
   const [gravureParameters, setGravureParameters] = useState<GravureRollParameters>(() => normalizeGravureParameters(defaultGravureRollParameters()));
   const [machineBreakdown, setMachineBreakdown] = useState<Record<MachineBreakdownKey, string>>(() => ({ ...MACHINE_BREAKDOWN_DEFAULTS }));
-  type ServerCalculation = { result: ReturnType<typeof calculatePouchCost>; inputJson: string };
+  type ServerCalculation = {
+    result: CostResult;
+    originalResult: CostResult;
+    candidates: PrintCandidate[];
+    inputJson: string;
+    selectedCandidateId: string;
+  };
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
   const [productionSpeedManual, setProductionSpeedManual] = useState(false);
-  const [sascheCandidateId, setSascheCandidateId] = useState("");
   type CustomerDraft = Pick<typeof form, 'customerName' | 'customerCode' | 'customerPostalCode' | 'customerAddress' | 'customerContact' | 'customerTelephone' | 'customerEmail'>;
   const [customerDraft, setCustomerDraft] = useState<CustomerDraft | null>(null);
   const [customerListOpen, setCustomerListOpen] = useState(false);
@@ -352,6 +358,84 @@ export default function QuotationPage() {
   const calculationInputJson = useMemo(() => JSON.stringify(calculationInput), [calculationInput]);
   const staleResult = serverResult !== null && serverResult.inputJson !== calculationInputJson;
 
+  const writeChecklistSnapshot = useCallback((result: CostResult) => {
+    const preliminarySnapshot = buildCalculationChecklistSnapshot(result, {
+      quotationNumber: "保存前",
+      customerName: form.customerName,
+      customerCode: form.customerCode,
+      printingMethod: result.printingMethod,
+      sourceHash: result.audit.resultJsonSha256,
+      resultHash: result.audit.resultJsonSha256,
+      widthMm: form.widthMm,
+      lengthMm: form.lengthMm,
+      parameters: effectiveParameters,
+      filmComposition: "PET12+AL7+PET12+LLDPE50",
+      webWidthMm: effectiveSize.webWidthMm,
+      lanes: effectiveSize.lanes,
+      pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
+      pitchAddMm: effectiveSize.pitchAddMm,
+      prodMultiplier: effectiveSize.prodMultiplier,
+      colorCount: Math.max(...form.skus.map((sku) => Number(sku.colorCount) || 0)),
+      skus: result.film.skuCosts.map((sku) => ({
+        name: sku.name,
+        quantity: sku.quantity,
+        fillMl: sku.fillMlPerChamber,
+        colorCount: sku.colorCount,
+      })),
+      lossRate: parameters.lossRate,
+      bulkUnitPrice: form.bulkPrice,
+      gravureParameters: normalizedGravureParameters,
+    });
+    const checklistSnapshotJson = JSON.stringify(preliminarySnapshot);
+    sessionStorage.setItem(CURRENT_CHECKLIST_SNAPSHOT_KEY, checklistSnapshotJson);
+    localStorage.setItem("pouch-current-checklist-snapshot-persistent-v1", checklistSnapshotJson);
+  }, [effectiveParameters, effectiveSize, form.bulkPrice, form.customerCode, form.customerName, form.lengthMm, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate]);
+
+  const selectCandidate = async (candidate: PrintCandidate) => {
+    if (!serverResult || pending || serverResult.selectedCandidateId === candidate.id) return;
+    const requestOrder = ++requestOrderRef.current;
+    setPending(true);
+    try {
+      const response = await fetch("/api/calculate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...calculationInput, recommendationMode: true, selectedCandidateId: candidate.id }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "candidate_calculation_failed");
+      if (requestOrder !== requestOrderRef.current) return;
+      const activeResult: CostResult = payload.result;
+      const originalResult: CostResult = payload.originalResult ?? serverResult.originalResult;
+      const candidates: PrintCandidate[] = payload.candidates ?? serverResult.candidates;
+      setServerResult({
+        result: activeResult,
+        originalResult,
+        candidates,
+        inputJson: calculationInputJson,
+        selectedCandidateId: candidate.id,
+      });
+      writeChecklistSnapshot(activeResult);
+    } catch (error) {
+      if (requestOrder === requestOrderRef.current) {
+        window.dispatchDebugError?.(error instanceof Error ? error.message : "candidate_calculation_failed");
+      }
+    } finally {
+      if (requestOrder === requestOrderRef.current) setPending(false);
+    }
+  };
+
+  const clearCandidate = () => {
+    if (!serverResult) return;
+    setServerResult({
+      ...serverResult,
+      result: serverResult.originalResult,
+      selectedCandidateId: "",
+    });
+    if (serverResult.originalResult.audit.resultJsonSha256 !== serverResult.result.audit.resultJsonSha256) {
+      writeChecklistSnapshot(serverResult.originalResult);
+    }
+  };
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (blocker) return;
@@ -360,12 +444,24 @@ export default function QuotationPage() {
     setServerResult(null);
     try {
       const requestedInputJson = calculationInputJson;
-      const response = await fetch("/api/calculate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(calculationInput) });
+      const response = await fetch("/api/calculate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...calculationInput, recommendationMode: true }),
+      });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "calculation_failed");
       if (requestOrder !== requestOrderRef.current) return;
-      setServerResult({ result: payload.result, inputJson: requestedInputJson });
-      setSascheCandidateId(payload.result.sasche?.id ?? "");
+      const originalResult: CostResult = payload.originalResult ?? payload.result;
+      const activeResult: CostResult = payload.result;
+      const candidates: PrintCandidate[] = payload.candidates ?? [];
+      setServerResult({
+        result: activeResult,
+        originalResult,
+        candidates,
+        inputJson: requestedInputJson,
+        selectedCandidateId: "",
+      });
       setCustomerDraft({
         customerName: form.customerName,
         customerCode: form.customerCode,
@@ -375,38 +471,7 @@ export default function QuotationPage() {
         customerTelephone: form.customerTelephone,
         customerEmail: form.customerEmail,
       });
-      const preliminarySnapshot = buildCalculationChecklistSnapshot(payload.result, {
-        quotationNumber: "保存前",
-        customerName: form.customerName,
-        customerCode: form.customerCode,
-        printingMethod: form.printingMethod,
-        sourceHash: payload.result.audit.resultJsonSha256,
-        resultHash: payload.result.audit.resultJsonSha256,
-        widthMm: form.widthMm,
-        lengthMm: form.lengthMm,
-        parameters: effectiveParameters,
-        filmComposition: "PET12+AL7+PET12+LLDPE50",
-        webWidthMm: effectiveSize.webWidthMm,
-        lanes: effectiveSize.lanes,
-        pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
-        pitchAddMm: effectiveSize.pitchAddMm,
-        prodMultiplier: effectiveSize.prodMultiplier,
-        colorCount: Math.max(...form.skus.map((sku) => Number(sku.colorCount) || 0)),
-        skus: form.skus.map((sku) => ({
-          name: sku.name,
-          quantity: sku.quantity,
-          fillMl: sku.fillMl,
-          colorCount: sku.colorCount,
-        })),
-        lossRate: parameters.lossRate,
-        bulkUnitPrice: form.bulkPrice,
-        gravureParameters: normalizedGravureParameters,
-      });
-      const checklistSnapshotJson = JSON.stringify(preliminarySnapshot);
-      sessionStorage.setItem(CURRENT_CHECKLIST_SNAPSHOT_KEY, checklistSnapshotJson);
-      localStorage.setItem("pouch-current-checklist-snapshot-persistent-v1", checklistSnapshotJson);
-      sessionStorage.removeItem("pouch-current-checklist-confirmations-v1");
-      localStorage.removeItem("pouch-current-checklist-confirmations-persistent-v1");
+      writeChecklistSnapshot(activeResult);
       setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (error) {
       if (requestOrder === requestOrderRef.current) {
@@ -418,21 +483,24 @@ export default function QuotationPage() {
   };
 
   // 조건変更後は自動試算を見せず、必ずサーバー再計算結果へ切り替える。
-  const resultShown: ReturnType<typeof calculatePouchCost> | null = staleResult ? null : serverResult?.result ?? null;
+  const resultShown: CostResult | null = staleResult ? null : serverResult?.result ?? null;
+  const resultPrintingMethod: PrintingMethod = resultShown?.printingMethod ?? form.printingMethod;
   const quotationPreview = useMemo(
     () => resultShown ? calculateAutomaticQuotation(resultShown, effectiveMargin) : null,
     [effectiveMargin, resultShown],
   );
+  // 候補はシミュレーター上の参考計算。見積ドラフトは左側入力と一致する元データのみ反映する。
+  const quotationDraftResult = serverResult?.selectedCandidateId ? serverResult.originalResult : resultShown;
 
   useEffect(() => {
-    if (!resultShown || !quotationPreview || !customerDraft) return;
+    if (!quotationDraftResult || !customerDraft) return;
     try {
       sessionStorage.setItem(
         QUOTATION_DRAFT_KEY,
-        JSON.stringify(buildQuotationDraft(resultShown, {
+        JSON.stringify(buildQuotationDraft(quotationDraftResult, {
           quotationNumber: "",
-          sourceHash: resultShown.audit.resultJsonSha256,
-          resultHash: resultShown.audit.resultJsonSha256,
+          sourceHash: quotationDraftResult.audit.resultJsonSha256,
+          resultHash: quotationDraftResult.audit.resultJsonSha256,
           widthMm: form.widthMm,
           lengthMm: form.lengthMm,
           connected: form.connected,
@@ -468,7 +536,7 @@ export default function QuotationPage() {
     } catch {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
-  }, [customerDraft, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, quotationPreview, resultShown]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
+  }, [customerDraft, effectiveMargin, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, quotationDraftResult]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
 
   const startCustomerEdit = (customer: CustomerMaster) => {
     setEditingCustomerCode(customer.customerCode);
@@ -884,11 +952,16 @@ export default function QuotationPage() {
             {!resultShown ? <div className="empty">「サーバーで再計算する」を実行すると結果を表示します。</div> : pending ? <div className="skeleton" aria-live="polite"><div /><div style={{ width: "70%" }} /><div style={{ width: "45%" }} /></div> : (
               <>
                 <p className="total-label">発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</p>
+                {serverResult?.selectedCandidateId ? (
+                  <p className="help" data-testid="active-candidate-note">
+                    選択候補基準で表示しています。左側の入力発注数は {formatNumber(form.quantity)} 枚のままです。
+                  </p>
+                ) : null}
                 <p className="total">
                   {formatCurrency(displayAmount(resultShown.totalCostPerPiece))}<span className="help"> / 枚</span>
                   <span className="total-sub">総原価 <strong>{formatCurrency(displayAmount(resultShown.costTotal))}</strong> ／ 参考: フィルム発注 {formatNumber(resultShown.film.orderLengthM)}m で製造可能 {formatNumber(resultShown.film.actualQuantity)} 枚（余剰 ≈ {formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）</span>
                 </p>
-                <p className="help">{form.printingMethod === "gravure"
+                <p className="help">{resultPrintingMethod === "gravure"
                   ? `グラビアは、幅${formatNumber(normalizedGravureParameters.smallWidthThresholdMm)}mm以下で必要納品長が5,500mを超える場合は${formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・${formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作に切り替えます。それ以外は5,500m納品・6,000m製作パターンです。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
                   : "「単価計算用数量」は発注したフィルムから実際に作れる枚数（ロス控除後・500枚単位）です。フィルム発注を100m単位で切り上げるため、発注枚数より多くなることがあります。"}</p>
                 <div className="cost-breakdown">
@@ -923,43 +996,49 @@ export default function QuotationPage() {
                       </p>
                     ) : null}
                   </details>
-                  {form.printingMethod === "gravure" && (serverResult?.result.sascheCandidates?.length ?? 0) > 0 ? (
-                    <section className="panel sasche-candidate-panel" aria-labelledby="sasche-candidate-title">
-                      <h3 id="sasche-candidate-title">Y計算 発注パターン候補</h3>
+                  {serverResult && !staleResult ? (
+                    <section className="panel recommendation-panel" aria-labelledby="recommendation-title">
+                      <h3 id="recommendation-title">発注数量・パターン候補</h3>
                       <p className="help">
-                        PDF単価候補です。候補を選ぶと発注数量を調整します。数量変更後は「サーバーで再計算する」を実行してください。
+                        D=デジタル、K=韓国輸入、Y=国内調達。候補を選ぶと結果カードが候補基準に切り替わります。左側の入力数値は変わりません。
                       </p>
-                      <div className="sasche-candidate-grid">
-                        {(serverResult?.result.sascheCandidates ?? []).map((candidate) => {
-                          const selected = sascheCandidateId === candidate.id;
+                      <div className="recommendation-grid">
+                        <button
+                          type="button"
+                          className={!serverResult.selectedCandidateId ? "recommendation-card selected" : "recommendation-card"}
+                          onClick={clearCandidate}
+                          disabled={pending}
+                        >
+                          <span className="recommendation-label">入力値<em>現在</em></span>
+                          <span>{formatNumber(serverResult.originalResult.quantity, 0)}枚</span>
+                          <span>{formatNumber(serverResult.originalResult.film.orderLengthM, 0)}m</span>
+                          <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
+                        </button>
+                        {serverResult.candidates.map((candidate) => {
+                          const selected = serverResult.selectedCandidateId === candidate.id;
                           return (
                             <button
                               key={candidate.id}
                               type="button"
-                              className={selected ? "sasche-candidate selected" : "sasche-candidate"}
-                              onClick={() => {
-                                setSascheCandidateId(candidate.id);
-                                patchForm({ quantity: candidate.adjustedQuantity });
-                              }}
+                              className={selected ? "recommendation-card selected" : "recommendation-card"}
+                              onClick={() => void selectCandidate(candidate)}
+                              disabled={pending}
                             >
-                              <span className="sasche-candidate-label">
-                                {candidate.filmLabel} / {candidate.laneCount}丁 / {candidate.printTierM}m印刷
+                              <span className="recommendation-label">
+                                {candidate.route} / {candidate.sourceLabel}
                                 {candidate.recommended ? <em>推奨</em> : null}
                               </span>
-                              <span>出力 約{formatNumber(candidate.outputLengthM, 0)}m</span>
-                              <span>調整後数量 {formatNumber(candidate.adjustedQuantity, 0)}枚</span>
-                              <span>
-                                数量減 {formatNumber(Number(candidate.quantityReductionRatio), 1)}%
-                                {Number(candidate.quantityReductionRatio) > 15 ? "（要確認）" : ""}
-                              </span>
+                              <span>{candidate.detailLabel}</span>
+                              <span>{formatNumber(candidate.adjustedQuantity, 0)}枚</span>
+                              <span>{formatNumber(candidate.orderLengthM, 0)}m ／ {formatCurrency(candidate.includedUnitPricePerM, 2)}/m</span>
+                              <span>1枚 {formatCurrency(candidate.filmCostPerPieceYen, 2)} ／ 余剰 {formatNumber(candidate.surplusRatio, 1)}%</span>
+                              {candidate.toleranceExceeded ? <span className="warning">許容超過（単価優先）</span> : null}
                               <strong>フィルム {formatCurrency(candidate.filmTotalYen, 0)}</strong>
                             </button>
                           );
                         })}
                       </div>
-                      {staleResult ? (
-                        <p className="warning">候補を選択しました。「サーバーで再計算する」を実行して最新の原価に反映してください。</p>
-                      ) : null}
+                      {pending ? <p className="warning">候補計算中です。</p> : null}
                     </section>
                   ) : null}
                   <details className="cost-block" data-testid="cost-film">
@@ -967,8 +1046,8 @@ export default function QuotationPage() {
                     <table className="table breakdown-table">
                       <thead><tr><th scope="col">項目</th><th scope="col">単価</th><th scope="col">数量</th><th scope="col">金額</th></tr></thead>
                       <tbody>
-                        <tr><td>フィルム代</td><td>{formatCurrency(displayAmount(resultShown.film.unitPrice))} /m</td><td>{formatNumber(resultShown.film.orderLengthM)} m</td><td>{formatCurrency(displayAmount(form.printingMethod === "gravure" ? resultShown.film.filmTotal : resultShown.film.filmBaseCost))}</td></tr>
-                        {form.printingMethod !== "gravure" ? (
+                        <tr><td>フィルム代</td><td>{formatCurrency(displayAmount(resultShown.film.unitPrice))} /m</td><td>{formatNumber(resultShown.film.orderLengthM)} m</td><td>{formatCurrency(displayAmount(resultPrintingMethod === "gravure" ? resultShown.film.filmTotal : resultShown.film.filmBaseCost))}</td></tr>
+                        {resultPrintingMethod !== "gravure" ? (
                           <>
                             <tr><td>国内配送</td><td>{formatCurrency(displayAmount(parameters.domesticShippingPerTrip))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.domesticShipping))}</td></tr>
                             <tr><td>海外配送</td><td>{formatCurrency(displayAmount(parameters.overseasShippingPerTrip))} /回</td><td>{formatNumber(resultShown.film.shippingTrips)} 回</td><td>{formatCurrency(displayAmount(resultShown.film.overseasShipping))}</td></tr>
@@ -993,7 +1072,7 @@ export default function QuotationPage() {
                         const smallWidthManufacturerSalePriceYen = smallWidthManufacturingSaleYen.plus(D(resultShown.sellerProfitCost));
                         return (
                           <>
-                            {form.printingMethod === "gravure" ? (
+                            {resultPrintingMethod === "gravure" ? (
                               <>
                                 <p>① 必要納品長は合計 {formatNumber(f.requiredLengthM)}m です。</p>
                                 {resultShown.gravure?.smallWidthTier ? (
@@ -1028,7 +1107,7 @@ export default function QuotationPage() {
                                 <p>⑥ <strong>見積書のフィルム単価は発注枚数基準</strong>です。計算式は「フィルム費用合計 ÷ 発注枚数 {formatNumber(resultShown.quantity)}枚」です。実際に作れる枚数との差（約{formatNumber(String(Math.max(0, Number(f.actualQuantity) - Number(resultShown.quantity))))}枚）は、発注者が負担する余剰生産分です。</p>
                               </>
                             )}
-                            {form.printingMethod !== "gravure" && f.skuCosts.some((sku) => sku.multiplier === 2) ? (
+                            {resultPrintingMethod !== "gravure" && f.skuCosts.some((sku) => sku.multiplier === 2) ? (
                               <p>⑦ 幅35mmおよびXraラウンドで必要長さが900mを超えたため、幅736mm・2倍生産へ自動的に切り替えました。この場合の生産検討長さは「発注×2倍」、送り単位は200m、価格帯は571〜740mm、ロスは検討長さの10%で計算します。</p>
                             ) : null}
                           </>
@@ -1088,9 +1167,9 @@ export default function QuotationPage() {
                   <div className="formula-group">
                     <h4>すべての費用に共通する値</h4>
                     <table className="table formula-vars"><tbody>
-                      <tr><th scope="row">発注枚数</th><td>{formatNumber(form.quantity)} 枚</td><td>連結したあとのパウチ1個を「1枚」として数えた発注数です。</td></tr>
+                      <tr><th scope="row">発注枚数</th><td>{resultShown ? formatNumber(resultShown.quantity) : formatNumber(form.quantity)} 枚</td><td>連結したあとのパウチ1個を「1枚」として数えた発注数です。</td></tr>
                       <tr><th scope="row">連結形式</th><td>{form.connected} 連</td><td>パウチ1個の中にある室（区画）の数です。室数は「発注枚数 × 連結数」で計算します。</td></tr>
-                      <tr><th scope="row">充填量</th><td>SKU別設定（平均 {formatNumber(weightedAvgFill)} ml/室）</td><td>1室に入れる液体材料の量です。SKUごとに変えられます。使用量の計算には、発注枚数で重みづけした平均値を使います。</td></tr>
+                      <tr><th scope="row">充填量</th><td>SKU別設定（平均 {resultShown ? formatNumber(resultShown.fillMlPerChamber) : formatNumber(weightedAvgFill)} ml/室）</td><td>1室に入れる液体材料の量です。SKUごとに変えられます。使用量の計算には、発注枚数で重みづけした平均値を使います。</td></tr>
                       <tr><th scope="row">充填列数</th><td>{form.lanes} 列</td><td>1回に同時に充填できる列の数です。試験充填の量を計算するときにも使います。</td></tr>
                       <tr><th scope="row">テスト充填回数</th><td>{formatNumber(parameters.fillTestRuns)} 回</td><td>ロットを始める前に行う試験充填の回数です。実際の生産枚数には数えません。</td></tr>
                       <tr><th scope="row">初期投入量</th><td>{form.method === "hopper" ? formatNumber(parameters.hopperInitialChargeMl) : formatNumber(parameters.pressureInitialChargeMl)} ml</td><td>{form.method === "hopper" ? "ホッパ充填のラインに、生産前に投入しておく液体の量です。" : "加圧充填のラインに、生産前に投入しておく液体の量です。"}</td></tr>
@@ -1112,7 +1191,7 @@ export default function QuotationPage() {
                       <tr><th scope="row">検品速度</th><td>{formatNumber(parameters.inspectionSpeed)} 枚/h</td><td>検品にかかる人件費を1枚あたりに割り当てるときの分母です。</td></tr>
                       <tr><th scope="row">段取り・清掃時間</th><td>{formatNumber(parameters.setupTime)}h ＋ {formatNumber(parameters.cleanupTime)}h</td><td>ロット開始前の準備と、終了後の清掃にかかる時間です。発注数量に関係なく、ロットごとに固定で発生します。</td></tr>
                       <tr><th scope="row">カスタム費用</th><td>{formatCurrency(displayAmount(parameters.customPouchCharge))}</td><td>カスタム区分を選択したときに、ロット1回だけ加算する費用です。</td></tr>
-                      {form.printingMethod === "gravure" ? (
+                      {resultPrintingMethod === "gravure" ? (
                         <tr><th scope="row">供給価格調整率</th><td>{formatNumber(Number(parameters.sellerProfitRate) * 100, 1)}%</td><td>グラビアの製造者販売価格に反映します。デジタル単価は調整済みのため追加しません。</td></tr>
                       ) : null}
                     </tbody></table>
@@ -1294,7 +1373,7 @@ export default function QuotationPage() {
 
 }
 
-function bulkFillMlOf(result: ReturnType<typeof calculatePouchCost>) { return D(result.bulkUsageMl).minus(result.initialChargeMl).minus(result.testFillMl); }
+function bulkFillMlOf(result: CostResult) { return D(result.bulkUsageMl).minus(result.initialChargeMl).minus(result.testFillMl); }
 function redistributeSkuQuantities(total: string, count: number): string[] {
   const totalNumber = Number(total);
   if (!Number.isInteger(totalNumber) || totalNumber <= 0 || count <= 0) return [];

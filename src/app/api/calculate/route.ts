@@ -7,8 +7,14 @@ export const runtime = "nodejs";
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     const input = await request.json();
-    if (!input?.spec || !input?.quantity || !input?.printingMethod) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-    return NextResponse.json({ result: calculatePouchCost(input) });
+    if (!input?.spec || !input?.quantity || !input?.printingMethod) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+    const result = calculatePouchCost(input);
+    const originalResult = input.selectedCandidateId
+      ? calculatePouchCost({ ...input, selectedCandidateId: "" })
+      : result;
+    return NextResponse.json({ result, originalResult, candidates: result.recommendationCandidates ?? [] });
   } catch (error) {
     if (error instanceof QuotationValidationError) {
       return NextResponse.json({ error: error.code, digitalValidation: error.digitalValidation }, { status: 400 });
