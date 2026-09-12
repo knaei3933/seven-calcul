@@ -34,6 +34,13 @@ export type PrintCandidate = {
   orderReason?: string;
   surplusM?: string;
   surplusPieces?: string;
+  materialWidthMm?: number;
+  materialMultiplier?: number;
+  colorText?: string;
+  materialText?: string;
+  compositionText?: string;
+  pouchSpecText?: string;
+  patternText?: string;
   skuPatternCounts?: number[];
   // Server-side selection metadata. Safe to serialize; the API never trusts client-side money values.
   filmOrders?: { skuCode: string; requiredLengthM: string; orderLengthM: string }[];
@@ -276,6 +283,7 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
         skuCode: `SKU-${index + 1}`,
         requiredLengthM: skuRequiredLengths[index].toString(),
         orderLengthM: orderLength.toString(),
+        colorCount: context.spec.skuColorCounts?.[index] ?? context.spec.colorCount,
         capacity,
         unitPrice,
         baseCost: orderLength.times(unitPrice),
@@ -300,6 +308,18 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
     const naturalRequiredTotal = sum(skuRequiredLengths);
     const minimumTotal = D(parameters.digitalFilmMinTotalM);
     const minimumSkuTotal = sum(minimums);
+    const materialWidths = [...new Set(skuRows.map((row) => row.capacity.webWidthMm))];
+    const materialText = materialWidths.map((width) => {
+      const multiplier = skuRows.find((row) => row.capacity.webWidthMm === width)?.capacity.multiplier ?? 1;
+      return `原反 ${width}mm${multiplier > 1 ? ` ×${multiplier}` : ""}`;
+    }).join(" / ");
+    const colorTotal = sum(skuRows.map((row) => Math.max(0, Number(row.colorCount) || 0)));
+    const colorText = skuRows.length > 1
+      ? `${skuRows.map((row) => Math.max(0, Number(row.colorCount) || 0)).join("+")}（計${colorTotal}色）`
+      : `${colorTotal}色`;
+    const compositionText = "PET12+AL7+PET12+LLDPE50";
+    const pouchSpecText = `パウチ ${context.spec.customWidthMm ?? context.size.widthMm}×${context.spec.customLengthMm ?? context.size.lengthMm}mm ／ ${context.spec.connectedChambers}連 ／ ${context.spec.fillingLanes}列`;
+    const patternText = `${materialText} ／ ${aggregateOrderLength.toFixed(0)}m ／ ${priceLength}m帯`;
     let orderReason = "必要長を100m単位に切り上げました。";
     if (aggregateOrderLength.lt(naturalRequiredTotal)) {
       orderReason = "発注パターンに合わせて生産数量を調整しました。";
@@ -319,6 +339,11 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
       id: `D-${targetText}-${adjustedQuantity.toFixed(0)}`,
       detailLabel: `合計 ${aggregateOrderLength.toFixed(0)}m / ${priceLength}m帯`,
       printingMethod: "digital",
+      materialText: materialText,
+      colorText: colorText,
+      compositionText: compositionText,
+      pouchSpecText: pouchSpecText,
+      patternText: patternText,
       priceBreak,
       adjustedSkuQuantities: adjustedSkuQuantities.map((value) => value.toString()),
       filmOrders: skuRows.map((row) => ({
@@ -461,6 +486,15 @@ function buildKoreaCandidates(context: PrintCandidateContext): CandidateDraft[] 
     combinations = next.slice(0, 32);
   }
 
+  const materialWidth = Decimal.max(500, context.size.webWidthMm);
+  const colorTotal = sum(context.spec.skuColorCounts?.length
+    ? context.spec.skuColorCounts.map((value) => Math.max(0, Number(value) || 0))
+    : Array.from({ length: context.skuQuantities.length }, () => Math.max(0, Number(context.spec.colorCount) || 0)));
+  const colorText = context.skuQuantities.length > 1
+    ? `${(context.spec.skuColorCounts ?? []).map((value) => Math.max(0, Number(value) || 0)).join("+")}（計${colorTotal}色）`
+    : `${colorTotal}色`;
+  const compositionText = "PET12+AL7+PET12+LLDPE50";
+  const pouchSpecText = `パウチ ${context.spec.customWidthMm ?? context.size.widthMm}×${context.spec.customLengthMm ?? context.size.lengthMm}mm ／ ${context.spec.connectedChambers}連 ／ ${context.spec.fillingLanes}列`;
   const sellerFactor = D(1).plus(context.parameters.sellerProfitRate);
   return combinations.map((combination): CandidateDraft => {
     const requiredTotal = sum(context.skuRequiredLengths);
@@ -468,6 +502,8 @@ function buildKoreaCandidates(context: PrintCandidateContext): CandidateDraft[] 
     const includedFilmTotal = combination.filmTotal
       .times(sellerFactor)
       .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    const materialText = `原反 ${materialWidth}mm ／ パターン ${combination.options.map((option) => option.patternCount).join("+")} ／ ${combination.orderLengthM.toFixed(0)}m`;
+    const patternText = `${materialText} ／ ${colorText}`;
     return {
       ...candidateCommon(
         "K", context.originalQuantity, combination.adjustedQuantity, requiredTotal, combination.orderLengthM,
@@ -476,6 +512,11 @@ function buildKoreaCandidates(context: PrintCandidateContext): CandidateDraft[] 
       id: `K-${patternKey}-${combination.adjustedQuantity.toFixed(0)}`,
       detailLabel: `韓国輸入 パターン ${combination.options.map((option) => option.patternCount).join("+")}`,
       printingMethod: "gravure",
+      materialText: materialText,
+      colorText: colorText,
+      compositionText: compositionText,
+      pouchSpecText: pouchSpecText,
+      patternText: patternText,
       priceBreak: false,
       orderReason: `韓国輸入パターン ${combination.options.map((option) => option.patternCount).join("+")} のため、発注長と数量を調整しました。`,
       adjustedSkuQuantities: combination.options.map((option) => option.adjustedQuantity.toString()),
@@ -498,6 +539,14 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
     quantity: context.originalQuantity,
     colorCount: sum((context.spec.skuColorCounts?.length ? context.spec.skuColorCounts : [context.spec.colorCount]).map((value) => D(value))),
   });
+  const colorTotal = sum(context.spec.skuColorCounts?.length
+    ? context.spec.skuColorCounts.map((value) => Math.max(0, Number(value) || 0))
+    : Array.from({ length: context.skuQuantities.length }, () => Math.max(0, Number(context.spec.colorCount) || 0)));
+  const colorText = context.skuQuantities.length > 1
+    ? `${(context.spec.skuColorCounts ?? []).map((value) => Math.max(0, Number(value) || 0)).join("+")}（計${colorTotal}色）`
+    : `${colorTotal}色`;
+  const compositionText = "PET12+AL7+PET12+LLDPE50";
+  const pouchSpecText = `パウチ ${context.spec.customWidthMm ?? context.size.widthMm}×${context.spec.customLengthMm ?? context.size.lengthMm}mm ／ ${context.spec.connectedChambers}連 ／ ${context.spec.fillingLanes}列`;
   return candidates.map((sasche): CandidateDraft => {
     const outputLength = D(sasche.outputLengthM);
     const adjustedQuantity = D(sasche.adjustedQuantity);
@@ -509,11 +558,18 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
       const index = context.skuRequiredLengths.reduce((largest, required, index) => required.gt(context.skuRequiredLengths[largest]) ? index : largest, 0);
       skuQuantities[index] = skuQuantities[index].plus(difference);
     }
+    const materialText = `原反 ${sasche.matchedWidthMm}mm / ${sasche.laneCount}丁 / ${outputLength.toFixed(0)}m`;
+    const patternText = `${materialText} ／ ${colorText}`;
     return {
       ...candidateCommon("Y", context.originalQuantity, adjustedQuantity, context.requiredLengthM, outputLength, outputLength, D(sasche.filmTotalYen)),
       id: `Y-${sasche.id}`,
       detailLabel: `国内 ${sasche.webWidthMm}mm / ${sasche.laneCount}丁 / ${sasche.printTierM}m印刷`,
       printingMethod: "gravure",
+      materialText: materialText,
+      colorText: colorText,
+      compositionText: compositionText,
+      pouchSpecText: pouchSpecText,
+      patternText: patternText,
       orderReason: `国内Yパターン ${outputLength.toFixed(0)}m のため、発注数量を調整しました。`,
       priceBreak: true,
       adjustedSkuQuantities: skuQuantities.map((value) => value.toString()),
@@ -537,14 +593,15 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     })
     .map((draft) => finishCandidate(draft, context.originalQuantity));
 
-  // 推奨は顧客希望数量を満たし、過剰在庫が限定される実務候補から選ぶ。
   const originalQuantity = context.originalQuantity;
-  const practicalPool = candidates.filter((candidate) => (
-    D(candidate.adjustedQuantity).gte(originalQuantity)
-    && D(candidate.surplusRatio).lte(D("15"))
-  ));
+  const practicalPool = candidates.filter((candidate) => {
+    const quantityDeltaRatio = originalQuantity.gt(0)
+      ? D(candidate.adjustedQuantity).minus(originalQuantity).abs().div(originalQuantity)
+      : D(0);
+    return quantityDeltaRatio.lte(D("0.15"));
+  });
 
-  const rankedPractical = practicalPool.sort((left, right) => {
+  const byTotal = (items: PrintCandidate[]) => [...items].sort((left, right) => {
     const leftTotal = D(left.filmTotalYen);
     const rightTotal = D(right.filmTotalYen);
     if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
@@ -557,7 +614,45 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     return left.id.localeCompare(right.id);
   });
 
-  return rankedPractical
+  const satisfying = byTotal(candidates.filter((candidate) => D(candidate.adjustedQuantity).gte(originalQuantity)));
+  const rankedPractical = byTotal(practicalPool);
+  const recommendedCandidate = rankedPractical[0] ?? satisfying[0] ?? byTotal(candidates)[0];
+
+  // Keep one practical/cheapest representative for D/K/Y. This prevents a large
+  // volume K candidate from disappearing merely because pattern rounding exceeds 15%.
+  const routeRepresentatives = (["D", "K", "Y"] as const)
+    .map((route) => {
+      const practicalRoute = rankedPractical.filter((candidate) => candidate.route === route);
+      if (practicalRoute.length) return practicalRoute[0];
+      const routeCandidates = candidates.filter((candidate) => candidate.route === route);
+      return [...routeCandidates].sort((left, right) => {
+        const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
+        const rightDelta = D(right.adjustedQuantity).minus(originalQuantity).abs();
+        if (!leftDelta.eq(rightDelta)) return leftDelta.lt(rightDelta) ? -1 : 1;
+        const leftTotal = D(left.filmTotalYen);
+        const rightTotal = D(right.filmTotalYen);
+        if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
+        return left.id.localeCompare(right.id);
+      })[0];
+    })
+    .filter((candidate): candidate is PrintCandidate => Boolean(candidate));
+
+  const selectedIds = new Set(recommendedCandidate ? [recommendedCandidate.id] : []);
+  routeRepresentatives.forEach((candidate) => selectedIds.add(candidate.id));
+  const remaining = byTotal(candidates.filter((candidate) => !selectedIds.has(candidate.id)))
+    .slice(0, Math.max(0, 4 - selectedIds.size));
+
+  const display = [recommendedCandidate, ...routeRepresentatives, ...remaining]
+    .filter((candidate): candidate is PrintCandidate => Boolean(candidate));
+  const uniqueDisplay: PrintCandidate[] = [];
+  const displayIds = new Set<string>();
+  for (const candidate of display) {
+    if (displayIds.has(candidate.id)) continue;
+    displayIds.add(candidate.id);
+    uniqueDisplay.push(candidate);
+  }
+
+  return uniqueDisplay
     .slice(0, 4)
-    .map((candidate, index) => ({ ...candidate, recommended: index === 0 }));
+    .map((candidate) => ({ ...candidate, recommended: recommendedCandidate?.id === candidate.id }));
 }

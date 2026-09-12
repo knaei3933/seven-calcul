@@ -1108,6 +1108,7 @@ export default function QuotationPage() {
                       <div className="recommendation-grid">
                         <button
                           type="button"
+                          data-testid="input-basis-card"
                           className={!serverResult.selectedCandidateId ? "recommendation-card selected" : "recommendation-card"}
                           onClick={clearCandidate}
                           disabled={pending}
@@ -1145,8 +1146,12 @@ export default function QuotationPage() {
                                 {candidate.route} / {candidate.sourceLabel}
                                 {candidate.recommended ? <em>推奨</em> : null}
                               </span>
-                              <span>{candidate.detailLabel}</span>
-                              <span>{formatNumber(candidate.adjustedQuantity, 0)}枚{candidate.adjustedSkuQuantities.length > 1 ? `（SKU ${candidate.adjustedSkuQuantities.map((quantity) => formatNumber(quantity, 0)).join("+")}）` : ""}</span>
+                              <span>{candidate.pouchSpecText}</span>
+                              <span>{candidate.patternText}</span>
+                              <span>{candidate.colorText} ／ {candidate.compositionText}</span>
+                              <span>
+                                {formatNumber(candidate.adjustedQuantity, 0)}枚{candidate.adjustedSkuQuantities.length > 1 ? `（SKU ${candidate.adjustedSkuQuantities.map((quantity) => formatNumber(quantity, 0)).join("+")}）` : ""}
+                              </span>
                               <span>{formatNumber(candidate.orderLengthM, 0)}m ／ {formatCurrency(candidate.includedUnitPricePerM, 2)}/m</span>
                               <span>1枚 {formatCurrency(candidate.filmCostPerPieceYen, 2)} ／ 余剰 {formatNumber(candidate.surplusLengthM, 0)}m</span>
                               <span>{candidate.orderReason}</span>

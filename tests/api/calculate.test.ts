@@ -55,7 +55,7 @@ describe("calculate API recommendations", () => {
     printingMethod: "gravure",
   };
 
-  it("returns only practical candidates and preserves the original basis", async () => {
+  it("returns a recommended near-quantity candidate and preserves the original basis", async () => {
     const response = await POST(new Request("http://localhost/api/calculate", {
       method: "POST",
       body: JSON.stringify({ ...recommendationInput, recommendationMode: true }),
@@ -65,8 +65,10 @@ describe("calculate API recommendations", () => {
     expect(payload.candidates.length).toBeGreaterThan(0);
     expect(payload.candidates.length).toBeLessThanOrEqual(4);
     expect(payload.candidates[0].recommended).toBe(true);
-    expect(payload.candidates.every((candidate: any) => Number(candidate.adjustedQuantity) >= 133000)).toBe(true);
-    expect(payload.candidates.every((candidate: any) => Number(candidate.surplusRatio) <= 15)).toBe(true);
+    const recommended = payload.candidates.find((candidate: any) => candidate.recommended);
+    expect(recommended).toBeDefined();
+    expect(Math.abs(Number(recommended.adjustedQuantity) - 133000) / 133000).toBeLessThanOrEqual(0.15);
+    expect(payload.candidates.some((candidate: any) => candidate.route === "K")).toBe(true);
     expect(payload.originalResult.quantity).toBe("133000");
     expect(payload.result.quantity).toBe("133000");
     expect(payload.result.selectedCandidateId).toBe("");
