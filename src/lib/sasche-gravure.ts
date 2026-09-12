@@ -14,6 +14,7 @@ export type SascheCandidate = {
   laneCount: SascheLane;
   printTierM: SaschePrintTier;
   patternCount: number;
+  filmLabel: "Y";
   baseApproxLengthM: number;
   outputLengthM: string;
   requiredLengthM: string;
@@ -97,48 +98,53 @@ export function selectSascheCandidate({
 
   const candidates = supplierMatrix
     .filter((row) => row.webWidthMm === matchedWidth.webWidthMm)
-    .map((row) => {
-      const patternCount = requiredLengthM
-        .div(row.approxLengthM)
-        .toDecimalPlaces(0, Decimal.ROUND_CEIL)
-        .toNumber();
-      const outputLengthM = D(row.approxLengthM).times(patternCount);
+    .map((row): SascheCandidate => {
+      const outputLengthM = D(row.approxLengthM);
       const filmUnit = D(row.unitPrice).times(SELLER_MARKUP);
       const filmTotal = outputLengthM.times(filmUnit);
       const perPieceRequiredLength = quantity.gt(0) ? requiredLengthM.div(quantity) : D(0);
-      const maxQuantity = perPieceRequiredLength.gt(0)
+      const adjustedQuantity = perPieceRequiredLength.gt(0)
         ? outputLengthM.div(perPieceRequiredLength).toDecimalPlaces(0, Decimal.ROUND_FLOOR)
+        : D(0);
+      const quantityReductionRatio = quantity.gt(0)
+        ? quantity.minus(adjustedQuantity).div(quantity).times(100)
         : D(0);
       const surplus = Decimal.max(outputLengthM.minus(requiredLengthM), D(0));
       const shortage = Decimal.max(requiredLengthM.minus(outputLengthM), D(0));
       const surplusRatio = requiredLengthM.gt(0)
         ? surplus.div(requiredLengthM).times(100)
         : D(0);
-      const id = `sasche-${row.webWidthMm}-${row.laneCount}-${row.printTierM}-${patternCount}`;
-      const adjustedQuantity = adjustedQuantityForOutput(outputLengthM, requiredLengthM, quantity);
-      const quantityReductionRatio = quantity.gt(0)
-        ? quantity.minus(adjustedQuantity).div(quantity).times(100)
-        : D(0);
+      const id = `Y-${row.webWidthMm}-${row.laneCount}-${row.printTierM}`;
       return {
-        row,
-        patternCount,
+        id,
+        webWidthMm: row.webWidthMm,
+        matchedWidthMm: matchedWidth.webWidthMm,
+        laneCount: row.laneCount,
         printTierM: row.printTierM,
+        patternCount: 1,
+        filmLabel: "Y",
         baseApproxLengthM: row.approxLengthM,
         supplierUnitPriceYenPerM: row.unitPrice,
+        sellerMarkup: SELLER_MARKUP,
         filmUnitPriceYen: filmUnit.toString(),
+        requiredLengthM: requiredLengthM.toString(),
+        quantity: quantity.toString(),
+        colorCount: plateCount,
         outputLengthM: outputLengthM.toString(),
-        filmUnit,
         filmTotalYen: filmTotal.toString(),
+        plateUnitPriceYen: plateUnitPrice.toString(),
+        plateTotalYen: plateTotal.toString(),
         surplusLengthM: surplus.toString(),
         shortageLengthM: shortage.toString(),
         surplusRatio: surplusRatio.toString(),
         adjustedQuantity: adjustedQuantity.toString(),
         quantityReductionRatio: quantityReductionRatio.toString(),
         quantityToleranceExceeded: quantityReductionRatio.gt(15),
-        id,
+        feasible: outputLengthM.gte(requiredLengthM),
+        recommended: false,
+        comparisonRank: 0,
       };
     });
-
   const feasibleCandidates = candidates.filter((candidate) => D(candidate.outputLengthM).gte(requiredLengthM));
   const balancedCandidates = feasibleCandidates.filter((candidate) => D(candidate.surplusRatio).lte(15));
   const recommendedCandidate = balancedCandidates.length > 0
@@ -156,6 +162,7 @@ export function selectSascheCandidate({
     laneCount: matchedWidth.laneCount,
     printTierM: recommendedCandidate.printTierM,
     patternCount: recommendedCandidate.patternCount,
+    filmLabel: "Y",
     baseApproxLengthM: recommendedCandidate.baseApproxLengthM,
     outputLengthM: recommendedCandidate.outputLengthM.toString(),
     requiredLengthM: requiredLengthM.toString(),
@@ -203,68 +210,57 @@ export function buildSascheCandidates({
   const plateUnit = plateCount === 0
     ? D(0)
     : D(matchedWidth.plateBase).times(SELLER_MARKUP);
+  const plateTotal = plateUnit.times(plateCount);
 
   const candidates = supplierMatrix
     .filter((row) => row.webWidthMm === matchedWidth.webWidthMm)
-    .map((row) => {
-      const patternCount = requiredLengthM
-        .div(row.approxLengthM)
-        .toDecimalPlaces(0, Decimal.ROUND_CEIL)
-        .toNumber();
-      const outputLengthM = D(row.approxLengthM).times(patternCount);
+    .map((row): SascheCandidate => {
+      const outputLengthM = D(row.approxLengthM);
       const filmUnit = D(row.unitPrice).times(SELLER_MARKUP);
       const filmTotal = outputLengthM.times(filmUnit);
-      const surplus = Decimal.max(outputLengthM.minus(requiredLengthM), D(0));
-      const shortage = Decimal.max(requiredLengthM.minus(outputLengthM), D(0));
       const perPieceRequiredLength = quantity.gt(0) ? requiredLengthM.div(quantity) : D(0);
-      const maxQuantity = perPieceRequiredLength.gt(0)
+      const adjustedQuantity = perPieceRequiredLength.gt(0)
         ? outputLengthM.div(perPieceRequiredLength).toDecimalPlaces(0, Decimal.ROUND_FLOOR)
         : D(0);
+      const quantityReductionRatio = quantity.gt(0)
+        ? quantity.minus(adjustedQuantity).div(quantity).times(100)
+        : D(0);
+      const surplus = Decimal.max(outputLengthM.minus(requiredLengthM), D(0));
+      const shortage = Decimal.max(requiredLengthM.minus(outputLengthM), D(0));
       const surplusRatio = requiredLengthM.gt(0)
         ? surplus.div(requiredLengthM).times(100)
         : D(0);
-      const id = `sasche-${row.webWidthMm}-${row.laneCount}-${row.printTierM}-${patternCount}`;
-      const plateTotal = plateUnit.times(plateCount);
+      const id = `Y-${row.webWidthMm}-${row.laneCount}-${row.printTierM}`;
       return {
         id,
         webWidthMm: row.webWidthMm,
         matchedWidthMm: matchedWidth.webWidthMm,
         laneCount: row.laneCount,
         printTierM: row.printTierM,
-        patternCount,
+        patternCount: 1,
+        filmLabel: "Y",
         baseApproxLengthM: row.approxLengthM,
-        outputLengthM: outputLengthM.toString(),
-        requiredLengthM: requiredLengthM.toString(),
-        quantity: quantity.toString(),
-        adjustedQuantity: maxQuantity.toString(),
-        quantityReductionRatio: quantity.gt(0)
-          ? quantity.minus(maxQuantity).div(quantity).times(100).toString()
-          : "0",
-        quantityToleranceExceeded: maxQuantity.lt(quantity.times(0.85)),
-        colorCount: plateCount,
         supplierUnitPriceYenPerM: row.unitPrice,
         sellerMarkup: SELLER_MARKUP,
         filmUnitPriceYen: filmUnit.toString(),
+        outputLengthM: outputLengthM.toString(),
+        requiredLengthM: requiredLengthM.toString(),
+        quantity: quantity.toString(),
+        colorCount: plateCount,
         filmTotalYen: filmTotal.toString(),
         plateUnitPriceYen: plateUnit.toString(),
         plateTotalYen: plateTotal.toString(),
         surplusLengthM: surplus.toString(),
         shortageLengthM: shortage.toString(),
         surplusRatio: surplusRatio.toString(),
+        adjustedQuantity: adjustedQuantity.toString(),
+        quantityReductionRatio: quantityReductionRatio.toString(),
+        quantityToleranceExceeded: quantityReductionRatio.gt(15),
         feasible: outputLengthM.gte(requiredLengthM),
         recommended: selected.id === id,
         comparisonRank: 0,
       };
-    })
-    .sort((left, right) => {
-      if (left.feasible !== right.feasible) return left.feasible ? -1 : 1;
-      if (left.feasible && right.feasible) {
-        return Number(D(left.filmTotalYen).minus(D(right.filmTotalYen)));
-      }
-      return Number(D(left.shortageLengthM).minus(D(right.shortageLengthM)));
-    })
-    .map((candidate, index) => ({ ...candidate, comparisonRank: index + 1 }));
-
+    });
   return candidates;
 }
 
@@ -281,6 +277,7 @@ export function buildSascheGravureRollResult(
 
   return {
     requiredLengthM: requiredLengthM.toString(),
+    filmLabel: "Y",
     orderPatternCount: 1,
     deliverableLengthM: candidate.outputLengthM,
     productionLengthM: candidate.outputLengthM,

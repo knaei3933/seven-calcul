@@ -114,6 +114,7 @@ export interface GravureRollCostResult {
   customsCostYen: string;
   overseasShippingCostYen: string;
   shippingTrips: number;
+  filmLabel: "K" | "Y";
   copperPlateCount: number;
   copperPlateUnitPriceYen: string;
   copperPlateCostYen: string;
@@ -297,6 +298,7 @@ export function calculateGravureRollCost(input: GravureRollCostInput): GravureRo
 
   return {
     requiredLengthM: requiredLengthM.toString(),
+    filmLabel: "K",
     orderPatternCount,
     deliverableLengthM: deliverableLengthM.toString(),
     productionLengthM: productionLengthM.toString(),
