@@ -111,6 +111,7 @@ export default function QuotationPage() {
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
   const [productionSpeedManual, setProductionSpeedManual] = useState(false);
+  const [sascheCandidateId, setSascheCandidateId] = useState("");
   type CustomerDraft = Pick<typeof form, 'customerName' | 'customerCode' | 'customerPostalCode' | 'customerAddress' | 'customerContact' | 'customerTelephone' | 'customerEmail'>;
   const [customerDraft, setCustomerDraft] = useState<CustomerDraft | null>(null);
   const [customerListOpen, setCustomerListOpen] = useState(false);
@@ -364,6 +365,7 @@ export default function QuotationPage() {
       if (!response.ok) throw new Error(payload.error ?? "calculation_failed");
       if (requestOrder !== requestOrderRef.current) return;
       setServerResult({ result: payload.result, inputJson: requestedInputJson });
+      setSascheCandidateId(payload.result.sasche?.id ?? "");
       setCustomerDraft({
         customerName: form.customerName,
         customerCode: form.customerCode,
@@ -921,6 +923,45 @@ export default function QuotationPage() {
                       </p>
                     ) : null}
                   </details>
+                  {form.printingMethod === "gravure" && (serverResult?.result.sascheCandidates?.length ?? 0) > 0 ? (
+                    <section className="panel sasche-candidate-panel" aria-labelledby="sasche-candidate-title">
+                      <h3 id="sasche-candidate-title">Y計算 発注パターン候補</h3>
+                      <p className="help">
+                        PDF単価候補です。候補を選ぶと発注数量を調整します。数量変更後は「サーバーで再計算する」を実行してください。
+                      </p>
+                      <div className="sasche-candidate-grid">
+                        {(serverResult?.result.sascheCandidates ?? []).map((candidate) => {
+                          const selected = sascheCandidateId === candidate.id;
+                          return (
+                            <button
+                              key={candidate.id}
+                              type="button"
+                              className={selected ? "sasche-candidate selected" : "sasche-candidate"}
+                              onClick={() => {
+                                setSascheCandidateId(candidate.id);
+                                patchForm({ quantity: candidate.adjustedQuantity });
+                              }}
+                            >
+                              <span className="sasche-candidate-label">
+                                {candidate.filmLabel} / {candidate.laneCount}丁 / {candidate.printTierM}m印刷
+                                {candidate.recommended ? <em>推奨</em> : null}
+                              </span>
+                              <span>出力 約{formatNumber(candidate.outputLengthM, 0)}m</span>
+                              <span>調整後数量 {formatNumber(candidate.adjustedQuantity, 0)}枚</span>
+                              <span>
+                                数量減 {formatNumber(Number(candidate.quantityReductionRatio), 1)}%
+                                {Number(candidate.quantityReductionRatio) > 15 ? "（要確認）" : ""}
+                              </span>
+                              <strong>フィルム {formatCurrency(candidate.filmTotalYen, 0)}</strong>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {staleResult ? (
+                        <p className="warning">候補を選択しました。「サーバーで再計算する」を実行して最新の原価に反映してください。</p>
+                      ) : null}
+                    </section>
+                  ) : null}
                   <details className="cost-block" data-testid="cost-film">
                     <summary><h3>③ フィルム費用</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.film))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.film))} /枚）</small></span></summary>
                     <table className="table breakdown-table">
