@@ -268,7 +268,16 @@ function calculatePouchCostCore(
         orderAdjustment,
         skuCosts: [],
       }
-    : calculateFilmCost(size, quantityD, printingMethod, params, digitalOrders, orderAdjustment, recommendation?.aggregateDigitalPrice);
+    : calculateFilmCost(
+        size,
+        quantityD,
+        printingMethod,
+        params,
+        digitalOrders,
+        orderAdjustment,
+        recommendation?.aggregateDigitalPrice,
+        Boolean(recommendation?.filmOrderOverride),
+      );
   const skuCosts = film.skuCosts.map((skuCost, index) => ({
     ...skuCost,
     name: (spec.skuNames?.[index] ?? "").trim() || `充填物${index + 1}`,
@@ -302,7 +311,7 @@ function calculatePouchCostCore(
   const customCharge = spec.isCustom ? D(params.customPouchCharge) : D(0);
 
   const copperPlateCost = gravureRoll?.copperPlateCostYen ?? "0";
-  const copperPlateCostPerPiece = gravureRoll?.copperPlateCostPerPieceYen ?? "0";
+  const copperPlateCostPerPiece = D(copperPlateCost).div(quantityD).toString();
   // デジタルのフィルム単価は仕入価格に供給調整済みのため追加調整しない。
   const appliesSellerProfit = printingMethod === "gravure" && !sascheCandidate;
   const sellerProfitBaseCost = appliesSellerProfit ? D(filmWithSkus.filmTotal) : D(0);
@@ -535,6 +544,7 @@ function calculateFilmCost(
   digitalOrders: FilmSkuOrder[],
   orderAdjustment: FilmOrderAdjustment,
   aggregateDigitalPrice = false,
+  preserveOrderOverride = false,
 ): FilmCostResult {
   if (printingMethod !== "digital") throw validationError("gravure_not_configured");
   const pitch = D(size.lengthMm).plus(size.pitchAddMm);
@@ -542,7 +552,7 @@ function calculateFilmCost(
     const required = D(sku.requiredLengthM);
     // Excel規則: 35mm幅品・Xraラウンドは必要長が900m超で736mm幅・2倍生産に切替（検討長さ＝発注×2・200m刻み）
     const useLargeLot = Boolean(size.largeLotWebWidthMm) && required.gt(900);
-    const orderLength = useLargeLot && !aggregateDigitalPrice
+    const orderLength = useLargeLot && !preserveOrderOverride
       ? Decimal.max(500, ceilTo(required.div(2), 100))
       : D(sku.orderLengthM);
     const multiplier = useLargeLot ? 2 : 1;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { D } from "@/lib/decimal";
+import { D, Decimal } from "@/lib/decimal";
 import { defaultParameters } from "@/lib/constants";
 import { defaultGravureRollParameters } from "@/lib/gravure-roll";
 import { buildPrintCandidates, createPrintCandidateContext } from "@/lib/print-recommendation";
@@ -46,11 +46,12 @@ describe("print recommendation engine", () => {
     expect(digital.some((candidate) => candidate.priceBreak)).toBe(true);
   });
 
-  it("ranks primarily by film cost per proposed pouch", () => {
+  it("puts the practical recommendation first, then remaining candidates by cost", () => {
     const candidates = buildPrintCandidates(context());
-    const costs = candidates.map((candidate) => D(candidate.filmCostPerPieceYen));
-    for (let index = 1; index < costs.length; index += 1) {
-      expect(costs[index].gte(costs[index - 1])).toBe(true);
+    expect(candidates[0].recommended).toBe(true);
+    const remaining = candidates.slice(1).map((candidate) => D(candidate.filmCostPerPieceYen).toDecimalPlaces(4, Decimal.ROUND_HALF_UP));
+    for (let index = 1; index < remaining.length; index += 1) {
+      expect(remaining[index].gte(remaining[index - 1])).toBe(true);
     }
   });
 
@@ -69,6 +70,14 @@ describe("print recommendation engine", () => {
     });
     expect(D(result.film.orderLengthM).eq(candidate!.orderLengthM)).toBe(true);
     expect(D(result.costComponents.film).eq(candidate!.filmTotalYen)).toBe(true);
+  });
+
+  it("prices Y copper plates from each candidate row, not only the matched-width base row", () => {
+    const candidates = buildPrintCandidates(context(baseSpec, "150000"));
+    const lane1 = candidates.find((item) => item.route === "Y" && item.sasche?.laneCount === 1);
+    const lane2 = candidates.find((item) => item.route === "Y" && item.sasche?.laneCount === 2);
+    expect(Number(lane1!.sasche!.plateUnitPriceYen)).toBeCloseTo(26000 * 1.12, 8);
+    expect(Number(lane2!.sasche!.plateUnitPriceYen)).toBeCloseTo(32000 * 1.12, 8);
   });
 
   it("keeps K pattern quantities aligned to the film pattern without 1,000-piece rounding", () => {

@@ -1,4 +1,4 @@
-import { D, Decimal, sum } from "./decimal";
+import { D, Decimal, ceilTo, sum } from "./decimal";
 import { normalizeDigitalFilmOrder } from "./digital-film";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
 import { buildSascheCandidates, type SascheCandidate } from "./sasche-gravure";
@@ -114,8 +114,10 @@ function finishCandidate(
 
 function rankCandidates(candidates: PrintCandidate[], originalQuantity: Decimal): PrintCandidate[] {
   return [...candidates].sort((left, right) => {
-    const leftCost = D(left.filmCostPerPieceYen);
-    const rightCost = D(right.filmCostPerPieceYen);
+    // Ignore meaningless sub-yen differences caused by fixed shipping/customs
+    // being spread across vastly different production quantities.
+    const leftCost = D(left.filmCostPerPieceYen).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+    const rightCost = D(right.filmCostPerPieceYen).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
     if (!leftCost.eq(rightCost)) return leftCost.lt(rightCost) ? -1 : 1;
     const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
     const rightDelta = D(right.adjustedQuantity).minus(originalQuantity).abs();
@@ -133,6 +135,7 @@ function candidateCommon(
   effectiveLengthM: Decimal,
   filmTotal: Decimal,
   tolerancePercent = "15",
+  comparisonLengthM?: Decimal,
 ): Pick<
   PrintCandidate,
   | "route" | "routeLabel" | "sourceLabel" | "originalQuantity" | "adjustedQuantity"
@@ -163,32 +166,32 @@ function candidateCommon(
 }
 
 function allocateTotalLength(
-  requiredLengths: Decimal[],
+  weights: Decimal[],
   totalTarget: Decimal,
-  minimumPerSku: Decimal,
+  minimums: Decimal[],
 ): Decimal[] | null {
-  const count = requiredLengths.length;
-  const minimumTotal = minimumPerSku.times(count);
+  const count = weights.length;
+  const minimumTotal = sum(minimums);
   if (totalTarget.lt(minimumTotal) || !totalTarget.mod(100).eq(0)) return null;
-  const totalRequired = sum(requiredLengths);
-  if (!totalRequired.gt(0)) return null;
+  const totalWeight = sum(weights);
+  if (!totalWeight.gt(0)) return null;
   const remaining = totalTarget.minus(minimumTotal);
-  const base = requiredLengths.map(() => minimumPerSku);
+  const base = [...minimums];
   if (remaining.lte(0)) return base;
 
-  const proportional = requiredLengths.map((required) => remaining.times(required).div(totalRequired));
-  const allocated = requiredLengths.map((_, index) => floorTo(proportional[index], 100));
+  const proportional = weights.map((weight) => remaining.times(weight).div(totalWeight));
+  const allocated = weights.map((_, index) => floorTo(proportional[index], 100));
   let distributed = sum(allocated);
-  const order = requiredLengths
-    .map((required, index) => ({ index, required }))
-    .sort((left, right) => (left.required.eq(right.required) ? left.index - right.index : right.required.minus(left.required).toNumber()));
+  const order = weights
+    .map((weight, index) => ({ index, weight }))
+    .sort((left, right) => (left.weight.eq(right.weight) ? left.index - right.index : right.weight.minus(left.weight).toNumber()));
 
   while (distributed.lt(remaining)) {
-    const target = order.find(({ index }) => allocated[index].plus(100).lte(remaining.plus(minimumPerSku)))?.index ?? order[0].index;
+    const target = order[ distributed.mod(100).eq(0) ? distributed.div(100).toNumber() % order.length : 0 ].index;
     allocated[target] = allocated[target].plus(100);
     distributed = distributed.plus(100);
   }
-  return allocated.map((value, index) => value.plus(minimumPerSku));
+  return allocated.map((value, index) => value.plus(minimums[index]));
 }
 
 function digitalCapacity(
@@ -217,31 +220,42 @@ function maxD(first: Decimal, second: Decimal): Decimal {
 
 function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[] {
   const { size, parameters, skuRequiredLengths, originalQuantity } = context;
-  const normalized = normalizeDigitalFilmOrder(
-    skuRequiredLengths.map((required, index) => ({
-      skuCode: `SKU-${index + 1}`,
-      requiredLengthM: required.toString(),
-    })),
-    parameters,
-  );
-  const naturalTotal = sum(normalized.orders.map((order) => D(order.orderLengthM)));
+  // For 736mm/2-up candidates, physical purchase length is approximately
+  // half of the production-equivalent requirement. Allocate and compare using
+  // purchase length, not production-equivalent length.
+  const purchaseWeights = skuRequiredLengths.map((required) => {
+    const useLargeLot = Boolean(size.largeLotWebWidthMm) && required.gt(900);
+    return useLargeLot ? Decimal.max(500, ceilTo(required.div(2), 100)) : ceilTo(required, 100);
+  });
+  const normalized = purchaseWeights.map((orderLength, index) => ({
+    skuCode: `SKU-${index + 1}`,
+    requiredLengthM: skuRequiredLengths[index].toString(),
+    orderLengthM: Decimal.max(orderLength, D(parameters.digitalFilmMinSkuM)).toString(),
+  }));
+  const naturalTotal = sum(normalized.map((order) => D(order.orderLengthM)));
   const minimumPerSku = D(parameters.digitalFilmMinSkuM);
+  const minimums = skuRequiredLengths.map((required) => {
+    const useLargeLot = Boolean(size.largeLotWebWidthMm) && required.gt(900);
+    return useLargeLot ? Decimal.max(500, minimumPerSku) : minimumPerSku;
+  });
   const minimumTotal = D(parameters.digitalFilmMinTotalM);
   const totalFloor = floorTo(naturalTotal, 100);
-  const targets = new Set<string>([naturalTotal.toFixed(0)]);
+  const targets = new Set<string>();
+  const minimumCandidateTotal = maxDecimal(minimumTotal, sum(minimums));
+  if (naturalTotal.gte(minimumCandidateTotal)) targets.add(naturalTotal.toFixed(0));
   for (const offset of [0, 100, 200]) {
     const target = totalFloor.minus(offset);
-    if (target.gte(maxDecimal(minimumTotal, minimumPerSku.times(skuRequiredLengths.length)))) targets.add(target.toFixed(0));
+    if (target.gte(minimumCandidateTotal)) targets.add(target.toFixed(0));
   }
   for (const boundary of ["500", "1000", "1500"]) {
     const target = D(boundary);
-    if (target.gte(maxDecimal(minimumTotal, minimumPerSku.times(skuRequiredLengths.length)))) targets.add(boundary);
+    if (target.gte(minimumCandidateTotal)) targets.add(boundary);
   }
 
   const drafts: CandidateDraft[] = [];
   for (const targetText of targets) {
     const target = D(targetText);
-    const allocations = allocateTotalLength(skuRequiredLengths, target, minimumPerSku);
+    const allocations = allocateTotalLength(purchaseWeights, target, minimums);
     if (!allocations) continue;
     const capacities = allocations.map((orderLength, index) =>
       digitalCapacity(size, skuRequiredLengths[index], orderLength, parameters),
@@ -282,7 +296,10 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
     const priceBreak = ["500", "1000", "1500"].includes(targetText) && !aggregateOrderLength.eq(naturalTotal);
 
     drafts.push({
-      ...candidateCommon("D", originalQuantity, adjustedQuantity, requiredTotal, aggregateOrderLength, effectiveTotal, filmTotal),
+      ...candidateCommon(
+        "D", originalQuantity, adjustedQuantity, requiredTotal, aggregateOrderLength, effectiveTotal, filmTotal,
+        "15", sum(capacities.map((capacity) => capacity.considered)),
+      ),
       id: `D-${targetText}-${adjustedQuantity.toFixed(0)}`,
       detailLabel: `合計 ${aggregateOrderLength.toFixed(0)}m / ${priceLength}m帯`,
       printingMethod: "digital",
@@ -436,14 +453,23 @@ function buildKoreaCandidates(context: PrintCandidateContext): CandidateDraft[] 
       .times(sellerFactor)
       .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
     return {
-      ...candidateCommon("K", context.originalQuantity, combination.adjustedQuantity, requiredTotal, combination.orderLengthM, combination.effectiveLengthM, includedFilmTotal),
+      ...candidateCommon(
+        "K", context.originalQuantity, combination.adjustedQuantity, requiredTotal, combination.orderLengthM,
+        combination.effectiveLengthM, includedFilmTotal, "15", combination.effectiveLengthM,
+      ),
       id: `K-${patternKey}-${combination.adjustedQuantity.toFixed(0)}`,
-      detailLabel: `韓国輸入 ${combination.gravureRoll.orderPatternCount}パターン`,
+      detailLabel: `韓国輸入 パターン ${combination.options.map((option) => option.patternCount).join("+")}`,
       printingMethod: "gravure",
       priceBreak: false,
       adjustedSkuQuantities: combination.options.map((option) => option.adjustedQuantity.toString()),
       skuPatternCounts: combination.options.map((option) => option.patternCount),
-      gravureRoll: combination.gravureRoll,
+      gravureRoll: {
+        ...combination.gravureRoll,
+        requiredLengthM: requiredTotal.toString(),
+        recommendedQuantityUtilization: requiredTotal.gt(0)
+          ? combination.effectiveLengthM.div(requiredTotal).toString()
+          : "0",
+      },
     } as CandidateDraft;
   });
 }
@@ -485,11 +511,58 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     ...buildDomesticCandidates(context),
   ];
   const seen = new Set<string>();
-  const unique = drafts.filter((draft) => {
-    if (seen.has(draft.id) || !D(draft.adjustedQuantity).gt(0)) return false;
-    seen.add(draft.id);
-    return true;
+  const candidates = drafts
+    .filter((draft) => {
+      if (seen.has(draft.id) || !D(draft.adjustedQuantity).gt(0)) return false;
+      seen.add(draft.id);
+      return true;
+    })
+    .map((draft) => finishCandidate(draft, context.originalQuantity));
+
+  // A candidate is practically actionable when it stays near the requested
+  // quantity, or when it is a genuine lower unit-price break.
+  const originalQuantity = context.originalQuantity;
+  const routeGroups = new Map<PrintCandidateRoute, PrintCandidate[]>();
+  for (const route of ["D", "K", "Y"] as const) {
+    routeGroups.set(route, candidates.filter((candidate) => candidate.route === route));
+  }
+  for (const candidate of candidates) {
+    const group = routeGroups.get(candidate.route) ?? [];
+    const reference = group
+      .filter((item) => item.id !== candidate.id)
+      .sort((left, right) => {
+        const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
+        const rightDelta = D(right.adjustedQuantity).minus(originalQuantity).abs();
+        if (!leftDelta.eq(rightDelta)) return leftDelta.lt(rightDelta) ? -1 : 1;
+        return left.id.localeCompare(right.id);
+      })[0];
+    const referencePrice = reference ? D(reference.includedUnitPricePerM) : D(0);
+    candidate.priceBreak = candidate.priceBreak
+      && referencePrice.gt(0)
+      && D(candidate.includedUnitPricePerM).lte(referencePrice.times("0.90"));
+  }
+
+  const ranked = rankCandidates(candidates, originalQuantity);
+  const actionable = ranked.filter((candidate) => {
+    const quantityDeltaRatio = originalQuantity.gt(0)
+      ? D(candidate.adjustedQuantity).minus(originalQuantity).abs().div(originalQuantity)
+      : D(0);
+    return quantityDeltaRatio.lte("0.15") || candidate.priceBreak;
   });
-  const ranked = rankCandidates(unique.map((draft) => finishCandidate(draft, context.originalQuantity)), context.originalQuantity);
-  return ranked.map((candidate, index) => ({ ...candidate, recommended: index === 0 })).slice(0, 9);
+  const recommendationPool = actionable.length ? rankCandidates(actionable, originalQuantity) : ranked;
+  const recommendedCandidate = recommendationPool[0];
+
+  // Always retain the best route representative. A global top-N can otherwise
+  // exclude Y or D entirely when one production route has many pattern rows.
+  const routeRepresentatives = (["D", "K", "Y"] as const)
+    .map((route) => ranked.find((candidate) => candidate.route === route))
+    .filter((candidate): candidate is PrintCandidate => Boolean(candidate))
+    .filter((candidate) => candidate.id !== recommendedCandidate.id);
+  const selectedIds = new Set([recommendedCandidate.id, ...routeRepresentatives.map((candidate) => candidate.id)]);
+  const remaining = ranked
+    .filter((candidate) => !selectedIds.has(candidate.id))
+    .slice(0, Math.max(0, 9 - selectedIds.size));
+  const nonRecommended = rankCandidates([...routeRepresentatives, ...remaining], originalQuantity);
+  const display = [recommendedCandidate, ...nonRecommended];
+  return display.map((candidate, index) => ({ ...candidate, recommended: index === 0 }));
 }

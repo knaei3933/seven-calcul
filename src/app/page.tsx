@@ -4,14 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CostResult } from "@/lib/calculation";
 import { defaultParameters, defaultProductionSpeedForFillMl, machineChargeBasis, sizeMaster } from "@/lib/constants";
 import { displayAmount } from "@/lib/calculation";
-import { D } from "@/lib/decimal";
+import { D, Decimal } from "@/lib/decimal";
 import { CURRENT_CHECKLIST_SNAPSHOT_KEY, buildCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 import Link from "next/link";
 import { defaultGravureRollParameters, type GravureRollParameters } from "@/lib/gravure-roll";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { QUOTATION_DRAFT_KEY, buildQuotationDraft } from "@/lib/quotation-draft";
 import { calculateAutomaticQuotation } from "@/lib/quotation-pricing";
-import { deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calculations";
+import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calculations";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
 import type { CustomerMaster, CustomerMasterInput } from "@/lib/quotation-shared";
 import type { PrintCandidate } from "@/lib/print-recommendation";
@@ -358,7 +358,17 @@ export default function QuotationPage() {
   const calculationInputJson = useMemo(() => JSON.stringify(calculationInput), [calculationInput]);
   const staleResult = serverResult !== null && serverResult.inputJson !== calculationInputJson;
 
-  const writeChecklistSnapshot = useCallback((result: CostResult) => {
+  const writeChecklistSnapshot = useCallback((
+    result: CostResult,
+    skuOverride?: {
+      name: string;
+      quantity: string;
+      fillMl: string;
+      colorCount: string;
+      requiredLengthM?: string;
+      orderLengthM?: string;
+    }[],
+  ) => {
     const preliminarySnapshot = buildCalculationChecklistSnapshot(result, {
       quotationNumber: "保存前",
       customerName: form.customerName,
@@ -376,11 +386,18 @@ export default function QuotationPage() {
       pitchAddMm: effectiveSize.pitchAddMm,
       prodMultiplier: effectiveSize.prodMultiplier,
       colorCount: Math.max(...form.skus.map((sku) => Number(sku.colorCount) || 0)),
-      skus: result.film.skuCosts.map((sku) => ({
+      skus: (skuOverride ?? (form.skus.map((sku) => ({
         name: sku.name,
         quantity: sku.quantity,
-        fillMl: sku.fillMlPerChamber,
+        fillMl: sku.fillMl,
         colorCount: sku.colorCount,
+      })) as ChecklistSkuContext[])).map((sku: ChecklistSkuContext, index) => ({
+        name: sku.name || `充填物${index + 1}`,
+        quantity: sku.quantity,
+        fillMl: sku.fillMl,
+        colorCount: sku.colorCount,
+        requiredLengthM: sku.requiredLengthM,
+        orderLengthM: sku.orderLengthM,
       })),
       lossRate: parameters.lossRate,
       bulkUnitPrice: form.bulkPrice,
@@ -414,7 +431,30 @@ export default function QuotationPage() {
         inputJson: calculationInputJson,
         selectedCandidateId: candidate.id,
       });
-      writeChecklistSnapshot(activeResult);
+      const adjustedQuantities = candidate.adjustedSkuQuantities;
+      const totalAdjustedQuantity = adjustedQuantities.reduce<Decimal>(
+        (total, value) => total.plus(D(value)),
+        D(0),
+      );
+      writeChecklistSnapshot(activeResult, form.skus.map((sku, index) => {
+        const quantity = D(adjustedQuantities[index] ?? activeResult.quantity);
+        const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate);
+        const orderLengthM = candidate.route === "D"
+          ? D(candidate.filmOrders?.[index]?.orderLengthM ?? activeResult.film.orderLengthM)
+          : candidate.route === "K"
+            ? D(candidate.skuPatternCounts?.[index] ?? 1).times(normalizedGravureParameters.productionPatternLengthM)
+            : totalAdjustedQuantity.gt(0)
+              ? D(activeResult.film.orderLengthM).times(quantity.div(totalAdjustedQuantity))
+              : D(activeResult.film.orderLengthM);
+        return {
+          name: sku.name,
+          quantity: quantity.toString(),
+          fillMl: sku.fillMl,
+          colorCount: sku.colorCount,
+          requiredLengthM: requiredLengthM.toString(),
+          orderLengthM: orderLengthM.toString(),
+        };
+      }));
     } catch (error) {
       if (requestOrder === requestOrderRef.current) {
         window.dispatchDebugError?.(error instanceof Error ? error.message : "candidate_calculation_failed");
@@ -1029,7 +1069,7 @@ export default function QuotationPage() {
                                 {candidate.recommended ? <em>推奨</em> : null}
                               </span>
                               <span>{candidate.detailLabel}</span>
-                              <span>{formatNumber(candidate.adjustedQuantity, 0)}枚</span>
+                              <span>{formatNumber(candidate.adjustedQuantity, 0)}枚{candidate.adjustedSkuQuantities.length > 1 ? `（SKU ${candidate.adjustedSkuQuantities.map((quantity) => formatNumber(quantity, 0)).join("+")}）` : ""}</span>
                               <span>{formatNumber(candidate.orderLengthM, 0)}m ／ {formatCurrency(candidate.includedUnitPricePerM, 2)}/m</span>
                               <span>1枚 {formatCurrency(candidate.filmCostPerPieceYen, 2)} ／ 余剰 {formatNumber(candidate.surplusRatio, 1)}%</span>
                               {candidate.toleranceExceeded ? <span className="warning">許容超過（単価優先）</span> : null}
@@ -1240,7 +1280,7 @@ export default function QuotationPage() {
                 <div>
                   <dt>品名</dt><dd>パウチ製品</dd>
                 </div>
-                <div><dt>数量</dt><dd>{formatNumber(form.quantity)} 枚</dd></div>
+                <div><dt>数量</dt><dd>{formatNumber(resultShown?.quantity ?? form.quantity)} 枚</dd></div>
                 <div><dt>適用利益率</dt><dd>{formatNumber(Number(effectiveMargin) * 100, 3)}%（参考値）</dd></div>
                 <div>
                   <dt>販売単価</dt>
@@ -1383,6 +1423,7 @@ function redistributeSkuQuantities(total: string, count: number): string[] {
 }
 
 interface SkuEntry { name: string; quantity: string; fillMl: string; colorCount: string; }
+type ChecklistSkuContext = SkuEntry & { requiredLengthM?: string; orderLengthM?: string; };
 
 function redistributeSkus(skus: SkuEntry[], total: string): SkuEntry[] {
   const quantities = redistributeSkuQuantities(total, skus.length);

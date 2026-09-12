@@ -156,6 +156,11 @@ export type CalculationChecklistContext = {
     quantity: string;
     fillMl: string;
     colorCount: string;
+    requiredLengthM?: string;
+    orderLengthM?: string;
+    multiplier?: number;
+    webWidthMm?: number;
+    appliedBand?: string;
   }[];
   lossRate?: string;
   parameters?: CostParameters;
@@ -218,17 +223,20 @@ export function buildCalculationChecklistSnapshot(
     film: result.film,
     gravure: result.gravure,
     gravureParameters: context.gravureParameters,
-    skus: result.film.skuCosts.map((sku, index) => ({
-      name: context.skus?.[index]?.name?.trim() || sku.name || `充填物${index + 1}`,
-      quantity: context.skus?.[index]?.quantity ?? sku.quantity,
-      fillMlPerChamber: context.skus?.[index]?.fillMl ?? sku.fillMlPerChamber,
-      colorCount: context.skus?.[index]?.colorCount ?? sku.colorCount,
-      requiredLengthM: sku.requiredLengthM,
-      orderLengthM: sku.orderLengthM,
-      multiplier: sku.multiplier,
-      webWidthMm: sku.webWidthMm,
-      appliedBand: sku.appliedBand,
-    })),
+    skus: (context.skus?.length ? context.skus : result.film.skuCosts).map((contextSku, index) => {
+      const skuCost = result.film.skuCosts[index];
+      return {
+        name: contextSku.name?.trim() || skuCost?.name || `充填物${index + 1}`,
+        quantity: contextSku.quantity ?? skuCost?.quantity ?? result.quantity,
+        fillMlPerChamber: ("fillMl" in contextSku ? contextSku.fillMl : contextSku.fillMlPerChamber) ?? skuCost?.fillMlPerChamber ?? result.fillMlPerChamber,
+        colorCount: contextSku.colorCount ?? skuCost?.colorCount ?? "0",
+        requiredLengthM: contextSku.requiredLengthM ?? skuCost?.requiredLengthM ?? result.film.requiredLengthM,
+        orderLengthM: contextSku.orderLengthM ?? skuCost?.orderLengthM ?? result.film.orderLengthM,
+        multiplier: contextSku.multiplier ?? skuCost?.multiplier ?? 1,
+        webWidthMm: contextSku.webWidthMm ?? skuCost?.webWidthMm ?? context.webWidthMm ?? 0,
+        appliedBand: contextSku.appliedBand ?? skuCost?.appliedBand ?? "",
+      };
+    }),
     orderPatternCount: result.orderPatternCount ?? 1,
     deliverablePatternLengthM: result.deliverablePatternLengthM ?? "0",
     productionPatternLengthM: result.film.orderLengthM,
