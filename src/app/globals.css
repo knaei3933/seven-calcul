@@ -1147,3 +1147,13 @@ header .version-badge { display: none; }
   .recommendation-grid { grid-template-columns: 1fr; }
   .recommendation-card { min-height: 0; }
 }
+
+.recommendation-collapsed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+@media (max-width: 640px) {
+  .recommendation-collapsed { flex-direction: column; align-items: stretch; }
+}

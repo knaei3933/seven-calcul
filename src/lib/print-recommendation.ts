@@ -519,50 +519,62 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     })
     .map((draft) => finishCandidate(draft, context.originalQuantity));
 
-  // A candidate is practically actionable when it stays near the requested
-  // quantity, or when it is a genuine lower unit-price break.
+  // Keep price-break alternatives visible, but reserve 推奨 for a practical
+  // proposal that satisfies the requested order without large excess stock.
   const originalQuantity = context.originalQuantity;
-  const routeGroups = new Map<PrintCandidateRoute, PrintCandidate[]>();
-  for (const route of ["D", "K", "Y"] as const) {
-    routeGroups.set(route, candidates.filter((candidate) => candidate.route === route));
-  }
-  for (const candidate of candidates) {
-    const group = routeGroups.get(candidate.route) ?? [];
-    const reference = group
-      .filter((item) => item.id !== candidate.id)
-      .sort((left, right) => {
-        const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
-        const rightDelta = D(right.adjustedQuantity).minus(originalQuantity).abs();
-        if (!leftDelta.eq(rightDelta)) return leftDelta.lt(rightDelta) ? -1 : 1;
-        return left.id.localeCompare(right.id);
-      })[0];
-    const referencePrice = reference ? D(reference.includedUnitPricePerM) : D(0);
-    candidate.priceBreak = candidate.priceBreak
-      && referencePrice.gt(0)
-      && D(candidate.includedUnitPricePerM).lte(referencePrice.times("0.90"));
-  }
-
-  const ranked = rankCandidates(candidates, originalQuantity);
-  const actionable = ranked.filter((candidate) => {
-    const quantityDeltaRatio = originalQuantity.gt(0)
-      ? D(candidate.adjustedQuantity).minus(originalQuantity).abs().div(originalQuantity)
-      : D(0);
-    return quantityDeltaRatio.lte("0.15") || candidate.priceBreak;
+  const practicalPool = candidates.filter((candidate) => (
+    D(candidate.adjustedQuantity).gte(originalQuantity)
+    && D(candidate.surplusRatio).lte(D("15"))
+  ));
+  const rank = (items: PrintCandidate[]) => [...items].sort((left, right) => {
+    const leftTotal = D(left.filmTotalYen);
+    const rightTotal = D(right.filmTotalYen);
+    if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
+    const leftSurplus = D(left.surplusLengthM);
+    const rightSurplus = D(right.surplusLengthM);
+    if (!leftSurplus.eq(rightSurplus)) return leftSurplus.lt(rightSurplus) ? -1 : 1;
+    const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
+    const rightDelta = D(right.adjustedQuantity).minus(originalQuantity).abs();
+    if (!leftDelta.eq(rightDelta)) return leftDelta.lt(rightDelta) ? -1 : 1;
+    return left.id.localeCompare(right.id);
   });
-  const recommendationPool = actionable.length ? rankCandidates(actionable, originalQuantity) : ranked;
-  const recommendedCandidate = recommendationPool[0];
 
-  // Always retain the best route representative. A global top-N can otherwise
-  // exclude Y or D entirely when one production route has many pattern rows.
+  const rankedPractical = rank(practicalPool);
+  const recommendedCandidate = rankedPractical[0];
+  const selectedIds = new Set(recommendedCandidate ? [recommendedCandidate.id] : []);
+  const practicalAlternatives = rankedPractical.filter((candidate) => !selectedIds.has(candidate.id));
+
+  // Preserve route breadth and a small number of far price-break alternatives.
   const routeRepresentatives = (["D", "K", "Y"] as const)
-    .map((route) => ranked.find((candidate) => candidate.route === route))
+    .map((route) => rank(candidates.filter((candidate) => candidate.route === route))[0])
     .filter((candidate): candidate is PrintCandidate => Boolean(candidate))
-    .filter((candidate) => candidate.id !== recommendedCandidate.id);
-  const selectedIds = new Set([recommendedCandidate.id, ...routeRepresentatives.map((candidate) => candidate.id)]);
-  const remaining = ranked
-    .filter((candidate) => !selectedIds.has(candidate.id))
+    .filter((candidate) => !selectedIds.has(candidate.id));
+  routeRepresentatives.forEach((candidate) => selectedIds.add(candidate.id));
+
+  const farBreakRepresentative = rank(candidates.filter((candidate) => (
+    candidate.toleranceExceeded && candidate.priceBreak
+  )))[0];
+  const remaining = rank(candidates.filter((candidate) => (
+    !selectedIds.has(candidate.id) && candidate.id !== farBreakRepresentative?.id
+  )))
     .slice(0, Math.max(0, 9 - selectedIds.size));
-  const nonRecommended = rankCandidates([...routeRepresentatives, ...remaining], originalQuantity);
-  const display = [recommendedCandidate, ...nonRecommended];
-  return display.map((candidate, index) => ({ ...candidate, recommended: index === 0 }));
+  const display = recommendedCandidate
+    ? [
+        recommendedCandidate,
+        ...practicalAlternatives.slice(0, 4),
+        ...routeRepresentatives,
+        ...(farBreakRepresentative ? [farBreakRepresentative] : []),
+        ...remaining,
+      ]
+    : [...routeRepresentatives, ...remaining];
+  const uniqueDisplay: PrintCandidate[] = [];
+  const displayIds = new Set<string>();
+  for (const candidate of display) {
+    if (displayIds.has(candidate.id)) continue;
+    displayIds.add(candidate.id);
+    uniqueDisplay.push(candidate);
+  }
+  return uniqueDisplay
+    .slice(0, 9)
+    .map((candidate) => ({ ...candidate, recommended: recommendedCandidate?.id === candidate.id }));
 }

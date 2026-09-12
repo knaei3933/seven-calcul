@@ -18,7 +18,7 @@ const baseSpec: PouchSpec = {
   skuCount: 1,
 };
 
-function context(spec: PouchSpec = baseSpec, quantity = "150000") {
+function context(spec: PouchSpec = baseSpec, quantity = "133000") {
   return createPrintCandidateContext({
     spec,
     quantity,
@@ -46,13 +46,19 @@ describe("print recommendation engine", () => {
     expect(digital.some((candidate) => candidate.priceBreak)).toBe(true);
   });
 
-  it("puts the practical recommendation first, then remaining candidates by cost", () => {
+  it("recommends the practical near-quantity Y candidate", () => {
     const candidates = buildPrintCandidates(context());
-    expect(candidates[0].recommended).toBe(true);
-    const remaining = candidates.slice(1).map((candidate) => D(candidate.filmCostPerPieceYen).toDecimalPlaces(4, Decimal.ROUND_HALF_UP));
-    for (let index = 1; index < remaining.length; index += 1) {
-      expect(remaining[index].gte(remaining[index - 1])).toBe(true);
-    }
+    const recommended = candidates.find((candidate) => candidate.recommended)!;
+    expect(recommended.route).toBe("Y");
+    expect(recommended.orderLengthM).toBe("3400");
+    expect(recommended.adjustedQuantity).toBe("142325");
+    expect(D(recommended.filmTotalYen).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toString()).toBe("385370");
+    expect(D(recommended.surplusRatio).lte(D("15"))).toBe(true);
+
+    const farBreak = candidates.find((candidate) => candidate.orderLengthM === "7000");
+    expect(farBreak).toBeDefined();
+    expect(D(farBreak!.surplusRatio).gt(D("15"))).toBe(true);
+    expect(farBreak!.recommended).toBe(false);
   });
 
   it("preserves a selected digital candidate order length", () => {
@@ -61,7 +67,7 @@ describe("print recommendation engine", () => {
     expect(candidate).toBeDefined();
     const result = calculatePouchCost({
       spec: baseSpec,
-      quantity: "150000",
+      quantity: "133000",
       printingMethod: "gravure",
       parameters: defaultParameters,
       gravureParameters: defaultGravureRollParameters(),
@@ -91,7 +97,7 @@ describe("print recommendation engine", () => {
   it("computes a selected candidate result without changing the caller input quantity", () => {
     const input = {
       spec: baseSpec,
-      quantity: "150000",
+      quantity: "133000",
       printingMethod: "gravure" as const,
       parameters: defaultParameters,
       gravureParameters: defaultGravureRollParameters(),

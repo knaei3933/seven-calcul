@@ -4,6 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QuotationPage from "@/app/page";
 import { calculatePouchCost } from "@/lib/calculation";
+import { defaultParameters } from "@/lib/constants";
+import { defaultGravureRollParameters } from "@/lib/gravure-roll";
+import type { PouchSpec } from "@/lib/types";
 
 describe("quotation UI", () => {
   beforeEach(() => sessionStorage.clear());
@@ -171,6 +174,47 @@ describe("quotation UI", () => {
     await user.type(customMargin, "42");
     expect(screen.getByTestId("input-summary")).toBeInTheDocument();
     expect(screen.getByTestId("calculate-desktop")).toBeEnabled();
+  });
+
+  it("collapses candidate alternatives after selection and hides the route selector", async () => {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+    const input = {
+      spec: {
+        sizeKey: "tube-35x80", fillMlPerChamber: "3", connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4,
+        isCustom: false, colorCount: 2, bulkUnitPrice: "0", skuCount: 1,
+      } as PouchSpec,
+      quantity: "133000", printingMethod: "gravure" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+    };
+    const originalCalculation = calculatePouchCost({ ...input, recommendationMode: true });
+    const candidate = originalCalculation.recommendationCandidates![0];
+    const selectedCalculation = calculatePouchCost({
+      ...input,
+      recommendationMode: true,
+      selectedCandidateId: candidate.id,
+    });
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+        const result = body.selectedCandidateId ? selectedCalculation : originalCalculation;
+      return new Response(JSON.stringify({
+        result,
+        originalResult: originalCalculation,
+        candidates: result.recommendationCandidates ?? [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+    expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
+    expect(screen.getByText("発注数量・パターン候補")).toBeInTheDocument();
+
+    await user.click(screen.getByText("推奨"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitFor(() => expect(screen.getAllByText("選択中候補").length).toBeGreaterThan(0));
+    expect(screen.queryByText("発注数量・パターン候補")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("発注数量 (枚)")).toHaveValue("10000");
   });
 
   it("supports per-SKU pouch quantities and blocks when the sum differs from the order quantity", async () => {

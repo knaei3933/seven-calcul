@@ -115,6 +115,7 @@ export default function QuotationPage() {
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [recommendationPanelOpen, setRecommendationPanelOpen] = useState(true);
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
   const [productionSpeedManual, setProductionSpeedManual] = useState(false);
@@ -424,6 +425,7 @@ export default function QuotationPage() {
       const activeResult: CostResult = payload.result;
       const originalResult: CostResult = payload.originalResult ?? serverResult.originalResult;
       const candidates: PrintCandidate[] = payload.candidates ?? serverResult.candidates;
+      setRecommendationPanelOpen(false);
       setServerResult({
         result: activeResult,
         originalResult,
@@ -466,6 +468,7 @@ export default function QuotationPage() {
 
   const clearCandidate = () => {
     if (!serverResult) return;
+    setRecommendationPanelOpen(true);
     setServerResult({
       ...serverResult,
       result: serverResult.originalResult,
@@ -495,6 +498,7 @@ export default function QuotationPage() {
       const originalResult: CostResult = payload.originalResult ?? payload.result;
       const activeResult: CostResult = payload.result;
       const candidates: PrintCandidate[] = payload.candidates ?? [];
+      setRecommendationPanelOpen(true);
       setServerResult({
         result: activeResult,
         originalResult,
@@ -525,6 +529,8 @@ export default function QuotationPage() {
   // 조건変更後は自動試算を見せず、必ずサーバー再計算結果へ切り替える。
   const resultShown: CostResult | null = staleResult ? null : serverResult?.result ?? null;
   const resultPrintingMethod: PrintingMethod = resultShown?.printingMethod ?? form.printingMethod;
+  const hasCurrentRecommendationCandidates = !staleResult && (serverResult?.candidates.length ?? 0) > 0;
+  const showPrintingMethodSelector = !hasCurrentRecommendationCandidates;
   const quotationPreview = useMemo(
     () => resultShown ? calculateAutomaticQuotation(resultShown, effectiveMargin) : null,
     [effectiveMargin, resultShown],
@@ -865,6 +871,7 @@ export default function QuotationPage() {
                   </fieldset>
                 ))}
               </div>
+            {showPrintingMethodSelector ? (
             <div className="field" data-testid="printing-method-block">
               <span id="printing-label">印刷方式</span>
               <div className="radio-cards" role="radiogroup" aria-labelledby="printing-label">
@@ -873,6 +880,7 @@ export default function QuotationPage() {
               </div>
               <p className="help">グラビア選択時はロールフィルム用の原反・印刷・ラミネート・銅版費を計算します。他の生産資源はデジタル計算と同じモデルを使います。</p>
             </div>
+            ) : null}
               <p className="help">SKUごとに製品名・発注枚数・充填量・色数を設定できます。発注枚数の合計が発注数量（{formatNumber(form.quantity)}枚）と一致する必要があります。SKU数を変更すると均等割りします（製品名 未入力時は 充填物1, 2, 3…）。</p>
               {!skuQuantitiesValid ? <p className="error" role="alert" data-testid="sku-sum-error">SKU合計 {formatNumber(skuQuantitySum)} 枚 ≠ 発注数量 {formatNumber(form.quantity)} 枚。各SKUの発注枚数を調整してください。</p> : null}
             </div>
@@ -1060,7 +1068,32 @@ export default function QuotationPage() {
                       </p>
                     ) : null}
                   </details>
-                  {serverResult && !staleResult ? (
+                  {serverResult && !staleResult && serverResult.selectedCandidateId && !recommendationPanelOpen ? (
+                    <section className="panel recommendation-panel" aria-labelledby="recommendation-collapsed-title">
+                      <h3 id="recommendation-collapsed-title">選択中候補</h3>
+                      <div className="recommendation-grid">
+                        <button
+                          type="button"
+                          className="recommendation-card selected"
+                          onClick={() => setRecommendationPanelOpen(true)}
+                        >
+                          <span className="recommendation-label">
+                            {(serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.route ?? "選択")} / 選択中
+                          </span>
+                          <span>候補一覧を開く</span>
+                        </button>
+                      </div>
+                    </section>
+                  ) : null}
+                  {serverResult && !staleResult && serverResult.selectedCandidateId && !recommendationPanelOpen ? (
+                    <section className="panel recommendation-panel" aria-labelledby="recommendation-collapsed-title">
+                      <div className="recommendation-collapsed">
+                        <strong>選択中候補</strong>
+                        <button className="button secondary small" type="button" onClick={() => setRecommendationPanelOpen(true)}>候補一覧</button>
+                      </div>
+                    </section>
+                  ) : null}
+                  {serverResult && !staleResult && recommendationPanelOpen ? (
                     <section className="panel recommendation-panel" aria-labelledby="recommendation-title">
                       <h3 id="recommendation-title">発注数量・パターン候補</h3>
                       <p className="help">
