@@ -212,6 +212,8 @@ describe("quotation UI", () => {
     expect(screen.getByText(/原反 /)).toBeInTheDocument();
     expect(screen.getByText(/4色/)).toBeInTheDocument();
     expect(screen.getByText(/フィルム PET12\+AL7\+PET12\+LLDPE50/)).toBeInTheDocument();
+    expect(screen.getByText(/必要長を100m単位|合計最低発注|SKU最低300m/)).toBeInTheDocument();
+    expect(screen.getAllByText(/余剰 /).length).toBeGreaterThan(0);
 
     await user.click(screen.getByText("推奨"));
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));

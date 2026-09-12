@@ -555,6 +555,18 @@ export default function QuotationPage() {
     ? "グラビア / 韓国輸入"
     : "デジタル";
   const originalFilmComposition = "PET12+AL7+PET12+LLDPE50";
+  const originalRequiredLengthM = D(originalResult?.film.requiredLengthM ?? "0");
+  const originalOrderLengthM = D(originalResult?.film.orderLengthM ?? "0");
+  const originalSurplusLengthM = Decimal.max(originalOrderLengthM.minus(originalRequiredLengthM), D(0));
+  const originalSurplusPieces = originalResult
+    ? Decimal.max(D(originalResult.film.actualQuantity).minus(D(originalResult.quantity)), D(0))
+    : D(0);
+  const originalOrderAdjustment = originalResult?.film.orderAdjustment ?? "none";
+  const originalOrderReason = originalOrderAdjustment === "minimum_total_allocation"
+    ? "フィルム合計最低500mのため、最低発注量まで引き上げました。"
+    : originalOrderAdjustment === "minimum_sku_allocation"
+      ? "SKU最低300mのため、各SKUの発注長を引き上げました。"
+      : "必要長を100m単位に切り上げて発注します。";
 
   useEffect(() => {
     if (!quotationDraftResult || !customerDraft) return;
@@ -1105,17 +1117,18 @@ export default function QuotationPage() {
                             <em>現在</em>
                           </span>
                           <span>
-                            パウチ {form.widthMm}×{form.lengthMm}mm ／ {form.connected}連 ／ {form.lanes}列
+                            パウチ {form.widthMm}×{form.lengthMm}mm ／ {form.connected}連 ／ {form.lanes}列 ／ {originalColorText}
                           </span>
                           <span>
-                            原反 {formatNumber(originalWebWidthMm)}mm{originalMultiplier > 1 ? ` ×${originalMultiplier}` : ""} ／ {originalColorText}
+                            原反 {formatNumber(originalWebWidthMm)}mm{originalMultiplier > 1 ? ` ×${originalMultiplier}` : ""} ／ フィルム {originalFilmComposition}
                           </span>
-                          <span>フィルム {originalFilmComposition}</span>
-                          <span>{formatNumber(serverResult.originalResult.quantity, 0)}枚</span>
-                          <span>{formatNumber(serverResult.originalResult.film.orderLengthM, 0)}m</span>
                           <span>
-                            1枚 {formatCurrency(D(serverResult.originalResult.film.filmTotal).div(serverResult.originalResult.quantity).toString(), 2)} ／ 余剰 {formatNumber(Math.max(0, Number(serverResult.originalResult.film.actualQuantity) - Number(serverResult.originalResult.quantity)), 0)}枚
+                            必要 {formatNumber(originalRequiredLengthM.toString(), 0)}m ／ 発注 {formatNumber(originalOrderLengthM.toString(), 0)}m ／ 余剰 {formatNumber(originalSurplusLengthM.toString(), 0)}m
                           </span>
+                          <span>
+                            {formatNumber(serverResult.originalResult.quantity, 0)}枚 ／ 余剰 {formatNumber(originalSurplusPieces.toString(), 0)}枚
+                          </span>
+                          <span>{originalOrderReason}</span>
                           <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
                         </button>
                         {serverResult.candidates.map((candidate) => {
@@ -1135,7 +1148,8 @@ export default function QuotationPage() {
                               <span>{candidate.detailLabel}</span>
                               <span>{formatNumber(candidate.adjustedQuantity, 0)}枚{candidate.adjustedSkuQuantities.length > 1 ? `（SKU ${candidate.adjustedSkuQuantities.map((quantity) => formatNumber(quantity, 0)).join("+")}）` : ""}</span>
                               <span>{formatNumber(candidate.orderLengthM, 0)}m ／ {formatCurrency(candidate.includedUnitPricePerM, 2)}/m</span>
-                              <span>1枚 {formatCurrency(candidate.filmCostPerPieceYen, 2)} ／ 余剰 {formatNumber(candidate.surplusRatio, 1)}%</span>
+                              <span>1枚 {formatCurrency(candidate.filmCostPerPieceYen, 2)} ／ 余剰 {formatNumber(candidate.surplusLengthM, 0)}m</span>
+                              <span>{candidate.orderReason}</span>
                               {candidate.toleranceExceeded ? <span className="warning">許容超過（単価優先）</span> : null}
                               <strong>フィルム {formatCurrency(candidate.filmTotalYen, 0)}</strong>
                             </button>

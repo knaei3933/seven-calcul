@@ -31,6 +31,9 @@ export type PrintCandidate = {
   recommended: boolean;
   toleranceExceeded: boolean;
   priceBreak: boolean;
+  orderReason?: string;
+  surplusM?: string;
+  surplusPieces?: string;
   skuPatternCounts?: number[];
   // Server-side selection metadata. Safe to serialize; the API never trusts client-side money values.
   filmOrders?: { skuCode: string; requiredLengthM: string; orderLengthM: string }[];
@@ -294,6 +297,19 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
     const requiredTotal = sum(skuRequiredLengths);
     const effectiveTotal = sum(capacities.map((capacity) => capacity.effective));
     const priceBreak = ["500", "1000", "1500"].includes(targetText) && !aggregateOrderLength.eq(naturalTotal);
+    const naturalRequiredTotal = sum(skuRequiredLengths);
+    const minimumTotal = D(parameters.digitalFilmMinTotalM);
+    const minimumSkuTotal = sum(minimums);
+    let orderReason = "必要長を100m単位に切り上げました。";
+    if (aggregateOrderLength.lt(naturalRequiredTotal)) {
+      orderReason = "発注パターンに合わせて生産数量を調整しました。";
+    } else if (minimumTotal.gt(naturalRequiredTotal)) {
+      orderReason = `合計最低発注 ${minimumTotal.toFixed(0)}mのため、最低発注量まで注文しました。`;
+    } else if (minimumSkuTotal.gt(naturalRequiredTotal)) {
+      orderReason = `SKU最低発注 ${parameters.digitalFilmMinSkuM}mのため、各SKUの発注長を引き上げました。`;
+    } else if (priceBreak) {
+      orderReason = `${priceLength}m帯単価適用のため、発注長を引き上げました。`;
+    }
 
     drafts.push({
       ...candidateCommon(
@@ -461,6 +477,7 @@ function buildKoreaCandidates(context: PrintCandidateContext): CandidateDraft[] 
       detailLabel: `韓国輸入 パターン ${combination.options.map((option) => option.patternCount).join("+")}`,
       printingMethod: "gravure",
       priceBreak: false,
+      orderReason: `韓国輸入パターン ${combination.options.map((option) => option.patternCount).join("+")} のため、発注長と数量を調整しました。`,
       adjustedSkuQuantities: combination.options.map((option) => option.adjustedQuantity.toString()),
       skuPatternCounts: combination.options.map((option) => option.patternCount),
       gravureRoll: {
@@ -497,6 +514,7 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
       id: `Y-${sasche.id}`,
       detailLabel: `国内 ${sasche.webWidthMm}mm / ${sasche.laneCount}丁 / ${sasche.printTierM}m印刷`,
       printingMethod: "gravure",
+      orderReason: `国内Yパターン ${outputLength.toFixed(0)}m のため、発注数量を調整しました。`,
       priceBreak: true,
       adjustedSkuQuantities: skuQuantities.map((value) => value.toString()),
       sasche,
