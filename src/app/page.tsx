@@ -1091,7 +1091,13 @@ export default function QuotationPage() {
           </section>
           <section className="panel" aria-labelledby="result-title">
             <p className="input-summary" data-testid="input-summary">{`${form.widthMm}×${form.lengthMm} / ${form.connected}連 / ${formatNumber(form.quantity)}枚 / ${resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"} / SKU ${form.skuCount}件（${form.skus.map((sku, index) => `${skuDisplayName(index)} ${formatNumber(sku.quantity)}枚`).join("＋")}）`}</p>
-            <div className="result-header" data-testid="server-result" data-state={staleResult ? "stale" : pending ? "calculating" : serverResult ? "calculated" : "not_calculated"}><h2 id="result-title">原価・利益試算</h2><span>{pending ? "計算中" : staleResult ? "再計算が必要" : serverResult ? `サーバー計算済み ${calculatedAt ?? ""}` : "サーバー再計算待ち"}</span></div>
+            <div className="result-header" data-testid="server-result" data-state={staleResult ? "stale" : pending ? "calculating" : serverResult ? "calculated" : "not_calculated"}>
+              <h2 id="result-title">原価・利益試算</h2>
+              <span className="result-status">
+                {serverResult?.selectedCandidateId ? <span className="selection-status" data-testid="selection-status">選択中</span> : null}
+                <span>{pending ? "計算中" : staleResult ? "再計算が必要" : serverResult ? `サーバー計算済み ${calculatedAt ?? ""}` : "サーバー再計算待ち"}</span>
+              </span>
+            </div>
             {!resultShown ? <div className="empty">「サーバーで再計算する」を実行すると結果を表示します。</div> : pending ? <div className="skeleton" aria-live="polite"><div /><div style={{ width: "70%" }} /><div style={{ width: "45%" }} /></div> : (
               <>
                 <p className="total-label">発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</p>
@@ -1196,6 +1202,7 @@ export default function QuotationPage() {
                               onClick={() => void selectCandidate(candidate)}
                               disabled={pending}
                             >
+                              {selected ? <span className="selection-status card-selection-status">選択中</span> : null}
                               <span className="recommendation-label">
                                 {candidate.route} / {candidate.sourceLabel}
                                 {candidate.recommended ? <em>推奨</em> : null}

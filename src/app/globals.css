@@ -61,6 +61,13 @@ a { color: var(--primary); }
 .mobile-actions { display: none; position: fixed; width: 100%; right: auto; bottom: 0; left: 0; z-index: 20; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); background: rgba(255, 255, 255, .96); border-top: 1px solid var(--line); box-shadow: 0 -6px 18px rgba(23, 33, 58, .12); }
 .mobile-actions .button { width: 100%; min-height: 48px; }
 .result-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.result-status { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.selection-status {
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .04em;
+}
 .total { font-size: 28px; font-weight: 800; margin: 4px 0 12px; }
 .total-sub { display: block; font-size: 13px; font-weight: 700; margin-top: 4px; }
 .total-label { font-size: 13px; font-weight: 800; color: var(--ink); margin: 6px 0 0; }
@@ -1090,6 +1097,7 @@ header .version-badge { display: none; }
   gap: 9px;
 }
 .recommendation-card {
+  position: relative;
   display: grid;
   gap: 4px;
   align-content: start;
@@ -1138,6 +1146,12 @@ header .version-badge { display: none; }
   overflow-wrap: anywhere;
 }
 .recommendation-card span.warning { color: #b45309; font-weight: 750; }
+.card-selection-status {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  line-height: 1;
+}
 .recommendation-card strong {
   font-size: 15px;
   font-variant-numeric: tabular-nums;

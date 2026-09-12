@@ -218,6 +218,7 @@ describe("quotation UI", () => {
     await user.click(screen.getByText("推奨"));
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
     await waitFor(() => expect(screen.getByTestId("selected-candidate-summary")).toBeInTheDocument());
+    expect(screen.getByTestId("selection-status")).toHaveTextContent("選択中");
     expect(screen.queryByText("発注数量・パターン候補")).not.toBeInTheDocument();
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
     expect(screen.getByLabelText("発注数量 (枚)")).toHaveValue(candidate.adjustedQuantity);
