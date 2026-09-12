@@ -40,40 +40,48 @@ describe("calculate API", () => {
 });
 
 describe("calculate API recommendations", () => {
-  it("returns D/K/Y candidates and preserves the original basis", async () => {
+  const recommendationInput = {
+    ...validInput,
+    spec: {
+      ...validInput.spec,
+      sizeKey: "tube-35x80",
+      customWidthMm: "35",
+      customLengthMm: "80",
+      fillMlPerChamber: "3",
+      connectedChambers: 1,
+      colorCount: 4,
+    },
+    quantity: "133000",
+    printingMethod: "gravure",
+  };
+
+  it("returns only practical candidates and preserves the original basis", async () => {
     const response = await POST(new Request("http://localhost/api/calculate", {
       method: "POST",
-      body: JSON.stringify({
-        ...validInput,
-        printingMethod: "gravure",
-        recommendationMode: true,
-      }),
+      body: JSON.stringify({ ...recommendationInput, recommendationMode: true }),
     }));
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.candidates.length).toBeGreaterThan(0);
-    expect(payload.candidates.length).toBeLessThanOrEqual(9);
-    expect(new Set(payload.candidates.map((candidate: any) => candidate.route))).toEqual(new Set(["D", "K", "Y"]));
-    expect(payload.originalResult.quantity).toBe("10000");
-    expect(payload.result.quantity).toBe("10000");
+    expect(payload.candidates.length).toBeLessThanOrEqual(4);
+    expect(payload.candidates[0].recommended).toBe(true);
+    expect(payload.candidates.every((candidate: any) => Number(candidate.adjustedQuantity) >= 133000)).toBe(true);
+    expect(payload.candidates.every((candidate: any) => Number(candidate.surplusRatio) <= 15)).toBe(true);
+    expect(payload.originalResult.quantity).toBe("133000");
+    expect(payload.result.quantity).toBe("133000");
     expect(payload.result.selectedCandidateId).toBe("");
   });
 
   it("switches the active result to a selected candidate while returning the original", async () => {
     const first = await POST(new Request("http://localhost/api/calculate", {
       method: "POST",
-      body: JSON.stringify({
-        ...validInput,
-        printingMethod: "gravure",
-        recommendationMode: true,
-      }),
+      body: JSON.stringify({ ...recommendationInput, recommendationMode: true }),
     }));
-    const list = (await first.json()).candidates as Array<{ id: string }>;
+    const list = (await first.json()).candidates as Array<{ id: string; adjustedQuantity: string }>;
     const response = await POST(new Request("http://localhost/api/calculate", {
       method: "POST",
       body: JSON.stringify({
-        ...validInput,
-        printingMethod: "gravure",
+        ...recommendationInput,
         recommendationMode: true,
         selectedCandidateId: list[0].id,
       }),
@@ -81,6 +89,7 @@ describe("calculate API recommendations", () => {
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.result.selectedCandidateId).toBe(list[0].id);
-    expect(payload.originalResult.quantity).toBe("10000");
+    expect(payload.result.quantity).toBe(list[0].adjustedQuantity);
+    expect(payload.originalResult.quantity).toBe("133000");
   });
 });

@@ -39,7 +39,7 @@ describe("quotation UI", () => {
     expect(screen.getByLabelText("1回の充填列数 (列)")).toBeInTheDocument();
     expect(screen.getByText("テスト充填は500回 × 列数 × 充填量としてバルク使用量に加算します。")).toBeInTheDocument();
     expect(screen.getByLabelText("利益率 40%")).toBeChecked();
-    expect(screen.getByTestId("input-summary")).toHaveTextContent("50×60 / 1連 / 10,000枚 / SKU 1件（充填物1 10,000枚）");
+    expect(screen.getByTestId("input-summary")).toHaveTextContent("50×60 / 1連 / 10,000枚 / デジタル印刷 / SKU 1件（充填物1 10,000枚）");
     expect(screen.getByLabelText("左右幅 (mm)")).toHaveAttribute("readonly");
     expect(screen.getByLabelText("カスタム区分")).toBeEnabled();
   });
@@ -210,8 +210,8 @@ describe("quotation UI", () => {
     expect(screen.getByText("発注数量・パターン候補")).toBeInTheDocument();
 
     await user.click(screen.getByText("推奨"));
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await waitFor(() => expect(screen.getAllByText("選択中候補").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
+    await waitFor(() => expect(screen.getByTestId("selected-candidate-summary")).toBeInTheDocument());
     expect(screen.queryByText("発注数量・パターン候補")).not.toBeInTheDocument();
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
     expect(screen.getByLabelText("発注数量 (枚)")).toHaveValue("10000");

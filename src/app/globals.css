@@ -1157,3 +1157,21 @@ header .version-badge { display: none; }
 @media (max-width: 640px) {
   .recommendation-collapsed { flex-direction: column; align-items: stretch; }
 }
+
+.recommendation-collapsed {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.recommendation-collapsed span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 760px) {
+  .recommendation-collapsed { grid-template-columns: 1fr; white-space: normal; }
+}
+.quote-printing-method {
+  margin: 4px 0 0;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}

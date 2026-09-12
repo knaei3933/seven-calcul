@@ -519,14 +519,14 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     })
     .map((draft) => finishCandidate(draft, context.originalQuantity));
 
-  // Keep price-break alternatives visible, but reserve 推奨 for a practical
-  // proposal that satisfies the requested order without large excess stock.
+  // 推奨は顧客希望数量を満たし、過剰在庫が限定される実務候補から選ぶ。
   const originalQuantity = context.originalQuantity;
   const practicalPool = candidates.filter((candidate) => (
     D(candidate.adjustedQuantity).gte(originalQuantity)
     && D(candidate.surplusRatio).lte(D("15"))
   ));
-  const rank = (items: PrintCandidate[]) => [...items].sort((left, right) => {
+
+  const rankedPractical = practicalPool.sort((left, right) => {
     const leftTotal = D(left.filmTotalYen);
     const rightTotal = D(right.filmTotalYen);
     if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
@@ -539,42 +539,7 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     return left.id.localeCompare(right.id);
   });
 
-  const rankedPractical = rank(practicalPool);
-  const recommendedCandidate = rankedPractical[0];
-  const selectedIds = new Set(recommendedCandidate ? [recommendedCandidate.id] : []);
-  const practicalAlternatives = rankedPractical.filter((candidate) => !selectedIds.has(candidate.id));
-
-  // Preserve route breadth and a small number of far price-break alternatives.
-  const routeRepresentatives = (["D", "K", "Y"] as const)
-    .map((route) => rank(candidates.filter((candidate) => candidate.route === route))[0])
-    .filter((candidate): candidate is PrintCandidate => Boolean(candidate))
-    .filter((candidate) => !selectedIds.has(candidate.id));
-  routeRepresentatives.forEach((candidate) => selectedIds.add(candidate.id));
-
-  const farBreakRepresentative = rank(candidates.filter((candidate) => (
-    candidate.toleranceExceeded && candidate.priceBreak
-  )))[0];
-  const remaining = rank(candidates.filter((candidate) => (
-    !selectedIds.has(candidate.id) && candidate.id !== farBreakRepresentative?.id
-  )))
-    .slice(0, Math.max(0, 9 - selectedIds.size));
-  const display = recommendedCandidate
-    ? [
-        recommendedCandidate,
-        ...practicalAlternatives.slice(0, 4),
-        ...routeRepresentatives,
-        ...(farBreakRepresentative ? [farBreakRepresentative] : []),
-        ...remaining,
-      ]
-    : [...routeRepresentatives, ...remaining];
-  const uniqueDisplay: PrintCandidate[] = [];
-  const displayIds = new Set<string>();
-  for (const candidate of display) {
-    if (displayIds.has(candidate.id)) continue;
-    displayIds.add(candidate.id);
-    uniqueDisplay.push(candidate);
-  }
-  return uniqueDisplay
-    .slice(0, 9)
-    .map((candidate) => ({ ...candidate, recommended: recommendedCandidate?.id === candidate.id }));
+  return rankedPractical
+    .slice(0, 4)
+    .map((candidate, index) => ({ ...candidate, recommended: index === 0 }));
 }

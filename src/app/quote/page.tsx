@@ -1060,6 +1060,9 @@ export default function PrintableQuotationPage() {
             <div className="document-title">
               <p className="english"><EditableText value={form.documentEnglish} label="文書英字タイトル" onCommit={(next) => update("documentEnglish", next.trim())} /></p>
               <h2><EditableText value={form.documentHeading} label="文書タイトル" onCommit={(next) => update("documentHeading", next.trim())} /></h2>
+              <p className="quote-printing-method" data-testid="quote-printing-method">
+                印刷方式：{form.printingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}
+              </p>
               <dl>
                 <div><dt>見積番号</dt><dd>{form.quotationNumber || "-"}</dd></div>
                 <div><dt>発行日</dt><dd>{form.issueDate || "-"}</dd></div>

@@ -1019,14 +1019,14 @@ export default function QuotationPage() {
             </details>
           </section>
           <section className="panel" aria-labelledby="result-title">
-            <p className="input-summary" data-testid="input-summary">{`${form.widthMm}×${form.lengthMm} / ${form.connected}連 / ${formatNumber(form.quantity)}枚 / SKU ${form.skuCount}件（${form.skus.map((sku, index) => `${skuDisplayName(index)} ${formatNumber(sku.quantity)}枚`).join("＋")}）`}</p>
+            <p className="input-summary" data-testid="input-summary">{`${form.widthMm}×${form.lengthMm} / ${form.connected}連 / ${formatNumber(form.quantity)}枚 / ${resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"} / SKU ${form.skuCount}件（${form.skus.map((sku, index) => `${skuDisplayName(index)} ${formatNumber(sku.quantity)}枚`).join("＋")}）`}</p>
             <div className="result-header" data-testid="server-result" data-state={staleResult ? "stale" : pending ? "calculating" : serverResult ? "calculated" : "not_calculated"}><h2 id="result-title">原価・利益試算</h2><span>{pending ? "計算中" : staleResult ? "再計算が必要" : serverResult ? `サーバー計算済み ${calculatedAt ?? ""}` : "サーバー再計算待ち"}</span></div>
             {!resultShown ? <div className="empty">「サーバーで再計算する」を実行すると結果を表示します。</div> : pending ? <div className="skeleton" aria-live="polite"><div /><div style={{ width: "70%" }} /><div style={{ width: "45%" }} /></div> : (
               <>
                 <p className="total-label">発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</p>
                 {serverResult?.selectedCandidateId ? (
                   <p className="help" data-testid="active-candidate-note">
-                    選択候補基準で表示しています。左側の入力発注数は {formatNumber(form.quantity)} 枚のままです。
+                    選択候補（{resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}）基準で表示しています。左側の入力発注数は {formatNumber(form.quantity)} 枚のままです。
                   </p>
                 ) : null}
                 <p className="total">
@@ -1069,29 +1069,18 @@ export default function QuotationPage() {
                     ) : null}
                   </details>
                   {serverResult && !staleResult && serverResult.selectedCandidateId && !recommendationPanelOpen ? (
-                    <section className="panel recommendation-panel" aria-labelledby="recommendation-collapsed-title">
-                      <h3 id="recommendation-collapsed-title">選択中候補</h3>
-                      <div className="recommendation-grid">
-                        <button
-                          type="button"
-                          className="recommendation-card selected"
-                          onClick={() => setRecommendationPanelOpen(true)}
-                        >
-                          <span className="recommendation-label">
-                            {(serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.route ?? "選択")} / 選択中
-                          </span>
-                          <span>候補一覧を開く</span>
-                        </button>
-                      </div>
-                    </section>
-                  ) : null}
-                  {serverResult && !staleResult && serverResult.selectedCandidateId && !recommendationPanelOpen ? (
-                    <section className="panel recommendation-panel" aria-labelledby="recommendation-collapsed-title">
-                      <div className="recommendation-collapsed">
-                        <strong>選択中候補</strong>
-                        <button className="button secondary small" type="button" onClick={() => setRecommendationPanelOpen(true)}>候補一覧</button>
-                      </div>
-                    </section>
+                    <div className="recommendation-collapsed" data-testid="selected-candidate-summary">
+                      <strong>
+                        {serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.route ?? "選択"} /
+                        {" "}{serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.sourceLabel}
+                      </strong>
+                      <span>
+                        {formatNumber(serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.adjustedQuantity ?? 0, 0)}枚 ／
+                        {formatNumber(serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.orderLengthM ?? 0, 0)}m ／
+                        {formatCurrency(serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.filmCostPerPieceYen ?? 0, 2)}/枚
+                      </span>
+                      <button className="button secondary small" type="button" onClick={() => setRecommendationPanelOpen(true)}>候補一覧</button>
+                    </div>
                   ) : null}
                   {serverResult && !staleResult && recommendationPanelOpen ? (
                     <section className="panel recommendation-panel" aria-labelledby="recommendation-title">
@@ -1106,7 +1095,7 @@ export default function QuotationPage() {
                           onClick={clearCandidate}
                           disabled={pending}
                         >
-                          <span className="recommendation-label">入力値<em>現在</em></span>
+                          <span className="recommendation-label">入力値 / {serverResult.originalResult.printingMethod === "gravure" ? "グラビア" : "デジタル"}<em>現在</em></span>
                           <span>{formatNumber(serverResult.originalResult.quantity, 0)}枚</span>
                           <span>{formatNumber(serverResult.originalResult.film.orderLengthM, 0)}m</span>
                           <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>

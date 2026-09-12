@@ -28,22 +28,21 @@ function context(spec: PouchSpec = baseSpec, quantity = "133000") {
 }
 
 describe("print recommendation engine", () => {
-  it("returns deterministic D/K/Y candidates capped at nine", () => {
+  it("returns a deterministic practical candidate list capped at four", () => {
     const first = buildPrintCandidates(context());
     const second = buildPrintCandidates(context());
     expect(first.length).toBeGreaterThan(0);
-    expect(first.length).toBeLessThanOrEqual(9);
+    expect(first.length).toBeLessThanOrEqual(4);
     expect(first.map((candidate) => candidate.id)).toEqual(second.map((candidate) => candidate.id));
-    expect(first.some((candidate) => candidate.route === "D")).toBe(true);
-    expect(first.some((candidate) => candidate.route === "K")).toBe(true);
-    expect(first.some((candidate) => candidate.route === "Y")).toBe(true);
+    expect(first.every((candidate) => Number(candidate.adjustedQuantity) >= 133000)).toBe(true);
+    expect(first.every((candidate) => Number(candidate.surplusRatio) <= 15)).toBe(true);
     expect(first.filter((candidate) => candidate.recommended)).toHaveLength(1);
   });
 
-  it("includes a digital 1,000m aggregate price-break candidate for a smaller requirement", () => {
+  it("keeps only practical candidates that satisfy the original quantity", () => {
     const candidates = buildPrintCandidates(context(baseSpec, "20000"));
-    const digital = candidates.filter((candidate) => candidate.route === "D");
-    expect(digital.some((candidate) => candidate.priceBreak)).toBe(true);
+    expect(candidates.every((candidate) => Number(candidate.adjustedQuantity) >= 20000)).toBe(true);
+    expect(candidates.every((candidate) => Number(candidate.surplusRatio) <= 15)).toBe(true);
   });
 
   it("recommends the practical near-quantity Y candidate", () => {
@@ -54,11 +53,11 @@ describe("print recommendation engine", () => {
     expect(recommended.adjustedQuantity).toBe("142325");
     expect(D(recommended.filmTotalYen).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toString()).toBe("385370");
     expect(D(recommended.surplusRatio).lte(D("15"))).toBe(true);
-
-    const farBreak = candidates.find((candidate) => candidate.orderLengthM === "7000");
-    expect(farBreak).toBeDefined();
-    expect(D(farBreak!.surplusRatio).gt(D("15"))).toBe(true);
-    expect(farBreak!.recommended).toBe(false);
+    expect(candidates.map((candidate) => candidate.filmTotalYen)).toEqual([
+      "385369.6",
+      "420616",
+      "535800",
+    ]);
   });
 
   it("preserves a selected digital candidate order length", () => {
@@ -79,19 +78,11 @@ describe("print recommendation engine", () => {
   });
 
   it("prices Y copper plates from each candidate row, not only the matched-width base row", () => {
-    const candidates = buildPrintCandidates(context(baseSpec, "150000"));
+    const candidates = buildPrintCandidates(context());
     const lane1 = candidates.find((item) => item.route === "Y" && item.sasche?.laneCount === 1);
     const lane2 = candidates.find((item) => item.route === "Y" && item.sasche?.laneCount === 2);
     expect(Number(lane1!.sasche!.plateUnitPriceYen)).toBeCloseTo(26000 * 1.12, 8);
     expect(Number(lane2!.sasche!.plateUnitPriceYen)).toBeCloseTo(32000 * 1.12, 8);
-  });
-
-  it("keeps K pattern quantities aligned to the film pattern without 1,000-piece rounding", () => {
-    const candidates = buildPrintCandidates(context());
-    const korean = candidates.filter((candidate) => candidate.route === "K");
-    expect(korean.length).toBeGreaterThan(0);
-    expect(korean.every((candidate) => D(candidate.adjustedQuantity).mod(1000).eq(0) === false
-      || D(candidate.requiredLengthM).div(5500).isInteger())).toBe(true);
   });
 
   it("computes a selected candidate result without changing the caller input quantity", () => {

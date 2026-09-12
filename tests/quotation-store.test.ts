@@ -247,10 +247,10 @@ describe("quotation persistence with a manually edited selling price", () => {
       spec: {
         sizeKey: "tube-35x80", fillMlPerChamber: "3", connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4,
         isCustom: false, colorCount: 2, bulkUnitPrice: "0", skuCount: 2,
-        skuQuantities: ["90000", "60000"], skuNames: ["Serum", "Emulsion"],
+        skuQuantities: ["79800", "53200"], skuNames: ["Serum", "Emulsion"],
         skuFillMlPerChamber: ["10", "30"], skuColorCounts: ["2", "4"],
       },
-      quantity: "150000",
+      quantity: "133000",
       printingMethod: "gravure",
       recommendationMode: true,
       selectedCandidateId: "",
