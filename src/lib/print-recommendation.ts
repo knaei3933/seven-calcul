@@ -25,6 +25,7 @@ export type PrintCandidate = {
   shortageLengthM: string;
   surplusRatio: string;
   quantityDelta: string;
+  quantityShortfallRatio: string;
   includedUnitPricePerM: string;
   filmTotalYen: string;
   filmCostPerPieceYen: string;
@@ -94,7 +95,7 @@ export type PrintCandidateContext = {
   gravureParameters: GravureRollParameters;
 };
 
-type CandidateDraft = Omit<PrintCandidate, "recommended" | "quantityDelta"> & { __internal?: true };
+type CandidateDraft = Omit<PrintCandidate, "recommended" | "quantityDelta" | "quantityShortfallRatio"> & { __internal?: true };
 
 function floorTo(value: Decimal, unit: string | number): Decimal {
   const step = D(unit);
@@ -115,9 +116,13 @@ function finishCandidate(
 ): PrintCandidate {
   const adjustedQuantity = D(draft.adjustedQuantity);
   const original = D(draft.originalQuantity);
+  const shortfallRatio = original.gt(0)
+    ? Decimal.max(D(0), original.minus(adjustedQuantity)).div(original).times(100)
+    : D(0);
   return {
     ...draft,
     quantityDelta: adjustedQuantity.minus(original).toString(),
+    quantityShortfallRatio: shortfallRatio.toString(),
     recommended: false,
   };
 }
@@ -467,6 +472,32 @@ function combinationRank(combination: KCombination, originalQuantity: Decimal) {
   };
 }
 
+function paretoCandidates(candidates: PrintCandidate[]): PrintCandidate[] {
+  // Keep economically meaningful alternatives even when their quantity differs.
+  // A candidate is dominated only when another candidate is simultaneously
+  // better-or-equal in BOTH purchase total and per-piece cost.
+  return candidates.filter((candidate) => {
+    const total = D(candidate.filmTotalYen);
+    const perPiece = D(candidate.filmCostPerPieceYen);
+    return !candidates.some((competitor) => {
+      if (competitor.id === candidate.id) return false;
+      const competitorTotal = D(competitor.filmTotalYen);
+      const competitorPerPiece = D(competitor.filmCostPerPieceYen);
+      return competitorTotal.lte(total)
+        && competitorPerPiece.lte(perPiece)
+        && (competitorTotal.lt(total) || competitorPerPiece.lt(perPiece));
+    });
+  }).sort((left, right) => {
+    const leftTotal = D(left.filmTotalYen);
+    const rightTotal = D(right.filmTotalYen);
+    if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
+    const leftPerPiece = D(left.filmCostPerPieceYen);
+    const rightPerPiece = D(right.filmCostPerPieceYen);
+    if (!leftPerPiece.eq(rightPerPiece)) return leftPerPiece.lt(rightPerPiece) ? -1 : 1;
+    return left.id.localeCompare(right.id);
+  });
+}
+
 function buildKoreaCandidates(context: PrintCandidateContext): CandidateDraft[] {
   let combinations: KCombination[] = [];
   for (let skuIndex = 0; skuIndex < context.skuQuantities.length; skuIndex += 1) {
@@ -625,15 +656,17 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
   });
   const fulfillingRanked = practicalPool.length ? byTotal(practicalPool) : byOrderThenTotal(fulfilling);
   const recommendedCandidate = fulfillingRanked[0] ?? byTotal(candidates)[0];
+  const pareto = paretoCandidates(candidates);
 
-  // Keep one practical/cheapest representative for D/K/Y. This prevents a large
-  // volume K candidate from disappearing merely because pattern rounding exceeds 15%.
+  // Keep one economically representative candidate for D/K/Y. Pareto selection
+  // deliberately keeps an under-quantity candidate when it is the cheapest
+  // purchase, while the recommended candidate separately guarantees quantity.
   const routeRepresentatives = (["D", "K", "Y"] as const)
     .map((route) => {
+      const paretoRoute = pareto.filter((candidate) => candidate.route === route);
+      if (paretoRoute.length) return paretoRoute[0];
       const practicalRoute = practicalPool.filter((candidate) => candidate.route === route);
       if (practicalRoute.length) return byTotal(practicalRoute)[0];
-      // Do not surface an under-quantity route fallback while fulfilling route
-      // candidates exist (for example D-500m when the order needs 20,000 pcs).
       const fulfillingRoute = fulfilling.filter((candidate) => candidate.route === route);
       if (fulfillingRoute.length) return byOrderThenTotal(fulfillingRoute)[0];
       const routeCandidates = candidates.filter((candidate) => candidate.route === route);
@@ -652,9 +685,8 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
 
   const selectedIds = new Set(recommendedCandidate ? [recommendedCandidate.id] : []);
   routeRepresentatives.forEach((candidate) => selectedIds.add(candidate.id));
-  // The primary contract is to satisfy the entered quantity. Under-quantity
-  // candidates are useful only when no route can cover the demand, so they must
-  // not displace fulfilling alternatives in the normal candidate list.
+  // Additional rows remain quantity-fulfilling because the Pareto/route cards
+  // above already expose economically optimal under-quantity alternatives.
   const representedRoutes = new Set(routeRepresentatives.map((candidate) => candidate.route));
   const remaining = byOrderThenTotal(fulfilling.filter((candidate) => (
     !selectedIds.has(candidate.id) && !representedRoutes.has(candidate.route)

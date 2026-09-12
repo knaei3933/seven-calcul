@@ -1155,6 +1155,9 @@ export default function QuotationPage() {
                               <span>{formatNumber(candidate.orderLengthM, 0)}m ／ {formatCurrency(candidate.includedUnitPricePerM, 2)}/m</span>
                               <span>1枚 {formatCurrency(candidate.filmCostPerPieceYen, 2)} ／ 余剰 {formatNumber(candidate.surplusLengthM, 0)}m</span>
                               <span>{candidate.orderReason}</span>
+                              {D(candidate.quantityShortfallRatio ?? "0").gt(0)
+                                ? <span className="warning">数量不足 {formatNumber(candidate.quantityShortfallRatio, 1)}%（入力比）</span>
+                                : null}
                               {candidate.toleranceExceeded ? <span className="warning">許容超過（単価優先）</span> : null}
                               <strong>フィルム {formatCurrency(candidate.filmTotalYen, 0)}</strong>
                             </button>

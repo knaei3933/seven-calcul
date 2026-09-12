@@ -42,14 +42,16 @@ describe("print recommendation engine", () => {
     expect(first[0].recommended).toBe(true);
   });
 
-  it("keeps fulfilling candidates and omits under-quantity digital fallbacks", () => {
+  it("keeps nondominated under-quantity candidates as comparison alternatives", () => {
     const candidates = buildPrintCandidates(context(baseSpec, "20000"));
+    const underQuantity = candidates.find((candidate) => candidate.orderLengthM === "500");
     const fulfilling = candidates.filter((candidate) => (
       Number(candidate.adjustedQuantity) >= 20000
     ));
-    expect(fulfilling.length).toBeGreaterThan(0);
+    expect(underQuantity).toBeDefined();
+    expect(D(underQuantity!.quantityShortfallRatio).gt(0)).toBe(true);
     expect(fulfilling.some((candidate) => candidate.orderLengthM === "1000")).toBe(true);
-    expect(candidates.some((candidate) => candidate.orderLengthM === "500")).toBe(false);
+    expect(fulfilling.some((candidate) => candidate.recommended)).toBe(true);
   });
 
   it("recommends the smallest practical candidate that satisfies the original quantity", () => {
