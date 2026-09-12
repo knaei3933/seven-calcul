@@ -91,7 +91,19 @@ describe("calculate API recommendations", () => {
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.result.selectedCandidateId).toBe(list[0].id);
-    expect(payload.result.quantity).toBe(list[0].adjustedQuantity);
+    expect(payload.result.quantity).toBe("133000");
     expect(payload.originalResult.quantity).toBe("133000");
+
+    const adjustableResponse = await POST(new Request("http://localhost/api/calculate", {
+      method: "POST",
+      body: JSON.stringify({
+        ...recommendationInput,
+        recommendationMode: true,
+        quantityPolicy: "adjustable",
+        selectedCandidateId: list[0].id,
+      }),
+    }));
+    const adjustablePayload = await adjustableResponse.json();
+    expect(adjustablePayload.result.quantity).toBe(list[0].adjustedQuantity);
   });
 });

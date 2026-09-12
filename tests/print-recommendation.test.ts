@@ -54,6 +54,30 @@ describe("print recommendation engine", () => {
     expect(fulfilling.some((candidate) => candidate.recommended)).toBe(true);
   });
 
+  it("uses real deliverable capacity and suppresses the digital input-basis duplicate", () => {
+    const rawCandidates = buildPrintCandidates(context(baseSpec, "20000"));
+    const rawThousand = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "1000");
+    expect(rawThousand?.adjustedQuantity).toBe("41860");
+    expect(rawCandidates.filter((candidate) => candidate.route === "D").every((candidate) => candidate.adjustedQuantity !== "19000")).toBe(true);
+
+    const digitalContext = createPrintCandidateContext({
+      spec: baseSpec,
+      quantity: "20000",
+      parameters: defaultParameters,
+      gravureParameters: defaultGravureRollParameters(),
+      printingMethod: "digital",
+      basisFilmOrderLengthM: "500",
+      basisFilmTotalYen: "182200",
+      quantityPolicy: "fixed",
+    });
+    const displayed = buildPrintCandidates(digitalContext);
+    expect(displayed.some((candidate) => candidate.orderLengthM === "500")).toBe(false);
+    const shortestFulfilling = displayed.find((candidate) => candidate.orderLengthM === "1000");
+    expect(shortestFulfilling?.recommended).toBe(true);
+    expect(D(shortestFulfilling!.incrementalFilmTotalYen!).toNumber()).toBe(112400);
+    expect(D(shortestFulfilling!.incrementalQuantity!).toNumber()).toBe(21860);
+  });
+
   it("recommends the smallest practical candidate that satisfies the original quantity", () => {
     const candidates = buildPrintCandidates(context());
     const recommended = candidates.find((candidate) => candidate.recommended)!;
@@ -112,7 +136,7 @@ describe("print recommendation engine", () => {
       || D(candidate.requiredLengthM).div(5500).isInteger())).toBe(true);
   });
 
-  it("computes a selected candidate result without changing the caller input quantity", () => {
+  it("keeps fixed-quantity selection and changes adjustable selection", () => {
     const input = {
       spec: baseSpec,
       quantity: "133000",
@@ -125,7 +149,12 @@ describe("print recommendation engine", () => {
     const candidate = original.recommendationCandidates?.[0];
     expect(candidate).toBeDefined();
     const selected = calculatePouchCost({ ...input, selectedCandidateId: candidate!.id });
-    expect(selected.quantity).toBe(candidate!.adjustedQuantity);
+    expect(selected.quantity).toBe("133000");
+    expect(selected.printingMethod).toBe(candidate!.printingMethod);
+    expect(selected.selectedCandidateId).toBe(candidate!.id);
+
+    const adjustable = calculatePouchCost({ ...input, quantityPolicy: "adjustable", selectedCandidateId: candidate!.id });
+    expect(adjustable.quantity).toBe(candidate!.adjustedQuantity);
     expect(selected.printingMethod).toBe(candidate!.printingMethod);
     expect(selected.selectedCandidateId).toBe(candidate!.id);
   });

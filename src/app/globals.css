@@ -1151,6 +1151,7 @@ header .version-badge { display: none; }
   overflow-wrap: anywhere;
 }
 .recommendation-card span.warning { color: #b45309; font-weight: 750; }
+.recommendation-card .selection-tag { color: #1d4ed8; font-weight: 850; }
 .card-selection-status {
   position: absolute;
   top: 6px;

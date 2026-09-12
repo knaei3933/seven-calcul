@@ -138,6 +138,7 @@ export interface CalculationInput {
   targetMargins?: string[];
   recommendationMode?: boolean;
   selectedCandidateId?: string;
+  quantityPolicy?: "fixed" | "adjustable";
 }
 
 type RecommendationOptions = {
@@ -433,7 +434,8 @@ function calculatePouchCostCore(
 }
 
 export function calculatePouchCost(input: CalculationInput): CostResult {
-  const { recommendationMode, selectedCandidateId, ...coreInput } = input;
+  const { recommendationMode, selectedCandidateId, quantityPolicy = "fixed", ...coreInput } = input;
+  if (quantityPolicy !== "fixed" && quantityPolicy !== "adjustable") throw validationError("invalid_quantity_policy");
   const recommendation: RecommendationOptions | undefined = recommendationMode
     ? {
         aggregateDigitalPrice: true,
@@ -455,6 +457,10 @@ export function calculatePouchCost(input: CalculationInput): CostResult {
     quantity: coreInput.quantity,
     parameters: params,
     gravureParameters: coreInput.gravureParameters ?? defaultGravureRollParameters(),
+    printingMethod: coreInput.printingMethod,
+    basisFilmOrderLengthM: original.film.orderLengthM,
+    basisFilmTotalYen: original.film.filmTotal,
+    quantityPolicy,
   });
   const candidates = buildPrintCandidates(context);
   const attach = (result: CostResult): CostResult => ({ ...result, recommendationCandidates: candidates, selectedCandidateId: selectedCandidateId ?? "" });
@@ -464,15 +470,19 @@ export function calculatePouchCost(input: CalculationInput): CostResult {
   if (!selected) return attach(original);
 
   const adjustedQuantity = sum(selected.adjustedSkuQuantities.map((value) => D(value)));
+  // Fixed-quantity candidates change procurement only. Adjustable candidates
+  // intentionally propose a different deliverable/production quantity.
+  const resultQuantity = quantityPolicy === "fixed" ? coreInput.quantity : adjustedQuantity.toString();
   const adjustedSpec: PouchSpec = {
     ...coreInput.spec,
-    skuQuantities: selected.adjustedSkuQuantities,
+    skuQuantities: quantityPolicy === "fixed" ? coreInput.spec.skuQuantities : selected.adjustedSkuQuantities,
   };
   const adjustedInput = {
     ...coreInput,
     spec: adjustedSpec,
-    quantity: adjustedQuantity.toString(),
+    quantity: resultQuantity,
     printingMethod: selected.printingMethod,
+    quantityPolicy,
   };
 
   if (selected.route === "D" && selected.filmOrders) {

@@ -204,6 +204,7 @@ describe("quotation UI", () => {
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
 
+    await user.click(screen.getByLabelText("数量調整"));
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();

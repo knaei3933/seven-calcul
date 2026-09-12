@@ -4,9 +4,10 @@ import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnit
 import { buildSascheCandidates, type SascheCandidate } from "./sasche-gravure";
 import { calculateGravureRollCost, type GravureRollCostResult, type GravureRollParameters } from "./gravure-roll";
 import { sizeMaster } from "./constants";
-import type { CostParameters, PouchSpec, SizeMaster } from "./types";
+import type { CostParameters, PouchSpec, PrintingMethod, SizeMaster } from "./types";
 
 export type PrintCandidateRoute = "D" | "K" | "Y";
+export type CandidateQuantityPolicy = "fixed" | "adjustable";
 
 export type PrintCandidate = {
   id: string;
@@ -26,6 +27,14 @@ export type PrintCandidate = {
   surplusRatio: string;
   quantityDelta: string;
   quantityShortfallRatio: string;
+  surplusPieces: string;
+  shortagePieces: string;
+  isFulfilling: boolean;
+  isPractical: boolean;
+  selectionTag: string;
+  incrementalFilmTotalYen?: string;
+  incrementalQuantity?: string;
+  incrementalCostPerAdditionalPieceYen?: string;
   includedUnitPricePerM: string;
   filmTotalYen: string;
   filmCostPerPieceYen: string;
@@ -34,7 +43,6 @@ export type PrintCandidate = {
   priceBreak: boolean;
   orderReason?: string;
   surplusM?: string;
-  surplusPieces?: string;
   materialWidthMm?: number;
   materialMultiplier?: number;
   colorText?: string;
@@ -54,11 +62,19 @@ export function createPrintCandidateContext({
   quantity,
   parameters,
   gravureParameters,
+  printingMethod,
+  basisFilmOrderLengthM,
+  basisFilmTotalYen,
+  quantityPolicy,
 }: {
   spec: PouchSpec;
   quantity: string | number | Decimal;
   parameters: CostParameters;
   gravureParameters: GravureRollParameters;
+  printingMethod?: PrintingMethod;
+  basisFilmOrderLengthM?: string | number | Decimal;
+  basisFilmTotalYen?: string | number | Decimal;
+  quantityPolicy?: CandidateQuantityPolicy;
 }): PrintCandidateContext {
   const originalQuantity = D(quantity);
   const baseSize = sizeMaster[spec.sizeKey];
@@ -81,6 +97,10 @@ export function createPrintCandidateContext({
     requiredLengthM: sum(skuRequiredLengths),
     parameters,
     gravureParameters,
+    printingMethod,
+    basisFilmOrderLengthM: basisFilmOrderLengthM ? D(basisFilmOrderLengthM) : null,
+    basisFilmTotalYen: basisFilmTotalYen ? D(basisFilmTotalYen) : null,
+    quantityPolicy,
   };
 }
 
@@ -93,11 +113,16 @@ export type PrintCandidateContext = {
   requiredLengthM: Decimal;
   parameters: CostParameters;
   gravureParameters: GravureRollParameters;
+  printingMethod?: PrintingMethod;
+  basisFilmOrderLengthM: Decimal | null;
+  basisFilmTotalYen: Decimal | null;
+  quantityPolicy?: CandidateQuantityPolicy;
 };
 
 const PRINT_CANDIDATE_LIMIT = 3;
+const PRACTICAL_SURPLUS_PERCENT = 15;
 
-type CandidateDraft = Omit<PrintCandidate, "recommended" | "quantityDelta" | "quantityShortfallRatio"> & { __internal?: true };
+type CandidateDraft = Omit<PrintCandidate, "recommended" | "quantityDelta" | "quantityShortfallRatio" | "surplusPieces" | "shortagePieces" | "isFulfilling" | "isPractical" | "selectionTag"> & { __internal?: true };
 
 function floorTo(value: Decimal, unit: string | number): Decimal {
   const step = D(unit);
@@ -121,26 +146,73 @@ function finishCandidate(
   const shortfallRatio = original.gt(0)
     ? Decimal.max(D(0), original.minus(adjustedQuantity)).div(original).times(100)
     : D(0);
+  const surplusPieces = Decimal.max(D(0), adjustedQuantity.minus(original));
+  const shortagePieces = Decimal.max(D(0), original.minus(adjustedQuantity));
+  const isFulfilling = shortagePieces.lte(0);
+  const surplusRatio = original.gt(0) ? surplusPieces.div(original).times(100) : D(0);
+  const isPractical = isFulfilling && surplusRatio.lte(D(PRACTICAL_SURPLUS_PERCENT));
   return {
     ...draft,
     quantityDelta: adjustedQuantity.minus(original).toString(),
     quantityShortfallRatio: shortfallRatio.toString(),
+    surplusPieces: surplusPieces.toString(),
+    shortagePieces: shortagePieces.toString(),
+    isFulfilling,
+    isPractical,
+    selectionTag: isFulfilling
+      ? (isPractical ? "実用充足" : "充足・余剰大")
+      : "不足のため参考",
     recommended: false,
   };
 }
 
-function rankCandidates(candidates: PrintCandidate[], originalQuantity: Decimal): PrintCandidate[] {
-  return [...candidates].sort((left, right) => {
-    // Ignore meaningless sub-yen differences caused by fixed shipping/customs
-    // being spread across vastly different production quantities.
-    const leftCost = D(left.filmCostPerPieceYen).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
-    const rightCost = D(right.filmCostPerPieceYen).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
-    if (!leftCost.eq(rightCost)) return leftCost.lt(rightCost) ? -1 : 1;
-    const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
-    const rightDelta = D(right.adjustedQuantity).minus(originalQuantity).abs();
-    if (!leftDelta.eq(rightDelta)) return leftDelta.lt(rightDelta) ? -1 : 1;
-    return left.id.localeCompare(right.id);
-  });
+function compareCandidates(left: PrintCandidate, right: PrintCandidate, originalQuantity: Decimal): number {
+  // Feasibility comes before money. A candidate cannot become "recommended"
+  // merely because its per-piece price improves after dropping demand.
+  if (left.isFulfilling !== right.isFulfilling) return left.isFulfilling ? -1 : 1;
+  if (left.isPractical !== right.isPractical) return left.isPractical ? -1 : 1;
+
+  // When no practical option exists, the shortest covering order is the safest
+  // recommendation; it exposes the customer to the smallest inventory risk.
+  if (!left.isPractical && !right.isPractical) {
+    const leftSurplus = D(left.surplusPieces);
+    const rightSurplus = D(right.surplusPieces);
+    if (!leftSurplus.eq(rightSurplus)) return leftSurplus.lt(rightSurplus) ? -1 : 1;
+  }
+
+  const leftTotal = D(left.filmTotalYen);
+  const rightTotal = D(right.filmTotalYen);
+  if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
+
+  const leftPerPiece = D(left.filmCostPerPieceYen).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+  const rightPerPiece = D(right.filmCostPerPieceYen).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+  if (!leftPerPiece.eq(rightPerPiece)) return leftPerPiece.lt(rightPerPiece) ? -1 : 1;
+
+  const leftLength = D(left.orderLengthM);
+  const rightLength = D(right.orderLengthM);
+  if (!leftLength.eq(rightLength)) return leftLength.lt(rightLength) ? -1 : 1;
+
+  const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
+  const rightDelta = D(right.adjustedQuantity).minus(originalQuantity).abs();
+  if (!leftDelta.eq(rightDelta)) return leftDelta.lt(rightDelta) ? -1 : 1;
+  return left.id.localeCompare(right.id);
+}
+
+function selectionTagForRank(candidate: PrintCandidate, ranked: PrintCandidate[], policy: CandidateQuantityPolicy): string {
+  if (!candidate.isFulfilling) return "不足のため参考";
+  const feasible = ranked.filter((item) => item.isFulfilling);
+  const tags: string[] = [candidate.isPractical ? "実用充足" : "充足・余剰大"];
+  if (policy === "fixed") tags.push("数量固定");
+  if (feasible.length > 0 && candidate.id === feasible.reduce((best, item) => (
+    D(item.filmTotalYen).lt(D(best.filmTotalYen)) ? item : best
+  )).id) tags.push("総額最小");
+  if (feasible.length > 0 && candidate.id === feasible.reduce((best, item) => (
+    D(item.filmCostPerPieceYen).lt(D(best.filmCostPerPieceYen)) ? item : best
+  )).id) tags.push("単価最小");
+  if (feasible.length > 0 && candidate.id === feasible.reduce((best, item) => (
+    D(item.orderLengthM).lt(D(best.orderLengthM)) ? item : best
+  )).id) tags.push("最短充足");
+  return tags.join("／");
 }
 
 function candidateCommon(
@@ -224,7 +296,9 @@ function digitalCapacity(
   const loss = Decimal.max(D(parameters.lossMinM), considered.times(parameters.lossRate));
   const effective = considered.minus(loss);
   const rawQuantity = effective.times(1000).div(pitch).times(size.lanes).toDecimalPlaces(0, Decimal.ROUND_FLOOR);
-  const proposedQuantity = floorTo(rawQuantity, 1000);
+  // Use the real deliverable capacity. A production-lot preference must not
+  // silently turn a 20,000-piece order into a 19,000-piece recommendation.
+  const proposedQuantity = rawQuantity.toDecimalPlaces(0, Decimal.ROUND_FLOOR);
   const webWidthMm = useLargeLot ? size.largeLotWebWidthMm! : size.webWidthMm;
   const appliedBand: "lte570" | "571to740" = useLargeLot ? "571to740" : size.priceBand;
   return { pitch, useLargeLot, multiplier, considered, loss, effective, rawQuantity, proposedQuantity, webWidthMm, appliedBand };
@@ -621,43 +695,27 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
   const candidates = drafts
     .filter((draft) => {
       if (seen.has(draft.id) || !D(draft.adjustedQuantity).gt(0)) return false;
+      // The input basis is already displayed separately. Repeating the same
+      // digital purchase (same route and same film length) only creates the
+      // misleading impression of a second economically distinct candidate.
+      if (
+        context.printingMethod === "digital"
+        && draft.route === "D"
+        && context.basisFilmOrderLengthM
+        && D(draft.orderLengthM).eq(context.basisFilmOrderLengthM)
+      ) return false;
       seen.add(draft.id);
       return true;
     })
     .map((draft) => finishCandidate(draft, context.originalQuantity));
 
   const originalQuantity = context.originalQuantity;
-  const fulfilling = candidates.filter((candidate) => D(candidate.adjustedQuantity).gte(originalQuantity));
-  const practicalPool = fulfilling.filter((candidate) => D(candidate.surplusRatio).lte(D("15")));
-
-  const byTotal = (items: PrintCandidate[]) => [...items].sort((left, right) => {
-    const leftTotal = D(left.filmTotalYen);
-    const rightTotal = D(right.filmTotalYen);
-    if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
-    const leftSurplus = D(left.surplusLengthM);
-    const rightSurplus = D(right.surplusLengthM);
-    if (!leftSurplus.eq(rightSurplus)) return leftSurplus.lt(rightSurplus) ? -1 : 1;
-    const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
-    const rightDelta = D(right.adjustedQuantity).minus(originalQuantity).abs();
-    if (!leftDelta.eq(rightDelta)) return leftDelta.lt(rightDelta) ? -1 : 1;
-    return left.id.localeCompare(right.id);
-  });
-
-  const rankedPractical = byTotal(practicalPool);
-  // If a low-surplus fulfilling order exists, prefer it because the customer
-  // can use most of the film. Otherwise choose the shortest order that still
-  // covers the requested quantity; this prevents 19,000/20,000 style answers.
-  const byOrderThenTotal = (items: PrintCandidate[]) => [...items].sort((left, right) => {
-    const leftLength = D(left.orderLengthM);
-    const rightLength = D(right.orderLengthM);
-    if (!leftLength.eq(rightLength)) return leftLength.lt(rightLength) ? -1 : 1;
-    const leftTotal = D(left.filmTotalYen);
-    const rightTotal = D(right.filmTotalYen);
-    if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
-    return left.id.localeCompare(right.id);
-  });
-  const fulfillingRanked = practicalPool.length ? byTotal(practicalPool) : byOrderThenTotal(fulfilling);
-  const recommendedCandidate = fulfillingRanked[0] ?? byTotal(candidates)[0];
+  const ranked = [...candidates].sort((left, right) => compareCandidates(left, right, originalQuantity));
+  const fulfillingRanked = ranked.filter((candidate) => candidate.isFulfilling);
+  const practicalPool = fulfillingRanked.filter((candidate) => candidate.isPractical);
+  // A shortage candidate is reference-only. It must never receive 推奨 status,
+  // even when every route would otherwise require reducing the order quantity.
+  const recommendedCandidate = practicalPool[0] ?? fulfillingRanked[0] ?? null;
   const pareto = paretoCandidates(candidates);
 
   // Show at most one representative per D/K/Y route. If the recommended
@@ -668,20 +726,9 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     .map((route) => {
       const paretoRoute = pareto.filter((candidate) => candidate.route === route);
       if (paretoRoute.length) return paretoRoute[0];
-      const practicalRoute = practicalPool.filter((candidate) => candidate.route === route);
-      if (practicalRoute.length) return byTotal(practicalRoute)[0];
-      const fulfillingRoute = fulfilling.filter((candidate) => candidate.route === route);
-      if (fulfillingRoute.length) return byOrderThenTotal(fulfillingRoute)[0];
-      const routeCandidates = candidates.filter((candidate) => candidate.route === route);
-      return [...routeCandidates].sort((left, right) => {
-        const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
-        const rightDelta = D(right.adjustedQuantity).minus(originalQuantity).abs();
-        if (!leftDelta.eq(rightDelta)) return leftDelta.lt(rightDelta) ? -1 : 1;
-        const leftTotal = D(left.filmTotalYen);
-        const rightTotal = D(right.filmTotalYen);
-        if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
-        return left.id.localeCompare(right.id);
-      })[0];
+      const rankedRoute = ranked.filter((candidate) => candidate.route === route);
+      const fulfillingRoute = rankedRoute.filter((candidate) => candidate.isFulfilling);
+      return fulfillingRoute[0] ?? rankedRoute[0];
     })
     .filter((candidate): candidate is PrintCandidate => Boolean(candidate));
   const paretoOrder = new Map(pareto.map((candidate, index) => [candidate.id, index]));
@@ -707,18 +754,26 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     ...(recommendedCandidate ? [recommendedCandidate] : []),
     ...rankedAlternatives,
   ].slice(0, PRINT_CANDIDATE_LIMIT);
-  const selectedIds = new Set(displayCandidates.map((candidate) => candidate.id));
+  const displayTags = new Map(displayCandidates.map((candidate) => [
+    candidate.id,
+    selectionTagForRank(candidate, ranked, context.quantityPolicy ?? "fixed"),
+  ]));
 
-  const display = displayCandidates;
-  const uniqueDisplay: PrintCandidate[] = [];
-  const displayIds = new Set<string>();
-  for (const candidate of display) {
-    if (displayIds.has(candidate.id)) continue;
-    displayIds.add(candidate.id);
-    uniqueDisplay.push(candidate);
-  }
-
-  return uniqueDisplay
-    .slice(0, PRINT_CANDIDATE_LIMIT)
-    .map((candidate) => ({ ...candidate, recommended: recommendedCandidate?.id === candidate.id }));
+  return displayCandidates.map((candidate) => ({
+    ...candidate,
+    selectionTag: displayTags.get(candidate.id) ?? candidate.selectionTag,
+    recommended: recommendedCandidate?.id === candidate.id,
+    ...(
+      context.basisFilmTotalYen
+        ? {
+            incrementalFilmTotalYen: D(candidate.filmTotalYen).minus(context.basisFilmTotalYen).toString(),
+            incrementalQuantity: D(candidate.adjustedQuantity).minus(originalQuantity).toString(),
+            incrementalCostPerAdditionalPieceYen: D(candidate.adjustedQuantity).gt(originalQuantity)
+              ? D(candidate.filmTotalYen).minus(context.basisFilmTotalYen)
+                  .div(D(candidate.adjustedQuantity).minus(originalQuantity)).toString()
+              : undefined,
+          }
+        : {}
+    ),
+  }));
 }
