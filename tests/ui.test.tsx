@@ -208,6 +208,10 @@ describe("quotation UI", () => {
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
     expect(screen.getByText("発注数量・パターン候補")).toBeInTheDocument();
+    expect(screen.getByText(/パウチ 50×60mm ／ 1連 ／ 4列/)).toBeInTheDocument();
+    expect(screen.getByText(/原反 /)).toBeInTheDocument();
+    expect(screen.getByText(/4色/)).toBeInTheDocument();
+    expect(screen.getByText(/フィルム PET12\+AL7\+PET12\+LLDPE50/)).toBeInTheDocument();
 
     await user.click(screen.getByText("推奨"));
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));

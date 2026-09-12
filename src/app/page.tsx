@@ -540,6 +540,21 @@ export default function QuotationPage() {
   const selectedRecommendation = serverResult?.selectedCandidateId
     ? serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId) ?? null
     : null;
+  const originalResult = serverResult?.originalResult;
+  const originalFilm = originalResult?.film;
+  const originalWebWidthMm = originalResult?.gravure?.materialWidthMm
+    ? Number(originalResult.gravure.materialWidthMm)
+    : originalFilm?.skuCosts[0]?.webWidthMm ?? effectiveSize.webWidthMm;
+  const originalMultiplier = originalFilm?.skuCosts[0]?.multiplier ?? 1;
+  const originalColorCounts = form.skus.map((sku) => Math.max(0, Number(sku.colorCount) || 0));
+  const originalColorTotal = originalColorCounts.reduce((total, value) => total + value, 0);
+  const originalColorText = originalColorCounts.length > 1
+    ? `${originalColorCounts.join("+")}（計${originalColorTotal}色）`
+    : `${originalColorTotal}色`;
+  const originalRouteText = originalResult?.printingMethod === "gravure"
+    ? "グラビア / 韓国輸入"
+    : "デジタル";
+  const originalFilmComposition = "PET12+AL7+PET12+LLDPE50";
 
   useEffect(() => {
     if (!quotationDraftResult || !customerDraft) return;
@@ -1085,9 +1100,22 @@ export default function QuotationPage() {
                           onClick={clearCandidate}
                           disabled={pending}
                         >
-                          <span className="recommendation-label">入力値 / {serverResult.originalResult.printingMethod === "gravure" ? "グラビア" : "デジタル"}<em>現在</em></span>
+                          <span className="recommendation-label">
+                            入力値 / {originalRouteText}
+                            <em>現在</em>
+                          </span>
+                          <span>
+                            パウチ {form.widthMm}×{form.lengthMm}mm ／ {form.connected}連 ／ {form.lanes}列
+                          </span>
+                          <span>
+                            原反 {formatNumber(originalWebWidthMm)}mm{originalMultiplier > 1 ? ` ×${originalMultiplier}` : ""} ／ {originalColorText}
+                          </span>
+                          <span>フィルム {originalFilmComposition}</span>
                           <span>{formatNumber(serverResult.originalResult.quantity, 0)}枚</span>
                           <span>{formatNumber(serverResult.originalResult.film.orderLengthM, 0)}m</span>
+                          <span>
+                            1枚 {formatCurrency(D(serverResult.originalResult.film.filmTotal).div(serverResult.originalResult.quantity).toString(), 2)} ／ 余剰 {formatNumber(Math.max(0, Number(serverResult.originalResult.film.actualQuantity) - Number(serverResult.originalResult.quantity)), 0)}枚
+                          </span>
                           <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
                         </button>
                         {serverResult.candidates.map((candidate) => {
