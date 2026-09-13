@@ -204,7 +204,6 @@ describe("quotation UI", () => {
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
 
-    await user.click(screen.getByLabelText("数量調整"));
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
@@ -224,8 +223,10 @@ describe("quotation UI", () => {
     expect(screen.getByTestId("selection-status")).toHaveTextContent("選択中");
     expect(screen.queryByText("発注数量・パターン候補")).not.toBeInTheDocument();
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("発注数量 (枚)")).toHaveValue(candidate.adjustedQuantity);
-    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("自動反映されています");
+    expect(screen.queryByTestId("quantity-policy")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("発注数量 (枚)")).toHaveValue("10000");
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("固定されます");
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("固定されます");
   });
 
   it("supports per-SKU pouch quantities and blocks when the sum differs from the order quantity", async () => {

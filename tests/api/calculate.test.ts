@@ -79,7 +79,7 @@ describe("calculate API recommendations", () => {
       method: "POST",
       body: JSON.stringify({ ...recommendationInput, recommendationMode: true }),
     }));
-    const list = (await first.json()).candidates as Array<{ id: string; adjustedQuantity: string }>;
+    const list = (await first.json()).candidates as Array<{ id: string; adjustedQuantity: string; filmTotalYen: string }>;
     const response = await POST(new Request("http://localhost/api/calculate", {
       method: "POST",
       body: JSON.stringify({
@@ -94,16 +94,6 @@ describe("calculate API recommendations", () => {
     expect(payload.result.quantity).toBe("133000");
     expect(payload.originalResult.quantity).toBe("133000");
 
-    const adjustableResponse = await POST(new Request("http://localhost/api/calculate", {
-      method: "POST",
-      body: JSON.stringify({
-        ...recommendationInput,
-        recommendationMode: true,
-        quantityPolicy: "adjustable",
-        selectedCandidateId: list[0].id,
-      }),
-    }));
-    const adjustablePayload = await adjustableResponse.json();
-    expect(adjustablePayload.result.quantity).toBe(list[0].adjustedQuantity);
+    expect(Number(payload.result.film.filmTotal)).toBe(Number(list[0].filmTotalYen));
   });
 });

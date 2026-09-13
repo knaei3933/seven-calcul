@@ -90,7 +90,6 @@ export default function QuotationPage() {
     widthMm: "50",
     lengthMm: "60",
     quantity: "10000",
-    quantityPolicy: "fixed" as "fixed" | "adjustable",
     connected: "1" as "1" | "2" | "3" | "4",
     method: "hopper" as "hopper" | "pressure",
     lanes: "4",
@@ -355,23 +354,15 @@ export default function QuotationPage() {
     spec: spec(),
     quantity: form.quantity,
     printingMethod: form.printingMethod,
-    quantityPolicy: form.quantityPolicy,
     targetMargins: targetMarginList,
     parameters: effectiveParameters,
     gravureParameters: normalizedGravureParameters,
-  }), [spec, form.quantity, form.printingMethod, form.quantityPolicy, targetMarginList, effectiveParameters, normalizedGravureParameters]);
+  }), [spec, form.quantity, form.printingMethod, targetMarginList, effectiveParameters, normalizedGravureParameters]);
 
   const calculationInputJson = useMemo(() => JSON.stringify(calculationInput), [calculationInput]);
   const selectedRecommendationForStale = serverResult?.selectedCandidateId
     ? serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId) ?? null
     : null;
-  const selectedQuantitiesMatchForm = !selectedRecommendationForStale || form.quantityPolicy === "fixed" || (
-    D(form.quantity).eq(selectedRecommendationForStale.adjustedQuantity)
-    && form.skus.every((sku, index) => (
-      !isPositiveDecimalInput(selectedRecommendationForStale.adjustedSkuQuantities[index])
-      || D(sku.quantity).eq(selectedRecommendationForStale.adjustedSkuQuantities[index])
-    ))
-  );
   const nonQuantityInput = useMemo(() => {
     const { spec, ...rest } = calculationInput;
     const { skuQuantities: _skuQuantities, ...nonQuantitySpec } = spec;
@@ -380,7 +371,7 @@ export default function QuotationPage() {
   }, [calculationInput]);
   const staleResult = serverResult !== null && (
     selectedRecommendationForStale
-      ? !selectedQuantitiesMatchForm || serverResult.requestNonQuantityJson !== nonQuantityInput
+      ? serverResult.requestNonQuantityJson !== nonQuantityInput
       : serverResult.inputJson !== calculationInputJson
   );
 
@@ -461,16 +452,6 @@ export default function QuotationPage() {
         originalQuantity: form.quantity,
         originalSkuQuantities: form.skus.map((sku) => sku.quantity),
       });
-      if (form.quantityPolicy === "adjustable") {
-        setForm((old) => ({
-          ...old,
-          quantity: D(candidate.adjustedQuantity).toString(),
-          skus: old.skus.map((sku, index) => ({
-            ...sku,
-            quantity: D(candidate.adjustedSkuQuantities[index] ?? candidate.adjustedQuantity).toString(),
-          })),
-        }));
-      }
       const adjustedQuantities = candidate.adjustedSkuQuantities;
       const totalAdjustedQuantity = adjustedQuantities.reduce<Decimal>(
         (total, value) => total.plus(D(value)),
@@ -905,14 +886,6 @@ export default function QuotationPage() {
             ) : null}
             <div className="field-row">
               <Field label="発注数量 (枚)" htmlFor="quantity"><input id="quantity" inputMode="numeric" value={form.quantity} onChange={(e) => patchForm({ quantity: e.target.value, skus: redistributeSkus(form.skus, e.target.value) })} /></Field>
-              <fieldset className="field" data-testid="quantity-policy">
-                <legend>数量ポリシー</legend>
-                <div className="radio-cards">
-                  <label><input type="radio" name="quantity-policy" value="fixed" checked={form.quantityPolicy === "fixed"} onChange={() => set("quantityPolicy", "fixed")} aria-label="数量固定" />数量固定</label>
-                  <label><input type="radio" name="quantity-policy" value="adjustable" checked={form.quantityPolicy === "adjustable"} onChange={() => set("quantityPolicy", "adjustable")} aria-label="数量調整" />数量調整</label>
-                </div>
-                <p className="help">固定：発注数量を維持し、不足候補は参考のみ。調整：候補選択時に左側数量も候補数量へ変更します。</p>
-              </fieldset>
               <div className="field">
                 <span>充填量（数量加重平均）</span>
                 <p className="effective-speed" data-testid="avg-fill">{formatNumber(weightedAvgFill)} ml/室</p>
@@ -1116,9 +1089,7 @@ export default function QuotationPage() {
                 {serverResult?.selectedCandidateId ? (
                   <p className="help" data-testid="active-candidate-note">
                     選択候補（{resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}）基準で表示しています。
-                    {form.quantityPolicy === "fixed"
-                      ? `数量固定のため、左側の発注数は ${formatNumber(form.quantity)} 枚のままです。`
-                      : `数量調整のため、左側の発注数は ${formatNumber(form.quantity)} 枚に自動反映されています。`}
+                    発注数量は {formatNumber(form.quantity)} 枚で固定されます。候補は調達・製造計画のみを切り替えます。
                   </p>
                 ) : null}
                 <p className="total">
@@ -1203,9 +1174,12 @@ export default function QuotationPage() {
                             必要 {formatNumber(originalRequiredLengthM.toString(), 0)}m ／ 発注 {formatNumber(originalOrderLengthM.toString(), 0)}m ／ 余剰 {formatNumber(originalSurplusLengthM.toString(), 0)}m
                           </span>
                           <span>
-                            {formatNumber(serverResult.originalResult.quantity, 0)}枚 ／ 余剰 {formatNumber(originalSurplusPieces.toString(), 0)}枚
+                            顧客 {formatNumber(serverResult.originalResult.quantity, 0)}枚 ／ 製作可能 {formatNumber(serverResult.originalResult.film.actualQuantity, 0)}枚 ／ 計画 {formatNumber(D(serverResult.originalResult.film.actualQuantity).div(1000).toDecimalPlaces(0, Decimal.ROUND_FLOOR).times(1000).toString(), 0)}枚
                           </span>
                           <span>{originalOrderReason}</span>
+                          {D(serverResult.originalResult.film.actualQuantity).lt(serverResult.originalResult.quantity)
+                            ? <span className="warning">不足のため参考</span>
+                            : null}
                           <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
                         </button>
                         {serverResult.candidates.map((candidate) => {
@@ -1230,6 +1204,7 @@ export default function QuotationPage() {
                               <span>
                                 {formatNumber(candidate.adjustedQuantity, 0)}枚{candidate.adjustedSkuQuantities.length > 1 ? `（SKU ${candidate.adjustedSkuQuantities.map((quantity) => formatNumber(quantity, 0)).join("+")}）` : ""}
                               </span>
+                              <span>製作可能 {formatNumber(candidate.capacityQuantity, 0)}枚 ／ 計画 {formatNumber(candidate.adjustedQuantity, 0)}枚 ／ 1,000枚刻み差 {formatNumber(candidate.capacityPlanningDifference, 0)}枚</span>
                               <span>{formatNumber(candidate.orderLengthM, 0)}m ／ {formatCurrency(candidate.includedUnitPricePerM, 2)}/m</span>
                               <span>1枚 {formatCurrency(candidate.filmCostPerPieceYen, 2)} ／ 余剰 {formatNumber(candidate.surplusLengthM, 0)}m</span>
                               <span>{candidate.orderReason}</span>

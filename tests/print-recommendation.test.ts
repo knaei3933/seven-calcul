@@ -57,7 +57,9 @@ describe("print recommendation engine", () => {
   it("uses real deliverable capacity and suppresses the digital input-basis duplicate", () => {
     const rawCandidates = buildPrintCandidates(context(baseSpec, "20000"));
     const rawThousand = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "1000");
-    expect(rawThousand?.adjustedQuantity).toBe("41860");
+    expect(rawThousand?.capacityQuantity).toBe("41860");
+    expect(rawThousand?.adjustedQuantity).toBe("41000");
+    expect(rawThousand?.capacityPlanningDifference).toBe("860");
     expect(rawCandidates.filter((candidate) => candidate.route === "D").every((candidate) => candidate.adjustedQuantity !== "19000")).toBe(true);
 
     const digitalContext = createPrintCandidateContext({
@@ -68,22 +70,23 @@ describe("print recommendation engine", () => {
       printingMethod: "digital",
       basisFilmOrderLengthM: "500",
       basisFilmTotalYen: "182200",
-      quantityPolicy: "fixed",
     });
     const displayed = buildPrintCandidates(digitalContext);
     expect(displayed.some((candidate) => candidate.orderLengthM === "500")).toBe(false);
     const shortestFulfilling = displayed.find((candidate) => candidate.orderLengthM === "1000");
     expect(shortestFulfilling?.recommended).toBe(true);
     expect(D(shortestFulfilling!.incrementalFilmTotalYen!).toNumber()).toBe(112400);
-    expect(D(shortestFulfilling!.incrementalQuantity!).toNumber()).toBe(21860);
+    expect(D(shortestFulfilling!.incrementalQuantity!).toNumber()).toBe(21000);
   });
 
-  it("recommends the smallest practical candidate that satisfies the original quantity", () => {
+  it("recommends practical candidates using 1,000-piece planning quantities", () => {
     const candidates = buildPrintCandidates(context());
     const recommended = candidates.find((candidate) => candidate.recommended)!;
     expect(recommended.route).toBe("Y");
     expect(recommended.orderLengthM).toBe("3400");
-    expect(recommended.adjustedQuantity).toBe("142325");
+    expect(recommended.capacityQuantity).toBe("142325");
+    expect(recommended.adjustedQuantity).toBe("142000");
+    expect(recommended.capacityPlanningDifference).toBe("325");
     expect(D(recommended.filmTotalYen).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toString()).toBe("385370");
     expect(D(recommended.surplusRatio).lte(D("15"))).toBe(true);
 
@@ -128,15 +131,15 @@ describe("print recommendation engine", () => {
     expect(Number(lane2!.plateUnitPriceYen)).toBeCloseTo(32000 * 1.12, 8);
   });
 
-  it("keeps K pattern quantities aligned to the film pattern without 1,000-piece rounding", () => {
+  it("keeps K capacity aligned while using 1,000-piece planning floors", () => {
     const candidates = buildPrintCandidates(context());
     const korean = candidates.filter((candidate) => candidate.route === "K");
     expect(korean.length).toBeGreaterThan(0);
-    expect(korean.every((candidate) => D(candidate.adjustedQuantity).mod(1000).eq(0) === false
-      || D(candidate.requiredLengthM).div(5500).isInteger())).toBe(true);
+    expect(korean.every((candidate) => D(candidate.adjustedQuantity).mod(1000).eq(0))).toBe(true);
+    expect(korean.every((candidate) => D(candidate.capacityQuantity).gte(candidate.adjustedQuantity))).toBe(true);
   });
 
-  it("keeps fixed-quantity selection and changes adjustable selection", () => {
+  it("keeps customer quantity fixed during candidate selection", () => {
     const input = {
       spec: baseSpec,
       quantity: "133000",
@@ -153,9 +156,6 @@ describe("print recommendation engine", () => {
     expect(selected.printingMethod).toBe(candidate!.printingMethod);
     expect(selected.selectedCandidateId).toBe(candidate!.id);
 
-    const adjustable = calculatePouchCost({ ...input, quantityPolicy: "adjustable", selectedCandidateId: candidate!.id });
-    expect(adjustable.quantity).toBe(candidate!.adjustedQuantity);
-    expect(selected.printingMethod).toBe(candidate!.printingMethod);
-    expect(selected.selectedCandidateId).toBe(candidate!.id);
+    expect(D(selected.film.filmTotal).eq(D(candidate!.filmTotalYen))).toBe(true);
   });
 });

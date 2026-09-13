@@ -7,7 +7,6 @@ import { sizeMaster } from "./constants";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeMaster } from "./types";
 
 export type PrintCandidateRoute = "D" | "K" | "Y";
-export type CandidateQuantityPolicy = "fixed" | "adjustable";
 
 export type PrintCandidate = {
   id: string;
@@ -17,6 +16,8 @@ export type PrintCandidate = {
   detailLabel: string;
   printingMethod: "digital" | "gravure";
   originalQuantity: string;
+  capacityQuantity: string;
+  capacityPlanningDifference: string;
   adjustedQuantity: string;
   adjustedSkuQuantities: string[];
   requiredLengthM: string;
@@ -65,7 +66,6 @@ export function createPrintCandidateContext({
   printingMethod,
   basisFilmOrderLengthM,
   basisFilmTotalYen,
-  quantityPolicy,
 }: {
   spec: PouchSpec;
   quantity: string | number | Decimal;
@@ -74,7 +74,6 @@ export function createPrintCandidateContext({
   printingMethod?: PrintingMethod;
   basisFilmOrderLengthM?: string | number | Decimal;
   basisFilmTotalYen?: string | number | Decimal;
-  quantityPolicy?: CandidateQuantityPolicy;
 }): PrintCandidateContext {
   const originalQuantity = D(quantity);
   const baseSize = sizeMaster[spec.sizeKey];
@@ -100,7 +99,6 @@ export function createPrintCandidateContext({
     printingMethod,
     basisFilmOrderLengthM: basisFilmOrderLengthM ? D(basisFilmOrderLengthM) : null,
     basisFilmTotalYen: basisFilmTotalYen ? D(basisFilmTotalYen) : null,
-    quantityPolicy,
   };
 }
 
@@ -116,13 +114,15 @@ export type PrintCandidateContext = {
   printingMethod?: PrintingMethod;
   basisFilmOrderLengthM: Decimal | null;
   basisFilmTotalYen: Decimal | null;
-  quantityPolicy?: CandidateQuantityPolicy;
 };
 
 const PRINT_CANDIDATE_LIMIT = 3;
 const PRACTICAL_SURPLUS_PERCENT = 15;
 
-type CandidateDraft = Omit<PrintCandidate, "recommended" | "quantityDelta" | "quantityShortfallRatio" | "surplusPieces" | "shortagePieces" | "isFulfilling" | "isPractical" | "selectionTag"> & { __internal?: true };
+type CandidateDraft = Omit<
+  PrintCandidate,
+  "recommended" | "quantityDelta" | "quantityShortfallRatio" | "surplusPieces" | "shortagePieces" | "isFulfilling" | "isPractical" | "selectionTag" | "capacityPlanningDifference"
+> & { __internal?: true };
 
 function floorTo(value: Decimal, unit: string | number): Decimal {
   const step = D(unit);
@@ -141,7 +141,28 @@ function finishCandidate(
   draft: CandidateDraft,
   originalQuantity: Decimal,
 ): PrintCandidate {
-  const adjustedQuantity = D(draft.adjustedQuantity);
+  const capacityQuantity = D(draft.capacityQuantity);
+  const capacityExactQuantity = D(draft.adjustedQuantity);
+  const adjustedQuantity = capacityExactQuantity.gt(0) ? floorTo(capacityExactQuantity, 1000) : capacityExactQuantity;
+  const plannedSkuQuantities = draft.adjustedSkuQuantities.map((value) => floorTo(D(value), 1000));
+  const plannedSkuTotal = sum(plannedSkuQuantities);
+  const planningDifference = adjustedQuantity.minus(plannedSkuTotal);
+  if (!planningDifference.eq(0)) {
+    const order = plannedSkuQuantities
+      .map((value, index) => ({ index, value }))
+      .sort((left, right) => (
+        left.value.eq(right.value)
+          ? left.index - right.index
+          : planningDifference.gt(0) ? right.value.minus(left.value).toNumber() : left.value.minus(right.value).toNumber()
+      ));
+    let remaining = planningDifference;
+    for (const { index } of order) {
+      if (remaining.eq(0)) break;
+      const step = remaining.gt(0) ? D(1000) : D(-1000);
+      plannedSkuQuantities[index] = plannedSkuQuantities[index].plus(step);
+      remaining = remaining.minus(step);
+    }
+  }
   const original = D(draft.originalQuantity);
   const shortfallRatio = original.gt(0)
     ? Decimal.max(D(0), original.minus(adjustedQuantity)).div(original).times(100)
@@ -153,6 +174,11 @@ function finishCandidate(
   const isPractical = isFulfilling && surplusRatio.lte(D(PRACTICAL_SURPLUS_PERCENT));
   return {
     ...draft,
+    capacityQuantity: capacityQuantity.toString(),
+    capacityPlanningDifference: capacityQuantity.minus(adjustedQuantity).toString(),
+    adjustedQuantity: adjustedQuantity.toString(),
+    adjustedSkuQuantities: plannedSkuQuantities.map((value) => value.toString()),
+    filmCostPerPieceYen: adjustedQuantity.gt(0) ? D(draft.filmTotalYen).div(adjustedQuantity).toString() : "0",
     quantityDelta: adjustedQuantity.minus(original).toString(),
     quantityShortfallRatio: shortfallRatio.toString(),
     surplusPieces: surplusPieces.toString(),
@@ -198,11 +224,10 @@ function compareCandidates(left: PrintCandidate, right: PrintCandidate, original
   return left.id.localeCompare(right.id);
 }
 
-function selectionTagForRank(candidate: PrintCandidate, ranked: PrintCandidate[], policy: CandidateQuantityPolicy): string {
+function selectionTagForRank(candidate: PrintCandidate, ranked: PrintCandidate[]): string {
   if (!candidate.isFulfilling) return "不足のため参考";
   const feasible = ranked.filter((item) => item.isFulfilling);
   const tags: string[] = [candidate.isPractical ? "実用充足" : "充足・余剰大"];
-  if (policy === "fixed") tags.push("数量固定");
   if (feasible.length > 0 && candidate.id === feasible.reduce((best, item) => (
     D(item.filmTotalYen).lt(D(best.filmTotalYen)) ? item : best
   )).id) tags.push("総額最小");
@@ -296,12 +321,12 @@ function digitalCapacity(
   const loss = Decimal.max(D(parameters.lossMinM), considered.times(parameters.lossRate));
   const effective = considered.minus(loss);
   const rawQuantity = effective.times(1000).div(pitch).times(size.lanes).toDecimalPlaces(0, Decimal.ROUND_FLOOR);
-  // Use the real deliverable capacity. A production-lot preference must not
-  // silently turn a 20,000-piece order into a 19,000-piece recommendation.
-  const proposedQuantity = rawQuantity.toDecimalPlaces(0, Decimal.ROUND_FLOOR);
+  // Production planning uses a 1,000-piece floor. Exact capacity stays visible
+  // so the difference between capacity and released plan is auditable.
+  const proposedQuantity = floorTo(rawQuantity, 1000);
   const webWidthMm = useLargeLot ? size.largeLotWebWidthMm! : size.webWidthMm;
   const appliedBand: "lte570" | "571to740" = useLargeLot ? "571to740" : size.priceBand;
-  return { pitch, useLargeLot, multiplier, considered, loss, effective, rawQuantity, proposedQuantity, webWidthMm, appliedBand };
+  return { pitch, useLargeLot, multiplier, considered, loss, effective, capacityQuantity: rawQuantity, proposedQuantity, webWidthMm, appliedBand };
 }
 
 // Local import alias keeps the public helper set of this module small.
@@ -353,6 +378,7 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
     );
     const adjustedSkuQuantities = capacities.map((capacity) => capacity.proposedQuantity);
     const adjustedQuantity = sum(adjustedSkuQuantities);
+    const capacityQuantity = sum(capacities.map((capacity) => capacity.capacityQuantity));
     if (!adjustedQuantity.gt(0)) continue;
 
     const aggregateOrderLength = sum(allocations);
@@ -417,6 +443,7 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
         "D", originalQuantity, adjustedQuantity, requiredTotal, aggregateOrderLength, effectiveTotal, filmTotal,
         "15", sum(capacities.map((capacity) => capacity.considered)),
       ),
+      capacityQuantity: capacityQuantity.toString(),
       id: `D-${targetText}-${adjustedQuantity.toFixed(0)}`,
       detailLabel: `合計 ${aggregateOrderLength.toFixed(0)}m / ${priceLength}m帯`,
       printingMethod: "digital",
@@ -616,6 +643,7 @@ function buildKoreaCandidates(context: PrintCandidateContext): CandidateDraft[] 
         "K", context.originalQuantity, combination.adjustedQuantity, requiredTotal, combination.orderLengthM,
         combination.effectiveLengthM, includedFilmTotal, "15", combination.effectiveLengthM,
       ),
+      capacityQuantity: combination.adjustedQuantity.toString(),
       id: `K-${patternKey}-${combination.adjustedQuantity.toFixed(0)}`,
       detailLabel: `韓国輸入 パターン ${combination.options.map((option) => option.patternCount).join("+")}`,
       printingMethod: "gravure",
@@ -657,6 +685,7 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
   return candidates.map((sasche): CandidateDraft => {
     const outputLength = D(sasche.outputLengthM);
     const adjustedQuantity = D(sasche.adjustedQuantity);
+    const filmTotalYen = D(sasche.filmTotalYen).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
     const ratios = context.skuRequiredLengths.map((required) => required.div(context.requiredLengthM));
     const perPieceBySku = context.skuRequiredLengths.map((required, index) => required.div(context.skuQuantities[index]));
     const skuQuantities = context.skuRequiredLengths.map((required, index) => outputLength.times(ratios[index]).div(perPieceBySku[index]).toDecimalPlaces(0, Decimal.ROUND_FLOOR));
@@ -668,7 +697,8 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
     const materialText = `原反 ${sasche.matchedWidthMm}mm / ${sasche.laneCount}丁 / ${outputLength.toFixed(0)}m`;
     const patternText = `${materialText} ／ ${colorText}`;
     return {
-      ...candidateCommon("Y", context.originalQuantity, adjustedQuantity, context.requiredLengthM, outputLength, outputLength, D(sasche.filmTotalYen)),
+      ...candidateCommon("Y", context.originalQuantity, adjustedQuantity, context.requiredLengthM, outputLength, outputLength, filmTotalYen),
+      capacityQuantity: adjustedQuantity.toString(),
       id: `Y-${sasche.id}`,
       detailLabel: `国内 ${sasche.webWidthMm}mm / ${sasche.laneCount}丁 / ${sasche.printTierM}m印刷`,
       printingMethod: "gravure",
@@ -756,7 +786,7 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
   ].slice(0, PRINT_CANDIDATE_LIMIT);
   const displayTags = new Map(displayCandidates.map((candidate) => [
     candidate.id,
-    selectionTagForRank(candidate, ranked, context.quantityPolicy ?? "fixed"),
+    selectionTagForRank(candidate, ranked),
   ]));
 
   return displayCandidates.map((candidate) => ({
