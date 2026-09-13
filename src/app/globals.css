@@ -1186,6 +1186,7 @@ header .version-badge { display: none; }
   white-space: nowrap;
 }
 .recommendation-collapsed span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.recommendation-collapsed-actions { display: flex; gap: 6px; }
 @media (max-width: 760px) {
   .recommendation-collapsed { grid-template-columns: 1fr; white-space: normal; }
 }

@@ -594,6 +594,24 @@ export default function QuotationPage() {
   const selectedRecommendation = serverResult?.selectedCandidateId
     ? serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId) ?? null
     : null;
+  const inputBasisPlanQuantity = D(serverResult?.originalResult.film.actualQuantity ?? "0")
+    .div(1000).toDecimalPlaces(0, Decimal.ROUND_FLOOR).times(1000);
+  const applyInputBasisPlan = () => {
+    if (!serverResult || pending) return;
+    if (inputBasisPlanQuantity.gte(serverResult.originalResult.quantity)) {
+      clearCandidate();
+      return;
+    }
+    const matchingPlan = serverResult.candidates.find((candidate) => (
+      D(candidate.orderLengthM).eq(serverResult.originalResult.film.orderLengthM)
+      && D(candidate.adjustedQuantity).eq(inputBasisPlanQuantity)
+    ));
+    if (matchingPlan) {
+      void selectCandidate(matchingPlan);
+      return;
+    }
+    clearCandidate();
+  };
   const originalResult = serverResult?.originalResult;
   const originalFilm = originalResult?.film;
   const originalWebWidthMm = originalResult?.gravure?.materialWidthMm
@@ -1102,7 +1120,7 @@ export default function QuotationPage() {
               <>
                 <p className="total-label">
                   {serverResult?.selectedCandidateId
-                    ? <>顧客発注 {formatNumber(form.quantity)} 枚 ／ 製造計画 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>
+                    ? <>発注数量 {formatNumber(form.quantity)} 枚 ／ 製造計画 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>
                     : <>発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>}
                 </p>
                 {serverResult?.selectedCandidateId ? (
@@ -1161,27 +1179,31 @@ export default function QuotationPage() {
                         {formatNumber(serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.orderLengthM ?? 0, 0)}m ／
                         {formatCurrency(serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.filmCostPerPieceYen ?? 0, 2)}/枚
                       </span>
-                      <button className="button secondary small" type="button" onClick={() => setRecommendationPanelOpen(true)}>候補一覧</button>
+                      <div className="recommendation-collapsed-actions">
+                        <button className="button secondary small" type="button" onClick={() => setRecommendationPanelOpen(true)}>候補一覧</button>
+                        <button className="button secondary small" type="button" onClick={clearCandidate} disabled={pending}>元の数量へ戻る</button>
+                      </div>
                     </div>
                   ) : null}
                   {serverResult && !staleResult && recommendationPanelOpen ? (
                     <section className="panel recommendation-panel" aria-labelledby="recommendation-title">
                       <h3 id="recommendation-title">フィルム調達・製造計画候補</h3>
                       <p className="help">
-                        D=デジタル、K=韓国輸入、Y=国内調達。候補を選ぶと左側の発注数量もその製造計画数に自動反映されます。「入力値」で元の数量へ戻ります。
+                        D=デジタル、K=韓国輸入、Y=国内調達。候補または参考計画を選ぶと左側の発注数量もその製造計画数に自動反映されます。「元の数量へ戻る」で元の数量へ復元します。
                       </p>
+                      <button className="button secondary small" type="button" onClick={clearCandidate} disabled={pending}>元の数量へ戻る</button>
                       <div className="recommendation-grid">
                         <button
                           type="button"
                           data-testid="input-basis-card"
                           className={!serverResult.selectedCandidateId ? "recommendation-card selected" : "recommendation-card"}
-                          onClick={clearCandidate}
+                          onClick={applyInputBasisPlan}
                           disabled={pending}
                         >
                           {!serverResult.selectedCandidateId ? <span className="selection-status card-selection-status">選択中</span> : null}
                           <span className="recommendation-label">
-                            入力値 / {originalRouteText}
-                            <em>現在</em>
+                            発注計画 / {originalRouteText}
+                            <em>参考</em>
                           </span>
                           <span>
                             パウチ {form.widthMm}×{form.lengthMm}mm ／ {form.connected}連 ／ {form.lanes}列 ／ {originalColorText}
@@ -1199,7 +1221,7 @@ export default function QuotationPage() {
                           {D(serverResult.originalResult.film.actualQuantity).lt(serverResult.originalResult.quantity)
                             ? <span className="warning">不足のため参考</span>
                             : null}
-                          <span>押すと元の入力数量へ戻ります。計画を反映する場合は下の候補を選択してください。</span>
+                          <span>押すと左側の発注数量を計画 {formatNumber(inputBasisPlanQuantity.toString(), 0)}枚に反映します。</span>
                           <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
                         </button>
                         {serverResult.candidates.map((candidate) => {
