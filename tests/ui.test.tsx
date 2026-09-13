@@ -224,8 +224,9 @@ describe("quotation UI", () => {
     expect(screen.queryByText("発注数量・パターン候補")).not.toBeInTheDocument();
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
     expect(screen.queryByTestId("quantity-policy")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("発注数量 (枚)")).toHaveValue("10000");
+    expect(screen.getByLabelText("発注数量 (枚)")).toHaveValue(candidate.adjustedQuantity);
     expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("製造計画");
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("自動反映されています");
   });
 
   it("supports per-SKU pouch quantities and blocks when the sum differs from the order quantity", async () => {

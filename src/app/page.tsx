@@ -369,9 +369,16 @@ export default function QuotationPage() {
     const { quantity: _quantity, ...nonQuantityRest } = rest;
     return JSON.stringify({ spec: nonQuantitySpec, ...nonQuantityRest });
   }, [calculationInput]);
+  const selectedQuantitiesMatchForm = !selectedRecommendationForStale || (
+    D(form.quantity).eq(selectedRecommendationForStale.adjustedQuantity)
+    && form.skus.every((sku, index) => (
+      !isPositiveDecimalInput(selectedRecommendationForStale.adjustedSkuQuantities[index])
+      || D(sku.quantity).eq(selectedRecommendationForStale.adjustedSkuQuantities[index])
+    ))
+  );
   const staleResult = serverResult !== null && (
     selectedRecommendationForStale
-      ? serverResult.requestNonQuantityJson !== nonQuantityInput
+      ? !selectedQuantitiesMatchForm || serverResult.requestNonQuantityJson !== nonQuantityInput
       : serverResult.inputJson !== calculationInputJson
   );
 
@@ -452,6 +459,14 @@ export default function QuotationPage() {
         originalQuantity: form.quantity,
         originalSkuQuantities: form.skus.map((sku) => sku.quantity),
       });
+      setForm((old) => ({
+        ...old,
+        quantity: D(candidate.adjustedQuantity).toString(),
+        skus: old.skus.map((sku, index) => ({
+          ...sku,
+          quantity: D(candidate.adjustedSkuQuantities[index] ?? candidate.adjustedQuantity).toString(),
+        })),
+      }));
       const adjustedQuantities = candidate.adjustedSkuQuantities;
       const totalAdjustedQuantity = adjustedQuantities.reduce<Decimal>(
         (total, value) => total.plus(D(value)),
@@ -1093,7 +1108,7 @@ export default function QuotationPage() {
                 {serverResult?.selectedCandidateId ? (
                   <p className="help" data-testid="active-candidate-note">
                     選択候補（{resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}）基準で表示しています。
-                    左側の顧客発注 {formatNumber(form.quantity)} 枚は変更しません。右側の原価・総原価は、選択候補の製造計画 {formatNumber(resultShown.quantity)} 枚で再計算しています。
+                    左側の発注数量は選択候補の製造計画 {formatNumber(resultShown.quantity)} 枚に自動反映されています。右側の原価・総原価も同じ製造計画で計算しています。
                   </p>
                 ) : null}
                 <p className="total">
@@ -1153,7 +1168,7 @@ export default function QuotationPage() {
                     <section className="panel recommendation-panel" aria-labelledby="recommendation-title">
                       <h3 id="recommendation-title">フィルム調達・製造計画候補</h3>
                       <p className="help">
-                        D=デジタル、K=韓国輸入、Y=国内調達。左側の顧客発注数は変わりません。候補を選ぶと、そのカードの製造計画数・フィルム発注長で原価を再計算します。「入力値」で元の計算へ戻ります。
+                        D=デジタル、K=韓国輸入、Y=国内調達。候補を選ぶと左側の発注数量もその製造計画数に自動反映されます。「入力値」で元の数量へ戻ります。
                       </p>
                       <div className="recommendation-grid">
                         <button
@@ -1184,6 +1199,7 @@ export default function QuotationPage() {
                           {D(serverResult.originalResult.film.actualQuantity).lt(serverResult.originalResult.quantity)
                             ? <span className="warning">不足のため参考</span>
                             : null}
+                          <span>押すと元の入力数量へ戻ります。計画を反映する場合は下の候補を選択してください。</span>
                           <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
                         </button>
                         {serverResult.candidates.map((candidate) => {
