@@ -1085,11 +1085,15 @@ export default function QuotationPage() {
             </div>
             {!resultShown ? <div className="empty">「サーバーで再計算する」を実行すると結果を表示します。</div> : pending ? <div className="skeleton" aria-live="polite"><div /><div style={{ width: "70%" }} /><div style={{ width: "45%" }} /></div> : (
               <>
-                <p className="total-label">発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</p>
+                <p className="total-label">
+                  {serverResult?.selectedCandidateId
+                    ? <>顧客発注 {formatNumber(form.quantity)} 枚 ／ 製造計画 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>
+                    : <>発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>}
+                </p>
                 {serverResult?.selectedCandidateId ? (
                   <p className="help" data-testid="active-candidate-note">
                     選択候補（{resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}）基準で表示しています。
-                    発注数量は {formatNumber(form.quantity)} 枚で固定されます。候補は調達・製造計画のみを切り替えます。
+                    左側の顧客発注 {formatNumber(form.quantity)} 枚は変更しません。右側の原価・総原価は、選択候補の製造計画 {formatNumber(resultShown.quantity)} 枚で再計算しています。
                   </p>
                 ) : null}
                 <p className="total">
@@ -1147,9 +1151,9 @@ export default function QuotationPage() {
                   ) : null}
                   {serverResult && !staleResult && recommendationPanelOpen ? (
                     <section className="panel recommendation-panel" aria-labelledby="recommendation-title">
-                      <h3 id="recommendation-title">発注数量・パターン候補</h3>
+                      <h3 id="recommendation-title">フィルム調達・製造計画候補</h3>
                       <p className="help">
-                        D=デジタル、K=韓国輸入、Y=国内調達。候補を選ぶと結果と左側の発注数が候補基準に切り替わります。「入力値」で元の数量へ戻ります。
+                        D=デジタル、K=韓国輸入、Y=国内調達。左側の顧客発注数は変わりません。候補を選ぶと、そのカードの製造計画数・フィルム発注長で原価を再計算します。「入力値」で元の計算へ戻ります。
                       </p>
                       <div className="recommendation-grid">
                         <button
@@ -1205,6 +1209,10 @@ export default function QuotationPage() {
                                 {formatNumber(candidate.adjustedQuantity, 0)}枚{candidate.adjustedSkuQuantities.length > 1 ? `（SKU ${candidate.adjustedSkuQuantities.map((quantity) => formatNumber(quantity, 0)).join("+")}）` : ""}
                               </span>
                               <span>製作可能 {formatNumber(candidate.capacityQuantity, 0)}枚 ／ 計画 {formatNumber(candidate.adjustedQuantity, 0)}枚 ／ 1,000枚刻み差 {formatNumber(candidate.capacityPlanningDifference, 0)}枚</span>
+                              <span>
+                                選択時：製造計画 {formatNumber(candidate.adjustedQuantity, 0)}枚で試算
+                                {D(candidate.shortagePieces ?? "0").gt(0) ? `（顧客発注より ${formatNumber(candidate.shortagePieces, 0)}枚不足）` : ""}
+                              </span>
                               <span>{formatNumber(candidate.orderLengthM, 0)}m ／ {formatCurrency(candidate.includedUnitPricePerM, 2)}/m</span>
                               <span>1枚 {formatCurrency(candidate.filmCostPerPieceYen, 2)} ／ 余剰 {formatNumber(candidate.surplusLengthM, 0)}m</span>
                               <span>{candidate.orderReason}</span>

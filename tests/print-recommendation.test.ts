@@ -36,31 +36,39 @@ describe("print recommendation engine", () => {
     expect(first.length).toBeLessThanOrEqual(3);
     expect(first.map((candidate) => candidate.id)).toEqual(second.map((candidate) => candidate.id));
     expect(first.some((candidate) => candidate.route === "D")).toBe(true);
-    expect(first.some((candidate) => candidate.route === "K")).toBe(true);
     expect(first.some((candidate) => candidate.route === "Y")).toBe(true);
     expect(first.filter((candidate) => candidate.recommended)).toHaveLength(1);
     expect(first[0].recommended).toBe(true);
   });
 
-  it("caps displayed alternatives at one route-balanced candidate per route", () => {
+  it("shows the fulfilling minimum and the small-lot shortage reference", () => {
     const candidates = buildPrintCandidates(context(baseSpec, "20000"));
+    const recommended = candidates.find((candidate) => candidate.recommended)!;
+    const shortageReference = candidates.find((candidate) => !candidate.isFulfilling)!;
     const fulfilling = candidates.filter((candidate) => (
       Number(candidate.adjustedQuantity) >= 20000
     ));
     expect(candidates).toHaveLength(3);
-    expect(new Set(candidates.map((candidate) => candidate.route))).toEqual(new Set(["D", "K", "Y"]));
-    expect(candidates.some((candidate) => candidate.orderLengthM === "500")).toBe(false);
-    expect(fulfilling.some((candidate) => candidate.orderLengthM === "1000")).toBe(true);
-    expect(fulfilling.some((candidate) => candidate.recommended)).toBe(true);
+    expect(recommended.route).toBe("D");
+    expect(recommended.orderLengthM).toBe("600");
+    expect(recommended.capacityQuantity).toBe("24186");
+    expect(recommended.adjustedQuantity).toBe("24000");
+    expect(shortageReference.orderLengthM).toBe("500");
+    expect(shortageReference.capacityQuantity).toBe("19534");
+    expect(shortageReference.adjustedQuantity).toBe("19000");
+    expect(shortageReference.shortagePieces).toBe("1000");
+    expect(shortageReference.recommended).toBe(false);
+    expect(fulfilling.some((candidate) => candidate.orderLengthM === "600")).toBe(true);
   });
 
-  it("uses real deliverable capacity and suppresses the digital input-basis duplicate", () => {
+  it("uses real deliverable capacity and keeps the shortage comparison selectable", () => {
     const rawCandidates = buildPrintCandidates(context(baseSpec, "20000"));
-    const rawThousand = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "1000");
-    expect(rawThousand?.capacityQuantity).toBe("41860");
-    expect(rawThousand?.adjustedQuantity).toBe("41000");
-    expect(rawThousand?.capacityPlanningDifference).toBe("860");
-    expect(rawCandidates.filter((candidate) => candidate.route === "D").every((candidate) => candidate.adjustedQuantity !== "19000")).toBe(true);
+    const rawFiveHundred = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "500");
+    const rawSixHundred = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "600");
+    expect(rawFiveHundred?.capacityQuantity).toBe("19534");
+    expect(rawFiveHundred?.adjustedQuantity).toBe("19000");
+    expect(rawSixHundred?.capacityQuantity).toBe("24186");
+    expect(rawSixHundred?.adjustedQuantity).toBe("24000");
 
     const digitalContext = createPrintCandidateContext({
       spec: baseSpec,
@@ -72,11 +80,11 @@ describe("print recommendation engine", () => {
       basisFilmTotalYen: "182200",
     });
     const displayed = buildPrintCandidates(digitalContext);
-    expect(displayed.some((candidate) => candidate.orderLengthM === "500")).toBe(false);
-    const shortestFulfilling = displayed.find((candidate) => candidate.orderLengthM === "1000");
+    expect(displayed.some((candidate) => candidate.orderLengthM === "500" && !candidate.recommended)).toBe(true);
+    const shortestFulfilling = displayed.find((candidate) => candidate.orderLengthM === "600");
     expect(shortestFulfilling?.recommended).toBe(true);
-    expect(D(shortestFulfilling!.incrementalFilmTotalYen!).toNumber()).toBe(112400);
-    expect(D(shortestFulfilling!.incrementalQuantity!).toNumber()).toBe(21000);
+    expect(D(shortestFulfilling!.incrementalFilmTotalYen!).toNumber()).toBe(51000);
+    expect(D(shortestFulfilling!.incrementalQuantity!).toNumber()).toBe(4000);
   });
 
   it("recommends practical candidates using 1,000-piece planning quantities", () => {
@@ -95,7 +103,7 @@ describe("print recommendation engine", () => {
       .filter((candidate) => Number(candidate.adjustedQuantity) >= 20000)
       .sort((left, right) => Number(left.adjustedQuantity) - Number(right.adjustedQuantity))[0];
     expect(smallestFulfilling.route).toBe("D");
-    expect(smallestFulfilling.orderLengthM).toBe("1000");
+    expect(smallestFulfilling.orderLengthM).toBe("600");
     expect(smallestFulfilling.recommended).toBe(true);
   });
 
@@ -131,15 +139,7 @@ describe("print recommendation engine", () => {
     expect(Number(lane2!.plateUnitPriceYen)).toBeCloseTo(32000 * 1.12, 8);
   });
 
-  it("keeps K capacity aligned while using 1,000-piece planning floors", () => {
-    const candidates = buildPrintCandidates(context());
-    const korean = candidates.filter((candidate) => candidate.route === "K");
-    expect(korean.length).toBeGreaterThan(0);
-    expect(korean.every((candidate) => D(candidate.adjustedQuantity).mod(1000).eq(0))).toBe(true);
-    expect(korean.every((candidate) => D(candidate.capacityQuantity).gte(candidate.adjustedQuantity))).toBe(true);
-  });
-
-  it("keeps customer quantity fixed during candidate selection", () => {
+  it("calculates a selected candidate at its 1,000-piece planning quantity", () => {
     const input = {
       spec: baseSpec,
       quantity: "133000",
@@ -152,7 +152,7 @@ describe("print recommendation engine", () => {
     const candidate = original.recommendationCandidates?.[0];
     expect(candidate).toBeDefined();
     const selected = calculatePouchCost({ ...input, selectedCandidateId: candidate!.id });
-    expect(selected.quantity).toBe("133000");
+    expect(selected.quantity).toBe(candidate!.adjustedQuantity);
     expect(selected.printingMethod).toBe(candidate!.printingMethod);
     expect(selected.selectedCandidateId).toBe(candidate!.id);
 

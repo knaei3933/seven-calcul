@@ -368,6 +368,25 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
     if (target.gte(minimumCandidateTotal)) targets.add(boundary);
   }
 
+  // The rounded requirement can still be short after loss and 1,000-piece
+  // planning. Add the smallest 100m procurement length that actually covers
+  // the fixed customer quantity (for example 500m -> 600m for 20,000 pieces).
+  {
+    const start = maxDecimal(totalFloor, minimumCandidateTotal);
+    const limit = maxDecimal(minimumCandidateTotal, naturalTotal).plus(50000);
+    for (let target = start; target.lte(limit); target = target.plus(100)) {
+      const allocations = allocateTotalLength(purchaseWeights, target, minimums);
+      if (!allocations) continue;
+      const capacity = allocations.reduce((total, orderLength, index) => (
+        total.plus(digitalCapacity(size, skuRequiredLengths[index], orderLength, parameters).proposedQuantity)
+      ), D(0));
+      if (capacity.gte(originalQuantity)) {
+        targets.add(target.toFixed(0));
+        break;
+      }
+    }
+  }
+
   const drafts: CandidateDraft[] = [];
   for (const targetText of targets) {
     const target = D(targetText);
@@ -725,15 +744,6 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
   const candidates = drafts
     .filter((draft) => {
       if (seen.has(draft.id) || !D(draft.adjustedQuantity).gt(0)) return false;
-      // The input basis is already displayed separately. Repeating the same
-      // digital purchase (same route and same film length) only creates the
-      // misleading impression of a second economically distinct candidate.
-      if (
-        context.printingMethod === "digital"
-        && draft.route === "D"
-        && context.basisFilmOrderLengthM
-        && D(draft.orderLengthM).eq(context.basisFilmOrderLengthM)
-      ) return false;
       seen.add(draft.id);
       return true;
     })
@@ -780,10 +790,28 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
       return left.id.localeCompare(right.id);
     });
 
+  // A shortage proposal is not recommended, but it is the user's explicit
+  // "what if we buy only the small lot?" comparison. Keep it among the first
+  // three cards whenever it exists so the tradeoff is selectable, not hidden.
+  const shortageReference = ranked
+    .filter((candidate) => !candidate.isFulfilling)
+    .sort((left, right) => {
+      const leftShortage = D(left.shortagePieces);
+      const rightShortage = D(right.shortagePieces);
+      if (!leftShortage.eq(rightShortage)) return leftShortage.lt(rightShortage) ? -1 : 1;
+      const leftTotal = D(left.filmTotalYen);
+      const rightTotal = D(right.filmTotalYen);
+      if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
+      return left.id.localeCompare(right.id);
+    })[0] ?? null;
+
   const displayCandidates = [
     ...(recommendedCandidate ? [recommendedCandidate] : []),
+    ...(shortageReference && shortageReference.id !== recommendedCandidate?.id ? [shortageReference] : []),
     ...rankedAlternatives,
-  ].slice(0, PRINT_CANDIDATE_LIMIT);
+  ].filter((candidate, index, items) => (
+    items.findIndex((item) => item.id === candidate.id) === index
+  )).slice(0, PRINT_CANDIDATE_LIMIT);
   const displayTags = new Map(displayCandidates.map((candidate) => [
     candidate.id,
     selectionTagForRank(candidate, ranked),

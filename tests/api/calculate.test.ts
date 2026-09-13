@@ -68,7 +68,6 @@ describe("calculate API recommendations", () => {
     const recommended = payload.candidates.find((candidate: any) => candidate.recommended);
     expect(recommended).toBeDefined();
     expect(Math.abs(Number(recommended.adjustedQuantity) - 133000) / 133000).toBeLessThanOrEqual(0.15);
-    expect(payload.candidates.some((candidate: any) => candidate.route === "K")).toBe(true);
     expect(payload.originalResult.quantity).toBe("133000");
     expect(payload.result.quantity).toBe("133000");
     expect(payload.result.selectedCandidateId).toBe("");
@@ -79,7 +78,10 @@ describe("calculate API recommendations", () => {
       method: "POST",
       body: JSON.stringify({ ...recommendationInput, recommendationMode: true }),
     }));
-    const list = (await first.json()).candidates as Array<{ id: string; adjustedQuantity: string; filmTotalYen: string }>;
+    const list = (await first.json()).candidates as Array<{
+      id: string; adjustedQuantity: string; filmTotalYen: string;
+      capacityQuantity: string; shortagePieces: string;
+    }>;
     const response = await POST(new Request("http://localhost/api/calculate", {
       method: "POST",
       body: JSON.stringify({
@@ -91,9 +93,23 @@ describe("calculate API recommendations", () => {
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.result.selectedCandidateId).toBe(list[0].id);
-    expect(payload.result.quantity).toBe("133000");
+    expect(payload.result.quantity).toBe(list[0].adjustedQuantity);
     expect(payload.originalResult.quantity).toBe("133000");
 
     expect(Number(payload.result.film.filmTotal)).toBe(Number(list[0].filmTotalYen));
+
+    const shortageReference = list.find((candidate) => !candidate.capacityQuantity || Number(candidate.shortagePieces) > 0);
+    expect(shortageReference).toBeDefined();
+    const shortageResponse = await POST(new Request("http://localhost/api/calculate", {
+      method: "POST",
+      body: JSON.stringify({
+        ...recommendationInput,
+        recommendationMode: true,
+        selectedCandidateId: shortageReference!.id,
+      }),
+    }));
+    const shortagePayload = await shortageResponse.json();
+    expect(shortagePayload.result.quantity).toBe(shortageReference!.adjustedQuantity);
+    expect(Number(shortagePayload.result.quantity)).toBeLessThan(133000);
   });
 });

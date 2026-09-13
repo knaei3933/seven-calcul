@@ -469,12 +469,12 @@ export function calculatePouchCost(input: CalculationInput): CostResult {
   const adjustedQuantity = sum(selected.adjustedSkuQuantities.map((value) => D(value)));
   const adjustedSpec: PouchSpec = {
     ...coreInput.spec,
-    skuQuantities: coreInput.spec.skuQuantities,
+    skuQuantities: selected.adjustedSkuQuantities,
   };
   const adjustedInput = {
     ...coreInput,
     spec: adjustedSpec,
-    quantity: coreInput.quantity,
+    quantity: adjustedQuantity.toString(),
     printingMethod: selected.printingMethod,
   };
 
