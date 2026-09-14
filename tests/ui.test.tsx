@@ -227,6 +227,8 @@ describe("quotation UI", () => {
     expect(screen.getByLabelText("発注数量 (枚)")).toHaveValue(candidate.adjustedQuantity);
     expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("製造計画");
     expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("自動反映されています");
+    expect(screen.getByLabelText("利益率 30%")).toBeChecked();
+    expect(screen.queryByLabelText("利益率 40%")).not.toBeInTheDocument();
   });
 
   it("supports per-SKU pouch quantities and blocks when the sum differs from the order quantity", async () => {

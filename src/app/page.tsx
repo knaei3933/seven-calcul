@@ -39,6 +39,18 @@ function withMarginForPrintingMethod<T extends { printingMethod: PrintingMethod;
     : { ...form, targetMargin: MARGIN_OPTIONS[form.printingMethod][0] };
 }
 
+function targetMarginsForPrintingMethod(printingMethod: PrintingMethod, effectiveMargin: string): string[] {
+  const seen = new Set<number>();
+  return [...MARGIN_OPTIONS[printingMethod], effectiveMargin]
+    .filter((value) => {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric <= 0 || numeric >= 1 || seen.has(numeric)) return false;
+      seen.add(numeric);
+      return true;
+    })
+    .sort((a, b) => Number(a) - Number(b));
+}
+
 const parameterGroups = [
   {
     title: "加工・固定費",
@@ -260,17 +272,10 @@ export default function QuotationPage() {
   const effectiveMargin = form.targetMargin === "custom" ? form.customMargin : form.targetMargin;
   const marginValid = isNumericInput(effectiveMargin) && Number(effectiveMargin) > 0 && Number(effectiveMargin) < 1;
   const marginOptions = MARGIN_OPTIONS[form.printingMethod];
-  const targetMarginList = useMemo(() => {
-    const seen = new Set<number>();
-    return [...marginOptions, effectiveMargin]
-      .filter((value) => {
-        const numeric = Number(value);
-        if (!Number.isFinite(numeric) || numeric <= 0 || numeric >= 1 || seen.has(numeric)) return false;
-        seen.add(numeric);
-        return true;
-      })
-      .sort((a, b) => Number(a) - Number(b));
-  }, [effectiveMargin, marginOptions]);
+  const targetMarginList = useMemo(
+    () => targetMarginsForPrintingMethod(form.printingMethod, effectiveMargin),
+    [form.printingMethod, effectiveMargin],
+  );
   const skuCount = Number(form.skuCount);
   const skuInputsReady = Number.isInteger(skuCount) && skuCount > 0;
   const skuQuantitySum = form.skus.reduce((total, sku) => total + (isNumericInput(sku.quantity) ? Number(sku.quantity) : 0), 0);
@@ -433,7 +438,14 @@ export default function QuotationPage() {
   }, [effectiveParameters, effectiveSize, form.bulkPrice, form.customerCode, form.customerName, form.lengthMm, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate]);
 
   const selectCandidate = async (candidate: PrintCandidate) => {
-    if (!serverResult || pending || serverResult.selectedCandidateId === candidate.id) return;
+    if (!serverResult || pending) {
+      if (serverResult?.selectedCandidateId === candidate.id) setRecommendationPanelOpen(false);
+      return;
+    }
+    if (serverResult.selectedCandidateId === candidate.id) {
+      setRecommendationPanelOpen(false);
+      return;
+    }
     const requestOrder = ++requestOrderRef.current;
     setPending(true);
     try {
@@ -448,19 +460,40 @@ export default function QuotationPage() {
       const activeResult: CostResult = payload.result;
       const originalResult: CostResult = payload.originalResult ?? serverResult.originalResult;
       const candidates: PrintCandidate[] = payload.candidates ?? serverResult.candidates;
+      const methodChanged = form.printingMethod !== candidate.printingMethod;
+      const candidateTargetMargin = methodChanged
+        ? MARGIN_OPTIONS[candidate.printingMethod][0]
+        : withMarginForPrintingMethod({
+          printingMethod: candidate.printingMethod,
+          targetMargin: form.targetMargin,
+        }).targetMargin;
+      const candidateCalculationInput = {
+        ...calculationInput,
+        printingMethod: candidate.printingMethod,
+        targetMargins: targetMarginsForPrintingMethod(candidate.printingMethod, candidateTargetMargin),
+      };
+      const candidateCalculationInputJson = JSON.stringify(candidateCalculationInput);
+      const { spec: candidateSpec, quantity: _candidateQuantity, ...candidateNonQuantityRest } = candidateCalculationInput;
+      const { skuQuantities: _candidateSkuQuantities, ...candidateNonQuantitySpec } = candidateSpec;
+      const candidateNonQuantityJson = JSON.stringify({
+        spec: candidateNonQuantitySpec,
+        ...candidateNonQuantityRest,
+      });
       setRecommendationPanelOpen(false);
       setServerResult({
         result: activeResult,
         originalResult,
         candidates,
-        inputJson: calculationInputJson,
-        requestNonQuantityJson: nonQuantityInput,
+        inputJson: candidateCalculationInputJson,
+        requestNonQuantityJson: candidateNonQuantityJson,
         selectedCandidateId: candidate.id,
         originalQuantity: form.quantity,
         originalSkuQuantities: form.skus.map((sku) => sku.quantity),
       });
       setForm((old) => ({
         ...old,
+        printingMethod: candidate.printingMethod,
+        targetMargin: candidateTargetMargin,
         quantity: D(candidate.adjustedQuantity).toString(),
         skus: old.skus.map((sku, index) => ({
           ...sku,
