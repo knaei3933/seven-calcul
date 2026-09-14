@@ -374,11 +374,14 @@ export default function QuotationPage() {
     const { quantity: _quantity, ...nonQuantityRest } = rest;
     return JSON.stringify({ spec: nonQuantitySpec, ...nonQuantityRest });
   }, [calculationInput]);
+  // Candidate selection changes procurement/production planning only. The
+  // left-side customer quantity remains authoritative; changing it must mark
+  // the selected candidate stale, while the planned surplus must not.
   const selectedQuantitiesMatchForm = !selectedRecommendationForStale || (
-    D(form.quantity).eq(selectedRecommendationForStale.adjustedQuantity)
+    D(form.quantity).eq(D(serverResult?.originalQuantity ?? serverResult?.originalResult.quantity ?? "0"))
     && form.skus.every((sku, index) => (
-      !isPositiveDecimalInput(selectedRecommendationForStale.adjustedSkuQuantities[index])
-      || D(sku.quantity).eq(selectedRecommendationForStale.adjustedSkuQuantities[index])
+      !serverResult?.originalSkuQuantities?.[index]
+      || D(sku.quantity).eq(serverResult.originalSkuQuantities[index])
     ))
   );
   const staleResult = serverResult !== null && (
@@ -494,11 +497,6 @@ export default function QuotationPage() {
         ...old,
         printingMethod: candidate.printingMethod,
         targetMargin: candidateTargetMargin,
-        quantity: D(candidate.adjustedQuantity).toString(),
-        skus: old.skus.map((sku, index) => ({
-          ...sku,
-          quantity: D(candidate.adjustedSkuQuantities[index] ?? candidate.adjustedQuantity).toString(),
-        })),
       }));
       const adjustedQuantities = candidate.adjustedSkuQuantities;
       const totalAdjustedQuantity = adjustedQuantities.reduce<Decimal>(
@@ -1151,13 +1149,13 @@ export default function QuotationPage() {
               <>
                 <p className="total-label">
                   {serverResult?.selectedCandidateId
-                    ? <>発注数量 {formatNumber(form.quantity)} 枚 ／ 製造計画 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>
+                    ? <>顧客発注 {formatNumber(serverResult.originalResult.quantity)} 枚 ／ 製造計画 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>
                     : <>発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>}
                 </p>
                 {serverResult?.selectedCandidateId ? (
                   <p className="help" data-testid="active-candidate-note">
                     選択候補（{resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}）基準で表示しています。
-                    左側の発注数量は選択候補の製造計画 {formatNumber(resultShown.quantity)} 枚に自動反映されています。右側の原価・総原価も同じ製造計画で計算しています。
+                    左側の顧客発注 {formatNumber(serverResult.originalResult.quantity)} 枚は固定です。右側の原価・総原価は選択候補の製造計画 {formatNumber(resultShown.quantity)} 枚で試算しています。
                   </p>
                 ) : null}
                 <p className="total">
@@ -1220,7 +1218,7 @@ export default function QuotationPage() {
                     <section className="panel recommendation-panel" aria-labelledby="recommendation-title">
                       <h3 id="recommendation-title">フィルム調達・製造計画候補</h3>
                       <p className="help">
-                        D=デジタル、K=韓国輸入、Y=国内調達。候補または参考計画を選ぶと左側の発注数量もその製造計画数に自動反映されます。「元の数量へ戻る」で元の数量へ復元します。
+                        D=デジタル、K=韓国輸入、Y=国内調達。候補または参考計画を選ぶと調達・製造計画のみ切り替わります。左側の顧客発注数は固定され、「元の数量へ戻る」で入力値計算へ復元します。
                       </p>
                       <button className="button secondary small" type="button" onClick={clearCandidate} disabled={pending}>元の数量へ戻る</button>
                       <div className="recommendation-grid">
