@@ -31,6 +31,7 @@ const MACHINE_BREAKDOWN_LABELS: Record<MachineBreakdownKey, string> = {
   annualOperatingHours: "年間稼働時間 (時間/年)",
 };
 const SIMULATOR_STATE_KEY = "pouch-simulator-state-v1";
+const INPUT_BASIS_SELECTION_ID = "__input_basis__";
 
 function withMarginForPrintingMethod<T extends { printingMethod: PrintingMethod; targetMargin: string }>(form: T): T {
   const options: readonly string[] = MARGIN_OPTIONS[form.printingMethod];
@@ -625,10 +626,20 @@ export default function QuotationPage() {
   const selectedRecommendation = serverResult?.selectedCandidateId
     ? serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId) ?? null
     : null;
+  const isInputBasisSelection = serverResult?.selectedCandidateId === INPUT_BASIS_SELECTION_ID;
   const inputBasisPlanQuantity = D(serverResult?.originalResult.film.actualQuantity ?? "0")
     .div(1000).toDecimalPlaces(0, Decimal.ROUND_FLOOR).times(1000);
   const applyInputBasisPlan = () => {
     if (!serverResult || pending) return;
+    if (inputBasisPlanQuantity.eq(serverResult.originalResult.quantity)) {
+      setRecommendationPanelOpen(false);
+      setServerResult((old) => old ? {
+        ...old,
+        result: old.originalResult,
+        selectedCandidateId: INPUT_BASIS_SELECTION_ID,
+      } : old);
+      return;
+    }
     const matchingPlan = serverResult.candidates.find((candidate) => (
       D(candidate.orderLengthM).eq(serverResult.originalResult.film.orderLengthM)
       && D(candidate.adjustedQuantity).eq(inputBasisPlanQuantity)
@@ -1200,13 +1211,17 @@ export default function QuotationPage() {
                   {serverResult && !staleResult && serverResult.selectedCandidateId && !recommendationPanelOpen ? (
                     <div className="recommendation-collapsed" data-testid="selected-candidate-summary">
                       <strong>
-                        {serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.route ?? "選択"} /
-                        {" "}{serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.sourceLabel}
+                        {isInputBasisSelection
+                          ? originalRouteText
+                          : serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.route ?? "選択"} /
+                        {" "}{isInputBasisSelection
+                          ? "入力値"
+                          : serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.sourceLabel}
                       </strong>
                       <span>
-                        {formatNumber(serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.adjustedQuantity ?? 0, 0)}枚 ／
-                        {formatNumber(serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.orderLengthM ?? 0, 0)}m ／
-                        {formatCurrency(serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.filmCostPerPieceYen ?? 0, 2)}/枚
+                        {formatNumber(isInputBasisSelection ? serverResult.originalResult.quantity : serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.adjustedQuantity ?? 0, 0)}枚 ／
+                        {formatNumber(isInputBasisSelection ? serverResult.originalResult.film.orderLengthM : serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.orderLengthM ?? 0, 0)}m ／
+                        {formatCurrency(isInputBasisSelection ? serverResult.originalResult.film.filmCostPerPiece : serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.filmCostPerPieceYen ?? 0, 2)}/枚
                       </span>
                       <div className="recommendation-collapsed-actions">
                         <button className="button secondary small" type="button" onClick={() => setRecommendationPanelOpen(true)}>候補一覧</button>
@@ -1225,11 +1240,11 @@ export default function QuotationPage() {
                         <button
                           type="button"
                           data-testid="input-basis-card"
-                          className={!serverResult.selectedCandidateId ? "recommendation-card selected" : "recommendation-card"}
+                          className={(!serverResult.selectedCandidateId || isInputBasisSelection) ? "recommendation-card selected" : "recommendation-card"}
                           onClick={applyInputBasisPlan}
                           disabled={pending}
                         >
-                          {!serverResult.selectedCandidateId ? <span className="selection-status card-selection-status">選択中</span> : null}
+                          {(!serverResult.selectedCandidateId || isInputBasisSelection) ? <span className="selection-status card-selection-status">選択中</span> : null}
                           <span className="recommendation-label">
                             発注計画 / {originalRouteText}
                             <em>参考</em>
