@@ -629,29 +629,6 @@ export default function QuotationPage() {
   const isInputBasisSelection = serverResult?.selectedCandidateId === INPUT_BASIS_SELECTION_ID;
   const inputBasisPlanQuantity = D(serverResult?.originalResult.film.actualQuantity ?? "0")
     .div(1000).toDecimalPlaces(0, Decimal.ROUND_FLOOR).times(1000);
-  const applyInputBasisPlan = () => {
-    if (!serverResult || pending) return;
-    if (inputBasisPlanQuantity.eq(serverResult.originalResult.quantity)) {
-      setRecommendationPanelOpen(false);
-      setServerResult((old) => old ? {
-        ...old,
-        result: old.originalResult,
-        selectedCandidateId: INPUT_BASIS_SELECTION_ID,
-      } : old);
-      return;
-    }
-    const matchingPlan = serverResult.candidates.find((candidate) => (
-      D(candidate.orderLengthM).eq(serverResult.originalResult.film.orderLengthM)
-      && D(candidate.adjustedQuantity).eq(inputBasisPlanQuantity)
-    )) ?? serverResult.candidates.find((candidate) => (
-      D(candidate.orderLengthM).eq(serverResult.originalResult.film.orderLengthM)
-    ));
-    if (matchingPlan) {
-      void selectCandidate(matchingPlan);
-      return;
-    }
-    clearCandidate();
-  };
   const originalResult = serverResult?.originalResult;
   const originalFilm = originalResult?.film;
   const originalWebWidthMm = originalResult?.gravure?.materialWidthMm
@@ -1241,7 +1218,7 @@ export default function QuotationPage() {
                           type="button"
                           data-testid="input-basis-card"
                           className={(!serverResult.selectedCandidateId || isInputBasisSelection) ? "recommendation-card selected" : "recommendation-card"}
-                          onClick={applyInputBasisPlan}
+                          onClick={clearCandidate}
                           disabled={pending}
                         >
                           {(!serverResult.selectedCandidateId || isInputBasisSelection) ? <span className="selection-status card-selection-status">選択中</span> : null}
@@ -1265,7 +1242,7 @@ export default function QuotationPage() {
                           {D(serverResult.originalResult.film.actualQuantity).lt(serverResult.originalResult.quantity)
                             ? <span className="warning">不足のため参考</span>
                             : null}
-                          <span>押すと左側の発注数量を計画 {formatNumber(inputBasisPlanQuantity.toString(), 0)}枚に反映します。</span>
+                          <span>押すと入力した発注数量の計算へ戻ります。候補の製造計画数は左側入力を変更しません。</span>
                           <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
                         </button>
                         {serverResult.candidates.map((candidate) => {
