@@ -805,8 +805,15 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
       return left.id.localeCompare(right.id);
     })[0] ?? null;
 
+  // The input basis must always remain selectable. Without this, the card can
+  // display a concrete planning quantity while no candidate exists to apply it.
+  const basisCandidate = context.basisFilmOrderLengthM
+    ? candidates.find((candidate) => D(candidate.orderLengthM).eq(context.basisFilmOrderLengthM!)) ?? null
+    : null;
+
   const displayCandidates = [
     ...(recommendedCandidate ? [recommendedCandidate] : []),
+    ...(basisCandidate && basisCandidate.id !== recommendedCandidate?.id ? [basisCandidate] : []),
     ...(shortageReference && shortageReference.id !== recommendedCandidate?.id ? [shortageReference] : []),
     ...rankedAlternatives,
   ].filter((candidate, index, items) => (

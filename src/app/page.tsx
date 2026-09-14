@@ -598,13 +598,11 @@ export default function QuotationPage() {
     .div(1000).toDecimalPlaces(0, Decimal.ROUND_FLOOR).times(1000);
   const applyInputBasisPlan = () => {
     if (!serverResult || pending) return;
-    if (inputBasisPlanQuantity.gte(serverResult.originalResult.quantity)) {
-      clearCandidate();
-      return;
-    }
     const matchingPlan = serverResult.candidates.find((candidate) => (
       D(candidate.orderLengthM).eq(serverResult.originalResult.film.orderLengthM)
       && D(candidate.adjustedQuantity).eq(inputBasisPlanQuantity)
+    )) ?? serverResult.candidates.find((candidate) => (
+      D(candidate.orderLengthM).eq(serverResult.originalResult.film.orderLengthM)
     ));
     if (matchingPlan) {
       void selectCandidate(matchingPlan);
