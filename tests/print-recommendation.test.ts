@@ -52,7 +52,8 @@ describe("print recommendation engine", () => {
     expect(recommended.route).toBe("D");
     expect(recommended.orderLengthM).toBe("600");
     expect(recommended.capacityQuantity).toBe("24186");
-    expect(recommended.adjustedQuantity).toBe("24000");
+    expect(recommended.isExactQuantity).toBe(true);
+    expect(recommended.adjustedQuantity).toBe("20000");
     expect(shortageReference.orderLengthM).toBe("500");
     expect(shortageReference.capacityQuantity).toBe("19534");
     expect(shortageReference.adjustedQuantity).toBe("19000");
@@ -64,11 +65,12 @@ describe("print recommendation engine", () => {
   it("uses real deliverable capacity and keeps the shortage comparison selectable", () => {
     const rawCandidates = buildPrintCandidates(context(baseSpec, "20000"));
     const rawFiveHundred = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "500");
-    const rawSixHundred = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "600");
+    const rawSixHundred = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "600" && candidate.isExactQuantity);
     expect(rawFiveHundred?.capacityQuantity).toBe("19534");
     expect(rawFiveHundred?.adjustedQuantity).toBe("19000");
     expect(rawSixHundred?.capacityQuantity).toBe("24186");
-    expect(rawSixHundred?.adjustedQuantity).toBe("24000");
+    const exactSixHundred = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "600" && candidate.isExactQuantity);
+    expect(exactSixHundred?.adjustedQuantity).toBe("20000");
 
     const digitalContext = createPrintCandidateContext({
       spec: baseSpec,
@@ -84,17 +86,18 @@ describe("print recommendation engine", () => {
     const shortestFulfilling = displayed.find((candidate) => candidate.orderLengthM === "600");
     expect(shortestFulfilling?.recommended).toBe(true);
     expect(D(shortestFulfilling!.incrementalFilmTotalYen!).toNumber()).toBe(51000);
-    expect(D(shortestFulfilling!.incrementalQuantity!).toNumber()).toBe(4000);
+    expect(D(shortestFulfilling!.incrementalQuantity!).toNumber()).toBe(0);
   });
 
-  it("recommends practical candidates using 1,000-piece planning quantities", () => {
+  it("recommends exact customer quantity candidates first", () => {
     const candidates = buildPrintCandidates(context());
     const recommended = candidates.find((candidate) => candidate.recommended)!;
     expect(recommended.route).toBe("Y");
     expect(recommended.orderLengthM).toBe("3400");
     expect(recommended.capacityQuantity).toBe("142325");
-    expect(recommended.adjustedQuantity).toBe("142000");
-    expect(recommended.capacityPlanningDifference).toBe("325");
+    expect(recommended.isExactQuantity).toBe(true);
+    expect(recommended.adjustedQuantity).toBe("133000");
+    expect(recommended.capacityPlanningDifference).toBe("9325");
     expect(D(recommended.filmTotalYen).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toString()).toBe("385370");
     expect(D(recommended.surplusRatio).lte(D("15"))).toBe(true);
 

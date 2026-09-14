@@ -32,6 +32,7 @@ export type PrintCandidate = {
   shortagePieces: string;
   isFulfilling: boolean;
   isPractical: boolean;
+  isExactQuantity: boolean;
   selectionTag: string;
   incrementalFilmTotalYen?: string;
   incrementalQuantity?: string;
@@ -121,7 +122,7 @@ const PRACTICAL_SURPLUS_PERCENT = 15;
 
 type CandidateDraft = Omit<
   PrintCandidate,
-  "recommended" | "quantityDelta" | "quantityShortfallRatio" | "surplusPieces" | "shortagePieces" | "isFulfilling" | "isPractical" | "selectionTag" | "capacityPlanningDifference"
+  "recommended" | "quantityDelta" | "quantityShortfallRatio" | "surplusPieces" | "shortagePieces" | "isFulfilling" | "isPractical" | "isExactQuantity" | "selectionTag" | "capacityPlanningDifference"
 > & { __internal?: true };
 
 function floorTo(value: Decimal, unit: string | number): Decimal {
@@ -172,6 +173,7 @@ function finishCandidate(
   const isFulfilling = shortagePieces.lte(0);
   const surplusRatio = original.gt(0) ? surplusPieces.div(original).times(100) : D(0);
   const isPractical = isFulfilling && surplusRatio.lte(D(PRACTICAL_SURPLUS_PERCENT));
+  const isExactQuantity = isFulfilling && adjustedQuantity.eq(original);
   return {
     ...draft,
     capacityQuantity: capacityQuantity.toString(),
@@ -185,8 +187,9 @@ function finishCandidate(
     shortagePieces: shortagePieces.toString(),
     isFulfilling,
     isPractical,
+    isExactQuantity,
     selectionTag: isFulfilling
-      ? (isPractical ? "実用充足" : "充足・余剰大")
+      ? (isExactQuantity ? "発注数一致" : isPractical ? "実用充足" : "充足・余剰大")
       : "不足のため参考",
     recommended: false,
   };
@@ -196,6 +199,9 @@ function compareCandidates(left: PrintCandidate, right: PrintCandidate, original
   // Feasibility comes before money. A candidate cannot become "recommended"
   // merely because its per-piece price improves after dropping demand.
   if (left.isFulfilling !== right.isFulfilling) return left.isFulfilling ? -1 : 1;
+  // An exact match to the customer's transaction quantity is the safest plan.
+  // Capacity-break candidates remain visible after it.
+  if (left.isExactQuantity !== right.isExactQuantity) return left.isExactQuantity ? -1 : 1;
   if (left.isPractical !== right.isPractical) return left.isPractical ? -1 : 1;
 
   // When no practical option exists, the shortest covering order is the safest
@@ -224,10 +230,49 @@ function compareCandidates(left: PrintCandidate, right: PrintCandidate, original
   return left.id.localeCompare(right.id);
 }
 
+function createExactQuantityCandidate(candidate: PrintCandidate, originalQuantity: Decimal): PrintCandidate | null {
+  const requested = D(originalQuantity);
+  if (!candidate.isFulfilling || D(candidate.adjustedQuantity).eq(requested)) return null;
+
+  const sourceQuantities = candidate.adjustedSkuQuantities.map((value) => D(value));
+  const sourceTotal = sum(sourceQuantities);
+  const exactSkus = sourceQuantities.map((value) => (
+    sourceTotal.gt(0) ? value.times(requested).div(sourceTotal).toDecimalPlaces(0, Decimal.ROUND_FLOOR) : D(0)
+  ));
+  let remaining = requested.minus(sum(exactSkus));
+  while (remaining.gt(0)) {
+    const target = exactSkus.reduce((largest, value, index) => value.gt(exactSkus[largest]) ? index : largest, 0);
+    exactSkus[target] = exactSkus[target].plus(1);
+    remaining = remaining.minus(1);
+  }
+  const capacityQuantity = D(candidate.capacityQuantity);
+  return {
+    ...candidate,
+    __internal: true,
+    id: `${candidate.id}-exact`,
+    capacityQuantity: capacityQuantity.toString(),
+    capacityPlanningDifference: capacityQuantity.minus(requested).toString(),
+    adjustedQuantity: requested.toString(),
+    adjustedSkuQuantities: exactSkus.map((value) => value.toString()),
+    filmCostPerPieceYen: requested.gt(0) ? D(candidate.filmTotalYen).div(requested).toString() : "0",
+    quantityDelta: "0",
+    quantityShortfallRatio: "0",
+    surplusPieces: "0",
+    shortagePieces: "0",
+    surplusRatio: "0",
+    toleranceExceeded: false,
+    isFulfilling: true,
+    isPractical: true,
+    isExactQuantity: true,
+    selectionTag: "発注数一致",
+    recommended: false,
+  } as PrintCandidate;
+}
+
 function selectionTagForRank(candidate: PrintCandidate, ranked: PrintCandidate[]): string {
   if (!candidate.isFulfilling) return "不足のため参考";
   const feasible = ranked.filter((item) => item.isFulfilling);
-  const tags: string[] = [candidate.isPractical ? "実用充足" : "充足・余剰大"];
+  const tags: string[] = [candidate.isExactQuantity ? "発注数一致" : candidate.isPractical ? "実用充足" : "充足・余剰大"];
   if (feasible.length > 0 && candidate.id === feasible.reduce((best, item) => (
     D(item.filmTotalYen).lt(D(best.filmTotalYen)) ? item : best
   )).id) tags.push("総額最小");
@@ -749,6 +794,8 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     })
     .map((draft) => finishCandidate(draft, context.originalQuantity));
 
+  candidates.push(...candidates.flatMap((candidate) => createExactQuantityCandidate(candidate, context.originalQuantity) ?? []));
+
   const originalQuantity = context.originalQuantity;
   const ranked = [...candidates].sort((left, right) => compareCandidates(left, right, originalQuantity));
   const fulfillingRanked = ranked.filter((candidate) => candidate.isFulfilling);
@@ -808,7 +855,10 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
   // The input basis must always remain selectable. Without this, the card can
   // display a concrete planning quantity while no candidate exists to apply it.
   const basisCandidate = context.basisFilmOrderLengthM
-    ? candidates.find((candidate) => D(candidate.orderLengthM).eq(context.basisFilmOrderLengthM!)) ?? null
+    ? candidates.filter((candidate) => D(candidate.orderLengthM).eq(context.basisFilmOrderLengthM!))
+        .find((candidate) => candidate.isExactQuantity)
+      ?? candidates.find((candidate) => D(candidate.orderLengthM).eq(context.basisFilmOrderLengthM!))
+      ?? null
     : null;
 
   const displayCandidates = [
