@@ -1629,11 +1629,18 @@ export default function QuotationPage() {
                   ) : null}
                   {serverResult && !staleResult && recommendationPanelOpen ? (
                     <section className="panel recommendation-panel" aria-labelledby="recommendation-title">
-                      <h3 id="recommendation-title">フィルム調達・製造計画候補</h3>
-                      <p className="help">
-                        D=デジタル、K=韓国輸入、Y=国内調達。まず下の表で「すべて合算した原価」を比べてください。フィルム差額はフィルム代だけの差で、銅版・加工費を足すと不利になることがあります。
-                        候補を選ぶと調達・製造計画のみ切り替わります。左側の顧客発注数は固定され、「元の数量へ戻る」で入力値計算へ復元します。
-                      </p>
+	                      <h3 id="recommendation-title">フィルム調達・製造計画候補</h3>
+	                      <div className="comparison-help">
+	                        <span className="comparison-legend">
+	                          D=デジタル ／ K=韓国輸入 ／ Y=国内調達
+	                        </span>
+	                        <HoverInfo label="比較の見方" testId="comparison-guide">
+	                          まず下の表で「すべて合算した原価」を比べてください。フィルム差額はフィルム代だけの差です。銅版・加工費を足すと不利になることがあります。
+	                        </HoverInfo>
+	                        <HoverInfo label="選択ルール" testId="selection-rule-guide">
+	                          候補を選ぶと調達・製造計画のみ切り替わります。左側の顧客発注数は固定され、「元の数量へ戻る」で入力値計算へ復元します。
+	                        </HoverInfo>
+	                      </div>
                       <button className="button secondary small" type="button" onClick={clearCandidate} disabled={pending}>元の数量へ戻る</button>
                       <div className="comparison-table-wrap" data-testid="all-in-comparison">
                         <table className="table comparison-table">

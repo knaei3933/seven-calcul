@@ -1267,6 +1267,28 @@ header .version-badge { display: none; }
   font-variant-numeric: tabular-nums;
 }
 .recommendation-panel .warning { margin: 0; }
+.comparison-help {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.comparison-legend {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+.comparison-help .hover-info { margin: 0; }
+.comparison-help .hover-info:last-child .hover-info-tooltip {
+  left: auto;
+  right: 0;
+}
 .comparison-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line);
