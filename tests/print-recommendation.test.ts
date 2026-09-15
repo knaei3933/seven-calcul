@@ -41,6 +41,29 @@ describe("print recommendation engine", () => {
     expect(first[0].recommended).toBe(true);
   });
 
+  it("guarantees digital and gravure representatives before shortage references across quantities", () => {
+    for (const quantity of ["20000", "50000", "133000"]) {
+      const displayed = buildPrintCandidates(context(baseSpec, quantity));
+      const repeat = buildPrintCandidates(context(baseSpec, quantity));
+      expect(displayed.length).toBeGreaterThan(0);
+      expect(displayed.length).toBeLessThanOrEqual(3);
+      expect(displayed.map((candidate) => candidate.id)).toEqual(repeat.map((candidate) => candidate.id));
+
+      const digitalIndex = displayed.findIndex((candidate) => candidate.route === "D");
+      const gravureIndex = displayed.findIndex((candidate) => candidate.printingMethod === "gravure");
+      expect(digitalIndex).toBeGreaterThanOrEqual(0);
+      expect(gravureIndex).toBeGreaterThanOrEqual(0);
+
+      const duplicateShortageIndex = displayed.findIndex((candidate, index) => (
+        !candidate.isFulfilling && index !== digitalIndex && index !== gravureIndex
+      ));
+      if (duplicateShortageIndex >= 0) {
+        expect(digitalIndex).toBeLessThan(duplicateShortageIndex);
+        expect(gravureIndex).toBeLessThan(duplicateShortageIndex);
+      }
+    }
+  });
+
   it("shows the fulfilling minimum and the small-lot shortage reference", () => {
     const candidates = buildPrintCandidates(context(baseSpec, "20000"));
     const recommended = candidates.find((candidate) => candidate.recommended)!;
@@ -160,5 +183,32 @@ describe("print recommendation engine", () => {
     expect(selected.selectedCandidateId).toBe(candidate!.id);
 
     expect(D(selected.film.filmTotal).eq(D(candidate!.filmTotalYen))).toBe(true);
+  });
+
+  it("uses selected candidate margins for a gravure result while keeping the digital original basis", () => {
+    const digitalMargins = ["0.3", "0.35", "0.4"];
+    const gravureMargins = ["0.2", "0.25", "0.3"];
+    const input = {
+      spec: baseSpec,
+      quantity: "50000",
+      printingMethod: "digital" as const,
+      parameters: defaultParameters,
+      gravureParameters: defaultGravureRollParameters(),
+      targetMargins: ["0.4", "0.35", "0.3"],
+      recommendationMode: true,
+    };
+    const original = calculatePouchCost(input);
+    const candidate = original.recommendationCandidates?.find((item) => item.route === "Y");
+    expect(candidate).toBeDefined();
+
+    const selected = calculatePouchCost({
+      ...input,
+      selectedCandidateId: candidate!.id,
+      selectedCandidateTargetMargins: gravureMargins,
+    });
+
+    expect(selected.printingMethod).toBe("gravure");
+    expect(original.sellingPrices.map((price) => price.margin)).toEqual(digitalMargins);
+    expect(selected.sellingPrices.map((price) => price.margin)).toEqual(gravureMargins);
   });
 });

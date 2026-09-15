@@ -10,11 +10,16 @@ import {
   sevenChemical,
   type QuotationDraft,
 } from "@/lib/quotation-draft";
-import { DEFAULT_FILM_COMPOSITION, QUOTATION_RESTORE_KEY } from "@/lib/quotation-shared";
+import {
+  DEFAULT_FILM_COMPOSITION,
+  QUOTATION_RESTORE_KEY,
+  SIMULATOR_STALE_STATUS_KEY,
+} from "@/lib/quotation-shared";
 
 const LAST_CHECKLIST_URL_KEY = "pouch-last-checklist-url-v1";
 import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
 import type { CalculationChecklistSnapshot } from "@/lib/calculation-checklist";
+import type { CalculationInput } from "@/lib/calculation";
 
 type QuoteForm = {
   quotationNumber: string;
@@ -83,6 +88,7 @@ type QuoteForm = {
   filmCostPerPiece: string;
   filmMeterPrice: string;
   filmOrderLengthM: string;
+  calculationFilmTotal: string;
   targetMargin: string;
   taxRatePercent: string;
   deliveryDate: string;
@@ -91,6 +97,7 @@ type QuoteForm = {
   sealText: string;
   footerNote: string;
   purchaseOrderJson: string;
+  calculationRequestJson: string;
 };
 
 const defaultQuote: QuoteForm = {
@@ -160,6 +167,7 @@ const defaultQuote: QuoteForm = {
   filmCostPerPiece: "0",
   filmMeterPrice: "0",
   filmOrderLengthM: "0",
+  calculationFilmTotal: "0",
   targetMargin: "0.4",
   taxRatePercent: "10",
   deliveryDate: "ご注文後の別途ご相談",
@@ -168,6 +176,7 @@ const defaultQuote: QuoteForm = {
   sealText: "検討済",
   footerNote: "本お見積りに関するご不明点は、下記連絡先までお気軽にお問い合わせください。",
   purchaseOrderJson: "",
+  calculationRequestJson: "",
 };
 
 function isFiniteNumber(value: string) {
@@ -257,6 +266,7 @@ export default function PrintableQuotationPage() {
   const [checklistUrl, setChecklistUrl] = useState("");
   const [checklistOpening, setChecklistOpening] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [quoteDraftStale, setQuoteDraftStale] = useState(false);
   const [mobileDrawer, setMobileDrawer] = useState<"left" | "right" | null>(null);
   const [isMobileWorkspace, setIsMobileWorkspace] = useState(false);
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrderSnapshot | null>(null);
@@ -281,13 +291,15 @@ export default function PrintableQuotationPage() {
 
   useEffect(() => {
     try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sessionStorageはSSR後にしか読めない意図的な復元処理です。
+      setQuoteDraftStale(Boolean(sessionStorage.getItem(SIMULATOR_STALE_STATUS_KEY)));
       const restoreRaw = sessionStorage.getItem(QUOTATION_RESTORE_KEY);
       if (restoreRaw) {
         const checklistUrl = sessionStorage.getItem(LAST_CHECKLIST_URL_KEY) ?? "";
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sessionStorageはSSR後にしか読めない意図的な復元処理です。
-      setChecklistUrl(checklistUrl);
-      const restored = JSON.parse(restoreRaw) as Partial<QuoteForm> & {
+        setChecklistUrl(checklistUrl);
+        const restored = JSON.parse(restoreRaw) as Partial<QuoteForm> & {
           resultHash?: unknown;
+          calculationRequest?: CalculationInput;
           purchaseOrder?: PurchaseOrderSnapshot;
           purchaseOrderJson?: string;
           calculationChecklistSnapshot?: CalculationChecklistSnapshot;
@@ -297,6 +309,9 @@ export default function PrintableQuotationPage() {
           const value = restored[key];
           if (typeof value === "string") restoredForm[key] = value;
         });
+        restoredForm.calculationRequestJson = restored.calculationRequest
+          ? JSON.stringify(restored.calculationRequest)
+          : "";
         setForm(restoredForm);
         try {
           const rawPurchaseOrder = restored.purchaseOrderJson ?? (restored.purchaseOrder ? JSON.stringify(restored.purchaseOrder) : "");
@@ -341,8 +356,10 @@ export default function PrintableQuotationPage() {
           filmCostPerPiece: draft.filmCostPerPiece,
           filmMeterPrice: draft.filmMeterPrice,
           filmOrderLengthM: draft.filmOrderLengthM,
+          calculationFilmTotal: draft.calculationFilmTotal,
           targetMargin: draft.targetMargin,
           purchaseOrderJson: draft.purchaseOrder ? JSON.stringify(draft.purchaseOrder) : "",
+          calculationRequestJson: draft.calculationRequest ? JSON.stringify(draft.calculationRequest) : "",
         }));
         setPurchaseOrder(draft.purchaseOrder ?? null);
         setCalculationChecklistSnapshot(draft.calculationChecklistSnapshot ?? null);
@@ -444,6 +461,9 @@ export default function PrintableQuotationPage() {
             sascheCandidates: calculationChecklistSnapshot?.sascheCandidates,
             customUnitDisplay: shownTotals.customUnit,
             customAmountDisplay: shownTotals.customAmount,
+            calculationRequest: form.calculationRequestJson
+              ? JSON.parse(form.calculationRequestJson) as CalculationInput
+              : undefined,
             purchaseOrder: purchaseOrder,
             calculationChecklistSnapshot: calculationChecklistSnapshot,
             filmUnitDisplay: shownTotals.filmUnit,
@@ -508,6 +528,7 @@ export default function PrintableQuotationPage() {
   && !!parsedCustomQuantity && parsedCustomQuantity.gt(0)
     && !!parsedTargetMargin && parsedTargetMargin.gt(0) && parsedTargetMargin.lt(1)
     && !!parsedTaxRatePercent && parsedTaxRatePercent.gte(0);
+  const linkedQuoteActionsDisabled = !valid || saving || quoteDraftStale;
 
   const totals = (() => {
     if (!valid || !parsedQuantity || !parsedTargetMargin || !parsedTaxRatePercent || !parsedFillingCost || !parsedFilmCost || !parsedCopperCost || !parsedCustomLotCost || !parsedCustomQuantity || !parsedFilmMeterPrice || !parsedFilmOrderLength) return null;
@@ -999,15 +1020,20 @@ export default function PrintableQuotationPage() {
           <p className="help" data-testid="quote-source">
             {sourceVersion ? `原価計算結果連携済み / 計算ID ${sourceVersion.slice(0, 12)}` : "原価シミュレーター未連携。手入力または「原価値を取込」後に出力できます。"}
           </p>
+          {quoteDraftStale ? (
+            <p className="warning" role="alert" data-testid="stale-quote-warning">
+              シミュレーター入力が変更されたため、連携された見積情報は古くなっています。再計算してから保存・出力してください。
+            </p>
+          ) : null}
         </div>
         <div className="toolbar-actions no-print">
           <button className="button secondary" type="button" onClick={() => router.push("/")}>シミュレーターから取込</button>
-          <button className="button secondary" type="button" data-testid="save-history" disabled={!valid || saving} onClick={() => void saveToHistory()}>{saving ? "保存中..." : savedAt ? `履歴保存済 ${savedAt}` : "履歴に保存"}</button>
-          <button className="button" type="button" data-testid="print-pdf" disabled={!valid || saving} onClick={() => void printPdf()}>PDF出力（A4）</button>
+          <button className="button secondary" type="button" data-testid="save-history" disabled={linkedQuoteActionsDisabled} onClick={() => void saveToHistory()}>{saving ? "保存中..." : savedAt ? `履歴保存済 ${savedAt}` : "履歴に保存"}</button>
+          <button className="button" type="button" data-testid="print-pdf" disabled={linkedQuoteActionsDisabled} onClick={() => void printPdf()}>PDF出力（A4）</button>
           <button
             className="button secondary"
             type="button"
-            disabled={!valid || saving || checklistOpening}
+            disabled={linkedQuoteActionsDisabled || checklistOpening}
             title="現在の見積内容を保存し、計算確認チェックリストを開きます"
             data-testid="open-checklist"
             onClick={() => void openChecklist()}
@@ -1241,7 +1267,7 @@ export default function PrintableQuotationPage() {
 
       <div className="quote-edge-handles no-print" aria-label="見積書編集クイック操作">
         <button type="button" onClick={() => setMobileDrawer("left")} aria-expanded={mobileDrawer === "left"}>基本</button>
-        <button className="print-button" type="button" disabled={!valid || saving} onClick={() => void printPdf()}>PDF</button>
+        <button className="print-button" type="button" disabled={linkedQuoteActionsDisabled} onClick={() => void printPdf()}>PDF</button>
         <button type="button" onClick={() => setMobileDrawer("right")} aria-expanded={mobileDrawer === "right"}>金額</button>
       </div>
 

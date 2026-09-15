@@ -1,8 +1,8 @@
 import { D } from "./decimal";
-import type { CostResult } from "./calculation";
+import type { CalculationInput, CostResult } from "./calculation";
 import type { CostParameters } from "./types";
 import type { GravureRollParameters } from "./gravure-roll";
-import { buildPurchaseOrderSnapshot, type PurchaseContext, type PurchaseOrderSnapshot } from "./purchase-order";
+import { activeMaterialWidthMm, buildPurchaseOrderSnapshot, type PurchaseContext, type PurchaseOrderSnapshot } from "./purchase-order";
 import { buildCalculationChecklistSnapshot, type CalculationChecklistSnapshot } from "./calculation-checklist";
 import type { SascheCandidate } from "./sasche-gravure";
 
@@ -32,6 +32,8 @@ export interface QuotationDraft {
   totalCostPerPiece: string;
   calculationVersion: string;
   resultHash: string;
+  calculationFilmTotal: string;
+  calculationRequest?: CalculationInput;
   customerName?: string;
   customerCode?: string;
   customerContact?: string;
@@ -93,6 +95,7 @@ export function buildQuotationDraft(
     lossRate: string;
     bulkUnitPrice: string;
     gravureParameters?: GravureRollParameters;
+    calculationRequest?: CalculationInput;
   },
 ): QuotationDraft {
   const fillingCost = D(result.costPerPieceComponents.bulk)
@@ -100,6 +103,7 @@ export function buildQuotationDraft(
     .plus(result.costPerPieceComponents.fixedLot)
     .plus(result.costPerPieceComponents.custom);
   const productSummary = context.skuNames.filter(Boolean).join(" / ") || "パウチ製品";
+  const activeWidthMm = activeMaterialWidthMm(result);
 
   return {
     productSummary,
@@ -107,7 +111,7 @@ export function buildQuotationDraft(
     purchaseOrder: (() => {
       const snapshot = buildPurchaseOrderSnapshot(result, {
         filmComposition: context.filmComposition,
-        webWidthMm: context.webWidthMm,
+        webWidthMm: activeWidthMm ?? context.webWidthMm,
         lanes: context.lanes,
         pitchMm: context.pitchMm,
         prodMultiplier: context.prodMultiplier,
@@ -125,7 +129,9 @@ export function buildQuotationDraft(
             colorCount: sku.colorCount ?? "0",
             requiredLengthM: sku.requiredLengthM ?? skuCost?.requiredLengthM ?? result.film.requiredLengthM,
             orderLengthM: sku.orderLengthM ?? skuCost?.orderLengthM ?? result.film.orderLengthM,
-            webWidthMm: sku.webWidthMm ?? skuCost?.webWidthMm ?? context.webWidthMm,
+            webWidthMm: skuCost?.webWidthMm
+              ?? (result.gravure ? activeWidthMm : sku.webWidthMm ?? activeWidthMm)
+              ?? context.webWidthMm,
             multiplier: sku.multiplier ?? skuCost?.multiplier ?? 1,
           };
         });
@@ -143,6 +149,8 @@ export function buildQuotationDraft(
     totalCostPerPiece: result.totalCostPerPiece,
     calculationVersion: result.audit.calculationVersion,
     resultHash: result.audit.resultJsonSha256,
+    calculationFilmTotal: result.film.filmTotal,
+    calculationRequest: context.calculationRequest,
     printingMethod: context.printingMethod,
     customerName: context.customerName,
     customerContact: context.customerContact,
@@ -200,6 +208,7 @@ export function parseQuotationDraft(value: unknown): QuotationDraft | null {
     candidate.totalCostPerPiece,
     candidate.calculationVersion,
     candidate.resultHash,
+    candidate.calculationFilmTotal,
   ];
   if (required.some((item) => typeof item !== "string" || item.trim() === "")) return null;
   return candidate as QuotationDraft;

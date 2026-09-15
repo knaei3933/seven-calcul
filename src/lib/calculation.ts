@@ -138,6 +138,7 @@ export interface CalculationInput {
   targetMargins?: string[];
   recommendationMode?: boolean;
   selectedCandidateId?: string;
+  selectedCandidateTargetMargins?: string[];
 }
 
 type RecommendationOptions = {
@@ -433,7 +434,12 @@ function calculatePouchCostCore(
 }
 
 export function calculatePouchCost(input: CalculationInput): CostResult {
-  const { recommendationMode, selectedCandidateId, ...coreInput } = input;
+  const {
+    recommendationMode,
+    selectedCandidateId,
+    selectedCandidateTargetMargins,
+    ...coreInput
+  } = input;
   const recommendation: RecommendationOptions | undefined = recommendationMode
     ? {
         aggregateDigitalPrice: true,
@@ -464,7 +470,7 @@ export function calculatePouchCost(input: CalculationInput): CostResult {
   if (!selectedCandidateId) return attach(original);
 
   const selected = candidates.find((candidate) => candidate.id === selectedCandidateId);
-  if (!selected) return attach(original);
+  if (!selected) throw validationError("candidate_not_found");
 
   const adjustedQuantity = sum(selected.adjustedSkuQuantities.map((value) => D(value)));
   const adjustedSpec: PouchSpec = {
@@ -476,6 +482,7 @@ export function calculatePouchCost(input: CalculationInput): CostResult {
     spec: adjustedSpec,
     quantity: adjustedQuantity.toString(),
     printingMethod: selected.printingMethod,
+    targetMargins: selectedCandidateTargetMargins ?? coreInput.targetMargins,
   };
 
   if (selected.route === "D" && selected.filmOrders) {

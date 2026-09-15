@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { analyzeQuotation } from "@/lib/quotation-history";
 import { calculatePouchCost } from "@/lib/calculation";
+import { defaultParameters } from "@/lib/constants";
+import { defaultGravureRollParameters } from "@/lib/gravure-roll";
 import { buildQuotationDraft } from "@/lib/quotation-draft";
 import { buildCalculationChecklistSnapshot, buildLegacyChecklistItems } from "@/lib/calculation-checklist";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
@@ -288,6 +290,117 @@ describe("quotation persistence with a manually edited selling price", () => {
     expect(draft.purchaseOrder?.printingMethod).toBe("gravure");
     expect(draft.purchaseOrder?.skuColorCounts).toEqual(["2", "4"]);
     expect(draft.purchaseOrder?.skuOrderDetails.map((sku) => Number(sku.quantity))).toEqual(candidate!.adjustedSkuQuantities.map(Number));
+  });
+
+  it("uses the selected gravure material width for purchase-order and nested checklist SKU rows", () => {
+    const input = {
+      spec: {
+        sizeKey: "tube-50x90" as const, fillMlPerChamber: "3", connectedChambers: 1 as const, fillingMethod: "hopper" as const,
+        fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+      },
+      quantity: "50000", printingMethod: "digital" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+      targetMargins: ["0.3", "0.35", "0.4"], recommendationMode: true,
+    };
+    const original = calculatePouchCost(input);
+    const candidate = original.recommendationCandidates!.find((item) => item.route === "Y")!;
+    const selected = calculatePouchCost({
+      ...input,
+      selectedCandidateId: candidate.id,
+      selectedCandidateTargetMargins: ["0.2", "0.25", "0.3"],
+    });
+    expect(selected.gravure).toBeDefined();
+
+    const draft = buildQuotationDraft(selected, {
+      quotationNumber: "",
+      sourceHash: selected.audit.resultJsonSha256,
+      resultHash: selected.audit.resultJsonSha256,
+      widthMm: "50",
+      lengthMm: "90",
+      connected: "1",
+      skuNames: ["Selected"],
+      targetMargin: "0.3",
+      printingMethod: selected.printingMethod,
+      filmComposition: "PET12+AL7+PET12+LLDPE50",
+      webWidthMm: 999,
+      lanes: 4,
+      pitchMm: "98",
+      pitchAddMm: "8",
+      prodMultiplier: 1,
+      colorCount: 4,
+      skus: [{
+        name: "Selected", quantity: selected.quantity, fillMl: "3", colorCount: "4", webWidthMm: 888,
+      }],
+      lossRate: "0.1",
+      bulkUnitPrice: "0",
+    });
+    const activeWidth = Number(selected.gravure?.materialWidthMm);
+    expect(draft.purchaseOrder?.webWidthMm).toBe(activeWidth);
+    expect(draft.purchaseOrder?.skuOrderDetails.every((sku) => sku.webWidthMm === activeWidth)).toBe(true);
+    expect(draft.calculationChecklistSnapshot).toBeDefined();
+    const checklistSnapshot = draft.calculationChecklistSnapshot;
+    if (!checklistSnapshot) throw new Error("Selected checklist snapshot was not built");
+    const checklistSkus = checklistSnapshot.skus ?? [];
+    expect(checklistSkus).not.toHaveLength(0);
+    expect(checklistSnapshot.materialWidthMm).toBe(String(activeWidth));
+    expect(checklistSkus.every((sku) => sku.webWidthMm === activeWidth)).toBe(true);
+  });
+
+  it("preserves mixed digital SKU widths in nested purchase-order and checklist rows", () => {
+    const result = calculatePouchCost({
+      spec: {
+        sizeKey: "tube-35x60" as const,
+        fillMlPerChamber: "3",
+        connectedChambers: 1 as const,
+        fillingMethod: "hopper" as const,
+        fillingLanes: 4,
+        isCustom: false,
+        colorCount: 2,
+        bulkUnitPrice: "0",
+        skuCount: 2,
+        skuQuantities: ["60000", "30000"],
+        skuNames: ["LargeLot", "Standard"],
+        skuFillMlPerChamber: ["3", "3"],
+        skuColorCounts: ["2", "2"],
+      },
+      quantity: "90000",
+      printingMethod: "digital" as const,
+    });
+    const expectedWidths = result.film.skuCosts.map((sku) => sku.webWidthMm);
+    expect(expectedWidths).toEqual([736, 356]);
+
+    const draft = buildQuotationDraft(result, {
+      quotationNumber: "",
+      sourceHash: result.audit.resultJsonSha256,
+      resultHash: result.audit.resultJsonSha256,
+      widthMm: "35",
+      lengthMm: "60",
+      connected: "1",
+      skuNames: ["LargeLot", "Standard"],
+      targetMargin: "0.4",
+      printingMethod: "digital",
+      filmComposition: "PET12+AL7+PET12+LLDPE50",
+      webWidthMm: 356,
+      lanes: 4,
+      pitchMm: "66",
+      pitchAddMm: "6",
+      prodMultiplier: 1,
+      colorCount: 2,
+      skus: result.film.skuCosts.map((sku, index) => ({
+        name: index === 0 ? "LargeLot" : "Standard",
+        quantity: sku.quantity || result.quantity,
+        fillMl: "3",
+        colorCount: "2",
+        webWidthMm: expectedWidths[1 - index],
+      })),
+      lossRate: defaultParameters.lossRate,
+      bulkUnitPrice: "0",
+      parameters: defaultParameters,
+    });
+
+    expect(draft.purchaseOrder?.skuOrderDetails.map((sku) => sku.webWidthMm)).toEqual(expectedWidths);
+    const checklistSkus = draft.calculationChecklistSnapshot?.skus ?? [];
+    expect(checklistSkus.map((sku) => sku.webWidthMm)).toEqual(expectedWidths);
   });
 
   it("rebuilds persistent checklists for quotations saved before checklist snapshots", async () => {

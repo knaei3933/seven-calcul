@@ -31,13 +31,14 @@ describe("calculation checklist snapshot", () => {
       lengthMm: "80",
       pitchMm: "88",
       pitchAddMm: "8",
-      webWidthMm: 556,
+      webWidthMm: 999,
       skus: [{ name: "テスト", quantity: "10000", fillMl: "3", colorCount: "2" }],
     });
 
     expect(snapshot.pouchWidthMm).toBe("50");
     expect(snapshot.pouchLengthMm).toBe("80");
-    expect(snapshot.materialWidthMm).toBe("556");
+    expect(snapshot.materialWidthMm).toBe(String(result.film.skuCosts[0]?.webWidthMm));
+    expect(snapshot.materialWidthMm).not.toBe("999");
     expect(snapshot.pitchMm).toBe("88");
 
     const items = buildChecklistItems(snapshot);
@@ -55,6 +56,45 @@ describe("calculation checklist snapshot", () => {
     expect(pitch.inputs).toContain("ピッチ加算 = 8 mm");
     expect(pitch.result).toBe("88");
     expect(readCalculationChecklistSnapshot(snapshot)).not.toBeNull();
+  });
+
+  it("uses the selected gravure result width instead of generic context width", () => {
+    const input = {
+      spec: {
+        sizeKey: "tube-50x90" as const,
+        fillMlPerChamber: "3",
+        connectedChambers: 1 as const,
+        fillingMethod: "hopper" as const,
+        fillingLanes: 4,
+        isCustom: false,
+        colorCount: 4,
+        bulkUnitPrice: "0",
+        skuCount: 1,
+      },
+      quantity: "50000",
+      printingMethod: "digital" as const,
+    };
+    const original = calculatePouchCost({ ...input, recommendationMode: true });
+    const candidate = original.recommendationCandidates?.find((item) => item.route === "Y");
+    expect(candidate).toBeDefined();
+    const selected = calculatePouchCost({
+      ...input,
+      recommendationMode: true,
+      selectedCandidateId: candidate!.id,
+    });
+    expect(selected.gravure).toBeDefined();
+
+    const snapshot = buildCalculationChecklistSnapshot(selected, {
+      quotationNumber: "selected",
+      printingMethod: "gravure",
+      sourceHash: "source",
+      resultHash: "selected-result",
+      filmComposition: "PET12+AL7+PET12+LLDPE50",
+      webWidthMm: 999,
+    });
+
+    expect(snapshot.materialWidthMm).toBe(selected.gravure?.materialWidthMm);
+    expect(snapshot.materialWidthMm).not.toBe("999");
   });
 
   it("rejects stale checklist snapshots with missing separated dimensions", () => {

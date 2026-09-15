@@ -55,6 +55,11 @@ export type PurchaseContext = {
   lossRate: string;
 };
 
+export function activeMaterialWidthMm(result: CostResult, fallback?: number): number | null {
+  const width = result.gravure?.materialWidthMm ?? result.film.skuCosts[0]?.webWidthMm ?? fallback;
+  return width == null ? null : Number(width);
+}
+
 export function buildPurchaseOrderSnapshot(result: CostResult, context: PurchaseContext): PurchaseOrderSnapshot {
   const skuColorCounts = result.film.skuCosts.length > 0
     ? result.film.skuCosts.map((sku) => sku.colorCount)
@@ -69,9 +74,7 @@ export function buildPurchaseOrderSnapshot(result: CostResult, context: Purchase
     effectiveLengthM: result.film.effectiveLengthM,
     lossM: result.film.lossM,
     lossRate: context.lossRate,
-    webWidthMm: result.gravure
-      ? Number(result.gravure.materialWidthMm)
-      : result.film.skuCosts[0]?.webWidthMm ?? context.webWidthMm,
+    webWidthMm: activeMaterialWidthMm(result, context.webWidthMm) ?? context.webWidthMm,
     lanes: context.lanes,
     pitchMm: context.pitchMm,
     prodMultiplier: context.prodMultiplier,

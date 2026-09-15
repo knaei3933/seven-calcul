@@ -1,4 +1,5 @@
 import type { CostResult } from "./calculation";
+import { activeMaterialWidthMm } from "./purchase-order";
 import { defaultParameters, sizeMaster } from "./constants";
 import type { CostParameters } from "./types";
 import type { GravureRollParameters } from "./gravure-roll";
@@ -171,6 +172,7 @@ export function buildCalculationChecklistSnapshot(
   result: CostResult,
   context: CalculationChecklistContext,
 ): CalculationChecklistSnapshot {
+  const activeWidthMm = activeMaterialWidthMm(result);
   return {
     checklistVersion: CHECKLIST_VERSION,
     calculationVersion: result.audit.calculationVersion,
@@ -183,17 +185,17 @@ export function buildCalculationChecklistSnapshot(
     quantity: result.quantity,
     connectedChambers: result.connectedChambers,
     chamberCount: result.chamberCount,
-    widthMm: result.gravure
-      ? String(result.gravure.materialWidthMm)
-      : result.film.skuCosts[0] ? String(result.film.skuCosts[0].webWidthMm) : context.widthMm ?? "",
+    widthMm: activeWidthMm != null ? String(activeWidthMm) : context.widthMm ?? "",
     lengthMm: context.lengthMm ?? "",
     pouchWidthMm: context.widthMm,
     pouchLengthMm: context.lengthMm,
     pitchMm: context.pitchMm,
     pitchAddMm: context.pitchAddMm,
-    materialWidthMm: context.webWidthMm != null
-      ? String(context.webWidthMm)
-      : result.gravure?.materialWidthMm,
+    materialWidthMm: activeWidthMm != null
+      ? String(activeWidthMm)
+      : context.webWidthMm != null
+        ? String(context.webWidthMm)
+        : undefined,
     fillMlPerChamber: result.fillMlPerChamber,
     totalFillMlPerPouch: result.totalFillMlPerPouch,
     fillingMethod: result.fillingMethod,
@@ -233,7 +235,10 @@ export function buildCalculationChecklistSnapshot(
         requiredLengthM: contextSku.requiredLengthM ?? skuCost?.requiredLengthM ?? result.film.requiredLengthM,
         orderLengthM: contextSku.orderLengthM ?? skuCost?.orderLengthM ?? result.film.orderLengthM,
         multiplier: contextSku.multiplier ?? skuCost?.multiplier ?? 1,
-        webWidthMm: contextSku.webWidthMm ?? skuCost?.webWidthMm ?? context.webWidthMm ?? 0,
+        webWidthMm: skuCost?.webWidthMm
+          ?? (result.gravure ? activeWidthMm : contextSku.webWidthMm ?? activeWidthMm)
+          ?? context.webWidthMm
+          ?? 0,
         appliedBand: contextSku.appliedBand ?? skuCost?.appliedBand ?? "",
       };
     }),

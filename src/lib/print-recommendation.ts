@@ -861,10 +861,25 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
       ?? null
     : null;
 
-  const displayCandidates = [
+  const digitalRepresentative = uniqueRouteCandidates.find((candidate) => candidate.route === "D") ?? null;
+  const gravureRepresentative = uniqueRouteCandidates.find((candidate) => candidate.route === "K")
+    ?? uniqueRouteCandidates.find((candidate) => candidate.route === "Y")
+    ?? null;
+  // Digital and gravure comparisons are primary routing decisions. Reserve
+  // their slots before basis/shortage references, then let the card cap decide
+  // which remaining alternatives fit.
+  const guaranteedRouteCandidates = [
     ...(recommendedCandidate ? [recommendedCandidate] : []),
-    ...(basisCandidate && basisCandidate.id !== recommendedCandidate?.id ? [basisCandidate] : []),
-    ...(shortageReference && shortageReference.id !== recommendedCandidate?.id ? [shortageReference] : []),
+    ...(digitalRepresentative ? [digitalRepresentative] : []),
+    ...(gravureRepresentative ? [gravureRepresentative] : []),
+  ].filter((candidate, index, items) => (
+    items.findIndex((item) => item.id === candidate.id) === index
+  ));
+
+  const displayCandidates = [
+    ...guaranteedRouteCandidates,
+    ...(basisCandidate ? [basisCandidate] : []),
+    ...(shortageReference ? [shortageReference] : []),
     ...rankedAlternatives,
   ].filter((candidate, index, items) => (
     items.findIndex((item) => item.id === candidate.id) === index

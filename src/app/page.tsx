@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CostResult } from "@/lib/calculation";
+import type { CalculationInput, CostResult } from "@/lib/calculation";
 import { defaultParameters, defaultProductionSpeedForFillMl, machineChargeBasis, sizeMaster } from "@/lib/constants";
 import { displayAmount } from "@/lib/calculation";
 import { D, Decimal } from "@/lib/decimal";
@@ -12,8 +12,10 @@ import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { QUOTATION_DRAFT_KEY, buildQuotationDraft } from "@/lib/quotation-draft";
 import { calculateAutomaticQuotation } from "@/lib/quotation-pricing";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calculations";
+import { activeMaterialWidthMm } from "@/lib/purchase-order";
+import { isCalculationRequest } from "@/lib/calculation-provenance";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
-import type { CustomerMaster, CustomerMasterInput } from "@/lib/quotation-shared";
+import { SIMULATOR_STALE_STATUS_KEY, type CustomerMaster, type CustomerMasterInput } from "@/lib/quotation-shared";
 import type { PrintCandidate } from "@/lib/print-recommendation";
 
 const MARGIN_OPTIONS = {
@@ -21,6 +23,7 @@ const MARGIN_OPTIONS = {
   gravure: ["0.3", "0.25", "0.2"],
 } as const;
 type TargetMargin = string;
+type TargetMarginMode = "standard" | "custom";
 const MACHINE_BREAKDOWN_DEFAULTS = { ...machineChargeBasis } as const;
 type MachineBreakdownKey = keyof typeof MACHINE_BREAKDOWN_DEFAULTS;
 const MACHINE_BREAKDOWN_LABELS: Record<MachineBreakdownKey, string> = {
@@ -32,12 +35,21 @@ const MACHINE_BREAKDOWN_LABELS: Record<MachineBreakdownKey, string> = {
 };
 const SIMULATOR_STATE_KEY = "pouch-simulator-state-v1";
 const INPUT_BASIS_SELECTION_ID = "__input_basis__";
+const INPUT_PRINTING_METHOD: PrintingMethod = "digital";
 
 function withMarginForPrintingMethod<T extends { printingMethod: PrintingMethod; targetMargin: string }>(form: T): T {
   const options: readonly string[] = MARGIN_OPTIONS[form.printingMethod];
   return form.targetMargin === "custom" || options.includes(form.targetMargin)
     ? form
     : { ...form, targetMargin: MARGIN_OPTIONS[form.printingMethod][0] };
+}
+
+function targetMarginModeFor(targetMargin: string): TargetMarginMode {
+  return targetMargin === "custom" ? "custom" : "standard";
+}
+
+function candidateRouteText(candidate: PrintCandidate): string {
+  return `${candidate.route} / ${candidate.sourceLabel}${candidate.printingMethod === "gravure" ? "（グラビア印刷）" : ""}`;
 }
 
 function targetMarginsForPrintingMethod(printingMethod: PrintingMethod, effectiveMargin: string): string[] {
@@ -127,6 +139,13 @@ export default function QuotationPage() {
     selectedCandidateId: string;
     originalQuantity?: string;
     originalSkuQuantities?: string[];
+    originalInputJson?: string;
+    originalRequestNonQuantityJson?: string;
+    originalPrintingMethod?: PrintingMethod;
+    originalTargetMargin?: string;
+    originalTargetMarginMode?: TargetMarginMode;
+    calculationRequest?: CalculationInput;
+    originalCalculationRequest?: CalculationInput;
   };
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
@@ -232,7 +251,14 @@ export default function QuotationPage() {
             calculatedAt?: string | null;
             customerDraft?: CustomerDraft | null;
           };
-          if (saved.form) setForm((old) => withMarginForPrintingMethod({ ...old, ...saved.form }));
+          if (saved.form) setForm((old) => withMarginForPrintingMethod({
+            ...old,
+            ...saved.form,
+            // Candidate display state must never overwrite the customer's
+            // input basis. The simulator intentionally starts as digital and
+            // exposes gravure only through recommendation candidates.
+            printingMethod: INPUT_PRINTING_METHOD,
+          }));
           if (saved.parameters) setParameters((old) => ({ ...old, ...saved.parameters }));
           if (saved.parameters?.customPouchCharge === "400000") {
             setParameters((old) => ({ ...old, customPouchCharge: "220000" }));
@@ -244,10 +270,64 @@ export default function QuotationPage() {
           } else if (saved.parameters?.productionSpeedPerMinute) {
             setProductionSpeedManual(true);
           }
-          if (saved.serverResult?.result && typeof saved.serverResult.inputJson === "string") {
-            setServerResult(saved.serverResult);
+          const savedServerResult = saved.serverResult?.result && typeof saved.serverResult.inputJson === "string"
+            ? saved.serverResult
+            : null;
+          let restoredServerResult = false;
+          if (saved.form && savedServerResult && !savedServerResult.selectedCandidateId) {
+            const originalPrintingMethod = INPUT_PRINTING_METHOD;
+            if (saved.form.printingMethod !== originalPrintingMethod) {
+              const savedFormMargin = saved.form.targetMargin === "custom"
+                ? saved.form.customMargin
+                : saved.form.targetMargin;
+              const restoredMargin = savedServerResult.originalTargetMargin
+                ?? (typeof savedFormMargin === "string" && isNumericInput(savedFormMargin) ? savedFormMargin : undefined);
+              const restoredMode = savedServerResult.originalTargetMarginMode
+                ?? (saved.form.targetMargin === "custom" ? "custom" : "standard");
+              setForm((old) => ({
+                ...old,
+                printingMethod: originalPrintingMethod,
+                targetMargin: restoredMode === "custom"
+                  ? "custom"
+                  : restoredMargin ?? MARGIN_OPTIONS[originalPrintingMethod][0],
+                customMargin: restoredMode === "custom"
+                  ? restoredMargin ?? old.customMargin
+                  : old.customMargin,
+              }));
+            }
           }
-          if (typeof saved.calculatedAt === "string") {
+          if (savedServerResult) {
+            const hasOriginalCandidateBasis = savedServerResult.originalQuantity !== undefined
+              && savedServerResult.originalSkuQuantities !== undefined
+              && savedServerResult.originalInputJson !== undefined
+              && savedServerResult.originalRequestNonQuantityJson !== undefined
+              && savedServerResult.originalPrintingMethod !== undefined
+              && savedServerResult.originalTargetMargin !== undefined
+              && savedServerResult.originalTargetMarginMode !== undefined;
+            const hasValidCalculationRequests = isCalculationRequest(savedServerResult.calculationRequest)
+              && savedServerResult.calculationRequest.selectedCandidateId === savedServerResult.selectedCandidateId
+              && (!savedServerResult.selectedCandidateId
+                || (isCalculationRequest(savedServerResult.originalCalculationRequest)
+                  && savedServerResult.originalCalculationRequest.selectedCandidateId === ""));
+            const originalRequest = savedServerResult.originalCalculationRequest;
+            const hasDigitalInputBasis = isCalculationRequest(originalRequest)
+              ? originalRequest.printingMethod === INPUT_PRINTING_METHOD
+              : savedServerResult.originalPrintingMethod === INPUT_PRINTING_METHOD
+                && savedServerResult.originalResult.printingMethod === INPUT_PRINTING_METHOD;
+            if (!hasValidCalculationRequests
+              || !hasDigitalInputBasis
+              || (savedServerResult.selectedCandidateId && !hasOriginalCandidateBasis)) {
+              sessionStorage.removeItem(QUOTATION_DRAFT_KEY);
+              sessionStorage.setItem(
+                SIMULATOR_STALE_STATUS_KEY,
+                hasValidCalculationRequests ? "legacy-selected-state" : "calculation-provenance-invalid",
+              );
+            } else {
+              setServerResult(savedServerResult);
+              restoredServerResult = true;
+            }
+          }
+          if (restoredServerResult && typeof saved.calculatedAt === "string") {
             setCalculatedAt(saved.calculatedAt);
           }
           if (saved.customerDraft && typeof saved.customerDraft === "object") {
@@ -272,10 +352,13 @@ export default function QuotationPage() {
     : standardSize;
   const effectiveMargin = form.targetMargin === "custom" ? form.customMargin : form.targetMargin;
   const marginValid = isNumericInput(effectiveMargin) && Number(effectiveMargin) > 0 && Number(effectiveMargin) < 1;
-  const marginOptions = MARGIN_OPTIONS[form.printingMethod];
+  const activePrintingMethod: PrintingMethod = serverResult?.selectedCandidateId
+    ? serverResult.result.printingMethod
+    : INPUT_PRINTING_METHOD;
+  const marginOptions = MARGIN_OPTIONS[activePrintingMethod];
   const targetMarginList = useMemo(
-    () => targetMarginsForPrintingMethod(form.printingMethod, effectiveMargin),
-    [form.printingMethod, effectiveMargin],
+    () => targetMarginsForPrintingMethod(activePrintingMethod, effectiveMargin),
+    [activePrintingMethod, effectiveMargin],
   );
   const skuCount = Number(form.skuCount);
   const skuInputsReady = Number.isInteger(skuCount) && skuCount > 0;
@@ -359,11 +442,11 @@ export default function QuotationPage() {
   const calculationInput = useMemo(() => ({
     spec: spec(),
     quantity: form.quantity,
-    printingMethod: form.printingMethod,
+    printingMethod: activePrintingMethod,
     targetMargins: targetMarginList,
     parameters: effectiveParameters,
     gravureParameters: normalizedGravureParameters,
-  }), [spec, form.quantity, form.printingMethod, targetMarginList, effectiveParameters, normalizedGravureParameters]);
+  }), [spec, form.quantity, activePrintingMethod, targetMarginList, effectiveParameters, normalizedGravureParameters]);
 
   const calculationInputJson = useMemo(() => JSON.stringify(calculationInput), [calculationInput]);
   const selectedRecommendationForStale = serverResult?.selectedCandidateId
@@ -413,7 +496,7 @@ export default function QuotationPage() {
       lengthMm: form.lengthMm,
       parameters: effectiveParameters,
       filmComposition: "PET12+AL7+PET12+LLDPE50",
-      webWidthMm: effectiveSize.webWidthMm,
+      webWidthMm: activeMaterialWidthMm(result, effectiveSize.webWidthMm) ?? effectiveSize.webWidthMm,
       lanes: effectiveSize.lanes,
       pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
       pitchAddMm: effectiveSize.pitchAddMm,
@@ -453,10 +536,37 @@ export default function QuotationPage() {
     const requestOrder = ++requestOrderRef.current;
     setPending(true);
     try {
+      const originalPrintingMethod = INPUT_PRINTING_METHOD;
+      const originalTargetMargin = serverResult.originalTargetMargin ?? effectiveMargin;
+      const originalTargetMarginMode = serverResult.originalTargetMarginMode
+        ?? targetMarginModeFor(form.targetMargin);
+      const candidateUsesOriginalBasis = candidate.printingMethod === originalPrintingMethod;
+      const candidateTargetMargin = candidateUsesOriginalBasis
+        ? originalTargetMargin
+        : MARGIN_OPTIONS[candidate.printingMethod][0];
+      const candidateTargetMarginMode = candidateUsesOriginalBasis
+        ? originalTargetMarginMode
+        : "standard";
+      const basisTargetMargins = targetMarginsForPrintingMethod(originalPrintingMethod, originalTargetMargin);
+      const candidateTargetMargins = targetMarginsForPrintingMethod(candidate.printingMethod, candidateTargetMargin);
+      // Candidate IDs are generated from the original calculation basis. Sending
+      // the currently selected route would regenerate a different candidate set
+      // and make return-route selections resolve to the original result again.
+      const basisCalculationInput = {
+        ...calculationInput,
+        printingMethod: originalPrintingMethod,
+        targetMargins: basisTargetMargins,
+      };
+      const calculationRequest: CalculationInput = {
+        ...basisCalculationInput,
+        recommendationMode: true,
+        selectedCandidateId: candidate.id,
+        selectedCandidateTargetMargins: candidateTargetMargins,
+      };
       const response = await fetch("/api/calculate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...calculationInput, recommendationMode: true, selectedCandidateId: candidate.id }),
+        body: JSON.stringify(calculationRequest),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "candidate_calculation_failed");
@@ -464,19 +574,11 @@ export default function QuotationPage() {
       const activeResult: CostResult = payload.result;
       const originalResult: CostResult = payload.originalResult ?? serverResult.originalResult;
       const candidates: PrintCandidate[] = payload.candidates ?? serverResult.candidates;
-      const methodChanged = form.printingMethod !== candidate.printingMethod;
-      const candidateTargetMargin = methodChanged
-        ? MARGIN_OPTIONS[candidate.printingMethod][0]
-        : withMarginForPrintingMethod({
-          printingMethod: candidate.printingMethod,
-          targetMargin: form.targetMargin,
-        }).targetMargin;
       const candidateCalculationInput = {
         ...calculationInput,
         printingMethod: candidate.printingMethod,
-        targetMargins: targetMarginsForPrintingMethod(candidate.printingMethod, candidateTargetMargin),
+        targetMargins: candidateTargetMargins,
       };
-      const candidateCalculationInputJson = JSON.stringify(candidateCalculationInput);
       const { spec: candidateSpec, quantity: _candidateQuantity, ...candidateNonQuantityRest } = candidateCalculationInput;
       const { skuQuantities: _candidateSkuQuantities, ...candidateNonQuantitySpec } = candidateSpec;
       const candidateNonQuantityJson = JSON.stringify({
@@ -488,16 +590,23 @@ export default function QuotationPage() {
         result: activeResult,
         originalResult,
         candidates,
-        inputJson: candidateCalculationInputJson,
+        inputJson: JSON.stringify(basisCalculationInput),
         requestNonQuantityJson: candidateNonQuantityJson,
         selectedCandidateId: candidate.id,
         originalQuantity: form.quantity,
         originalSkuQuantities: form.skus.map((sku) => sku.quantity),
+        originalInputJson: serverResult.originalInputJson ?? serverResult.inputJson,
+        originalRequestNonQuantityJson: serverResult.originalRequestNonQuantityJson ?? serverResult.requestNonQuantityJson,
+        originalPrintingMethod,
+        originalTargetMargin,
+        originalTargetMarginMode,
+        calculationRequest,
+        originalCalculationRequest: serverResult.originalCalculationRequest ?? serverResult.calculationRequest,
       });
       setForm((old) => ({
         ...old,
-        printingMethod: candidate.printingMethod,
-        targetMargin: candidateTargetMargin,
+        targetMargin: candidateTargetMarginMode === "custom" ? "custom" : candidateTargetMargin,
+        customMargin: candidateTargetMarginMode === "custom" ? candidateTargetMargin : old.customMargin,
       }));
       const adjustedQuantities = candidate.adjustedSkuQuantities;
       const totalAdjustedQuantity = adjustedQuantities.reduce<Decimal>(
@@ -534,12 +643,23 @@ export default function QuotationPage() {
 
   const clearCandidate = () => {
     if (!serverResult) return;
+    // When the input-basis card is already selected, clicking it is a toggle:
+    // collapse the candidate list just like clicking another selected card.
+    if (!serverResult.selectedCandidateId) {
+      setRecommendationPanelOpen(false);
+      return;
+    }
     const restoredQuantity = serverResult.originalQuantity ?? D(serverResult.originalResult.quantity).toString();
     const restoredSkuQuantities = serverResult.originalSkuQuantities
       ?? form.skus.map((_, index) => D(serverResult.originalResult.film.skuCosts[index]?.quantity ?? serverResult.originalResult.quantity).toString());
+    const restoredTargetMargin = serverResult.originalTargetMargin ?? effectiveMargin;
+    const restoredTargetMarginMode = serverResult.originalTargetMarginMode
+      ?? targetMarginModeFor(form.targetMargin);
     setForm((old) => ({
       ...old,
       quantity: restoredQuantity,
+      targetMargin: restoredTargetMarginMode === "custom" ? "custom" : restoredTargetMargin,
+      customMargin: restoredTargetMarginMode === "custom" ? restoredTargetMargin : old.customMargin,
       skus: old.skus.map((sku, index) => ({
         ...sku,
         quantity: restoredSkuQuantities[index] ?? restoredQuantity,
@@ -550,6 +670,10 @@ export default function QuotationPage() {
       ...serverResult,
       result: serverResult.originalResult,
       selectedCandidateId: "",
+      inputJson: serverResult.originalInputJson ?? serverResult.inputJson,
+      requestNonQuantityJson: serverResult.originalRequestNonQuantityJson ?? serverResult.requestNonQuantityJson,
+      calculationRequest: serverResult.originalCalculationRequest ?? serverResult.calculationRequest,
+      originalCalculationRequest: serverResult.originalCalculationRequest ?? serverResult.calculationRequest,
     });
     if (serverResult.originalResult.audit.resultJsonSha256 !== serverResult.result.audit.resultJsonSha256) {
       writeChecklistSnapshot(serverResult.originalResult, form.skus.map((sku, index) => ({
@@ -568,22 +692,57 @@ export default function QuotationPage() {
     setPending(true);
     setServerResult(null);
     try {
-      const requestedInputJson = calculationInputJson;
-      const requestedNonQuantityJson = nonQuantityInput;
+      const shouldRestoreInputMargin = Boolean(serverResult?.selectedCandidateId);
+      // The explicit recalculation button always returns to the customer's
+      // input basis. Gravure is selected only by clicking a recommendation card.
+      const requestedTargetMargin = shouldRestoreInputMargin && serverResult
+        ? serverResult.originalTargetMargin ?? effectiveMargin
+        : effectiveMargin;
+      const requestedTargetMarginMode = shouldRestoreInputMargin && serverResult
+        ? serverResult.originalTargetMarginMode ?? targetMarginModeFor(form.targetMargin)
+        : targetMarginModeFor(form.targetMargin);
+      const requestedPrintingMethod = INPUT_PRINTING_METHOD;
+      const requestedTargetMargins = targetMarginsForPrintingMethod(requestedPrintingMethod, requestedTargetMargin);
+      const baseCalculationInput = {
+        ...calculationInput,
+        printingMethod: requestedPrintingMethod,
+        targetMargins: requestedTargetMargins,
+      };
+      const requestedInputJson = JSON.stringify(baseCalculationInput);
+      const { spec: requestedSpec, quantity: _requestedQuantity, ...requestedNonQuantityRest } = baseCalculationInput;
+      const { skuQuantities: _requestedSkuQuantities, ...requestedNonQuantitySpec } = requestedSpec;
+      const requestedNonQuantityJson = JSON.stringify({
+        spec: requestedNonQuantitySpec,
+        ...requestedNonQuantityRest,
+      });
+      const calculationRequest: CalculationInput = {
+        ...baseCalculationInput,
+        recommendationMode: true,
+        selectedCandidateId: "",
+        selectedCandidateTargetMargins: requestedTargetMargins,
+      };
       const response = await fetch("/api/calculate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...calculationInput, recommendationMode: true }),
+        body: JSON.stringify(calculationRequest),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "calculation_failed");
       if (requestOrder !== requestOrderRef.current) return;
       const originalResult: CostResult = payload.originalResult ?? payload.result;
-      const activeResult: CostResult = payload.result;
+      if (
+        originalResult.printingMethod !== requestedPrintingMethod
+        || payload.result.printingMethod !== requestedPrintingMethod
+      ) {
+        throw new Error("calculation_basis_mismatch");
+      }
+      // With no candidate selected, even a malformed/mock response must not
+      // replace the customer's digital input basis with an active candidate.
+      const selectedResult: CostResult = originalResult;
       const candidates: PrintCandidate[] = payload.candidates ?? [];
       setRecommendationPanelOpen(true);
       setServerResult({
-        result: activeResult,
+        result: selectedResult,
         originalResult,
         candidates,
         inputJson: requestedInputJson,
@@ -591,7 +750,19 @@ export default function QuotationPage() {
         selectedCandidateId: "",
         originalQuantity: form.quantity,
         originalSkuQuantities: form.skus.map((sku) => sku.quantity),
+        originalInputJson: requestedInputJson,
+        originalRequestNonQuantityJson: requestedNonQuantityJson,
+        originalPrintingMethod: requestedPrintingMethod,
+        originalTargetMargin: requestedTargetMargin,
+        originalTargetMarginMode: requestedTargetMarginMode,
+        calculationRequest,
+        originalCalculationRequest: calculationRequest,
       });
+      setForm((old) => ({
+        ...old,
+        targetMargin: requestedTargetMarginMode === "custom" ? "custom" : requestedTargetMargin,
+        customMargin: requestedTargetMarginMode === "custom" ? requestedTargetMargin : old.customMargin,
+      }));
       setCustomerDraft({
         customerName: form.customerName,
         customerCode: form.customerCode,
@@ -601,7 +772,7 @@ export default function QuotationPage() {
         customerTelephone: form.customerTelephone,
         customerEmail: form.customerEmail,
       });
-      writeChecklistSnapshot(activeResult);
+      writeChecklistSnapshot(selectedResult);
       setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (error) {
       if (requestOrder === requestOrderRef.current) {
@@ -626,7 +797,8 @@ export default function QuotationPage() {
   const selectedRecommendation = serverResult?.selectedCandidateId
     ? serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId) ?? null
     : null;
-  const isInputBasisSelection = serverResult?.selectedCandidateId === INPUT_BASIS_SELECTION_ID;
+  const isInputBasisSelection = !serverResult?.selectedCandidateId
+    || serverResult.selectedCandidateId === INPUT_BASIS_SELECTION_ID;
   const inputBasisPlanQuantity = D(serverResult?.originalResult.film.actualQuantity ?? "0")
     .div(1000).toDecimalPlaces(0, Decimal.ROUND_FLOOR).times(1000);
   const originalResult = serverResult?.originalResult;
@@ -658,7 +830,7 @@ export default function QuotationPage() {
       : "必要長を100m単位に切り上げて発注します。";
 
   useEffect(() => {
-    if (!quotationDraftResult || !customerDraft) return;
+    if (!serverResult || !quotationDraftResult || !customerDraft) return;
     const totalDraftQuantity = selectedRecommendation?.adjustedSkuQuantities.reduce<Decimal>(
       (total, value) => total.plus(D(value)),
       D(0),
@@ -708,7 +880,7 @@ export default function QuotationPage() {
           parameters: effectiveParameters,
           lossRate: parameters.lossRate,
           bulkUnitPrice: form.bulkPrice,
-          webWidthMm: effectiveSize.webWidthMm,
+          webWidthMm: activeMaterialWidthMm(quotationDraftResult, effectiveSize.webWidthMm) ?? effectiveSize.webWidthMm,
           lanes: effectiveSize.lanes,
           pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
           pitchAddMm: effectiveSize.pitchAddMm,
@@ -717,12 +889,20 @@ export default function QuotationPage() {
             ?? Math.max(...form.skus.map((sku) => Number(sku.colorCount) || 0)),
           skus: draftSkus,
           gravureParameters: normalizedGravureParameters,
+          calculationRequest: serverResult.calculationRequest,
         })),
       );
+      sessionStorage.removeItem(SIMULATOR_STALE_STATUS_KEY);
     } catch {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
   }, [customerDraft, effectiveMargin, effectiveSize, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate, quotationDraftResult, selectedRecommendation]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
+
+  useEffect(() => {
+    if (!serverResult || !staleResult) return;
+    sessionStorage.removeItem(QUOTATION_DRAFT_KEY);
+    sessionStorage.setItem(SIMULATOR_STALE_STATUS_KEY, "input-changed");
+  }, [serverResult, staleResult]);
 
   const startCustomerEdit = (customer: CustomerMaster) => {
     setEditingCustomerCode(customer.customerCode);
@@ -1151,7 +1331,9 @@ export default function QuotationPage() {
                   <span className="total-sub">総原価 <strong>{formatCurrency(displayAmount(resultShown.costTotal))}</strong> ／ 参考: フィルム発注 {formatNumber(resultShown.film.orderLengthM)}m で製造可能 {formatNumber(resultShown.film.actualQuantity)} 枚（余剰 ≈ {formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）</span>
                 </p>
                 <p className="help">{resultPrintingMethod === "gravure"
-                  ? `グラビアは、幅${formatNumber(normalizedGravureParameters.smallWidthThresholdMm)}mm以下で必要納品長が5,500mを超える場合は${formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・${formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作に切り替えます。それ以外は5,500m納品・6,000m製作パターンです。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
+                  ? resultShown.sasche
+                    ? `国内調達は幅${formatNumber(resultShown.sasche.matchedWidthMm)}mm ／ ${formatNumber(resultShown.sasche.laneCount)}丁 ／ ${formatNumber(resultShown.sasche.printTierM)}m印刷グレードの固定出荷パターン（出荷長 ${formatNumber(resultShown.film.orderLengthM)}m）を採用しています。必要納品長 ${formatNumber(resultShown.film.requiredLengthM)}m に対する未使用長さは ${formatNumber(resultShown.film.lossM)}m、稼働率は ${formatNumber(D(resultShown.film.requiredLengthM).div(resultShown.film.effectiveLengthM).times(100).toString(), 1)}%です。`
+                    : `グラビアは、幅${formatNumber(normalizedGravureParameters.smallWidthThresholdMm)}mm以下で必要納品長が5,500mを超える場合は${formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・${formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作に切り替えます。それ以外は5,500m納品・6,000m製作パターンです。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
                   : "「単価計算用数量」は発注したフィルムから実際に作れる枚数（ロス控除後・500枚単位）です。フィルム発注を100m単位で切り上げるため、発注枚数より多くなることがあります。"}</p>
                 <div className="cost-breakdown">
                   <details className="cost-block" data-testid="cost-processing">
@@ -1185,15 +1367,12 @@ export default function QuotationPage() {
                       </p>
                     ) : null}
                   </details>
-                  {serverResult && !staleResult && serverResult.selectedCandidateId && !recommendationPanelOpen ? (
+                  {serverResult && !staleResult && !recommendationPanelOpen ? (
                     <div className="recommendation-collapsed" data-testid="selected-candidate-summary">
                       <strong>
                         {isInputBasisSelection
                           ? originalRouteText
-                          : serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.route ?? "選択"} /
-                        {" "}{isInputBasisSelection
-                          ? "入力値"
-                          : serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.sourceLabel}
+                          : candidateRouteText(serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)!)}
                       </strong>
                       <span>
                         {formatNumber(isInputBasisSelection ? serverResult.originalResult.quantity : serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.adjustedQuantity ?? 0, 0)}枚 ／
@@ -1202,7 +1381,9 @@ export default function QuotationPage() {
                       </span>
                       <div className="recommendation-collapsed-actions">
                         <button className="button secondary small" type="button" onClick={() => setRecommendationPanelOpen(true)}>候補一覧</button>
-                        <button className="button secondary small" type="button" onClick={clearCandidate} disabled={pending}>元の数量へ戻る</button>
+                        {serverResult.selectedCandidateId ? (
+                          <button className="button secondary small" type="button" onClick={clearCandidate} disabled={pending}>元の数量へ戻る</button>
+                        ) : null}
                       </div>
                     </div>
                   ) : null}
@@ -1211,6 +1392,7 @@ export default function QuotationPage() {
                       <h3 id="recommendation-title">フィルム調達・製造計画候補</h3>
                       <p className="help">
                         D=デジタル、K=韓国輸入、Y=国内調達。候補または参考計画を選ぶと調達・製造計画のみ切り替わります。左側の顧客発注数は固定され、「元の数量へ戻る」で入力値計算へ復元します。
+                        ランキングはフィルム調達総額と1枚あたりフィルムコストで比較します。銅版・加工・金型は候補選択後の計算に反映され、候補ランキングには含めません。
                       </p>
                       <button className="button secondary small" type="button" onClick={clearCandidate} disabled={pending}>元の数量へ戻る</button>
                       <div className="recommendation-grid">
@@ -1257,7 +1439,7 @@ export default function QuotationPage() {
                             >
                               {selected ? <span className="selection-status card-selection-status">選択中</span> : null}
                               <span className="recommendation-label">
-                                {candidate.route} / {candidate.sourceLabel}
+                                {candidateRouteText(candidate)}
                                 {candidate.recommended ? <em>推奨</em> : null}
                               </span>
                               <span className="selection-tag">{candidate.selectionTag}</span>
@@ -1327,30 +1509,43 @@ export default function QuotationPage() {
                         return (
                           <>
                             {resultPrintingMethod === "gravure" ? (
-                              <>
-                                <p>① 必要納品長は合計 {formatNumber(f.requiredLengthM)}m です。</p>
-                                {resultShown.gravure?.smallWidthTier ? (
-                                  <p>② パウチ幅が小幅閾値以下で、必要納品長が標準5,500mを超えたため、{formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・{formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作パターンを使います。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
-                                ) : (
-                                  <p>② 5,500m発注パターンへ切り上げます。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
-                                )}
-                                <p>③ 製作長 {formatNumber(f.orderLengthM)}m の中にロス {formatNumber(f.lossM)}m が含まれます。</p>
-                                {resultShown.gravure?.smallWidthTier ? (
-                                  <>
-                                    <p>④-1 <strong>製造者販売価格</strong>＝{formatCurrency(smallWidthManufacturerSalePriceYen.toString(), 2)}</p>
-                                    <p>④-2 通関料＝{formatCurrency(displayAmount(f.customs))}</p>
-                                    <p>④-3 海外配送費＝{formatCurrency(displayAmount(f.overseasShipping))}</p>
-                                    <p>④-4 <strong>フィルム代合計</strong>＝{formatCurrency(smallWidthManufacturerSalePriceYen.toString(), 2)}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は別計上します。</p>
-                                  </>
-                                ) : (
-                                  <>
-                                    <p>④ <strong>フィルム代＝製造者販売価格＋通関料＋海外配送費</strong>＝{formatCurrency(displayAmount(D(f.filmTotal).minus(f.customs).minus(f.overseasShipping).toString()))}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は色数×銅版幅×外径で別計上します。</p>
-                                    <p>⑤ 製造マージン＝フィルム製造原価 {formatCurrency(displayAmount((resultShown.gravure?.filmCostYen ?? "0").toString()))} × {formatNumber(Number(normalizedGravureParameters.manufacturerMarginRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}。通関料＝製造マージン込製造者販売価格 {formatCurrency(displayAmount(resultShown.gravure?.customsBaseCostYen ?? "0"))} × {formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.customsCostYen ?? "0"))} です。</p>
-                                  </>
-                                )}
-                                <p>⑦ 海外配送はロスを含めず、納品可能長基準で計算します。ceil(納品可能長 {formatNumber(f.effectiveLengthM)}m ÷ {formatNumber(normalizedGravureParameters.overseasShippingUnitM)}m)×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatNumber(f.shippingTrips)}回×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatCurrency(displayAmount(f.overseasShipping))}。この金額は上記のフィルムm単価に含めて表示します。</p>
-                                <p>⑥ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(resultShown.deliverablePatternLengthM ?? "1").times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
-                              </>
+                              resultShown.sasche ? (
+                                <>
+                                  <p>① 必要納品長は合計 {formatNumber(f.requiredLengthM)}m です。</p>
+                                  <p>
+                                    ② 国内調達は幅{formatNumber(resultShown.sasche.matchedWidthMm)}mm・{formatNumber(resultShown.sasche.laneCount)}丁・{formatNumber(resultShown.sasche.printTierM)}m印刷グレードの固定出荷パターンを採用し、
+                                    今回の出荷長は {formatNumber(f.effectiveLengthM)}m です。
+                                  </p>
+                                  <p>③ 出荷長 {formatNumber(f.effectiveLengthM)}m から必要納品長 {formatNumber(f.requiredLengthM)}m を差し引いた未使用長さは {formatNumber(f.lossM)}m です。</p>
+                                  <p>④ フィルム代＝出荷長 {formatNumber(f.effectiveLengthM)}m × 販売m単価 {formatCurrency(displayAmount(f.unitPrice), 2)}＝{formatCurrency(displayAmount(f.filmTotal))}。この単価には国内サプライヤー調達の販売マージンが含まれ、通関料・海外配送費は加算しません。銅版費は別計上します。</p>
+                                  <p>⑤ 稼働率＝必要納品長 {formatNumber(f.requiredLengthM)}m ÷ 出荷長 {formatNumber(f.effectiveLengthM)}m＝{formatNumber(D(f.requiredLengthM).div(f.effectiveLengthM).times(100).toString(), 1)}%です。</p>
+                                </>
+                              ) : (
+                                <>
+                                  <p>① 必要納品長は合計 {formatNumber(f.requiredLengthM)}m です。</p>
+                                  {resultShown.gravure?.smallWidthTier ? (
+                                    <p>② パウチ幅が小幅閾値以下で、必要納品長が標準5,500mを超えたため、{formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・{formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作パターンを使います。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
+                                  ) : (
+                                    <p>② 5,500m発注パターンへ切り上げます。発注パターン {formatNumber(resultShown.orderPatternCount ?? 1)} 回 → 納品可能 {formatNumber(f.effectiveLengthM)}m / 製作 {formatNumber(f.orderLengthM)}m です。</p>
+                                  )}
+                                  <p>③ 製作長 {formatNumber(f.orderLengthM)}m の中にロス {formatNumber(f.lossM)}m が含まれます。</p>
+                                  {resultShown.gravure?.smallWidthTier ? (
+                                    <>
+                                      <p>④-1 <strong>製造者販売価格</strong>＝{formatCurrency(smallWidthManufacturerSalePriceYen.toString(), 2)}</p>
+                                      <p>④-2 通関料＝{formatCurrency(displayAmount(f.customs))}</p>
+                                      <p>④-3 海外配送費＝{formatCurrency(displayAmount(f.overseasShipping))}</p>
+                                      <p>④-4 <strong>フィルム代合計</strong>＝{formatCurrency(smallWidthManufacturerSalePriceYen.toString(), 2)}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は別計上します。</p>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <p>④ <strong>フィルム代＝製造者販売価格＋通関料＋海外配送費</strong>＝{formatCurrency(displayAmount(D(f.filmTotal).minus(f.customs).minus(f.overseasShipping).toString()))}＋{formatCurrency(displayAmount(f.customs))}＋{formatCurrency(displayAmount(f.overseasShipping))}＝{formatCurrency(displayAmount(f.filmTotal))}。銅版費は色数×銅版幅×外径で別計上します。</p>
+                                      <p>⑤ 製造マージン＝フィルム製造原価 {formatCurrency(displayAmount((resultShown.gravure?.filmCostYen ?? "0").toString()))} × {formatNumber(Number(normalizedGravureParameters.manufacturerMarginRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.manufacturerMarginCostYen ?? "0"))}。通関料＝製造マージン込製造者販売価格 {formatCurrency(displayAmount(resultShown.gravure?.customsBaseCostYen ?? "0"))} × {formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 1)}%＝{formatCurrency(displayAmount(resultShown.gravure?.customsCostYen ?? "0"))} です。</p>
+                                    </>
+                                  )}
+                                  <p>⑦ 海外配送はロスを含めず、納品可能長基準で計算します。ceil(納品可能長 {formatNumber(f.effectiveLengthM)}m ÷ {formatNumber(normalizedGravureParameters.overseasShippingUnitM)}m)×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatNumber(f.shippingTrips)}回×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatCurrency(displayAmount(f.overseasShipping))}。この金額は上記のフィルムm単価に含めて表示します。</p>
+                                  <p>⑥ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(resultShown.deliverablePatternLengthM ?? "1").times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
+                                </>
+                              )
                             ) : (
                               <>
                                 <p>① 必要な生産長さは合計 {formatNumber(f.requiredLengthM)}m です。計算式は「発注枚数 ÷ (1−ロス率) × ピッチ ÷ 生産列数」です。</p>
@@ -1358,12 +1553,8 @@ export default function QuotationPage() {
                                 <p>③ 最低発注ルールを適用します。各SKUは {formatNumber(parameters.digitalFilmMinSkuM)}m 以上、合計は {formatNumber(parameters.digitalFilmMinTotalM)}m 以上のため、発注長さは {formatNumber(f.orderLengthM)}m{Number(f.orderLengthM) > sumRounded ? " になります（最低値を満たすまで切り上げました）" : " です（切り上げ後の長さがそのまま使えます）"}。</p>
                                 <p>④ フィルムのロス {formatNumber(f.lossM)}m を差し引きます。ロスは{f.skuCosts.some((sku) => sku.multiplier === 2) ? "生産検討長さ（発注×2倍）" : "発注長さ"}の {formatNumber(Number(parameters.lossRate) * 100, 3)}% で、最低 {formatNumber(parameters.lossMinM)}m を保証します。差し引いたあとの有効長は {formatNumber(f.effectiveLengthM)}m です。</p>
                                 <p>⑤ 参考として、有効なフィルム長から作れる枚数は {formatNumber(f.actualQuantity)}枚 です。計算は「有効 {formatNumber(f.effectiveLengthM)}m ÷ ピッチ × 列数」で、価格計算は500枚単位の {formatNumber(f.pricingQuantity)}枚 を使います。</p>
-                                <p>⑥ <strong>見積書のフィルム単価は発注枚数基準</strong>です。計算式は「フィルム費用合計 ÷ 発注枚数 {formatNumber(resultShown.quantity)}枚」です。実際に作れる枚数との差（約{formatNumber(String(Math.max(0, Number(f.actualQuantity) - Number(resultShown.quantity))))}枚）は、発注者が負担する余剰生産分です。</p>
                               </>
                             )}
-                            {resultPrintingMethod !== "gravure" && f.skuCosts.some((sku) => sku.multiplier === 2) ? (
-                              <p>⑦ 幅35mmおよびXraラウンドで必要長さが900mを超えたため、幅736mm・2倍生産へ自動的に切り替えました。この場合の生産検討長さは「発注×2倍」、送り単位は200m、価格帯は571〜740mm、ロスは検討長さの10%で計算します。</p>
-                            ) : null}
                           </>
                         );
                       })()}
@@ -1375,14 +1566,22 @@ export default function QuotationPage() {
                       <table className="table breakdown-table">
                         <thead><tr><th scope="col">項目</th><th scope="col">計算</th><th scope="col">金額</th></tr></thead>
                         <tbody>
-                          <tr>
-                            <td>新規銅版</td>
-                            <td>MAX(¥32,000, 色数 × (原反幅+100mm) × ¥{formatNumber(normalizedGravureParameters.newCopperPlateUnitPriceYen)} × 42cm を切り上げ)</td>
-                            <td data-testid="copper-plate-amount">{formatCurrency(displayAmount(resultShown.costComponents.copperPlate), 0)}</td>
-                          </tr>
+	                          <tr>
+	                            <td>新規銅版</td>
+	                            <td>
+	                              {resultShown.sasche
+	                                ? `${formatNumber(resultShown.sasche.colorCount)}色 × ${formatCurrency(displayAmount(resultShown.sasche.plateUnitPriceYen), 0)}（PDF掲載金額に12%適用）`
+	                                : `MAX(¥32,000, 色数 × (原反幅+100mm) × ¥${formatNumber(normalizedGravureParameters.newCopperPlateUnitPriceYen)} × 42cm を切り上げ)`}
+	                            </td>
+	                            <td data-testid="copper-plate-amount">{formatCurrency(displayAmount(resultShown.costComponents.copperPlate), 0)}</td>
+	                          </tr>
                         </tbody>
                       </table>
-                      <p className="chain">常に新規銅版を作成する前提です。計算額が¥32,000未満の場合は¥32,000を適用し、小数は切り上げて整数円にします。版費はロット固定費として全発注数量に配賦します。</p>
+	                      <p className="chain">
+	                        {resultShown.sasche
+	                          ? "国内調達の銅版単価にはPDF掲載金額に12%販売マージンを適用しています。版費はロット固定費として全発注数量に配賦します。"
+	                          : "常に新規銅版を作成する前提です。計算額が¥32,000未満の場合は¥32,000を適用し、小数は切り上げて整数円にします。版費はロット固定費として全発注数量に配賦します。"}
+	                      </p>
                     </details>
                   ) : null}
                   <details className="cost-block" data-testid="cost-bulk">

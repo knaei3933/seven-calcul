@@ -112,4 +112,17 @@ describe("calculate API recommendations", () => {
     expect(shortagePayload.result.quantity).toBe(shortageReference!.adjustedQuantity);
     expect(Number(shortagePayload.result.quantity)).toBeLessThan(133000);
   });
+
+  it("rejects an unknown selected candidate", async () => {
+    const response = await POST(new Request("http://localhost/api/calculate", {
+      method: "POST",
+      body: JSON.stringify({
+        ...recommendationInput,
+        recommendationMode: true,
+        selectedCandidateId: "unknown-candidate",
+      }),
+    }));
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "candidate_not_found" });
+  });
 });

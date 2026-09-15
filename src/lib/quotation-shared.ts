@@ -1,4 +1,5 @@
 export const QUOTATION_RESTORE_KEY = "pouch-quotation-restore-v1";
+export const SIMULATOR_STALE_STATUS_KEY = "pouch-simulator-stale-status-v1";
 export const DEFAULT_FILM_COMPOSITION = "PET12+AL7+PET12+LLDPE50μ";
 
 export type QuotationStatus = "draft" | "sent" | "approved" | "rejected" | "expired";

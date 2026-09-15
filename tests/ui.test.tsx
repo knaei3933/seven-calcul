@@ -6,6 +6,7 @@ import QuotationPage from "@/app/page";
 import { calculatePouchCost } from "@/lib/calculation";
 import { defaultParameters } from "@/lib/constants";
 import { defaultGravureRollParameters } from "@/lib/gravure-roll";
+import { QUOTATION_DRAFT_KEY } from "@/lib/quotation-draft";
 import type { PouchSpec } from "@/lib/types";
 
 describe("quotation UI", () => {
@@ -146,17 +147,37 @@ describe("quotation UI", () => {
     render(<QuotationPage />);
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
     expect(screen.getByTestId("calculate-desktop")).toBeEnabled();
-    const result = calculatePouchCost({
+    const input = {
       spec: {
         sizeKey: "round-50x60", customWidthMm: "50", customLengthMm: "60", fillMlPerChamber: "3", connectedChambers: 1,
         fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0",
         skuCount: 1,
-      },
-      quantity: "10000", printingMethod: "gravure",
+      } as PouchSpec,
+      quantity: "10000", printingMethod: "digital" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+    };
+    const originalCalculation = calculatePouchCost({ ...input, recommendationMode: true });
+    const candidate = originalCalculation.recommendationCandidates!.find((item) => item.printingMethod === "gravure")!;
+    const selectedCalculation = calculatePouchCost({
+      ...input,
+      recommendationMode: true,
+      selectedCandidateId: candidate.id,
+      selectedCandidateTargetMargins: ["0.2", "0.25", "0.3"],
     });
-    global.fetch = vi.fn(async () => new Response(JSON.stringify({ result }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const result = body.selectedCandidateId ? selectedCalculation : originalCalculation;
+      return new Response(JSON.stringify({
+        result,
+        originalResult: originalCalculation,
+        candidates: originalCalculation.recommendationCandidates ?? [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+    expect(screen.getByTestId("input-summary")).toHaveTextContent("デジタル印刷");
+    await user.click(screen.getByRole("button", { name: /Y \/ 国内調達/ }));
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
     expect(screen.getAllByTestId("gravure-parameters").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("cost-copper").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("cost-film").some((node) => node.textContent?.includes("製造者販売価格"))).toBe(true);
@@ -184,16 +205,27 @@ describe("quotation UI", () => {
         sizeKey: "tube-35x80", fillMlPerChamber: "3", connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4,
         isCustom: false, colorCount: 2, bulkUnitPrice: "0", skuCount: 1,
       } as PouchSpec,
-      quantity: "133000", printingMethod: "gravure" as const,
+      quantity: "133000", printingMethod: "digital" as const,
       parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
     };
-    const originalCalculation = calculatePouchCost({ ...input, recommendationMode: true });
-    const candidate = originalCalculation.recommendationCandidates![0];
-    const selectedCalculation = calculatePouchCost({
+    const targetMargins = ["0.3", "0.35", "0.4"];
+    const originalRequest = {
       ...input,
+      targetMargins,
+      recommendationMode: true,
+      selectedCandidateId: "",
+      selectedCandidateTargetMargins: targetMargins,
+    };
+    const originalCalculation = calculatePouchCost(originalRequest);
+    const candidate = originalCalculation.recommendationCandidates![0];
+    const selectedRequest = {
+      ...input,
+      targetMargins,
       recommendationMode: true,
       selectedCandidateId: candidate.id,
-    });
+      selectedCandidateTargetMargins: targetMargins,
+    };
+    const selectedCalculation = calculatePouchCost(selectedRequest);
     global.fetch = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body));
         const result = body.selectedCandidateId ? selectedCalculation : originalCalculation;
@@ -208,6 +240,7 @@ describe("quotation UI", () => {
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
     expect(screen.getByText("フィルム調達・製造計画候補")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Y \/ 国内調達（グラビア印刷）/ })).toBeInTheDocument();
     expect(screen.getByText(/パウチ 50×60mm ／ 1連 ／ 4列/)).toBeInTheDocument();
     expect(screen.getByTestId("selection-status")).toHaveTextContent("選択中");
     expect(within(screen.getByTestId("input-basis-card")).getByText(/原反 /)).toBeInTheDocument();
@@ -217,8 +250,24 @@ describe("quotation UI", () => {
     expect(screen.getByText(/必要長を100m単位|合計最低発注|SKU最低300m/)).toBeInTheDocument();
     expect(screen.getAllByText(/余剰 /).length).toBeGreaterThan(0);
 
+    await user.click(screen.getByTestId("input-basis-card"));
+    await waitFor(() => expect(screen.queryByText("フィルム調達・製造計画候補")).not.toBeInTheDocument());
+    expect(screen.getByTestId("selected-candidate-summary")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "候補一覧" }));
+    await waitFor(() => expect(screen.getByText("フィルム調達・製造計画候補")).toBeInTheDocument());
+
     await user.click(screen.getByText("推奨"));
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
+    await user.click(screen.getByTestId("cost-film").querySelector("summary")!);
+    const filmChain = screen.getByTestId("film-loss-chain");
+    expect(filmChain).toHaveTextContent("国内調達は幅");
+    expect(filmChain).toHaveTextContent("の固定出荷パターンを採用し");
+    expect(filmChain).toHaveTextContent("未使用長さ");
+    expect(filmChain).not.toHaveTextContent("輸入パターンを使いません");
+    expect(filmChain).not.toHaveTextContent("K / 韓国輸入の");
+    expect(filmChain).not.toHaveTextContent("5,500m発注パターンへ切り上げます");
+    expect(filmChain).not.toHaveTextContent("製造マージン＝");
+    expect(filmChain).not.toHaveTextContent("海外配送はロスを含めず");
     await waitFor(() => expect(screen.getByTestId("selected-candidate-summary")).toBeInTheDocument());
     expect(screen.getByTestId("selection-status")).toHaveTextContent("選択中");
     expect(screen.queryByText("発注数量・パターン候補")).not.toBeInTheDocument();
@@ -229,6 +278,325 @@ describe("quotation UI", () => {
     expect(screen.getByLabelText("発注数量 (枚)")).toHaveValue("10000");
     expect(screen.getByLabelText("利益率 30%")).toBeChecked();
     expect(screen.queryByLabelText("利益率 40%")).not.toBeInTheDocument();
+  });
+
+  it("restores the original printing method and target margin when returning from a candidate", async () => {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+    const input = {
+      spec: {
+        sizeKey: "tube-50x90", fillMlPerChamber: "3", connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4,
+        isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+      } as PouchSpec,
+      quantity: "50000", printingMethod: "digital" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+    };
+    const originalCalculation = calculatePouchCost({
+      ...input,
+      targetMargins: ["0.4", "0.35", "0.3"],
+      recommendationMode: true,
+    });
+    const gravureCandidate = originalCalculation.recommendationCandidates!.find((candidate) => candidate.route === "Y")!;
+    expect(gravureCandidate).toBeTruthy();
+    const fetchMock = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const result = body.selectedCandidateId
+        ? calculatePouchCost({
+          ...input,
+          printingMethod: body.printingMethod,
+          targetMargins: body.targetMargins,
+          recommendationMode: true,
+          selectedCandidateId: body.selectedCandidateId,
+        })
+        : originalCalculation;
+      return new Response(JSON.stringify({
+        result,
+        originalResult: originalCalculation,
+        candidates: originalCalculation.recommendationCandidates ?? [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    global.fetch = fetchMock;
+
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+	    await user.click(screen.getByRole("button", { name: /Y \/ 国内調達/ }));
+	    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
+	    expect(screen.getByLabelText("利益率 30%")).toBeChecked();
+	    await user.click(screen.getByTestId("cost-copper").querySelector("summary")!);
+	    expect(screen.getByTestId("copper-plate-amount")).toHaveTextContent("￥120,960");
+	    expect(screen.getByTestId("cost-copper")).toHaveTextContent("4色 × ￥30,240（PDF掲載金額に12%適用）");
+	    expect(screen.getByTestId("cost-copper")).toHaveTextContent("PDF掲載金額に12%販売マージンを適用");
+
+	    await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "候補一覧" }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]).toBeEnabled());
+    await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
+    expect(screen.getByLabelText("利益率 40%")).toBeChecked();
+    expect(screen.getByLabelText("利益率 30%")).not.toBeChecked();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "候補一覧" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Y \/ 国内調達/ })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: /Y \/ 国内調達/ }));
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
+    expect(screen.getByLabelText("利益率 30%")).toBeChecked();
+
+    await waitFor(() => expect(screen.getByTestId("calculate-desktop")).toBeEnabled());
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.queryByTestId("active-candidate-note")).not.toBeInTheDocument());
+    expect(screen.getByTestId("input-summary")).toHaveTextContent("デジタル印刷");
+    expect(within(screen.getByTestId("input-basis-card")).getByText("選択中")).toBeInTheDocument();
+    expect(screen.getByLabelText("利益率 40%")).toBeChecked();
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3);
+    const recalculationBasis = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
+    expect(recalculationBasis.printingMethod).toBe("digital");
+    expect(recalculationBasis.selectedCandidateId).toBe("");
+
+    await user.click(screen.getAllByRole("button", { name: "元の数量へ戻る" })[0]);
+    await waitFor(() => expect(screen.getByTestId("input-summary")).toHaveTextContent("デジタル印刷"));
+    expect(screen.getByLabelText("利益率 40%")).toBeChecked();
+    expect(screen.getByLabelText("利益率 30%")).not.toBeChecked();
+  });
+
+  it("preserves a custom original margin across same-method candidate switches", async () => {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+    await user.click(screen.getByLabelText("利益率 カスタム"));
+    const customMargin = screen.getByLabelText("カスタム利益率 (%)");
+    await user.clear(customMargin);
+    await user.type(customMargin, "42");
+
+    const input = {
+      spec: {
+        sizeKey: "tube-50x90", fillMlPerChamber: "3", connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4,
+        isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+      } as PouchSpec,
+      quantity: "50000", printingMethod: "digital" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+    };
+    const originalTargetMargins = ["0.3", "0.35", "0.4", "0.42"];
+    const originalCalculation = calculatePouchCost({
+      ...input,
+      targetMargins: originalTargetMargins,
+      recommendationMode: true,
+    });
+    const fetchMock = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const result = body.selectedCandidateId
+        ? calculatePouchCost({
+          ...input,
+          printingMethod: body.printingMethod,
+          targetMargins: body.targetMargins,
+          recommendationMode: true,
+          selectedCandidateId: body.selectedCandidateId,
+        })
+        : originalCalculation;
+      return new Response(JSON.stringify({
+        result,
+        originalResult: originalCalculation,
+        candidates: originalCalculation.recommendationCandidates ?? [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    global.fetch = fetchMock;
+
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+    await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
+    expect(screen.getByLabelText("利益率 カスタム")).toBeChecked();
+    expect(screen.getByLabelText("カスタム利益率 (%)")).toHaveValue("42");
+    const sameMethodCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    const sameMethodBody = JSON.parse(String(sameMethodCall[1]?.body));
+    expect(sameMethodBody.printingMethod).toBe("digital");
+    expect(sameMethodBody.targetMargins).toEqual(originalTargetMargins);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "候補一覧" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Y \/ 国内調達/ })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: /Y \/ 国内調達/ }));
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
+    expect(screen.getByLabelText("利益率 30%")).toBeChecked();
+    expect(screen.getByLabelText("利益率 カスタム")).not.toBeChecked();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "候補一覧" }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]).toBeEnabled());
+    await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
+    expect(screen.getByLabelText("利益率 カスタム")).toBeChecked();
+    expect(screen.getByLabelText("カスタム利益率 (%)")).toHaveValue("42");
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /元の数量へ戻る/ })[0]).toBeEnabled());
+    await user.click(screen.getAllByRole("button", { name: /元の数量へ戻る/ })[0]);
+    await waitFor(() => expect(screen.getByTestId("input-summary")).toHaveTextContent("デジタル印刷"));
+    expect(screen.getByLabelText("利益率 カスタム")).toBeChecked();
+    expect(screen.getByLabelText("カスタム利益率 (%)")).toHaveValue("42");
+  });
+
+  it("rejects a legacy selected candidate state without an original margin mode", async () => {
+    const input = {
+      spec: {
+        sizeKey: "tube-35x80", fillMlPerChamber: "3", connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4,
+        isCustom: false, colorCount: 2, bulkUnitPrice: "0", skuCount: 1,
+      } as PouchSpec,
+      quantity: "133000", printingMethod: "gravure" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+    };
+    const originalRequest = {
+      ...input,
+      targetMargins: ["0.2", "0.25", "0.3"],
+      recommendationMode: true,
+      selectedCandidateId: "",
+      selectedCandidateTargetMargins: ["0.2", "0.25", "0.3"],
+    };
+    const originalCalculation = calculatePouchCost(originalRequest);
+    const candidate = originalCalculation.recommendationCandidates![0];
+    const selectedRequest = {
+      ...input,
+      targetMargins: ["0.2", "0.25", "0.3"],
+      recommendationMode: true,
+      selectedCandidateId: candidate.id,
+      selectedCandidateTargetMargins: ["0.2", "0.25", "0.3"],
+    };
+    const selectedCalculation = calculatePouchCost(selectedRequest);
+    const inputJson = JSON.stringify({ printingMethod: "gravure" });
+    sessionStorage.setItem(QUOTATION_DRAFT_KEY, JSON.stringify({ stale: true }));
+    sessionStorage.setItem("pouch-simulator-state-v1", JSON.stringify({
+      version: 1,
+      form: {
+        quantity: input.quantity,
+        printingMethod: selectedCalculation.printingMethod,
+        targetMargin: "0.3",
+      },
+      serverResult: {
+        result: selectedCalculation,
+        originalResult: originalCalculation,
+        candidates: originalCalculation.recommendationCandidates ?? [],
+        inputJson,
+        requestNonQuantityJson: inputJson,
+        selectedCandidateId: candidate.id,
+        originalQuantity: input.quantity,
+        originalSkuQuantities: [input.quantity],
+        originalInputJson: inputJson,
+        originalRequestNonQuantityJson: inputJson,
+        originalPrintingMethod: input.printingMethod,
+        originalTargetMargin: "0.3",
+        calculationRequest: selectedRequest,
+        originalCalculationRequest: originalRequest,
+      },
+      calculatedAt: "09:00:00",
+    }));
+
+    render(<QuotationPage />);
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "not_calculated"));
+    expect(screen.getByTestId("server-result")).toHaveTextContent("サーバー再計算待ち");
+    expect(sessionStorage.getItem(QUOTATION_DRAFT_KEY)).toBeNull();
+    expect(sessionStorage.getItem("pouch-simulator-stale-status-v1")).toBe("legacy-selected-state");
+    await waitFor(() => {
+      const savedState = JSON.parse(sessionStorage.getItem("pouch-simulator-state-v1")!);
+      expect(savedState.serverResult).toBeNull();
+    });
+  });
+
+  it("rejects a saved calculation without a valid calculation request", async () => {
+    const input = {
+      spec: {
+        sizeKey: "round-50x60", fillMlPerChamber: "3", connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4,
+        isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+      } as PouchSpec,
+      quantity: "10000", printingMethod: "digital" as const,
+    };
+    const result = calculatePouchCost(input);
+    sessionStorage.setItem(QUOTATION_DRAFT_KEY, JSON.stringify({ stale: true }));
+    sessionStorage.setItem("pouch-simulator-state-v1", JSON.stringify({
+      version: 1,
+      form: { quantity: input.quantity, printingMethod: "digital" },
+      serverResult: {
+        result,
+        originalResult: result,
+        candidates: [],
+        inputJson: JSON.stringify({ printingMethod: "digital" }),
+        selectedCandidateId: "",
+      },
+      calculatedAt: "09:00:00",
+    }));
+
+    render(<QuotationPage />);
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "not_calculated"));
+    expect(sessionStorage.getItem(QUOTATION_DRAFT_KEY)).toBeNull();
+    expect(sessionStorage.getItem("pouch-simulator-stale-status-v1")).toBe("calculation-provenance-invalid");
+    await waitFor(() => {
+      const savedState = JSON.parse(sessionStorage.getItem("pouch-simulator-state-v1")!);
+      expect(savedState.serverResult).toBeNull();
+    });
+  });
+
+  it("clears stale quotation status for a fresh candidate and marks changed inputs stale", async () => {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+    const input = {
+      spec: {
+        sizeKey: "tube-50x90", fillMlPerChamber: "3", connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4,
+        isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+      } as PouchSpec,
+      quantity: "50000", printingMethod: "digital" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+    };
+    const targetMargins = ["0.3", "0.35", "0.4"];
+    const originalCalculation = calculatePouchCost({
+      ...input,
+      targetMargins,
+      recommendationMode: true,
+    });
+    const candidate = originalCalculation.recommendationCandidates!.find((item) => item.route === "Y")!;
+    expect(candidate).toBeTruthy();
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const result = body.selectedCandidateId
+        ? calculatePouchCost({
+          ...input,
+          targetMargins: body.targetMargins,
+          recommendationMode: true,
+          selectedCandidateId: body.selectedCandidateId,
+          selectedCandidateTargetMargins: body.selectedCandidateTargetMargins,
+        })
+        : originalCalculation;
+      return new Response(JSON.stringify({
+        result,
+        originalResult: originalCalculation,
+        candidates: originalCalculation.recommendationCandidates ?? [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+    sessionStorage.setItem("pouch-simulator-stale-status-v1", "input-changed");
+    sessionStorage.removeItem(QUOTATION_DRAFT_KEY);
+
+    await user.click(screen.getByRole("button", { name: /Y \/ 国内調達/ }));
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
+    await waitFor(() => {
+      expect(sessionStorage.getItem(QUOTATION_DRAFT_KEY)).not.toBeNull();
+      expect(sessionStorage.getItem("pouch-simulator-stale-status-v1")).toBeNull();
+    });
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /元の数量へ戻る/ })[0]).toBeEnabled());
+    await user.click(screen.getAllByRole("button", { name: /元の数量へ戻る/ })[0]);
+    await waitFor(() => expect(screen.getByTestId("input-summary")).toHaveTextContent("デジタル印刷"));
+    await waitFor(() => {
+      const draft = JSON.parse(sessionStorage.getItem(QUOTATION_DRAFT_KEY)!);
+      expect(draft.resultHash).toBe(originalCalculation.audit.resultJsonSha256);
+      expect(draft.calculationRequest.selectedCandidateId).toBe("");
+      expect(draft.calculationRequest.targetMargins).toEqual(targetMargins);
+    });
+
+    fireEvent.change(screen.getByLabelText("発注数量 (枚)"), { target: { value: "50001" } });
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "stale"));
+    await waitFor(() => {
+      expect(sessionStorage.getItem(QUOTATION_DRAFT_KEY)).toBeNull();
+      expect(sessionStorage.getItem("pouch-simulator-stale-status-v1")).toBe("input-changed");
+    });
   });
 
   it("supports per-SKU pouch quantities and blocks when the sum differs from the order quantity", async () => {
