@@ -99,9 +99,17 @@ describe("quotation UI", () => {
     await user.clear(screen.getByLabelText("発注数量 (枚)"));
     await user.type(screen.getByLabelText("発注数量 (枚)"), "20000");
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "stale");
-    expect(screen.getByTestId("server-result")).toHaveTextContent("再計算が必要");
-  });
+	    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "stale");
+	    expect(screen.getByTestId("server-result")).toHaveTextContent("再計算が必要");
+	    expect(screen.getByTestId("stale-input-warning")).toHaveTextContent("入力内容が変わりました");
+	    expect(screen.getByTestId("stale-input-warning")).toHaveTextContent("今すぐ再計算");
+	    expect(screen.getByTestId("calculate-desktop")).toHaveTextContent("入力が変わりました。再計算する");
+
+	    await user.click(screen.getByTestId("stale-recalc-button"));
+	    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+	    expect(screen.queryByTestId("stale-input-warning")).not.toBeInTheDocument();
+	    expect(screen.getByTestId("calculate-desktop")).toHaveTextContent("サーバーで再計算する");
+	  });
 
   it("keeps only the latest server calculation when responses arrive out of order", async () => {
     const user = userEvent.setup();

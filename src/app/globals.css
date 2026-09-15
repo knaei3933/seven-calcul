@@ -76,6 +76,44 @@ a { color: var(--primary); }
 .total { font-size: 28px; font-weight: 800; margin: 4px 0 12px; }
 .total-sub { display: block; font-size: 13px; font-weight: 700; margin-top: 4px; }
 .total-label { font-size: 13px; font-weight: 800; color: var(--ink); margin: 6px 0 0; }
+.stale-recalc-banner {
+  position: sticky;
+  top: calc(var(--global-header-height) + 10px);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 2px solid #ea580c;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 11px 12px;
+  margin: 0 0 10px;
+  box-shadow: 0 8px 22px rgb(234 88 12 / .14);
+}
+.stale-recalc-banner strong {
+  display: block;
+  font-size: 14px;
+}
+.stale-recalc-banner p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.stale-recalc-banner .button {
+  flex: 0 0 auto;
+  min-height: 46px;
+}
+.button.needs-recalc {
+  background: #ea580c;
+  animation: recalc-pulse 1.4s ease-in-out infinite;
+}
+@keyframes recalc-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(234 88 12 / .35); }
+  55% { box-shadow: 0 0 0 7px rgb(234 88 12 / 0); }
+}
+.unit-cost-grid {
 .unit-cost-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

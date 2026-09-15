@@ -1528,8 +1528,24 @@ export default function QuotationPage() {
             </details>
           </section>
           <section className="panel" aria-labelledby="result-title">
-            <p className="input-summary" data-testid="input-summary">{`${form.widthMm}×${form.lengthMm} / ${form.connected}連 / ${formatNumber(form.quantity)}枚 / ${resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"} / SKU ${form.skuCount}件（${form.skus.map((sku, index) => `${skuDisplayName(index)} ${formatNumber(sku.quantity)}枚`).join("＋")}）`}</p>
-            <div className="result-header" data-testid="server-result" data-state={staleResult ? "stale" : pending ? "calculating" : serverResult ? "calculated" : "not_calculated"}>
+	            <p className="input-summary" data-testid="input-summary">{`${form.widthMm}×${form.lengthMm} / ${form.connected}連 / ${formatNumber(form.quantity)}枚 / ${resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"} / SKU ${form.skuCount}件（${form.skus.map((sku, index) => `${skuDisplayName(index)} ${formatNumber(sku.quantity)}枚`).join("＋")}）`}</p>
+	            {serverResult && staleResult ? (
+	              <div className="stale-recalc-banner" role="alert" data-testid="stale-input-warning">
+	                <div>
+	                  <strong>入力内容が変わりました。</strong>
+	                  <p>古い候補・原価・見積りは使えません。今すぐ再計算して結果を更新してください。</p>
+	                </div>
+	                <button
+	                  className="button needs-recalc"
+	                  type="submit"
+	                  data-testid="stale-recalc-button"
+	                  disabled={blocker || pending}
+	                >
+	                  {pending ? "計算中..." : "今すぐ再計算"}
+	                </button>
+	              </div>
+	            ) : null}
+	            <div className="result-header" data-testid="server-result" data-state={staleResult ? "stale" : pending ? "calculating" : serverResult ? "calculated" : "not_calculated"}>
 	              <h2 id="result-title">原価・利益試算</h2>
 	              <span className="result-status">
 	                <span>{pending ? "計算中" : staleResult ? "再計算が必要" : serverResult ? `サーバー計算済み ${calculatedAt ?? ""}` : "サーバー再計算待ち"}</span>
@@ -2038,7 +2054,15 @@ export default function QuotationPage() {
               </div>
             </div>
             <div className="primary-action-stack">
-              <button className="button" type="submit" data-testid="calculate-desktop" disabled={blocker || pending}>{pending ? "計算中..." : "サーバーで再計算する"}</button>
+	              <button
+	                className={`button${staleResult ? " needs-recalc" : ""}`}
+	                type="submit"
+	                data-testid="calculate-desktop"
+	                data-state={staleResult ? "needs-recalc" : "current"}
+	                disabled={blocker || pending}
+	              >
+	                {pending ? "計算中..." : staleResult ? "入力が変わりました。再計算する" : "サーバーで再計算する"}
+	              </button>
               {resultShown ? (
                 <Link className="button secondary" href="/checklists/current" data-testid="current-checklist-link">
                   計算確認チェックリスト（保存前）
@@ -2048,7 +2072,14 @@ export default function QuotationPage() {
             <div className="action-note"><strong>サーバー計算済み</strong>は参照計算を意味し、見積確定ではありません。</div>
           </section>
           <div className="mobile-actions" data-testid="mobile-actions">
-            <button className="button" type="submit" disabled={blocker || pending}>{pending ? "計算中..." : "サーバーで再計算する"}</button>
+	            <button
+	              className={`button${staleResult ? " needs-recalc" : ""}`}
+	              type="submit"
+	              data-state={staleResult ? "needs-recalc" : "current"}
+	              disabled={blocker || pending}
+	            >
+	              {pending ? "計算中..." : staleResult ? "入力が変わりました。再計算する" : "サーバーで再計算する"}
+	            </button>
             {resultShown ? (
               <Link className="button secondary" href="/checklists/current" data-testid="current-checklist-link-mobile">
                 計算確認チェックリスト（保存前）
