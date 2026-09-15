@@ -308,7 +308,10 @@ describe("quotation UI", () => {
     expect(screen.getByText("フィルム調達・製造計画候補")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Y \/ 国内調達（グラビア印刷）/ })).toBeInTheDocument();
     expect(screen.getByText(/パウチ 50×60mm ／ 1連 ／ 4列/)).toBeInTheDocument();
-    expect(screen.getByTestId("selection-status")).toHaveTextContent("選択中");
+    expect(screen.queryByTestId("selection-status")).not.toBeInTheDocument();
+    expect(screen.getByTestId("unit-cost-summary")).toHaveTextContent("総単価（初期費用込）");
+    expect(screen.getByTestId("unit-cost-summary")).toHaveTextContent("パウチ単価（変動費）");
+    expect(screen.getByTestId("unit-cost-summary")).toHaveTextContent("初期費用単価");
     expect(within(screen.getByTestId("input-basis-card")).getByText(/原反 /)).toBeInTheDocument();
     expect(within(screen.getByTestId("input-basis-card")).getByText("選択中")).toBeInTheDocument();
     expect(screen.getByText(/4色/)).toBeInTheDocument();
@@ -335,7 +338,7 @@ describe("quotation UI", () => {
     expect(filmChain).not.toHaveTextContent("製造マージン＝");
     expect(filmChain).not.toHaveTextContent("海外配送はロスを含めず");
     await waitFor(() => expect(screen.getByTestId("selected-candidate-summary")).toBeInTheDocument());
-    expect(screen.getByTestId("selection-status")).toHaveTextContent("選択中");
+    expect(screen.queryByTestId("selection-status")).not.toBeInTheDocument();
     expect(screen.queryByText("発注数量・パターン候補")).not.toBeInTheDocument();
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
     expect(screen.queryByTestId("quantity-policy")).not.toBeInTheDocument();

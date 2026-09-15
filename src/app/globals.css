@@ -76,6 +76,96 @@ a { color: var(--primary); }
 .total { font-size: 28px; font-weight: 800; margin: 4px 0 12px; }
 .total-sub { display: block; font-size: 13px; font-weight: 700; margin-top: 4px; }
 .total-label { font-size: 13px; font-weight: 800; color: var(--ink); margin: 6px 0 0; }
+.unit-cost-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: -6px 0 12px;
+}
+.unit-cost-grid > div {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  padding: 9px;
+  min-width: 0;
+}
+.unit-cost-grid span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.unit-cost-grid strong {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  white-space: nowrap;
+}
+.hover-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 240px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  cursor: help;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 5px 9px;
+  margin: 0 0 8px;
+}
+.hover-info-trigger {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hover-info-trigger::after {
+  content: "?";
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: white;
+  font-size: 9px;
+}
+.hover-info-tooltip {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 30;
+  width: min(460px, max(280px, 70vw));
+  border: 1px solid #bfdbfe;
+  border-radius: 9px;
+  background: #f8fbff;
+  color: #1f2937;
+  box-shadow: 0 8px 24px rgb(15 23 42 / .14);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.55;
+  padding: 9px 10px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition: opacity .12s ease, transform .12s ease, visibility .12s;
+}
+.hover-info:hover .hover-info-tooltip,
+.hover-info:focus .hover-info-tooltip,
+.hover-info:focus-within .hover-info-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.hover-info:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
 .effective-speed { font-size: 20px; font-weight: 800; margin: 2px 0; }
 .cost-breakdown { display: grid; gap: 12px; margin: 12px 0; }
 .cost-block { border: 1px solid var(--line); border-radius: 10px; background: #f8fafd; padding: 10px 12px; }

@@ -218,6 +218,31 @@ function targetMarginsForPrintingMethod(printingMethod: PrintingMethod, effectiv
     .sort((a, b) => Number(a) - Number(b));
 }
 
+type HoverInfoProps = {
+  label: string;
+  testId?: string;
+  children: React.ReactNode;
+};
+
+function HoverInfo({ label, testId, children }: HoverInfoProps) {
+  const descriptionId = `hover-info-${label.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase()}`;
+  return (
+    <span
+      className="hover-info"
+      tabIndex={0}
+      role="note"
+      aria-label={label}
+      aria-describedby={descriptionId}
+      data-testid={testId}
+    >
+      <span className="hover-info-trigger" aria-hidden="true">{label}</span>
+      <span className="hover-info-tooltip" id={descriptionId} role="tooltip">
+        {children}
+      </span>
+    </span>
+  );
+}
+
 const parameterGroups = [
   {
     title: "加工・固定費",
@@ -951,6 +976,18 @@ export default function QuotationPage() {
 
   // 조건変更後は自動試算を見せず、必ずサーバー再計算結果へ切り替える。
   const resultShown: CostResult | null = staleResult ? null : serverResult?.result ?? null;
+  const initialUnitCostPerPiece = resultShown
+    ? D(resultShown.costPerPieceComponents.fixedLot)
+      .plus(resultShown.costPerPieceComponents.custom)
+      .plus(resultShown.costPerPieceComponents.copperPlate)
+      .toString()
+    : "0";
+  const pouchUnitCostPerPiece = resultShown
+    ? D(resultShown.costPerPieceComponents.film)
+      .plus(resultShown.costPerPieceComponents.bulk)
+      .plus(resultShown.costPerPieceComponents.variableProcessing)
+      .toString()
+    : "0";
   const resultPrintingMethod: PrintingMethod = resultShown?.printingMethod ?? form.printingMethod;
   const hasCurrentRecommendationCandidates = !staleResult && (serverResult?.candidates.length ?? 0) > 0;
   const showPrintingMethodSelector = !hasCurrentRecommendationCandidates;
@@ -1485,11 +1522,10 @@ export default function QuotationPage() {
           <section className="panel" aria-labelledby="result-title">
             <p className="input-summary" data-testid="input-summary">{`${form.widthMm}×${form.lengthMm} / ${form.connected}連 / ${formatNumber(form.quantity)}枚 / ${resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"} / SKU ${form.skuCount}件（${form.skus.map((sku, index) => `${skuDisplayName(index)} ${formatNumber(sku.quantity)}枚`).join("＋")}）`}</p>
             <div className="result-header" data-testid="server-result" data-state={staleResult ? "stale" : pending ? "calculating" : serverResult ? "calculated" : "not_calculated"}>
-              <h2 id="result-title">原価・利益試算</h2>
-              <span className="result-status">
-                {serverResult ? <span className="selection-status" data-testid="selection-status">選択中</span> : null}
-                <span>{pending ? "計算中" : staleResult ? "再計算が必要" : serverResult ? `サーバー計算済み ${calculatedAt ?? ""}` : "サーバー再計算待ち"}</span>
-              </span>
+	              <h2 id="result-title">原価・利益試算</h2>
+	              <span className="result-status">
+	                <span>{pending ? "計算中" : staleResult ? "再計算が必要" : serverResult ? `サーバー計算済み ${calculatedAt ?? ""}` : "サーバー再計算待ち"}</span>
+	              </span>
             </div>
             {calculationError ? (
               <p className="error" role="alert" data-testid="calculation-error">
@@ -1503,21 +1539,42 @@ export default function QuotationPage() {
                     ? <>顧客発注 {formatNumber(serverResult.originalResult.quantity)} 枚 ／ 製造計画 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>
                     : <>発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>}
                 </p>
-                {serverResult?.selectedCandidateId ? (
-                  <p className="help" data-testid="active-candidate-note">
-                    選択候補（{resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}）基準で表示しています。
-                    左側の顧客発注 {formatNumber(serverResult.originalResult.quantity)} 枚は固定です。右側の原価・総原価は選択候補の製造計画 {formatNumber(resultShown.quantity)} 枚で試算しています。
-                  </p>
-                ) : null}
-                <p className="total">
-                  {formatCurrency(displayAmount(resultShown.totalCostPerPiece))}<span className="help"> / 枚</span>
-                  <span className="total-sub">総原価 <strong>{formatCurrency(displayAmount(resultShown.costTotal))}</strong> ／ 参考: フィルム発注 {formatNumber(resultShown.film.orderLengthM)}m で製造可能 {formatNumber(resultShown.film.actualQuantity)} 枚（余剰 ≈ {formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）</span>
-                </p>
-                <p className="help">{resultPrintingMethod === "gravure"
-                  ? resultShown.sasche
-                    ? `国内調達は幅${formatNumber(resultShown.sasche.matchedWidthMm)}mm ／ ${formatNumber(resultShown.sasche.laneCount)}丁 ／ ${formatNumber(resultShown.sasche.printTierM)}m印刷グレードの固定出荷パターン（出荷長 ${formatNumber(resultShown.film.orderLengthM)}m）を採用しています。必要納品長 ${formatNumber(resultShown.film.requiredLengthM)}m に対する未使用長さは ${formatNumber(resultShown.film.lossM)}m、稼働率は ${formatNumber(D(resultShown.film.requiredLengthM).div(resultShown.film.effectiveLengthM).times(100).toString(), 1)}%です。`
-                    : `グラビアは、幅${formatNumber(normalizedGravureParameters.smallWidthThresholdMm)}mm以下で必要納品長が5,500mを超える場合は${formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・${formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作に切り替えます。それ以外は5,500m納品・6,000m製作パターンです。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
-                  : "「単価計算用数量」は発注したフィルムから実際に作れる枚数（ロス控除後・500枚単位）です。フィルム発注を100m単位で切り上げるため、発注枚数より多くなることがあります。"}</p>
+	                {serverResult?.selectedCandidateId ? (
+	                  <HoverInfo
+	                    label="選択候補"
+	                    testId="active-candidate-note"
+	                  >
+	                    選択候補（{resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}）基準で表示しています。左側の顧客発注 {formatNumber(serverResult.originalResult.quantity)} 枚は固定です。右側の原価・総原価は選択候補の製造計画 {formatNumber(resultShown.quantity)} 枚で試算しています。
+	                  </HoverInfo>
+	                ) : null}
+	                <p className="total">
+	                  {formatCurrency(displayAmount(resultShown.totalCostPerPiece))}<span className="help"> / 枚</span>
+	                  <span className="total-sub">総原価 <strong>{formatCurrency(displayAmount(resultShown.costTotal))}</strong> ／ 参考: フィルム発注 {formatNumber(resultShown.film.orderLengthM)}m で製造可能 {formatNumber(resultShown.film.actualQuantity)} 枚（余剰 ≈ {formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）</span>
+	                </p>
+	                <div className="unit-cost-grid" data-testid="unit-cost-summary">
+	                  <div>
+	                    <span>総単価（初期費用込）</span>
+	                    <strong>{formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</strong>
+	                  </div>
+	                  <div>
+	                    <span>パウチ単価（変動費）</span>
+	                    <strong>{formatCurrency(displayAmount(pouchUnitCostPerPiece), 2)} /枚</strong>
+	                  </div>
+	                  <div>
+	                    <span>初期費用単価</span>
+	                    <strong>{formatCurrency(displayAmount(initialUnitCostPerPiece), 2)} /枚</strong>
+	                  </div>
+	                </div>
+	                <HoverInfo
+	                  label="調達パターン"
+	                  testId="delivery-pattern-note"
+	                >
+	                  {resultPrintingMethod === "gravure"
+	                  ? resultShown.sasche
+	                    ? `国内調達は幅${formatNumber(resultShown.sasche.matchedWidthMm)}mm ／ ${formatNumber(resultShown.sasche.laneCount)}丁 ／ ${formatNumber(resultShown.sasche.printTierM)}m印刷グレードの固定出荷パターン（出荷長 ${formatNumber(resultShown.film.orderLengthM)}m）を採用しています。必要納品長 ${formatNumber(resultShown.film.requiredLengthM)}m に対する未使用長さは ${formatNumber(resultShown.film.lossM)}m、稼働率は ${formatNumber(D(resultShown.film.requiredLengthM).div(resultShown.film.effectiveLengthM).times(100).toString(), 1)}%です。`
+	                    : `グラビアは、幅${formatNumber(normalizedGravureParameters.smallWidthThresholdMm)}mm以下で必要納品長が5,500mを超える場合は${formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・${formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作に切り替えます。それ以外は5,500m納品・6,000m製作パターンです。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
+	                  : "「単価計算用数量」は発注したフィルムから実際に作れる枚数（ロス控除後・500枚単位）です。フィルム発注を100m単位で切り上げるため、発注枚数より多くなることがあります。"}
+	                </HoverInfo>
                 <div className="cost-breakdown">
                   <details className="cost-block" data-testid="cost-processing">
                     <summary><h3>① 加工費（人件費・機械）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.variableProcessing))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.variableProcessing))} /枚）</small></span></summary>
