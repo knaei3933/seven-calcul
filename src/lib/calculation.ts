@@ -151,6 +151,8 @@ type RecommendationOptions = {
 
 const DEFAULT_TARGET_MARGINS = ["0.4", "0.5"] as const;
 
+type CoreCalculationInput = Omit<CalculationInput, "recommendationMode" | "selectedCandidateId" | "selectedCandidateTargetMargins">;
+
 function resolveTargetMargins(targetMargins?: string[]): string[] {
   if (!targetMargins || targetMargins.length === 0) return [...DEFAULT_TARGET_MARGINS];
   const seen = new Set<string>();
@@ -167,7 +169,7 @@ function resolveTargetMargins(targetMargins?: string[]): string[] {
 }
 
 function calculatePouchCostCore(
-  { spec, quantity, printingMethod, parameters, gravureParameters, targetMargins, recommendation }: Omit<CalculationInput, "recommendationMode" | "selectedCandidateId"> & { recommendation?: RecommendationOptions },
+  { spec, quantity, printingMethod, parameters, gravureParameters, targetMargins, recommendation }: CoreCalculationInput & { recommendation?: RecommendationOptions },
 ): CostResult {
   const quantityD = D(quantity);
   if (quantityD.lte(0) || D(spec.fillMlPerChamber).lte(0) || spec.fillingLanes <= 0) throw validationError("invalid_positive_input");
@@ -433,6 +435,52 @@ function calculatePouchCostCore(
   };
 }
 
+export function calculateSelectedCandidateCore(
+  candidate: PrintCandidate,
+  input: CoreCalculationInput,
+): CostResult {
+  const adjustedQuantity = sum(candidate.adjustedSkuQuantities.map((value) => D(value)));
+  const adjustedInput: CoreCalculationInput = {
+    ...input,
+    spec: { ...input.spec, skuQuantities: candidate.adjustedSkuQuantities },
+    quantity: adjustedQuantity.toString(),
+    printingMethod: candidate.printingMethod,
+  };
+
+  if (candidate.route === "D" && candidate.filmOrders) {
+    return calculatePouchCostCore({
+      ...adjustedInput,
+      recommendation: {
+        aggregateDigitalPrice: true,
+        filmOrderOverride: candidate.filmOrders.map((order) => ({ ...order })),
+      },
+    });
+  }
+
+  if (candidate.route === "K" && candidate.gravureRoll) {
+    return calculatePouchCostCore({
+      ...adjustedInput,
+      recommendation: {
+        aggregateDigitalPrice: false,
+        suppressAutomaticSasche: true,
+        gravureRollOverride: { ...candidate.gravureRoll },
+      },
+    });
+  }
+
+  if (candidate.route === "Y" && candidate.sasche) {
+    return calculatePouchCostCore({
+      ...adjustedInput,
+      recommendation: {
+        aggregateDigitalPrice: false,
+        sascheCandidateOverride: { ...candidate.sasche },
+      },
+    });
+  }
+
+  return calculatePouchCostCore(adjustedInput);
+}
+
 export function calculatePouchCost(input: CalculationInput): CostResult {
   const {
     recommendationMode,
@@ -465,62 +513,29 @@ export function calculatePouchCost(input: CalculationInput): CostResult {
     basisFilmOrderLengthM: original.film.orderLengthM,
     basisFilmTotalYen: original.film.filmTotal,
   });
-  const candidates = buildPrintCandidates(context);
+  const candidates = buildPrintCandidates(context).map((candidate) => {
+    const economics = calculateSelectedCandidateCore(candidate, coreInput);
+    return {
+      ...candidate,
+      copperPlateTotalYen: economics.copperPlateCost,
+      allInTotalCostYen: economics.costTotal,
+      allInCostPerPieceYen: economics.totalCostPerPiece,
+      allInDeltaYen: D(economics.costTotal).minus(D(original.costTotal)).toString(),
+    };
+  });
   const attach = (result: CostResult): CostResult => ({ ...result, recommendationCandidates: candidates, selectedCandidateId: selectedCandidateId ?? "" });
   if (!selectedCandidateId) return attach(original);
 
   const selected = candidates.find((candidate) => candidate.id === selectedCandidateId);
   if (!selected) throw validationError("candidate_not_found");
 
-  const adjustedQuantity = sum(selected.adjustedSkuQuantities.map((value) => D(value)));
-  const adjustedSpec: PouchSpec = {
-    ...coreInput.spec,
-    skuQuantities: selected.adjustedSkuQuantities,
-  };
-  const adjustedInput = {
-    ...coreInput,
-    spec: adjustedSpec,
-    quantity: adjustedQuantity.toString(),
-    printingMethod: selected.printingMethod,
-    targetMargins: selectedCandidateTargetMargins ?? coreInput.targetMargins,
-  };
-
-  if (selected.route === "D" && selected.filmOrders) {
-    const candidateResult = calculatePouchCostCore({
-      ...adjustedInput,
-      recommendation: {
-        aggregateDigitalPrice: true,
-        filmOrderOverride: selected.filmOrders.map((order) => ({ ...order })),
-      },
-    });
-    return attach(candidateResult);
-  }
-
-  if (selected.route === "K" && selected.gravureRoll) {
-    const candidateResult = calculatePouchCostCore({
-      ...adjustedInput,
-      recommendation: {
-        aggregateDigitalPrice: false,
-        suppressAutomaticSasche: true,
-        gravureRollOverride: selected.gravureRoll,
-      },
-    });
-    return attach(candidateResult);
-  }
-
-  if (selected.route === "Y" && selected.sasche) {
-    const candidateResult = calculatePouchCostCore({
-      ...adjustedInput,
-      recommendation: {
-        aggregateDigitalPrice: false,
-        sascheCandidateOverride: selected.sasche,
-        gravureRollOverride: undefined,
-      },
-    });
-    return attach(candidateResult);
-  }
-
-  return attach(original);
+  const candidateResult = calculateSelectedCandidateCore(
+    selected,
+    selectedCandidateTargetMargins
+      ? { ...coreInput, targetMargins: selectedCandidateTargetMargins }
+      : coreInput,
+  );
+  return attach(candidateResult);
 }
 
 export function approvedCommission(amount: string, status: QuotationStatus, parameters: Partial<CostParameters> = {}): { eligible: boolean; commissionAmount: string | null } {

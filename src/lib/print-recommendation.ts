@@ -37,6 +37,10 @@ export type PrintCandidate = {
   incrementalFilmTotalYen?: string;
   incrementalQuantity?: string;
   incrementalCostPerAdditionalPieceYen?: string;
+  copperPlateTotalYen?: string;
+  allInTotalCostYen?: string;
+  allInCostPerPieceYen?: string;
+  allInDeltaYen?: string;
   includedUnitPricePerM: string;
   filmTotalYen: string;
   filmCostPerPieceYen: string;

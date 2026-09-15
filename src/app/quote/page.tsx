@@ -1022,7 +1022,7 @@ export default function PrintableQuotationPage() {
           </p>
           {quoteDraftStale ? (
             <p className="warning" role="alert" data-testid="stale-quote-warning">
-              シミュレーター入力が変更されたため、連携された見積情報は古くなっています。再計算してから保存・出力してください。
+              この見積書は古くなっています。シミュレーターの条件が変わったため、今は保存・PDF出力・チェックリスト操作ができません。シミュレーターに戻り、「サーバーで再計算する」を実行してから、これらの操作を行ってください。
             </p>
           ) : null}
         </div>
@@ -1436,6 +1436,18 @@ export default function PrintableQuotationPage() {
             <li>明細の単価・金額を変えた場合も、見積単価と合計が追従します。</li>
             <li>原価・利益の内部計算は保存時に記録し、帳票には表示しません。</li>
           </ol>
+
+          <div className="purchase-selling-guide" data-testid="purchase-selling-guide">
+            <strong>仕入価格と販売価格の見方（社内用・非印刷）</strong>
+            <p>
+              フィルムの「仕入m単価（参考）」は調達を確認するための参考原価です。
+              中央のA4に表示する「フィルム販売m単価」は、目標利益率を含めた顧客への見積単価です。同じm単価でも、仕入確認と販売提示で役割が違います。
+            </p>
+            <p>
+              銅版は、PDF掲載金額に12%の販売マージンを適用した金額を計算基準にします（例：￥27,000 → ￥30,240）。
+              A4の銅版行に表示するのは、さらに目標利益率を含めた顧客への販売単価・販売金額です。見積書画面では、PDF基準額と12%適用後の仕入基準をこの社内ガイドだけに表示します。
+            </p>
+          </div>
 
           <p className={`calc-mode ${isPriceOverride ? "override" : "auto"}`}>
             {isPriceOverride ? "現在：見積単価 override 中" : "現在：目標利益率による自動計算"}

@@ -3,7 +3,7 @@ import { D, Decimal } from "@/lib/decimal";
 import { defaultParameters } from "@/lib/constants";
 import { defaultGravureRollParameters } from "@/lib/gravure-roll";
 import { buildPrintCandidates, createPrintCandidateContext } from "@/lib/print-recommendation";
-import { calculatePouchCost } from "@/lib/calculation";
+import { calculatePouchCost, calculateSelectedCandidateCore } from "@/lib/calculation";
 import { buildSascheCandidates } from "@/lib/sasche-gravure";
 import type { PouchSpec } from "@/lib/types";
 
@@ -210,5 +210,78 @@ describe("print recommendation engine", () => {
     expect(selected.printingMethod).toBe("gravure");
     expect(original.sellingPrices.map((price) => price.margin)).toEqual(digitalMargins);
     expect(selected.sellingPrices.map((price) => price.margin)).toEqual(gravureMargins);
+  });
+
+  it("attaches exact server-calculated all-in economics to displayed D/K/Y candidates", () => {
+    const spec: PouchSpec = {
+      ...baseSpec,
+      sizeKey: "tube-50x90",
+      skuQuantities: ["50000"],
+      skuColorCounts: ["4"],
+    };
+    const input = {
+      spec,
+      quantity: "50000",
+      printingMethod: "digital" as const,
+      parameters: defaultParameters,
+      gravureParameters: defaultGravureRollParameters(),
+      recommendationMode: true,
+    };
+    const original = calculatePouchCost(input);
+    const candidates = original.recommendationCandidates ?? [];
+
+    const digital = candidates.find((candidate) => candidate.route === "D");
+    const domestic = candidates.find((candidate) => candidate.route === "Y");
+    const korea = candidates.find((candidate) => candidate.route === "K");
+    expect(digital).toBeDefined();
+    expect(domestic).toBeDefined();
+    expect(korea).toBeDefined();
+
+    expect(Number(original.costTotal)).toBeCloseTo(572670.7, 3);
+    expect(digital!.copperPlateTotalYen).toBe("0");
+    expect(Number(digital!.allInDeltaYen)).toBeCloseTo(
+      Number(digital!.allInTotalCostYen) - Number(original.costTotal),
+      8,
+    );
+    expect(domestic!.filmTotalYen).toBe("269416");
+    expect(domestic!.copperPlateTotalYen).toBe("120960");
+    expect(Number(domestic!.allInTotalCostYen)).toBeCloseTo(549646.7, 3);
+    expect(Number(domestic!.allInDeltaYen)).toBeCloseTo(-23024, 8);
+    expect(Number(korea!.allInTotalCostYen)).toBeCloseTo(1280489.71, 1);
+    expect(korea!.adjustedQuantity).toBe("206000");
+
+    for (const candidate of candidates) {
+      const selected = calculatePouchCost({ ...input, selectedCandidateId: candidate.id });
+      expect(selected.quantity).toBe(candidate.adjustedQuantity);
+      expect(selected.copperPlateCost).toBe(candidate.copperPlateTotalYen);
+      expect(selected.costTotal).toBe(candidate.allInTotalCostYen);
+      expect(selected.totalCostPerPiece).toBe(candidate.allInCostPerPieceYen);
+    }
+  });
+
+  it("uses adjusted candidate input when replay metadata is absent", () => {
+    const input = {
+      spec: {
+        ...baseSpec,
+        sizeKey: "tube-50x90" as const,
+        skuQuantities: ["50000"],
+        skuColorCounts: ["4"],
+      },
+      quantity: "50000",
+      printingMethod: "digital" as const,
+      parameters: defaultParameters,
+      gravureParameters: defaultGravureRollParameters(),
+      recommendationMode: true,
+    };
+    const candidate = calculatePouchCost(input).recommendationCandidates
+      ?.find((item) => item.route === "D" && !item.isFulfilling);
+    expect(candidate).toBeDefined();
+    const { filmOrders: _filmOrders, ...candidateWithoutReplayMetadata } = candidate!;
+
+    const result = calculateSelectedCandidateCore(candidateWithoutReplayMetadata, input);
+
+    expect(result.selectedCandidateId).toBeUndefined();
+    expect(result.quantity).toBe(candidate!.adjustedQuantity);
+    expect(result.film.skuCosts[0]?.quantity).toBe(candidate!.adjustedQuantity);
   });
 });

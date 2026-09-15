@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CalculationInput, CostResult } from "@/lib/calculation";
 import { defaultParameters, defaultProductionSpeedForFillMl, machineChargeBasis, sizeMaster } from "@/lib/constants";
 import { displayAmount } from "@/lib/calculation";
-import { D, Decimal } from "@/lib/decimal";
+import { D, Decimal, sum } from "@/lib/decimal";
 import { CURRENT_CHECKLIST_SNAPSHOT_KEY, buildCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 import Link from "next/link";
 import { defaultGravureRollParameters, type GravureRollParameters } from "@/lib/gravure-roll";
@@ -36,6 +36,70 @@ const MACHINE_BREAKDOWN_LABELS: Record<MachineBreakdownKey, string> = {
 const SIMULATOR_STATE_KEY = "pouch-simulator-state-v1";
 const INPUT_BASIS_SELECTION_ID = "__input_basis__";
 const INPUT_PRINTING_METHOD: PrintingMethod = "digital";
+const CALCULATION_REQUEST_TIMEOUT_MS = 15000;
+
+type CalculationPayload = {
+  result?: CostResult;
+  originalResult?: CostResult;
+  candidates?: PrintCandidate[];
+  error?: string;
+};
+
+async function postCalculationWithTimeout(request: CalculationInput): Promise<{
+  response: Response;
+  payload: CalculationPayload;
+}> {
+  const controller = new AbortController();
+  const timeoutError = new Error("calculation_request_timeout");
+  timeoutError.name = "TimeoutError";
+  let timedOut = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      reject(timeoutError);
+    }, CALCULATION_REQUEST_TIMEOUT_MS);
+  });
+
+  try {
+    const requestPromise = (async () => {
+      const response = await fetch("/api/calculate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+      return { response, payload: await response.json() as CalculationPayload };
+    })();
+    return await Promise.race([requestPromise, timeoutPromise]);
+  } catch (error) {
+    if (timedOut) throw timeoutError;
+    throw error;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+function calculationErrorFor(error: unknown, fallbackCode: string): { code: string; message: string } {
+  if (error instanceof Error && error.name === "TimeoutError") {
+    return {
+      code: "calculation_request_timeout",
+      message: "サーバーへの接続が15秒でタイムアウトしました。ネットワークとサーバー状態を確認し、もう一度「サーバーで再計算する」を押してください。",
+    };
+  }
+  if (error instanceof TypeError) {
+    return {
+      code: "calculation_network_error",
+      message: "サーバーに接続できませんでした。ネットワークを確認し、もう一度「サーバーで再計算する」を押してください。",
+    };
+  }
+  const code = error instanceof Error && error.message ? error.message : fallbackCode;
+  return {
+    code,
+    message: `計算を続けられませんでした。入力内容を見直して、もう一度「サーバーで再計算する」を押してください。（エラー: ${code}）`,
+  };
+}
 
 function withMarginForPrintingMethod<T extends { printingMethod: PrintingMethod; targetMargin: string }>(form: T): T {
   const options: readonly string[] = MARGIN_OPTIONS[form.printingMethod];
@@ -50,6 +114,96 @@ function targetMarginModeFor(targetMargin: string): TargetMarginMode {
 
 function candidateRouteText(candidate: PrintCandidate): string {
   return `${candidate.route} / ${candidate.sourceLabel}${candidate.printingMethod === "gravure" ? "（グラビア印刷）" : ""}`;
+}
+
+function overproductionMultiple(candidate: PrintCandidate): Decimal | null {
+  const customerQuantity = D(candidate.originalQuantity);
+  const plannedQuantity = D(candidate.adjustedQuantity);
+  if (!candidate.isFulfilling || customerQuantity.lte(0)) return null;
+  const multiple = plannedQuantity.div(customerQuantity);
+  return candidate.route === "K" || multiple.gte(2)
+    ? multiple.toDecimalPlaces(1, Decimal.ROUND_HALF_UP)
+    : null;
+}
+
+function comparisonRisk(candidate: PrintCandidate): string {
+  const multiple = overproductionMultiple(candidate);
+  if (multiple) return `顧客発注の${formatNumber(multiple.toString(), 1)}倍製造／在庫リスク`;
+  if (D(candidate.shortagePieces ?? "0").gt(0)) {
+    return `顧客発注に ${formatNumber(candidate.shortagePieces, 0)}枚不足`;
+  }
+  return "—";
+}
+
+function RecommendationCandidateCard({
+  candidate,
+  selected,
+  pending,
+  onSelect,
+}: {
+  candidate: PrintCandidate;
+  selected: boolean;
+  pending: boolean;
+  onSelect: (candidate: PrintCandidate) => void;
+}) {
+  const overproduction = overproductionMultiple(candidate);
+  return (
+    <button
+      type="button"
+      className={selected ? "recommendation-card selected" : "recommendation-card"}
+      onClick={() => onSelect(candidate)}
+      disabled={pending}
+    >
+      {selected ? <span className="selection-status card-selection-status">選択中</span> : null}
+      <span className="recommendation-label">
+        {candidateRouteText(candidate)}
+        {candidate.recommended ? <em>推奨</em> : null}
+      </span>
+      <span className="selection-tag">{candidate.selectionTag}</span>
+      <span>{candidate.pouchSpecText}</span>
+      <span>{candidate.patternText}</span>
+      <span>{candidate.colorText} ／ {candidate.compositionText}</span>
+      <span>
+        {formatNumber(candidate.adjustedQuantity, 0)}枚{candidate.adjustedSkuQuantities.length > 1 ? `（SKU ${candidate.adjustedSkuQuantities.map((quantity) => formatNumber(quantity, 0)).join("+")}）` : ""}
+      </span>
+      <span>製作可能 {formatNumber(candidate.capacityQuantity, 0)}枚 ／ 計画 {formatNumber(candidate.adjustedQuantity, 0)}枚 ／ 1,000枚刻み差 {formatNumber(candidate.capacityPlanningDifference, 0)}枚</span>
+      <span>
+        選択時：製造計画 {formatNumber(candidate.adjustedQuantity, 0)}枚で試算
+        {D(candidate.shortagePieces ?? "0").gt(0) ? `（顧客発注より ${formatNumber(candidate.shortagePieces, 0)}枚不足）` : ""}
+      </span>
+      <span>{formatNumber(candidate.orderLengthM, 0)}m ／ {formatCurrency(candidate.includedUnitPricePerM, 2)}/m</span>
+      <span>1枚 {formatCurrency(candidate.filmCostPerPieceYen, 2)} ／ 余剰 {formatNumber(candidate.surplusLengthM, 0)}m</span>
+      <span>{candidate.orderReason}</span>
+      {candidate.incrementalFilmTotalYen && D(candidate.incrementalFilmTotalYen).abs().gt(1) ? (
+        <span data-testid={`candidate-${candidate.route}-film-delta`}>
+          フィルムのみ差額 {formatCurrency(candidate.incrementalFilmTotalYen, 0)}
+          {candidate.incrementalQuantity && candidate.incrementalCostPerAdditionalPieceYen && D(candidate.incrementalQuantity).gt(0)
+            ? `／ 追加 ${formatNumber(candidate.incrementalQuantity, 0)}枚で ${formatCurrency(candidate.incrementalCostPerAdditionalPieceYen, 2)}/枚`
+            : ""}
+        </span>
+      ) : null}
+      {D(candidate.copperPlateTotalYen ?? "0").gt(0) ? (
+        <span data-testid={`candidate-${candidate.route}-copper`}>
+          銅版費 +{formatCurrency(candidate.copperPlateTotalYen ?? "0", 0)}
+        </span>
+      ) : null}
+      {candidate.allInDeltaYen ? (
+        <span data-testid={`candidate-${candidate.route}-all-in-delta`}>
+          すべて合算だと入力値比 {formatCurrency(candidate.allInDeltaYen, 0)}
+        </span>
+      ) : null}
+      {overproduction ? (
+        <span className="warning" data-testid={`candidate-${candidate.route}-risk`}>
+          顧客発注の{formatNumber(overproduction.toString(), 1)}倍製造／在庫リスク
+        </span>
+      ) : null}
+      {D(candidate.shortagePieces ?? "0").gt(0)
+        ? <span className="warning">数量不足 {formatNumber(candidate.shortagePieces, 0)}枚（{formatNumber(candidate.quantityShortfallRatio, 1)}%）</span>
+        : null}
+      {candidate.toleranceExceeded ? <span className="warning">許容超過（単価優先）</span> : null}
+      <strong>フィルム {formatCurrency(candidate.filmTotalYen, 0)}</strong>
+    </button>
+  );
 }
 
 function targetMarginsForPrintingMethod(printingMethod: PrintingMethod, effectiveMargin: string): string[] {
@@ -150,7 +304,9 @@ export default function QuotationPage() {
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [calculationError, setCalculationError] = useState<{ code: string; message: string } | null>(null);
   const [recommendationPanelOpen, setRecommendationPanelOpen] = useState(true);
+  const [shortagePlansOpen, setShortagePlansOpen] = useState(false);
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
   const [productionSpeedManual, setProductionSpeedManual] = useState(false);
@@ -533,8 +689,10 @@ export default function QuotationPage() {
       setRecommendationPanelOpen(false);
       return;
     }
+    const selectingShortageReference = !candidate.isFulfilling;
     const requestOrder = ++requestOrderRef.current;
     setPending(true);
+    setCalculationError(null);
     try {
       const originalPrintingMethod = INPUT_PRINTING_METHOD;
       const originalTargetMargin = serverResult.originalTargetMargin ?? effectiveMargin;
@@ -563,17 +721,22 @@ export default function QuotationPage() {
         selectedCandidateId: candidate.id,
         selectedCandidateTargetMargins: candidateTargetMargins,
       };
-      const response = await fetch("/api/calculate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(calculationRequest),
-      });
-      const payload = await response.json();
+      const { response, payload } = await postCalculationWithTimeout(calculationRequest);
       if (!response.ok) throw new Error(payload.error ?? "candidate_calculation_failed");
       if (requestOrder !== requestOrderRef.current) return;
+      if (!payload.result) throw new Error("calculation_response_invalid");
       const activeResult: CostResult = payload.result;
+      const expectedAdjustedQuantity = sum(candidate.adjustedSkuQuantities.map((quantity) => D(quantity)));
+      if (
+        activeResult.selectedCandidateId !== candidate.id
+        || activeResult.printingMethod !== candidate.printingMethod
+        || !D(activeResult.quantity).eq(expectedAdjustedQuantity)
+      ) {
+        throw new Error("candidate_result_mismatch");
+      }
       const originalResult: CostResult = payload.originalResult ?? serverResult.originalResult;
       const candidates: PrintCandidate[] = payload.candidates ?? serverResult.candidates;
+      setCalculationError(null);
       const candidateCalculationInput = {
         ...calculationInput,
         printingMethod: candidate.printingMethod,
@@ -586,6 +749,7 @@ export default function QuotationPage() {
         ...candidateNonQuantityRest,
       });
       setRecommendationPanelOpen(false);
+      setShortagePlansOpen(selectingShortageReference);
       setServerResult({
         result: activeResult,
         originalResult,
@@ -634,7 +798,9 @@ export default function QuotationPage() {
       }));
     } catch (error) {
       if (requestOrder === requestOrderRef.current) {
-        window.dispatchDebugError?.(error instanceof Error ? error.message : "candidate_calculation_failed");
+        const displayError = calculationErrorFor(error, "candidate_calculation_failed");
+        setCalculationError(displayError);
+        window.dispatchDebugError?.(displayError.code);
       }
     } finally {
       if (requestOrder === requestOrderRef.current) setPending(false);
@@ -690,6 +856,7 @@ export default function QuotationPage() {
     if (blocker) return;
     const requestOrder = ++requestOrderRef.current;
     setPending(true);
+    setCalculationError(null);
     setServerResult(null);
     try {
       const shouldRestoreInputMargin = Boolean(serverResult?.selectedCandidateId);
@@ -721,14 +888,10 @@ export default function QuotationPage() {
         selectedCandidateId: "",
         selectedCandidateTargetMargins: requestedTargetMargins,
       };
-      const response = await fetch("/api/calculate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(calculationRequest),
-      });
-      const payload = await response.json();
+      const { response, payload } = await postCalculationWithTimeout(calculationRequest);
       if (!response.ok) throw new Error(payload.error ?? "calculation_failed");
       if (requestOrder !== requestOrderRef.current) return;
+      if (!payload.result) throw new Error("calculation_response_invalid");
       const originalResult: CostResult = payload.originalResult ?? payload.result;
       if (
         originalResult.printingMethod !== requestedPrintingMethod
@@ -740,6 +903,7 @@ export default function QuotationPage() {
       // replace the customer's digital input basis with an active candidate.
       const selectedResult: CostResult = originalResult;
       const candidates: PrintCandidate[] = payload.candidates ?? [];
+      setCalculationError(null);
       setRecommendationPanelOpen(true);
       setServerResult({
         result: selectedResult,
@@ -776,7 +940,9 @@ export default function QuotationPage() {
       setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (error) {
       if (requestOrder === requestOrderRef.current) {
-        window.dispatchDebugError?.(error instanceof Error ? error.message : "calculation_failed");
+        const displayError = calculationErrorFor(error, "calculation_failed");
+        setCalculationError(displayError);
+        window.dispatchDebugError?.(displayError.code);
       }
     } finally {
       if (requestOrder === requestOrderRef.current) setPending(false);
@@ -797,10 +963,12 @@ export default function QuotationPage() {
   const selectedRecommendation = serverResult?.selectedCandidateId
     ? serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId) ?? null
     : null;
+  const selectedShortageReference = Boolean(selectedRecommendation && !selectedRecommendation.isFulfilling);
+  const fulfillingRecommendationCandidates = serverResult?.candidates.filter((candidate) => candidate.isFulfilling) ?? [];
+  const shortageRecommendationCandidates = serverResult?.candidates.filter((candidate) => !candidate.isFulfilling) ?? [];
+  const shortagePlansVisible = shortagePlansOpen || selectedShortageReference;
   const isInputBasisSelection = !serverResult?.selectedCandidateId
     || serverResult.selectedCandidateId === INPUT_BASIS_SELECTION_ID;
-  const inputBasisPlanQuantity = D(serverResult?.originalResult.film.actualQuantity ?? "0")
-    .div(1000).toDecimalPlaces(0, Decimal.ROUND_FLOOR).times(1000);
   const originalResult = serverResult?.originalResult;
   const originalFilm = originalResult?.film;
   const originalWebWidthMm = originalResult?.gravure?.materialWidthMm
@@ -1062,6 +1230,16 @@ export default function QuotationPage() {
         <header className="app-header">
           <div><h1>パウチ参考原価・販売価格シミュレーター</h1><p>販売数量は連結後パウチ「枚」、充填は区画「室」で計算します。</p></div>
         </header>
+        <details className="quick-guide" data-testid="simulator-guide">
+          <summary>はじめての方へ：5ステップで進める</summary>
+          <ol>
+            <li data-testid="simulator-guide-step-1">パウチの形・サイズ・発注数量を選びます。</li>
+            <li data-testid="simulator-guide-step-2">充填方法・SKU・色数など、内容物の条件を設定します。</li>
+            <li data-testid="simulator-guide-step-3">「サーバーで再計算する」で、入力した条件のデジタル印刷試算を確認します。</li>
+            <li data-testid="simulator-guide-step-4">D／K／Yの調達計画を、合算原価・製造数・注意点で比べます。</li>
+            <li data-testid="simulator-guide-step-5">使う計画を選び、見積書発行へ進みます。</li>
+          </ol>
+        </details>
         <section className="panel customer-panel" aria-labelledby="customer-block-title">
           <h2 id="customer-block-title">顧客情報</h2>
           <div className="customer-toolbar">
@@ -1313,6 +1491,11 @@ export default function QuotationPage() {
                 <span>{pending ? "計算中" : staleResult ? "再計算が必要" : serverResult ? `サーバー計算済み ${calculatedAt ?? ""}` : "サーバー再計算待ち"}</span>
               </span>
             </div>
+            {calculationError ? (
+              <p className="error" role="alert" data-testid="calculation-error">
+                {calculationError.message}
+              </p>
+            ) : null}
             {!resultShown ? <div className="empty">「サーバーで再計算する」を実行すると結果を表示します。</div> : pending ? <div className="skeleton" aria-live="polite"><div /><div style={{ width: "70%" }} /><div style={{ width: "45%" }} /></div> : (
               <>
                 <p className="total-label">
@@ -1391,10 +1574,52 @@ export default function QuotationPage() {
                     <section className="panel recommendation-panel" aria-labelledby="recommendation-title">
                       <h3 id="recommendation-title">フィルム調達・製造計画候補</h3>
                       <p className="help">
-                        D=デジタル、K=韓国輸入、Y=国内調達。候補または参考計画を選ぶと調達・製造計画のみ切り替わります。左側の顧客発注数は固定され、「元の数量へ戻る」で入力値計算へ復元します。
-                        ランキングはフィルム調達総額と1枚あたりフィルムコストで比較します。銅版・加工・金型は候補選択後の計算に反映され、候補ランキングには含めません。
+                        D=デジタル、K=韓国輸入、Y=国内調達。まず下の表で「すべて合算した原価」を比べてください。フィルム差額はフィルム代だけの差で、銅版・加工費を足すと不利になることがあります。
+                        候補を選ぶと調達・製造計画のみ切り替わります。左側の顧客発注数は固定され、「元の数量へ戻る」で入力値計算へ復元します。
                       </p>
                       <button className="button secondary small" type="button" onClick={clearCandidate} disabled={pending}>元の数量へ戻る</button>
+                      <div className="comparison-table-wrap" data-testid="all-in-comparison">
+                        <table className="table comparison-table">
+                          <thead>
+                            <tr>
+                              <th scope="col">方法</th>
+                              <th scope="col">製造数</th>
+                              <th scope="col">フィルム</th>
+                              <th scope="col">銅版</th>
+                              <th scope="col">すべて合算</th>
+                              <th scope="col">合算 / 枚</th>
+                              <th scope="col">入力値との差</th>
+                              <th scope="col">注意</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr data-testid="comparison-input">
+                              <th scope="row">発注計画／{originalRouteText}</th>
+                              <td>{formatNumber(serverResult.originalResult.quantity, 0)}枚</td>
+                              <td>{formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</td>
+                              <td>{formatCurrency(serverResult.originalResult.copperPlateCost, 0)}</td>
+                              <td>{formatCurrency(serverResult.originalResult.costTotal, 0)}</td>
+                              <td>{formatCurrency(serverResult.originalResult.totalCostPerPiece, 2)}</td>
+                              <td>基準</td>
+                              <td>入力した発注数の計算</td>
+                            </tr>
+                            {serverResult.candidates
+                              .filter((candidate) => candidate.isFulfilling || shortagePlansVisible)
+                              .map((candidate) => (
+                              <tr key={candidate.id} data-testid={`comparison-${candidate.route}`}>
+                                <th scope="row">{candidateRouteText(candidate)}</th>
+                                <td>{formatNumber(candidate.adjustedQuantity, 0)}枚</td>
+                                <td>{formatCurrency(candidate.filmTotalYen, 0)}</td>
+                                <td>{formatCurrency(candidate.copperPlateTotalYen ?? "0", 0)}</td>
+                                <td>{formatCurrency(candidate.allInTotalCostYen ?? "0", 0)}</td>
+                                <td>{formatCurrency(candidate.allInCostPerPieceYen ?? "0", 2)}</td>
+                                <td>{formatCurrency(candidate.allInDeltaYen ?? "0", 0)}</td>
+                                <td>{comparisonRisk(candidate)}</td>
+                              </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
                       <div className="recommendation-grid">
                         <button
                           type="button"
@@ -1427,53 +1652,46 @@ export default function QuotationPage() {
                           <span>押すと入力した発注数量の計算へ戻ります。候補の製造計画数は左側入力を変更しません。</span>
                           <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
                         </button>
-                        {serverResult.candidates.map((candidate) => {
-                          const selected = serverResult.selectedCandidateId === candidate.id;
-                          return (
-                            <button
-                              key={candidate.id}
-                              type="button"
-                              className={selected ? "recommendation-card selected" : "recommendation-card"}
-                              onClick={() => void selectCandidate(candidate)}
-                              disabled={pending}
-                            >
-                              {selected ? <span className="selection-status card-selection-status">選択中</span> : null}
-                              <span className="recommendation-label">
-                                {candidateRouteText(candidate)}
-                                {candidate.recommended ? <em>推奨</em> : null}
-                              </span>
-                              <span className="selection-tag">{candidate.selectionTag}</span>
-                              <span>{candidate.pouchSpecText}</span>
-                              <span>{candidate.patternText}</span>
-                              <span>{candidate.colorText} ／ {candidate.compositionText}</span>
-                              <span>
-                                {formatNumber(candidate.adjustedQuantity, 0)}枚{candidate.adjustedSkuQuantities.length > 1 ? `（SKU ${candidate.adjustedSkuQuantities.map((quantity) => formatNumber(quantity, 0)).join("+")}）` : ""}
-                              </span>
-                              <span>製作可能 {formatNumber(candidate.capacityQuantity, 0)}枚 ／ 計画 {formatNumber(candidate.adjustedQuantity, 0)}枚 ／ 1,000枚刻み差 {formatNumber(candidate.capacityPlanningDifference, 0)}枚</span>
-                              <span>
-                                選択時：製造計画 {formatNumber(candidate.adjustedQuantity, 0)}枚で試算
-                                {D(candidate.shortagePieces ?? "0").gt(0) ? `（顧客発注より ${formatNumber(candidate.shortagePieces, 0)}枚不足）` : ""}
-                              </span>
-                              <span>{formatNumber(candidate.orderLengthM, 0)}m ／ {formatCurrency(candidate.includedUnitPricePerM, 2)}/m</span>
-                              <span>1枚 {formatCurrency(candidate.filmCostPerPieceYen, 2)} ／ 余剰 {formatNumber(candidate.surplusLengthM, 0)}m</span>
-                              <span>{candidate.orderReason}</span>
-                              {candidate.incrementalFilmTotalYen && D(candidate.incrementalFilmTotalYen).abs().gt(1) ? (
-                                <span>
-                                  現在比 {formatCurrency(candidate.incrementalFilmTotalYen, 0)}
-                                  {candidate.incrementalQuantity && candidate.incrementalCostPerAdditionalPieceYen && D(candidate.incrementalQuantity).gt(0)
-                                    ? `／ 追加 ${formatNumber(candidate.incrementalQuantity, 0)}枚で ${formatCurrency(candidate.incrementalCostPerAdditionalPieceYen, 2)}/枚`
-                                    : ""}
-                                </span>
-                              ) : null}
-                              {D(candidate.shortagePieces ?? "0").gt(0)
-                                ? <span className="warning">数量不足 {formatNumber(candidate.shortagePieces, 0)}枚（{formatNumber(candidate.quantityShortfallRatio, 1)}%）</span>
-                                : null}
-                              {candidate.toleranceExceeded ? <span className="warning">許容超過（単価優先）</span> : null}
-                              <strong>フィルム {formatCurrency(candidate.filmTotalYen, 0)}</strong>
-                            </button>
-                          );
-                        })}
+                        {fulfillingRecommendationCandidates.map((candidate) => (
+                          <RecommendationCandidateCard
+                            key={candidate.id}
+                            candidate={candidate}
+                            selected={serverResult.selectedCandidateId === candidate.id}
+                            pending={pending}
+                            onSelect={(target) => void selectCandidate(target)}
+                          />
+                        ))}
                       </div>
+                      {shortageRecommendationCandidates.length ? (
+                        <div className="shortage-plans">
+                          <button
+                            type="button"
+                            className="button secondary small"
+                            data-testid="shortage-plans-toggle"
+                            aria-expanded={shortagePlansVisible}
+                            onClick={() => setShortagePlansOpen((open) => !open)}
+                            disabled={selectedShortageReference}
+                          >
+                            {selectedShortageReference ? "不足プラン選択中" : "不足プランを比較する"}
+                          </button>
+                          <p className="help">
+                            顧客発注に届かない小さいまとめ購入です。費用は安く見えても全数は製造できないため、参考として比較します。
+                          </p>
+                          {shortagePlansVisible ? (
+                            <div className="recommendation-grid">
+                              {shortageRecommendationCandidates.map((candidate) => (
+                                <RecommendationCandidateCard
+                                  key={candidate.id}
+                                  candidate={candidate}
+                                  selected={serverResult.selectedCandidateId === candidate.id}
+                                  pending={pending}
+                                  onSelect={(target) => void selectCandidate(target)}
+                                />
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       {pending ? <p className="warning">候補計算中です。</p> : null}
                     </section>
                   ) : null}

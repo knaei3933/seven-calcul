@@ -471,6 +471,20 @@ header .version-badge { display: none; }
 .calc-guide-cards > div { display: grid; gap: 3px; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: white; padding: 8px; }
 .calc-guide-cards span { color: var(--muted); font-size: 10px; font-weight: 800; }
 .calc-guide-cards strong { overflow-wrap: anywhere; font-size: 13px; }
+.purchase-selling-guide {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #f0b429;
+  border-radius: 9px;
+  background: #fff8e6;
+  padding: 10px;
+}
+.purchase-selling-guide p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .calc-formula { margin: 0; border-left: 3px solid var(--primary); background: white; padding: 8px 10px; font-size: 12px; line-height: 1.6; }
 .calc-steps { margin: 0; padding-left: 18px; color: #374151; font-size: 12px; line-height: 1.65; }
 .calc-mode { margin: 0; border-radius: 999px; padding: 7px 10px; text-align: center; font-size: 11px; font-weight: 900; }
@@ -1163,6 +1177,69 @@ header .version-badge { display: none; }
   font-variant-numeric: tabular-nums;
 }
 .recommendation-panel .warning { margin: 0; }
+.comparison-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+}
+.comparison-table {
+  min-width: 780px;
+  margin: 0;
+  font-size: 12px;
+}
+.comparison-table th,
+.comparison-table td {
+  white-space: nowrap;
+  text-align: right;
+}
+.comparison-table th:first-child,
+.comparison-table td:first-child {
+  text-align: left;
+}
+.comparison-table thead th {
+  font-size: 11px;
+}
+.shortage-plans {
+  display: grid;
+  gap: 7px;
+  justify-items: start;
+  border-top: 1px dashed #bfdbfe;
+  padding-top: 9px;
+}
+.shortage-plans .help {
+  margin: 0;
+  max-width: 720px;
+}
+.quick-guide {
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 0;
+}
+.quick-guide summary {
+  min-height: 40px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 850;
+}
+.quick-guide[open] summary {
+  border-bottom: 1px solid #dbeafe;
+}
+.quick-guide ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 7px;
+  margin: 0;
+  padding: 10px 12px 12px 30px;
+}
+.quick-guide li {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.45;
+}
 @media (max-width: 640px) {
   .recommendation-grid { grid-template-columns: 1fr; }
   .recommendation-card { min-height: 0; }

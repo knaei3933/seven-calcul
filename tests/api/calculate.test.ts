@@ -73,6 +73,42 @@ describe("calculate API recommendations", () => {
     expect(payload.result.selectedCandidateId).toBe("");
   });
 
+  it("serializes server-calculated all-in economics for every displayed candidate", async () => {
+    const response = await POST(new Request("http://localhost/api/calculate", {
+      method: "POST",
+      body: JSON.stringify({
+        spec: {
+          sizeKey: "tube-50x90",
+          customWidthMm: "50",
+          customLengthMm: "90",
+          fillMlPerChamber: "3",
+          connectedChambers: 1,
+          fillingMethod: "hopper",
+          fillingLanes: 4,
+          isCustom: false,
+          colorCount: 4,
+          bulkUnitPrice: "0",
+          skuCount: 1,
+          skuQuantities: ["50000"],
+          skuColorCounts: ["4"],
+        },
+        quantity: "50000",
+        printingMethod: "digital",
+        recommendationMode: true,
+      }),
+    }));
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.candidates).toHaveLength(3);
+    expect(payload.candidates.map((candidate: any) => candidate.route).sort()).toEqual(["D", "K", "Y"]);
+    for (const candidate of payload.candidates) {
+      expect(typeof candidate.copperPlateTotalYen).toBe("string");
+      expect(typeof candidate.allInTotalCostYen).toBe("string");
+      expect(typeof candidate.allInCostPerPieceYen).toBe("string");
+      expect(typeof candidate.allInDeltaYen).toBe("string");
+    }
+  });
+
   it("switches the active result to a selected candidate while returning the original", async () => {
     const first = await POST(new Request("http://localhost/api/calculate", {
       method: "POST",

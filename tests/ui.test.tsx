@@ -3,11 +3,12 @@ import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QuotationPage from "@/app/page";
-import { calculatePouchCost } from "@/lib/calculation";
+import { calculatePouchCost, type CostResult } from "@/lib/calculation";
 import { defaultParameters } from "@/lib/constants";
 import { defaultGravureRollParameters } from "@/lib/gravure-roll";
 import { QUOTATION_DRAFT_KEY } from "@/lib/quotation-draft";
 import type { PouchSpec } from "@/lib/types";
+import type { PrintCandidate } from "@/lib/print-recommendation";
 
 describe("quotation UI", () => {
   beforeEach(() => sessionStorage.clear());
@@ -43,6 +44,31 @@ describe("quotation UI", () => {
     expect(screen.getByTestId("input-summary")).toHaveTextContent("50×60 / 1連 / 10,000枚 / デジタル印刷 / SKU 1件（充填物1 10,000枚）");
     expect(screen.getByLabelText("左右幅 (mm)")).toHaveAttribute("readonly");
     expect(screen.getByLabelText("カスタム区分")).toBeEnabled();
+  });
+
+  it("keeps first-time guidance compact until the user opens it", async () => {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+
+    const guide = screen.getByTestId("simulator-guide");
+    expect(guide).toHaveTextContent("はじめての方へ：5ステップで進める");
+    expect(screen.getByTestId("simulator-guide-step-1")).not.toBeVisible();
+    await user.click(screen.getByText("はじめての方へ：5ステップで進める"));
+
+    const steps = [
+      screen.getByTestId("simulator-guide-step-1"),
+      screen.getByTestId("simulator-guide-step-2"),
+      screen.getByTestId("simulator-guide-step-3"),
+      screen.getByTestId("simulator-guide-step-4"),
+      screen.getByTestId("simulator-guide-step-5"),
+    ];
+    expect(screen.getByTestId("simulator-guide").querySelectorAll("li")).toHaveLength(5);
+    for (const step of steps) expect(step).toBeVisible();
+    expect(steps[0]).toHaveTextContent("パウチの形・サイズ・発注数量");
+    expect(steps[1]).toHaveTextContent("充填方法・SKU・色数");
+    expect(steps[2]).toHaveTextContent("デジタル印刷試算");
+    expect(steps[3]).toHaveTextContent("D／K／Yの調達計画");
+    expect(steps[4]).toHaveTextContent("見積書発行");
   });
 
   it("exposes adjustable calculation parameters before recalculation", async () => {
@@ -120,6 +146,44 @@ describe("quotation UI", () => {
     expect(screen.getByTestId("server-result").getAttribute("data-state")).not.toBe("calculated");
   });
 
+  it("shows an actionable timeout message and clears it after a later successful calculation", async () => {
+    vi.useFakeTimers();
+    render(<QuotationPage />);
+    global.fetch = vi.fn(() => new Promise<Response>(() => undefined));
+
+    fireEvent.click(screen.getByTestId("calculate-desktop"));
+    expect(screen.queryByTestId("calculation-error")).not.toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15000);
+    });
+
+    expect(screen.getByTestId("calculation-error")).toHaveTextContent("サーバーへの接続が15秒でタイムアウトしました");
+    expect(screen.getByTestId("calculation-error")).toHaveTextContent("もう一度「サーバーで再計算する」を押してください");
+    expect(screen.getByTestId("server-result").getAttribute("data-state")).not.toBe("calculated");
+
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    const successfulResult = calculatePouchCost({
+      spec: {
+        sizeKey: "round-50x60", customWidthMm: "50", customLengthMm: "60", fillMlPerChamber: "3",
+        connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4, isCustom: false,
+        colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+      },
+      quantity: "10000",
+      printingMethod: "digital",
+      recommendationMode: true,
+    });
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      result: successfulResult,
+      originalResult: successfulResult,
+      candidates: successfulResult.recommendationCandidates ?? [],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+    expect(screen.queryByTestId("calculation-error")).not.toBeInTheDocument();
+  });
+
   it("unlocks custom dimensions and derives film web width from the custom pouch width", async () => {
     const user = userEvent.setup();
     render(<QuotationPage />);
@@ -158,15 +222,17 @@ describe("quotation UI", () => {
     };
     const originalCalculation = calculatePouchCost({ ...input, recommendationMode: true });
     const candidate = originalCalculation.recommendationCandidates!.find((item) => item.printingMethod === "gravure")!;
-    const selectedCalculation = calculatePouchCost({
-      ...input,
-      recommendationMode: true,
-      selectedCandidateId: candidate.id,
-      selectedCandidateTargetMargins: ["0.2", "0.25", "0.3"],
-    });
     global.fetch = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body));
-      const result = body.selectedCandidateId ? selectedCalculation : originalCalculation;
+      const result = body.selectedCandidateId
+        ? calculatePouchCost({
+          ...input,
+          targetMargins: body.targetMargins,
+          recommendationMode: true,
+          selectedCandidateId: body.selectedCandidateId,
+          selectedCandidateTargetMargins: body.selectedCandidateTargetMargins,
+        })
+        : originalCalculation;
       return new Response(JSON.stringify({
         result,
         originalResult: originalCalculation,
@@ -180,7 +246,7 @@ describe("quotation UI", () => {
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
     expect(screen.getAllByTestId("gravure-parameters").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("cost-copper").length).toBeGreaterThan(0);
-    expect(screen.getAllByTestId("cost-film").some((node) => node.textContent?.includes("製造者販売価格"))).toBe(true);
+    expect(screen.getAllByTestId("cost-film").some((node) => node.textContent?.includes("国内サプライヤー調達の販売マージン"))).toBe(true);
     expect(screen.getAllByTestId("cost-copper").some((node) => node.textContent?.includes("新規銅版費"))).toBe(true);
   });
 
@@ -329,6 +395,7 @@ describe("quotation UI", () => {
 
 	    await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "候補一覧" }));
+    await user.click(screen.getByRole("button", { name: "不足プランを比較する" }));
     await waitFor(() => expect(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]).toBeEnabled());
     await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
@@ -357,6 +424,163 @@ describe("quotation UI", () => {
     await waitFor(() => expect(screen.getByTestId("input-summary")).toHaveTextContent("デジタル印刷"));
     expect(screen.getByLabelText("利益率 40%")).toBeChecked();
     expect(screen.getByLabelText("利益率 30%")).not.toBeChecked();
+  });
+
+  it("shows all-in comparison and overproduction risk for the first-time audit case", async () => {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+    const input = {
+      spec: {
+        sizeKey: "tube-50x90", fillMlPerChamber: "3", connectedChambers: 1 as const, fillingMethod: "hopper" as const,
+        fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+        skuQuantities: ["50000"], skuColorCounts: ["4"],
+      } as PouchSpec,
+      quantity: "50000", printingMethod: "digital" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+    };
+    const originalCalculation = calculatePouchCost({ ...input, recommendationMode: true });
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      result: originalCalculation,
+      originalResult: originalCalculation,
+      candidates: originalCalculation.recommendationCandidates ?? [],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+
+    expect(screen.getByTestId("comparison-input")).toHaveTextContent("￥572,671");
+    expect(screen.getByTestId("comparison-Y")).toHaveTextContent("￥549,647");
+    expect(screen.getByTestId("comparison-Y")).toHaveTextContent("-￥23,024");
+    expect(screen.getByTestId("candidate-Y-film-delta")).toHaveTextContent("フィルムのみ差額 -￥143,984");
+    expect(screen.getByTestId("candidate-Y-copper")).toHaveTextContent("銅版費 +￥120,960");
+    expect(screen.getByTestId("candidate-Y-all-in-delta")).toHaveTextContent("-￥23,024");
+    expect(screen.getByTestId("comparison-K")).toHaveTextContent("206,000枚");
+    expect(screen.getByTestId("comparison-K")).toHaveTextContent("￥1,280,490");
+    expect(screen.getByTestId("comparison-K")).toHaveTextContent("顧客発注の4.1倍製造／在庫リスク");
+    expect(screen.getByTestId("candidate-K-risk")).toHaveTextContent("顧客発注の4.1倍製造／在庫リスク");
+  });
+
+  it("progressively discloses and keeps a selected shortage reference accessible", async () => {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+    const input = {
+      spec: {
+        sizeKey: "tube-50x90", fillMlPerChamber: "3", connectedChambers: 1 as const, fillingMethod: "hopper" as const,
+        fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+        skuQuantities: ["50000"], skuColorCounts: ["4"],
+      } as PouchSpec,
+      quantity: "50000", printingMethod: "digital" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+    };
+    const originalCalculation = calculatePouchCost({ ...input, recommendationMode: true });
+    const shortage = originalCalculation.recommendationCandidates!.find((candidate) => !candidate.isFulfilling)!;
+    expect(shortage).toBeTruthy();
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const result = body.selectedCandidateId
+        ? calculatePouchCost({
+          ...input,
+          targetMargins: body.targetMargins,
+          recommendationMode: true,
+          selectedCandidateId: body.selectedCandidateId,
+          selectedCandidateTargetMargins: body.selectedCandidateTargetMargins,
+        })
+        : originalCalculation;
+      return new Response(JSON.stringify({
+        result,
+        originalResult: originalCalculation,
+        candidates: originalCalculation.recommendationCandidates ?? [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    await user.selectOptions(screen.getByLabelText("サイズ"), "tube-50x90");
+    const quantityInput = screen.getByLabelText("発注数量 (枚)");
+    await user.clear(quantityInput);
+    await user.type(quantityInput, "50000");
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+    expect(screen.queryByRole("button", { name: /D \/ デジタル/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("comparison-D")).not.toBeInTheDocument();
+    const disclosure = screen.getByRole("button", { name: "不足プランを比較する" });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText(/顧客発注に届かない小さいまとめ購入です/)).toBeInTheDocument();
+
+    await user.click(disclosure);
+    expect(screen.getByTestId("comparison-D")).toBeInTheDocument();
+    const shortageCard = screen.getByRole("button", { name: /D \/ デジタル/ });
+    expect(shortageCard).toBeEnabled();
+    await user.click(shortageCard);
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("17,000 枚");
+    await user.click(screen.getByRole("button", { name: "候補一覧" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /D \/ デジタル/ })).toBeVisible());
+    expect(screen.getByTestId("comparison-D")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "不足プラン選択中" })).toBeDisabled();
+  });
+
+  it.each([
+    ["candidate ID", (result: CostResult, candidate: PrintCandidate): CostResult => ({
+      ...result,
+      selectedCandidateId: `${candidate.id}-wrong`,
+    })],
+    ["printing method", (result: CostResult, _candidate: PrintCandidate): CostResult => ({
+      ...result,
+      printingMethod: "digital",
+    })],
+    ["adjusted quantity", (result: CostResult, _candidate: PrintCandidate): CostResult => ({
+      ...result,
+      quantity: "49999",
+    })],
+  ])("rejects a selected candidate response with a mismatched %s", async (_label, tamper) => {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+    const input = {
+      spec: {
+        sizeKey: "tube-50x90", fillMlPerChamber: "3", connectedChambers: 1 as const, fillingMethod: "hopper" as const,
+        fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+        skuQuantities: ["50000"], skuColorCounts: ["4"],
+      } as PouchSpec,
+      quantity: "50000", printingMethod: "digital" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+    };
+    const originalCalculation = calculatePouchCost({ ...input, recommendationMode: true });
+    const candidate = originalCalculation.recommendationCandidates!.find((item) => item.route === "Y")!;
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (!body.selectedCandidateId) {
+        return new Response(JSON.stringify({
+          result: originalCalculation,
+          originalResult: originalCalculation,
+          candidates: originalCalculation.recommendationCandidates ?? [],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      const selectedResult = calculatePouchCost({
+        ...input,
+        targetMargins: body.targetMargins,
+        recommendationMode: true,
+        selectedCandidateId: body.selectedCandidateId,
+        selectedCandidateTargetMargins: body.selectedCandidateTargetMargins,
+      });
+      return new Response(JSON.stringify({
+        result: tamper(selectedResult, candidate),
+        originalResult: originalCalculation,
+        candidates: originalCalculation.recommendationCandidates ?? [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    await user.selectOptions(screen.getByLabelText("サイズ"), "tube-50x90");
+    const quantityInput = screen.getByLabelText("発注数量 (枚)");
+    await user.clear(quantityInput);
+    await user.type(quantityInput, "50000");
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+
+    await user.click(screen.getByRole("button", { name: /Y \/ 国内調達/ }));
+    await waitFor(() => expect(screen.getByTestId("calculation-error")).toHaveTextContent("candidate_result_mismatch"));
+    expect(screen.getByTestId("calculation-error")).toHaveTextContent("もう一度「サーバーで再計算する」を押してください");
+    expect(screen.queryByTestId("active-candidate-note")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Y \/ 国内調達/ })).toBeEnabled();
+    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
   });
 
   it("preserves a custom original margin across same-method candidate switches", async () => {
@@ -402,6 +626,7 @@ describe("quotation UI", () => {
 
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+    await user.click(screen.getByRole("button", { name: "不足プランを比較する" }));
     await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
     expect(screen.getByLabelText("利益率 カスタム")).toBeChecked();
@@ -421,6 +646,7 @@ describe("quotation UI", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "候補一覧" }));
+    await user.click(screen.getByRole("button", { name: "不足プランを比較する" }));
     await waitFor(() => expect(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]).toBeEnabled());
     await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
