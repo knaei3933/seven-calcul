@@ -116,9 +116,21 @@ function candidateRouteText(candidate: PrintCandidate): string {
   return `${candidate.route} / ${candidate.sourceLabel}${candidate.printingMethod === "gravure" ? "（グラビア印刷）" : ""}`;
 }
 
+function preferredComparisonCandidates(candidates: PrintCandidate[], shortagePlansVisible: boolean): PrintCandidate[] {
+  const visible = candidates.filter((candidate) => candidate.isFulfilling || shortagePlansVisible);
+  return (["D", "K", "Y"] as const).map((route) => {
+    const routeCandidates = visible.filter((candidate) => candidate.route === route);
+    return routeCandidates.find((candidate) => candidate.isExactQuantity)
+      ?? routeCandidates.find((candidate) => candidate.isFulfilling)
+      ?? routeCandidates[0];
+  }).filter((candidate): candidate is PrintCandidate => Boolean(candidate));
+}
+
 function overproductionMultiple(candidate: PrintCandidate): Decimal | null {
   const customerQuantity = D(candidate.originalQuantity);
-  const plannedQuantity = D(candidate.adjustedQuantity);
+  // The roll/pattern may remain much larger than the released plan even when
+  // an exact-quantity candidate is selected. Inventory risk follows capacity.
+  const plannedQuantity = D(candidate.capacityQuantity);
   if (!candidate.isFulfilling || customerQuantity.lte(0)) return null;
   const multiple = plannedQuantity.div(customerQuantity);
   return candidate.route === "K" || multiple.gte(2)
@@ -1571,7 +1583,15 @@ export default function QuotationPage() {
 	                >
 	                  {resultPrintingMethod === "gravure"
 	                  ? resultShown.sasche
-	                    ? `国内調達は幅${formatNumber(resultShown.sasche.matchedWidthMm)}mm ／ ${formatNumber(resultShown.sasche.laneCount)}丁 ／ ${formatNumber(resultShown.sasche.printTierM)}m印刷グレードの固定出荷パターン（出荷長 ${formatNumber(resultShown.film.orderLengthM)}m）を採用しています。必要納品長 ${formatNumber(resultShown.film.requiredLengthM)}m に対する未使用長さは ${formatNumber(resultShown.film.lossM)}m、稼働率は ${formatNumber(D(resultShown.film.requiredLengthM).div(resultShown.film.effectiveLengthM).times(100).toString(), 1)}%です。`
+	                    ? (() => {
+	                      const outputParts = resultShown.sasche.skuOutputLengthsM ?? [resultShown.film.orderLengthM];
+	                      const outputText = outputParts.length > 1
+	                        ? `${outputParts.map((length) => formatNumber(length)).join(" + ")}＝合計 ${formatNumber(resultShown.film.orderLengthM)}m`
+	                        : `出荷長 ${formatNumber(resultShown.film.orderLengthM)}m`;
+	                      return outputParts.length > 1
+	                        ? `国内調達はSKUごとに独立発注します。幅${formatNumber(resultShown.sasche.matchedWidthMm)}mm ／ ${formatNumber(resultShown.sasche.laneCount)}丁の固定出荷パターンを使い、SKUごとの出荷長は ${outputText} です。必要納品長 ${formatNumber(resultShown.film.requiredLengthM)}m に対する未使用長さは ${formatNumber(resultShown.film.lossM)}m、稼働率は ${formatNumber(D(resultShown.film.requiredLengthM).div(resultShown.film.effectiveLengthM).times(100).toString(), 1)}%です。`
+	                        : `国内調達は幅${formatNumber(resultShown.sasche.matchedWidthMm)}mm ／ ${formatNumber(resultShown.sasche.laneCount)}丁 ／ ${formatNumber(resultShown.sasche.printTierM)}m印刷グレードの固定出荷パターン（出荷長 ${formatNumber(resultShown.film.orderLengthM)}m）を採用しています。必要納品長 ${formatNumber(resultShown.film.requiredLengthM)}m に対する未使用長さは ${formatNumber(resultShown.film.lossM)}m、稼働率は ${formatNumber(D(resultShown.film.requiredLengthM).div(resultShown.film.effectiveLengthM).times(100).toString(), 1)}%です。`;
+	                    })()
 	                    : `グラビアは、幅${formatNumber(normalizedGravureParameters.smallWidthThresholdMm)}mm以下で必要納品長が5,500mを超える場合は${formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・${formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作に切り替えます。それ以外は5,500m納品・6,000m製作パターンです。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
 	                  : "「単価計算用数量」は発注したフィルムから実際に作れる枚数（ロス控除後・500枚単位）です。フィルム発注を100m単位で切り上げるため、発注枚数より多くなることがあります。"}
 	                </HoverInfo>
@@ -1667,8 +1687,7 @@ export default function QuotationPage() {
                               <td>基準</td>
                               <td>入力した発注数の計算</td>
                             </tr>
-                            {serverResult.candidates
-                              .filter((candidate) => candidate.isFulfilling || shortagePlansVisible)
+                            {preferredComparisonCandidates(serverResult.candidates, shortagePlansVisible)
                               .map((candidate) => (
                               <tr key={candidate.id} data-testid={`comparison-${candidate.route}`}>
                                 <th scope="row">{candidateRouteText(candidate)}</th>
@@ -1795,8 +1814,13 @@ export default function QuotationPage() {
                                 <>
                                   <p>① 必要納品長は合計 {formatNumber(f.requiredLengthM)}m です。</p>
                                   <p>
-                                    ② 国内調達は幅{formatNumber(resultShown.sasche.matchedWidthMm)}mm・{formatNumber(resultShown.sasche.laneCount)}丁・{formatNumber(resultShown.sasche.printTierM)}m印刷グレードの固定出荷パターンを採用し、
-                                    今回の出荷長は {formatNumber(f.effectiveLengthM)}m です。
+                                    ② 国内調達はSKUごとに独立発注です。ロールをSKU間で共用できないため、幅{formatNumber(resultShown.sasche.matchedWidthMm)}mm・{formatNumber(resultShown.sasche.laneCount)}丁の固定出荷パターンをSKUごとに選びます。
+                                    {(() => {
+                                      const outputParts = resultShown.sasche.skuOutputLengthsM ?? [f.effectiveLengthM];
+                                      return outputParts.length > 1
+                                        ? `採用出荷長は ${outputParts.map((length) => formatNumber(length)).join(" + ")}＝合計 ${formatNumber(f.effectiveLengthM)}m です。`
+                                        : `採用出荷長は ${formatNumber(f.effectiveLengthM)}m です。`;
+                                    })()}
                                   </p>
                                   <p>③ 出荷長 {formatNumber(f.effectiveLengthM)}m から必要納品長 {formatNumber(f.requiredLengthM)}m を差し引いた未使用長さは {formatNumber(f.lossM)}m です。</p>
                                   <p>④ フィルム代＝出荷長 {formatNumber(f.effectiveLengthM)}m × 販売m単価 {formatCurrency(displayAmount(f.unitPrice), 2)}＝{formatCurrency(displayAmount(f.filmTotal))}。この単価には国内サプライヤー調達の販売マージンが含まれ、通関料・海外配送費は加算しません。銅版費は別計上します。</p>

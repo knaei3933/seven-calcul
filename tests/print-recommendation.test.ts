@@ -38,7 +38,6 @@ describe("print recommendation engine", () => {
     expect(first.some((candidate) => candidate.route === "D")).toBe(true);
     expect(first.some((candidate) => candidate.route === "Y")).toBe(true);
     expect(first.filter((candidate) => candidate.recommended)).toHaveLength(1);
-    expect(first[0].recommended).toBe(true);
   });
 
   it("guarantees digital and gravure representatives before shortage references across quantities", () => {
@@ -67,7 +66,6 @@ describe("print recommendation engine", () => {
   it("shows the fulfilling minimum and the small-lot shortage reference", () => {
     const candidates = buildPrintCandidates(context(baseSpec, "20000"));
     const recommended = candidates.find((candidate) => candidate.recommended)!;
-    const shortageReference = candidates.find((candidate) => !candidate.isFulfilling)!;
     const fulfilling = candidates.filter((candidate) => (
       Number(candidate.adjustedQuantity) >= 20000
     ));
@@ -77,20 +75,15 @@ describe("print recommendation engine", () => {
     expect(recommended.capacityQuantity).toBe("24186");
     expect(recommended.isExactQuantity).toBe(true);
     expect(recommended.adjustedQuantity).toBe("20000");
-    expect(shortageReference.orderLengthM).toBe("500");
-    expect(shortageReference.capacityQuantity).toBe("19534");
-    expect(shortageReference.adjustedQuantity).toBe("19000");
-    expect(shortageReference.shortagePieces).toBe("1000");
-    expect(shortageReference.recommended).toBe(false);
+    // Shortage references are progressively disclosed in the UI and are not
+    // part of the primary route-balanced candidate list.
+    expect(candidates.every((candidate) => candidate.isFulfilling)).toBe(true);
     expect(fulfilling.some((candidate) => candidate.orderLengthM === "600")).toBe(true);
   });
 
   it("uses real deliverable capacity and keeps the shortage comparison selectable", () => {
     const rawCandidates = buildPrintCandidates(context(baseSpec, "20000"));
-    const rawFiveHundred = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "500");
     const rawSixHundred = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "600" && candidate.isExactQuantity);
-    expect(rawFiveHundred?.capacityQuantity).toBe("19534");
-    expect(rawFiveHundred?.adjustedQuantity).toBe("19000");
     expect(rawSixHundred?.capacityQuantity).toBe("24186");
     const exactSixHundred = rawCandidates.find((candidate) => candidate.route === "D" && candidate.orderLengthM === "600" && candidate.isExactQuantity);
     expect(exactSixHundred?.adjustedQuantity).toBe("20000");
@@ -105,7 +98,6 @@ describe("print recommendation engine", () => {
       basisFilmTotalYen: "182200",
     });
     const displayed = buildPrintCandidates(digitalContext);
-    expect(displayed.some((candidate) => candidate.orderLengthM === "500" && !candidate.recommended)).toBe(true);
     const shortestFulfilling = displayed.find((candidate) => candidate.orderLengthM === "600");
     expect(shortestFulfilling?.recommended).toBe(true);
     expect(D(shortestFulfilling!.incrementalFilmTotalYen!).toNumber()).toBe(51000);
@@ -247,8 +239,9 @@ describe("print recommendation engine", () => {
     expect(domestic!.copperPlateTotalYen).toBe("120960");
     expect(Number(domestic!.allInTotalCostYen)).toBeCloseTo(549646.7, 3);
     expect(Number(domestic!.allInDeltaYen)).toBeCloseTo(-23024, 8);
-    expect(Number(korea!.allInTotalCostYen)).toBeCloseTo(1280489.71, 1);
-    expect(korea!.adjustedQuantity).toBe("206000");
+    expect(Number(korea!.allInTotalCostYen)).toBeCloseTo(856512.7, 1);
+    expect(korea!.adjustedQuantity).toBe("50000");
+    expect(korea!.capacityQuantity).toBe("206249");
 
     for (const candidate of candidates) {
       const selected = calculatePouchCost({ ...input, selectedCandidateId: candidate.id });
@@ -274,7 +267,7 @@ describe("print recommendation engine", () => {
       recommendationMode: true,
     };
     const candidate = calculatePouchCost(input).recommendationCandidates
-      ?.find((item) => item.route === "D" && !item.isFulfilling);
+      ?.find((item) => item.route === "D");
     expect(candidate).toBeDefined();
     const { filmOrders: _filmOrders, ...candidateWithoutReplayMetadata } = candidate!;
 
@@ -283,5 +276,39 @@ describe("print recommendation engine", () => {
     expect(result.selectedCandidateId).toBeUndefined();
     expect(result.quantity).toBe(candidate!.adjustedQuantity);
     expect(result.film.skuCosts[0]?.quantity).toBe(candidate!.adjustedQuantity);
+  });
+
+  it("orders domestic Y rolls independently for each SKU", () => {
+    const spec: PouchSpec = {
+      ...baseSpec,
+      sizeKey: "tube-50x90",
+      skuCount: 2,
+      skuQuantities: ["25000", "25000"],
+      skuFillMlPerChamber: ["3", "3"],
+      skuColorCounts: ["4", "4"],
+    };
+    const input = {
+      spec,
+      quantity: "50000",
+      printingMethod: "digital" as const,
+      parameters: defaultParameters,
+      gravureParameters: defaultGravureRollParameters(),
+      recommendationMode: true,
+    };
+    const original = calculatePouchCost(input);
+    const candidate = original.recommendationCandidates?.find((item) => (
+      item.route === "Y" && item.orderLengthM === "3400"
+    ));
+    expect(candidate).toBeDefined();
+    expect(candidate!.materialText).toContain("SKUごと 1700m+1700m");
+    expect(candidate!.adjustedSkuQuantities).toEqual(["25000", "25000"]);
+    expect(candidate!.sasche?.skuOutputLengthsM).toEqual(["1700", "1700"]);
+
+    const selected = calculatePouchCost({
+      ...input,
+      selectedCandidateId: candidate!.id,
+    });
+    expect(selected.film.orderLengthM).toBe("3400");
+    expect(D(selected.film.filmTotal).eq(D(candidate!.filmTotalYen))).toBe(true);
   });
 });

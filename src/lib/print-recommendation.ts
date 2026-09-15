@@ -1,7 +1,7 @@
 import { D, Decimal, ceilTo, sum } from "./decimal";
 import { normalizeDigitalFilmOrder } from "./digital-film";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
-import { buildSascheCandidates, type SascheCandidate } from "./sasche-gravure";
+import { buildSascheCandidates, type SascheCandidate, type SascheLane, type SaschePrintTier } from "./sasche-gravure";
 import { calculateGravureRollCost, type GravureRollCostResult, type GravureRollParameters } from "./gravure-roll";
 import { sizeMaster } from "./constants";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeMaster } from "./types";
@@ -736,12 +736,110 @@ function buildKoreaCandidates(context: PrintCandidateContext): CandidateDraft[] 
 }
 
 function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft[] {
-  const candidates = buildSascheCandidates({
-    webWidthMm: context.size.webWidthMm,
-    requiredLengthM: context.requiredLengthM,
-    quantity: context.originalQuantity,
-    colorCount: sum((context.spec.skuColorCounts?.length ? context.spec.skuColorCounts : [context.spec.colorCount]).map((value) => D(value))),
-  });
+  type DomesticCombination = {
+    sasche: SascheCandidate;
+    adjustedQuantities: Decimal[];
+    outputLengthM: Decimal;
+    filmTotalYen: Decimal;
+    plateTotalYen: Decimal;
+    skuColorCounts: number[];
+  };
+
+  const skuColorCounts = context.spec.skuColorCounts?.length
+    ? context.spec.skuColorCounts.map((value) => Math.max(0, Number(value) || 0))
+    : context.skuQuantities.map(() => Math.max(0, Number(context.spec.colorCount) || 0));
+
+  // Domestic (Y) rolls are not shared between SKUs. Each SKU needs its own
+  // fixed shipping pattern, so options are combined per SKU instead of using
+  // the total required length as a single roll.
+  let combinations: DomesticCombination[] = [];
+  for (let skuIndex = 0; skuIndex < context.skuQuantities.length; skuIndex += 1) {
+    const options = buildSascheCandidates({
+      webWidthMm: context.size.webWidthMm,
+      requiredLengthM: context.skuRequiredLengths[skuIndex],
+      quantity: context.skuQuantities[skuIndex],
+      colorCount: D(skuColorCounts[skuIndex]),
+    });
+    if (options.length === 0) return [];
+
+    const createCombination = (candidate: SascheCandidate): DomesticCombination => ({
+      sasche: candidate,
+      adjustedQuantities: [D(candidate.adjustedQuantity)],
+      outputLengthM: D(candidate.outputLengthM),
+      filmTotalYen: D(candidate.filmTotalYen),
+      plateTotalYen: D(candidate.plateTotalYen),
+      skuColorCounts: [candidate.colorCount],
+    });
+
+    combinations = options.map(createCombination) as typeof combinations;
+    if (skuIndex === 0) continue;
+
+    const next: DomesticCombination[] = [];
+    for (const left of combinations) {
+      for (const right of options) {
+        const outputLengthM = left.outputLengthM.plus(right.outputLengthM);
+        const filmTotalYen = left.filmTotalYen.plus(right.filmTotalYen);
+        const plateTotalYen = left.plateTotalYen.plus(right.plateTotalYen);
+        const adjustedQuantity = left.adjustedQuantities.reduce(
+          (total, value) => total.plus(value),
+          D(0),
+        );
+        const requiredLengthM = D(left.sasche.requiredLengthM).plus(right.requiredLengthM);
+        const surplusLengthM = Decimal.max(outputLengthM.minus(requiredLengthM), D(0));
+        const shortageLengthM = Decimal.max(requiredLengthM.minus(outputLengthM), D(0));
+        const colorCount = left.sasche.colorCount + right.colorCount;
+        next.push({
+          sasche: {
+            id: `${left.sasche.id}+${right.id}`,
+            webWidthMm: right.webWidthMm,
+            matchedWidthMm: right.matchedWidthMm,
+            laneCount: Math.max(left.sasche.laneCount, right.laneCount) as SascheLane,
+            printTierM: Math.max(left.sasche.printTierM, right.printTierM) as SaschePrintTier,
+            patternCount: left.sasche.patternCount + right.patternCount,
+            filmLabel: "Y",
+            baseApproxLengthM: left.sasche.baseApproxLengthM + right.baseApproxLengthM,
+            supplierUnitPriceYenPerM: outputLengthM.gt(0)
+              ? filmTotalYen.div("1.12").div(outputLengthM).toString()
+              : "0",
+            sellerMarkup: "1.12",
+            filmUnitPriceYen: outputLengthM.gt(0) ? filmTotalYen.div(outputLengthM).toString() : "0",
+            filmTotalYen: filmTotalYen.toString(),
+            requiredLengthM: requiredLengthM.toString(),
+            quantity: D(left.sasche.quantity).plus(right.quantity).toString(),
+            colorCount,
+            plateUnitPriceYen: colorCount > 0 ? plateTotalYen.div(colorCount).toString() : "0",
+            plateTotalYen: plateTotalYen.toString(),
+            skuOutputLengthsM: [...left.sasche.skuOutputLengthsM ?? [], right.outputLengthM],
+            skuPatternIds: [...left.sasche.skuPatternIds ?? [], right.id],
+            adjustedQuantity: adjustedQuantity.toString(),
+            quantityReductionRatio: context.originalQuantity.gt(0)
+              ? Decimal.max(D(0), context.originalQuantity.minus(adjustedQuantity))
+                .div(context.originalQuantity).times(100).toString()
+              : "0",
+            quantityToleranceExceeded: context.originalQuantity.gt(0)
+              && Decimal.max(D(0), context.originalQuantity.minus(adjustedQuantity))
+                .div(context.originalQuantity).gt("0.15"),
+            outputLengthM: outputLengthM.toString(),
+            surplusLengthM: surplusLengthM.toString(),
+            shortageLengthM: shortageLengthM.toString(),
+            surplusRatio: requiredLengthM.gt(0)
+              ? surplusLengthM.div(requiredLengthM).times(100).toString()
+              : "0",
+            feasible: left.sasche.feasible && right.feasible,
+            recommended: false,
+            comparisonRank: 0,
+          },
+          adjustedQuantities: [...left.adjustedQuantities, D(right.adjustedQuantity)],
+          outputLengthM,
+          filmTotalYen,
+          plateTotalYen,
+          skuColorCounts: [...left.skuColorCounts, right.colorCount],
+        });
+      }
+    }
+    combinations = next;
+  }
+
   const colorTotal = sum(context.spec.skuColorCounts?.length
     ? context.spec.skuColorCounts.map((value) => Math.max(0, Number(value) || 0))
     : Array.from({ length: context.skuQuantities.length }, () => Math.max(0, Number(context.spec.colorCount) || 0)));
@@ -750,19 +848,17 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
     : `${colorTotal}色`;
   const compositionText = "PET12+AL7+PET12+LLDPE50";
   const pouchSpecText = `パウチ ${context.spec.customWidthMm ?? context.size.widthMm}×${context.spec.customLengthMm ?? context.size.lengthMm}mm ／ ${context.spec.connectedChambers}連 ／ ${context.spec.fillingLanes}列`;
-  return candidates.map((sasche): CandidateDraft => {
+  return combinations.map((combination): CandidateDraft => {
+    const sasche = combination.sasche;
     const outputLength = D(sasche.outputLengthM);
     const adjustedQuantity = D(sasche.adjustedQuantity);
     const filmTotalYen = D(sasche.filmTotalYen).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-    const ratios = context.skuRequiredLengths.map((required) => required.div(context.requiredLengthM));
-    const perPieceBySku = context.skuRequiredLengths.map((required, index) => required.div(context.skuQuantities[index]));
-    const skuQuantities = context.skuRequiredLengths.map((required, index) => outputLength.times(ratios[index]).div(perPieceBySku[index]).toDecimalPlaces(0, Decimal.ROUND_FLOOR));
-    const difference = adjustedQuantity.minus(sum(skuQuantities)).toNumber();
-    if (difference !== 0) {
-      const index = context.skuRequiredLengths.reduce((largest, required, index) => required.gt(context.skuRequiredLengths[largest]) ? index : largest, 0);
-      skuQuantities[index] = skuQuantities[index].plus(difference);
-    }
-    const materialText = `原反 ${sasche.matchedWidthMm}mm / ${sasche.laneCount}丁 / ${outputLength.toFixed(0)}m`;
+    const skuQuantities = combination.adjustedQuantities.map((value) => value.toString());
+    const outputParts = (sasche.skuOutputLengthsM ?? [sasche.outputLengthM]).map((length) => `${D(length).toFixed(0)}m`);
+    const outputText = outputParts.length > 1
+      ? `${outputParts.join("+")} ／ 合計${outputLength.toFixed(0)}m`
+      : `${outputLength.toFixed(0)}m`;
+    const materialText = `原反 ${sasche.matchedWidthMm}mm / ${sasche.laneCount}丁 / SKUごと ${outputText}`;
     const patternText = `${materialText} ／ ${colorText}`;
     return {
       ...candidateCommon("Y", context.originalQuantity, adjustedQuantity, context.requiredLengthM, outputLength, outputLength, filmTotalYen),
@@ -775,7 +871,9 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
       compositionText: compositionText,
       pouchSpecText: pouchSpecText,
       patternText: patternText,
-      orderReason: `国内Yパターン ${outputLength.toFixed(0)}m のため、発注数量を調整しました。`,
+      orderReason: outputParts.length > 1
+        ? `国内Y調達はSKUごとに独立発注のため、${outputParts.join("+")} を発注しました。`
+        : `国内Yパターン ${outputLength.toFixed(0)}m のため、発注数量を調整しました。`,
       priceBreak: true,
       adjustedSkuQuantities: skuQuantities.map((value) => value.toString()),
       sasche,
@@ -813,22 +911,24 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
   // candidate belongs to a route, it replaces that route's alternative so the
   // three-card limit can cover all production routes instead of duplicating a
   // route (for example two D rows plus Y and K).
-  const routeRepresentatives = (["D", "K", "Y"] as const)
-    .map((route) => {
-      const paretoRoute = pareto.filter((candidate) => candidate.route === route);
-      if (paretoRoute.length) return paretoRoute[0];
-      const rankedRoute = ranked.filter((candidate) => candidate.route === route);
-      const fulfillingRoute = rankedRoute.filter((candidate) => candidate.isFulfilling);
-      return fulfillingRoute[0] ?? rankedRoute[0];
-    })
+	  const routeRepresentatives = (["D", "K", "Y"] as const)
+	    .map((route) => {
+	      const rankedRoute = ranked.filter((candidate) => candidate.route === route);
+		      const fulfillingRoute = rankedRoute.filter((candidate) => candidate.isFulfilling);
+		      const practicalRoute = fulfillingRoute.filter((candidate) => candidate.isPractical);
+		      const paretoRoute = pareto.filter((candidate) => candidate.route === route);
+		      const paretoFulfillingRoute = paretoRoute.filter((candidate) => candidate.isFulfilling);
+		      return practicalRoute[0] ?? fulfillingRoute[0] ?? paretoFulfillingRoute[0] ?? paretoRoute[0] ?? rankedRoute[0];
+		    })
     .filter((candidate): candidate is PrintCandidate => Boolean(candidate));
   const paretoOrder = new Map(pareto.map((candidate, index) => [candidate.id, index]));
 
-  const routeCandidatesForDisplay = routeRepresentatives.map((candidate) => (
-    recommendedCandidate && candidate.route === recommendedCandidate.route
-      ? recommendedCandidate
-      : candidate
-  ));
+  const routeCandidatesForDisplay = [
+    ...(recommendedCandidate ? [recommendedCandidate] : []),
+    ...routeRepresentatives.filter((candidate) => (
+      !recommendedCandidate || candidate.route !== recommendedCandidate.route
+    )),
+  ];
   const uniqueRouteCandidates = routeCandidatesForDisplay.filter((candidate, index, items) => (
     items.findIndex((item) => item.id === candidate.id) === index
   ));
@@ -865,20 +965,10 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
       ?? null
     : null;
 
-  const digitalRepresentative = uniqueRouteCandidates.find((candidate) => candidate.route === "D") ?? null;
-  const gravureRepresentative = uniqueRouteCandidates.find((candidate) => candidate.route === "K")
-    ?? uniqueRouteCandidates.find((candidate) => candidate.route === "Y")
-    ?? null;
-  // Digital and gravure comparisons are primary routing decisions. Reserve
-  // their slots before basis/shortage references, then let the card cap decide
-  // which remaining alternatives fit.
-  const guaranteedRouteCandidates = [
-    ...(recommendedCandidate ? [recommendedCandidate] : []),
-    ...(digitalRepresentative ? [digitalRepresentative] : []),
-    ...(gravureRepresentative ? [gravureRepresentative] : []),
-  ].filter((candidate, index, items) => (
-    items.findIndex((item) => item.id === candidate.id) === index
-  ));
+  // Each D/K/Y route is a primary decision. Reserve one representative per
+  // route before basis/shortage references so a domestic option cannot be
+  // crowded out by a Korean option merely because both are gravure.
+  const guaranteedRouteCandidates = routeCandidatesForDisplay;
 
   const displayCandidates = [
     ...guaranteedRouteCandidates,

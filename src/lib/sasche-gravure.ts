@@ -29,6 +29,8 @@ export type SascheCandidate = {
   filmTotalYen: string;
   plateUnitPriceYen: string;
   plateTotalYen: string;
+  skuOutputLengthsM?: string[];
+  skuPatternIds?: string[];
   surplusLengthM: string;
   shortageLengthM: string;
   surplusRatio: string;
@@ -131,6 +133,8 @@ function buildSascheRows({ webWidthMm, requiredLengthM, quantity, colorCount }: 
         quantityToleranceExceeded: quantityReductionRatio.gt(15),
         outputLengthM: outputLengthM.toString(),
         filmTotalYen: filmTotal.toString(),
+        skuOutputLengthsM: [outputLengthM.toString()],
+        skuPatternIds: [id],
         surplusLengthM: surplus.toString(),
         shortageLengthM: shortage.toString(),
         surplusRatio: surplusRatio.toString(),

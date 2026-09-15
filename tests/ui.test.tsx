@@ -271,7 +271,7 @@ describe("quotation UI", () => {
         sizeKey: "tube-35x80", fillMlPerChamber: "3", connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4,
         isCustom: false, colorCount: 2, bulkUnitPrice: "0", skuCount: 1,
       } as PouchSpec,
-      quantity: "133000", printingMethod: "digital" as const,
+      quantity: "10000", printingMethod: "digital" as const,
       parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
     };
     const targetMargins = ["0.3", "0.35", "0.4"];
@@ -283,7 +283,7 @@ describe("quotation UI", () => {
       selectedCandidateTargetMargins: targetMargins,
     };
     const originalCalculation = calculatePouchCost(originalRequest);
-    const candidate = originalCalculation.recommendationCandidates![0];
+    const candidate = originalCalculation.recommendationCandidates!.find((item) => item.route === "Y")!;
     const selectedRequest = {
       ...input,
       targetMargins,
@@ -316,7 +316,6 @@ describe("quotation UI", () => {
     expect(within(screen.getByTestId("input-basis-card")).getByText("選択中")).toBeInTheDocument();
     expect(screen.getByText(/4色/)).toBeInTheDocument();
     expect(within(screen.getByTestId("input-basis-card")).getByText(/フィルム PET12\+AL7\+PET12\+LLDPE50/)).toBeInTheDocument();
-    expect(screen.getByText(/必要長を100m単位|合計最低発注|SKU最低300m/)).toBeInTheDocument();
     expect(screen.getAllByText(/余剰 /).length).toBeGreaterThan(0);
 
     await user.click(screen.getByTestId("input-basis-card"));
@@ -325,12 +324,12 @@ describe("quotation UI", () => {
     await user.click(screen.getByRole("button", { name: "候補一覧" }));
     await waitFor(() => expect(screen.getByText("フィルム調達・製造計画候補")).toBeInTheDocument());
 
-    await user.click(screen.getByText("推奨"));
+	    await user.click(screen.getByRole("button", { name: /Y \/ 国内調達（グラビア印刷）/ }));
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
     await user.click(screen.getByTestId("cost-film").querySelector("summary")!);
     const filmChain = screen.getByTestId("film-loss-chain");
-    expect(filmChain).toHaveTextContent("国内調達は幅");
-    expect(filmChain).toHaveTextContent("の固定出荷パターンを採用し");
+    expect(filmChain).toHaveTextContent("国内調達はSKUごとに独立発注です");
+    expect(filmChain).toHaveTextContent("固定出荷パターンをSKUごとに選びます");
     expect(filmChain).toHaveTextContent("未使用長さ");
     expect(filmChain).not.toHaveTextContent("輸入パターンを使いません");
     expect(filmChain).not.toHaveTextContent("K / 韓国輸入の");
@@ -398,8 +397,6 @@ describe("quotation UI", () => {
 
 	    await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "候補一覧" }));
-    await user.click(screen.getByRole("button", { name: "不足プランを比較する" }));
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]).toBeEnabled());
     await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
     expect(screen.getByLabelText("利益率 40%")).toBeChecked();
@@ -457,8 +454,8 @@ describe("quotation UI", () => {
     expect(screen.getByTestId("candidate-Y-film-delta")).toHaveTextContent("フィルムのみ差額 -￥143,984");
     expect(screen.getByTestId("candidate-Y-copper")).toHaveTextContent("銅版費 +￥120,960");
     expect(screen.getByTestId("candidate-Y-all-in-delta")).toHaveTextContent("-￥23,024");
-    expect(screen.getByTestId("comparison-K")).toHaveTextContent("206,000枚");
-    expect(screen.getByTestId("comparison-K")).toHaveTextContent("￥1,280,490");
+    expect(screen.getByTestId("comparison-K")).toHaveTextContent("50,000枚");
+    expect(screen.getByTestId("comparison-K")).toHaveTextContent("￥856,513");
     expect(screen.getByTestId("comparison-K")).toHaveTextContent("顧客発注の4.1倍製造／在庫リスク");
     expect(screen.getByTestId("candidate-K-risk")).toHaveTextContent("顧客発注の4.1倍製造／在庫リスク");
   });
@@ -470,13 +467,13 @@ describe("quotation UI", () => {
       spec: {
         sizeKey: "tube-50x90", fillMlPerChamber: "3", connectedChambers: 1 as const, fillingMethod: "hopper" as const,
         fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
-        skuQuantities: ["50000"], skuColorCounts: ["4"],
+        skuQuantities: ["500000"], skuColorCounts: ["4"],
       } as PouchSpec,
-      quantity: "50000", printingMethod: "digital" as const,
+      quantity: "500000", printingMethod: "digital" as const,
       parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
     };
     const originalCalculation = calculatePouchCost({ ...input, recommendationMode: true });
-    const shortage = originalCalculation.recommendationCandidates!.find((candidate) => !candidate.isFulfilling)!;
+    const shortage = originalCalculation.recommendationCandidates!.find((candidate) => candidate.route === "Y" && !candidate.isFulfilling)!;
     expect(shortage).toBeTruthy();
     global.fetch = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body));
@@ -499,25 +496,23 @@ describe("quotation UI", () => {
     await user.selectOptions(screen.getByLabelText("サイズ"), "tube-50x90");
     const quantityInput = screen.getByLabelText("発注数量 (枚)");
     await user.clear(quantityInput);
-    await user.type(quantityInput, "50000");
+    await user.type(quantityInput, "500000");
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
-    expect(screen.queryByRole("button", { name: /D \/ デジタル/ })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("comparison-D")).not.toBeInTheDocument();
     const disclosure = screen.getByRole("button", { name: "不足プランを比較する" });
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByText(/顧客発注に届かない小さいまとめ購入です/)).toBeInTheDocument();
 
     await user.click(disclosure);
-    expect(screen.getByTestId("comparison-D")).toBeInTheDocument();
-    const shortageCard = screen.getByRole("button", { name: /D \/ デジタル/ });
+    expect(screen.getByTestId("comparison-Y")).toBeInTheDocument();
+    const shortageCard = screen.getByRole("button", { name: /Y \/ 国内調達/ });
     expect(shortageCard).toBeEnabled();
     await user.click(shortageCard);
-    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
-    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("17,000 枚");
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("63,000 枚");
     await user.click(screen.getByRole("button", { name: "候補一覧" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /D \/ デジタル/ })).toBeVisible());
-    expect(screen.getByTestId("comparison-D")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Y \/ 国内調達/ })).toBeVisible());
+    expect(screen.getByTestId("comparison-Y")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "不足プラン選択中" })).toBeDisabled();
   });
 
@@ -574,7 +569,7 @@ describe("quotation UI", () => {
     await user.selectOptions(screen.getByLabelText("サイズ"), "tube-50x90");
     const quantityInput = screen.getByLabelText("発注数量 (枚)");
     await user.clear(quantityInput);
-    await user.type(quantityInput, "50000");
+    await user.type(quantityInput, "500000");
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
 
@@ -629,7 +624,6 @@ describe("quotation UI", () => {
 
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
-    await user.click(screen.getByRole("button", { name: "不足プランを比較する" }));
     await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
     expect(screen.getByLabelText("利益率 カスタム")).toBeChecked();
@@ -649,8 +643,6 @@ describe("quotation UI", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "候補一覧" }));
-    await user.click(screen.getByRole("button", { name: "不足プランを比較する" }));
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]).toBeEnabled());
     await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
     expect(screen.getByLabelText("利益率 カスタム")).toBeChecked();

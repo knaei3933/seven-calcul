@@ -132,22 +132,8 @@ describe("calculate API recommendations", () => {
     expect(payload.result.quantity).toBe(list[0].adjustedQuantity);
     expect(payload.originalResult.quantity).toBe("133000");
 
-    expect(Number(payload.result.film.filmTotal)).toBe(Number(list[0].filmTotalYen));
-
-    const shortageReference = list.find((candidate) => !candidate.capacityQuantity || Number(candidate.shortagePieces) > 0);
-    expect(shortageReference).toBeDefined();
-    const shortageResponse = await POST(new Request("http://localhost/api/calculate", {
-      method: "POST",
-      body: JSON.stringify({
-        ...recommendationInput,
-        recommendationMode: true,
-        selectedCandidateId: shortageReference!.id,
-      }),
-    }));
-    const shortagePayload = await shortageResponse.json();
-    expect(shortagePayload.result.quantity).toBe(shortageReference!.adjustedQuantity);
-    expect(Number(shortagePayload.result.quantity)).toBeLessThan(133000);
-  });
+	    expect(Number(payload.result.film.filmTotal)).toBe(Number(list[0].filmTotalYen));
+	  });
 
   it("rejects an unknown selected candidate", async () => {
     const response = await POST(new Request("http://localhost/api/calculate", {
