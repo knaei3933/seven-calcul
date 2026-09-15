@@ -217,14 +217,81 @@ describe("quotation calculation provenance", () => {
     expect(payload.record.resultHash).toBe(originalResult.audit.resultJsonSha256);
   });
 
-  it("accepts an original multi-SKU gravure calculation with no selected candidate", async () => {
+	  it("accepts an original multi-SKU gravure calculation with no selected candidate", async () => {
     const response = await post(quotationBody("S7-PROVENANCE-GRAVURE-ORIGINAL", gravureDraft, gravureResult));
     expect(response.status).toBe(201);
     const payload = await response.json();
-    expect(payload.record.resultHash).toBe(gravureResult.audit.resultJsonSha256);
-  });
+	    expect(payload.record.resultHash).toBe(gravureResult.audit.resultJsonSha256);
+	  });
 
-  it("rejects a fabricated result hash before persistence", async () => {
+	  it("accepts a selected multi-SKU domestic Y request with independent roll lengths", async () => {
+	    const ySpec: PouchSpec = {
+	      ...spec,
+	      skuCount: 2,
+	      skuQuantities: ["25000", "25000"],
+	      skuNames: ["Y A", "Y B"],
+	      skuFillMlPerChamber: ["3", "3"],
+	      skuColorCounts: ["4", "4"],
+	    };
+	    const yRequest: CalculationInput = {
+	      ...baseInput,
+	      spec: ySpec,
+	      quantity: "50000",
+	      selectedCandidateId: "",
+	      selectedCandidateTargetMargins: baseInput.targetMargins,
+	    };
+	    const originalY = calculatePouchCost(yRequest);
+	    const candidate = originalY.recommendationCandidates!.find((item) => (
+	      item.route === "Y" && item.orderLengthM === "3400"
+	    ))!;
+	    const selectedY = calculatePouchCost({
+	      ...yRequest,
+	      selectedCandidateId: candidate.id,
+	      selectedCandidateTargetMargins: ["0.2", "0.25", "0.3"],
+	    });
+	    const draft = buildQuotationDraft(selectedY, {
+	      quotationNumber: "",
+	      sourceHash: selectedY.audit.resultJsonSha256,
+	      resultHash: selectedY.audit.resultJsonSha256,
+	      widthMm: "50",
+	      lengthMm: "90",
+	      connected: "1",
+	      skuNames: ["Y A", "Y B"],
+	      targetMargin: "0.3",
+	      printingMethod: selectedY.printingMethod,
+	      filmComposition: "PET12+AL7+PET12+LLDPE50",
+	      webWidthMm: 999,
+	      lanes: 4,
+	      pitchMm: "98",
+	      pitchAddMm: "8",
+	      prodMultiplier: 1,
+	      colorCount: 8,
+	      skus: candidate.adjustedSkuQuantities.map((quantity, index) => ({
+	        name: index === 0 ? "Y A" : "Y B",
+	        quantity,
+	        fillMl: "3",
+	        colorCount: "4",
+	        orderLengthM: candidate.sasche?.skuOutputLengthsM?.[index] ?? "1700",
+	        webWidthMm: 888,
+	      })),
+	      parameters: defaultParameters,
+	      lossRate: defaultParameters.lossRate,
+	      bulkUnitPrice: "0",
+	      gravureParameters: defaultGravureRollParameters(),
+	      calculationRequest: {
+	        ...yRequest,
+	        recommendationMode: true,
+	        selectedCandidateId: candidate.id,
+	        selectedCandidateTargetMargins: ["0.2", "0.25", "0.3"],
+	      },
+	    });
+
+	    const body = quotationBody("S7-PROVENANCE-Y-MULTI", draft, selectedY);
+	    const response = await post(body);
+	    expect(response.status).toBe(201);
+	  });
+
+	  it("rejects a fabricated result hash before persistence", async () => {
     const body = quotationBody("S7-PROVENANCE-002");
     body.resultHash = "fabricated-hash";
     body.payload.resultHash = "fabricated-hash";

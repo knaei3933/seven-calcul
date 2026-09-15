@@ -62,20 +62,25 @@ function hasValidPurchaseOrder(
     });
   }
 
-  const selectedCandidate = result.recommendationCandidates
-    ?.find((candidate) => candidate.id === result.selectedCandidateId);
-  const adjustedQuantities = selectedCandidate?.adjustedSkuQuantities
-    ?? request.spec.skuQuantities
-    ?? Array.from({ length: request.spec.skuCount }, () => request.quantity);
-  if (order.skuOrderDetails.length !== adjustedQuantities.length) return false;
-  const totalQuantity = adjustedQuantities.reduce((total, value) => total.plus(D(value)), D(0));
-  return order.skuOrderDetails.every((sku, index) => {
-    const quantity = D(adjustedQuantities[index]);
-    const allocatedOrderLength = totalQuantity.gt(0)
-      ? D(result.film.orderLengthM).times(quantity.div(totalQuantity))
-      : D(result.film.orderLengthM);
-    return decimalEquals(sku.quantity, quantity)
-      && decimalEquals(sku.orderLengthM, allocatedOrderLength)
+	  const selectedCandidate = result.recommendationCandidates
+	    ?.find((candidate) => candidate.id === result.selectedCandidateId);
+	  const adjustedQuantities = selectedCandidate?.adjustedSkuQuantities
+	    ?? request.spec.skuQuantities
+	    ?? Array.from({ length: request.spec.skuCount }, () => request.quantity);
+	  if (order.skuOrderDetails.length !== adjustedQuantities.length) return false;
+	  const productionPatternLengthM = request.gravureParameters?.productionPatternLengthM;
+	  const totalQuantity = adjustedQuantities.reduce((total, value) => total.plus(D(value)), D(0));
+	  return order.skuOrderDetails.every((sku, index) => {
+	    const quantity = D(adjustedQuantities[index]);
+	    const allocatedOrderLength = selectedCandidate?.route === "Y" && selectedCandidate.sasche?.skuOutputLengthsM?.[index]
+	      ? D(selectedCandidate.sasche.skuOutputLengthsM[index])
+	      : selectedCandidate?.route === "K" && selectedCandidate.skuPatternCounts?.[index]
+	        ? D(selectedCandidate.skuPatternCounts[index]).times(D(productionPatternLengthM ?? "5500"))
+	        : totalQuantity.gt(0)
+	          ? D(result.film.orderLengthM).times(quantity.div(totalQuantity))
+	          : D(result.film.orderLengthM);
+	    return decimalEquals(sku.quantity, quantity)
+	      && decimalEquals(sku.orderLengthM, allocatedOrderLength)
       && decimalEquals(sku.webWidthMm, activeWidthMm);
   });
 }

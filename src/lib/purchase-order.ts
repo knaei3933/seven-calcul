@@ -16,8 +16,8 @@ export type PurchaseOrderSnapshot = {
   pitchMm: string;
   prodMultiplier: number;
   colorCount: number;
-  skuColorCounts: string[];
-  skuOrderDetails: {
+	  skuColorCounts: string[];
+	  skuOrderDetails: {
     skuCode: string;
     name: string;
     quantity: string;
@@ -25,9 +25,11 @@ export type PurchaseOrderSnapshot = {
     requiredLengthM: string;
     orderLengthM: string;
     webWidthMm: number;
-    multiplier: number;
-  }[];
-  orderPatternCount?: number;
+	    multiplier: number;
+	  }[];
+	  skuOrderLengthsM?: string[];
+	  procurementRoute?: "Y" | "K";
+	  orderPatternCount?: number;
   deliverablePatternLengthM?: string;
   productionPatternLengthM?: string;
   gravureLossM?: string;
@@ -80,7 +82,7 @@ export function buildPurchaseOrderSnapshot(result: CostResult, context: Purchase
     prodMultiplier: context.prodMultiplier,
     colorCount: context.colorCount,
     skuColorCounts,
-    skuOrderDetails: result.film.skuCosts.map((sku) => ({
+	    skuOrderDetails: result.film.skuCosts.map((sku) => ({
       skuCode: sku.skuCode,
       name: sku.name,
       quantity: sku.quantity,
@@ -89,7 +91,9 @@ export function buildPurchaseOrderSnapshot(result: CostResult, context: Purchase
       orderLengthM: sku.orderLengthM,
       webWidthMm: sku.webWidthMm,
       multiplier: sku.multiplier,
-    })),
+	    })),
+	    skuOrderLengthsM: result.sasche?.skuOutputLengthsM,
+	    procurementRoute: result.sasche ? "Y" : result.gravure ? "K" : undefined,
     customMold: result.customCharge ? {
       quantity: "1",
       costYen: result.customCharge,

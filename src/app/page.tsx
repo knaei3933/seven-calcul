@@ -819,11 +819,13 @@ export default function QuotationPage() {
         const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate);
         const orderLengthM = candidate.route === "D"
           ? D(candidate.filmOrders?.[index]?.orderLengthM ?? activeResult.film.orderLengthM)
-          : candidate.route === "K"
-            ? D(candidate.skuPatternCounts?.[index] ?? 1).times(normalizedGravureParameters.productionPatternLengthM)
-            : totalAdjustedQuantity.gt(0)
-              ? D(activeResult.film.orderLengthM).times(quantity.div(totalAdjustedQuantity))
-              : D(activeResult.film.orderLengthM);
+	            : candidate.route === "K"
+	              ? D(candidate.skuPatternCounts?.[index] ?? 1).times(normalizedGravureParameters.productionPatternLengthM)
+	            : candidate.route === "Y"
+	              ? D(candidate.sasche?.skuOutputLengthsM?.[index] ?? activeResult.film.orderLengthM)
+	              : totalAdjustedQuantity.gt(0)
+	                ? D(activeResult.film.orderLengthM).times(quantity.div(totalAdjustedQuantity))
+	                : D(activeResult.film.orderLengthM);
         return {
           name: sku.name,
           quantity: quantity.toString(),
@@ -1048,22 +1050,16 @@ export default function QuotationPage() {
 
   useEffect(() => {
     if (!serverResult || !quotationDraftResult || !customerDraft) return;
-    const totalDraftQuantity = selectedRecommendation?.adjustedSkuQuantities.reduce<Decimal>(
-      (total, value) => total.plus(D(value)),
-      D(0),
-    ) ?? D(quotationDraftResult.quantity);
-    const draftSkus = form.skus.map((sku, index) => {
+	    const draftSkus = form.skus.map((sku, index) => {
       const quantity = D(selectedRecommendation?.adjustedSkuQuantities[index] ?? sku.quantity);
       const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate);
       const orderLengthM = selectedRecommendation?.route === "D"
         ? D(selectedRecommendation.filmOrders?.[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM)
         : selectedRecommendation?.route === "K"
           ? D(selectedRecommendation.skuPatternCounts?.[index] ?? 1).times(normalizedGravureParameters.productionPatternLengthM)
-          : selectedRecommendation?.route === "Y"
-            ? totalDraftQuantity.gt(0)
-              ? D(quotationDraftResult.film.orderLengthM).times(quantity.div(totalDraftQuantity))
-              : D(quotationDraftResult.film.orderLengthM)
-            : quotationDraftResult.film.skuCosts[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM;
+	          : selectedRecommendation?.route === "Y"
+	            ? D(selectedRecommendation.sasche?.skuOutputLengthsM?.[index] ?? quotationDraftResult.film.orderLengthM)
+	            : quotationDraftResult.film.skuCosts[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM;
       return {
         name: sku.name,
         quantity: quantity.toString(),

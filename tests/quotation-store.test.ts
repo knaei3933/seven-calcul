@@ -403,6 +403,72 @@ describe("quotation persistence with a manually edited selling price", () => {
     expect(checklistSkus.map((sku) => sku.webWidthMm)).toEqual(expectedWidths);
   });
 
+  it("keeps domestic Y purchase orders independent for each SKU", () => {
+    const input = {
+      spec: {
+        sizeKey: "tube-50x90" as const, fillMlPerChamber: "3", connectedChambers: 1 as const, fillingMethod: "hopper" as const,
+        fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 2,
+        skuQuantities: ["25000", "25000"], skuNames: ["SKU A", "SKU B"],
+        skuFillMlPerChamber: ["3", "3"], skuColorCounts: ["4", "4"],
+      },
+      quantity: "50000", printingMethod: "digital" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+      targetMargins: ["0.3", "0.35", "0.4"], recommendationMode: true,
+    };
+    const original = calculatePouchCost(input);
+    const candidate = original.recommendationCandidates!.find((item) => (
+      item.route === "Y" && item.orderLengthM === "3400"
+    ))!;
+    const selected = calculatePouchCost({
+      ...input,
+      selectedCandidateId: candidate.id,
+      selectedCandidateTargetMargins: ["0.2", "0.25", "0.3"],
+    });
+    expect(selected.gravure).toBeDefined();
+
+    const draft = buildQuotationDraft(selected, {
+      quotationNumber: "",
+      sourceHash: selected.audit.resultJsonSha256,
+      resultHash: selected.audit.resultJsonSha256,
+      widthMm: "50",
+      lengthMm: "90",
+      connected: "1",
+      skuNames: ["SKU A", "SKU B"],
+      targetMargin: "0.3",
+      printingMethod: selected.printingMethod,
+      filmComposition: "PET12+AL7+PET12+LLDPE50",
+      webWidthMm: 999,
+      lanes: 4,
+      pitchMm: "98",
+      pitchAddMm: "8",
+      prodMultiplier: 1,
+      colorCount: 8,
+      skus: candidate.adjustedSkuQuantities.map((quantity, index) => ({
+        name: index === 0 ? "SKU A" : "SKU B",
+        quantity,
+        fillMl: "3",
+        colorCount: "4",
+        orderLengthM: candidate.sasche?.skuOutputLengthsM?.[index] ?? "1700",
+      })),
+      lossRate: defaultParameters.lossRate,
+      bulkUnitPrice: "0",
+      parameters: defaultParameters,
+    });
+
+    expect(draft.purchaseOrder?.orderLengthM).toBe("3400");
+    expect(draft.purchaseOrder?.procurementRoute).toBe("Y");
+    expect(draft.purchaseOrder?.skuOrderLengthsM).toEqual(["1700", "1700"]);
+    expect(draft.purchaseOrder?.skuOrderDetails.map((sku) => ({
+      quantity: Number(sku.quantity),
+      orderLengthM: Number(sku.orderLengthM),
+      webWidthMm: sku.webWidthMm,
+    }))).toEqual([
+      { quantity: 25000, orderLengthM: 1700, webWidthMm: 476 },
+      { quantity: 25000, orderLengthM: 1700, webWidthMm: 476 },
+    ]);
+    expect(draft.calculationChecklistSnapshot?.skus?.map((sku) => sku.orderLengthM)).toEqual(["1700", "1700"]);
+  });
+
   it("rebuilds persistent checklists for quotations saved before checklist snapshots", async () => {
     const quotationInput: QuotationRecordInput = {
       quotationNumber: "S7-LEGACY-CHECKLIST-001",

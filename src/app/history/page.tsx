@@ -902,7 +902,7 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
                 <dl className="purchase-order-grid">
                   <div><dt>必要長</dt><dd>{formatNumber(order.requiredLengthM, 3)} m</dd></div>
                   <div><dt>発注長</dt><dd>{formatNumber(order.orderLengthM, 0)} m</dd></div>
-                  <div><dt>ロス</dt><dd>{formatNumber(order.lossM, 0)} m</dd></div>
+	                  <div><dt>{order.procurementRoute === "Y" ? "未使用長さ" : "ロス"}</dt><dd>{formatNumber(order.lossM, 0)} m</dd></div>
                   <div><dt>有効長</dt><dd>{formatNumber(order.effectiveLengthM, 0)} m</dd></div>
                 </dl>
                 {order.printingMethod === "digital" ? (
@@ -912,8 +912,18 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
                     <li>原反幅 {formatNumber(order.webWidthMm, 0)}mm は、このサイズを {formatNumber(order.lanes, 0)}列で生産する登録済み確認幅です。1列あたり {formatNumber(D(order.webWidthMm).div(order.lanes).toString(), 1)}mm 確保できます。</li>
                     {order.prodMultiplier > 1 ? <li>このサイズは大ロット切替のため生産倍率 {formatNumber(order.prodMultiplier, 0)}倍、検討幅 736mm を使用します。</li> : null}
                   </ol>
-                ) : (
-                  <ol>
+	                ) : order.procurementRoute === "Y" && order.skuOrderLengthsM?.length ? (
+	                  <ol>
+	                    <li>国内調達はSKUごとに独立発注です。ロールをSKU間で共用しません。</li>
+	                    <li>
+	                      発注長 ＝ SKUごとの出荷長 {order.skuOrderLengthsM.map((length) => formatNumber(length, 0)).join(" + ")}
+	                      ＝ 合計 {formatNumber(order.orderLengthM, 0)}m。
+	                    </li>
+	                    <li>未使用長さ ＝ 出荷長 {formatNumber(order.orderLengthM, 0)}m − 必要納品長 {formatNumber(order.requiredLengthM, 3)}m ＝ {formatNumber(order.lossM, 0)}m。</li>
+	                    <li>原反幅 {formatNumber(order.webWidthMm, 0)}mm は国内サプライヤーの確認幅です。</li>
+	                  </ol>
+	                ) : (
+	                  <ol>
                     <li>必要納品長 ＝ {formatNumber(order.requiredLengthM, 3)}m。</li>
                     <li>発注パターン ＝ ceil(必要納品長 ÷ {formatNumber(order.deliverablePatternLengthM ?? "0", 0)}m) ＝ {formatNumber(order.orderPatternCount ?? 1, 0)}回。</li>
                     <li>発注（製作）長 ＝ パターン数 × 製作パターン長 ＝ {formatNumber(order.orderLengthM, 0)}m。納品可能長は {formatNumber(order.deliverablePatternLengthM ?? "0", 0)}m、ロスは {formatNumber(order.gravureLossM ?? "0", 0)}m。</li>
@@ -957,12 +967,20 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
                         <div><dt>外径</dt><dd>{formatNumber(order.copperPlate.diameterMm, 0)} cm</dd></div>
                         <div><dt>金額</dt><dd>{formatCurrency(order.copperPlate.priceYen, 0)}</dd></div>
                       </dl>
-                      <ol>
-                        <li>銅版数 ＝ 印刷色数。</li>
-                        <li>版幅 ＝ 原反幅 {formatNumber(order.webWidthMm, 0)}mm ＋ 端代100mm ＝ {formatNumber(order.copperPlate.plateWidthMm, 0)}mm。</li>
-                        <li>1本 ＝ MAX(¥32,000, 版幅cm × 単価 × 外径cm)。小数は切り上げ。</li>
-                        <li>金額 ＝ 1本単価 × 銅版数。銅版は印刷色ごとに1本必要です。</li>
-                      </ol>
+	                      {order.procurementRoute === "Y" ? (
+	                        <ol>
+	                          <li>銅版数 ＝ SKUごとの印刷色数の合計。</li>
+	                          <li>1本 ＝ PDF掲載金額に12%販売マージンを適用。</li>
+	                          <li>金額 ＝ 1本単価 × 銅版数。SKUごとに銅版は共用しません。</li>
+	                        </ol>
+	                      ) : (
+	                        <ol>
+	                          <li>銅版数 ＝ 印刷色数。</li>
+	                          <li>版幅 ＝ 原反幅 {formatNumber(order.webWidthMm, 0)}mm ＋ 端代100mm ＝ {formatNumber(order.copperPlate.plateWidthMm, 0)}mm。</li>
+	                          <li>1本 ＝ MAX(¥32,000, 版幅cm × 単価 × 外径cm)。小数は切り上げ。</li>
+	                          <li>金額 ＝ 1本単価 × 銅版数。銅版は印刷色ごとに1本必要です。</li>
+	                        </ol>
+	                      )}
                     </>
                   ) : <p>銅版情報が保存されていません。</p>}
                 </section>
