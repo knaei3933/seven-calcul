@@ -1835,7 +1835,7 @@ export default function QuotationPage() {
                                     })()}
                                   </p>
                                   <p>③ 出荷長 {formatNumber(f.effectiveLengthM)}m から必要納品長 {formatNumber(f.requiredLengthM)}m を差し引いた未使用長さは {formatNumber(f.lossM)}m です。</p>
-                                  <p>④ フィルム代＝出荷長 {formatNumber(f.effectiveLengthM)}m × 販売m単価 {formatCurrency(displayAmount(f.unitPrice), 2)}＝{formatCurrency(displayAmount(f.filmTotal))}。この単価には国内サプライヤー調達の販売マージンが含まれ、通関料・海外配送費は加算しません。銅版費は別計上します。</p>
+                                  <p>④ フィルム代＝出荷長 {formatNumber(f.effectiveLengthM)}m × 販売m単価 {formatCurrency(displayAmount(f.unitPrice), 2)}＝{formatCurrency(displayAmount(f.filmTotal))}。この金額は確定した調達条件に基づき、通関料・海外配送費を加算しません。銅版費は別計上します。</p>
                                   <p>⑤ 稼働率＝必要納品長 {formatNumber(f.requiredLengthM)}m ÷ 出荷長 {formatNumber(f.effectiveLengthM)}m＝{formatNumber(D(f.requiredLengthM).div(f.effectiveLengthM).times(100).toString(), 1)}%です。</p>
                                 </>
                               ) : (
@@ -1888,7 +1888,7 @@ export default function QuotationPage() {
 	                            <td>新規銅版</td>
 	                            <td>
 	                              {resultShown.sasche
-	                                ? `${formatNumber(resultShown.sasche.colorCount)}色 × ${formatCurrency(displayAmount(resultShown.sasche.plateUnitPriceYen), 0)}（PDF掲載金額に12%適用）`
+	                                ? `${formatNumber(resultShown.sasche.colorCount)}色分を別計上`
 	                                : `MAX(¥32,000, 色数 × (原反幅+100mm) × ¥${formatNumber(normalizedGravureParameters.newCopperPlateUnitPriceYen)} × 42cm を切り上げ)`}
 	                            </td>
 	                            <td data-testid="copper-plate-amount">{formatCurrency(displayAmount(resultShown.costComponents.copperPlate), 0)}</td>
@@ -1896,8 +1896,8 @@ export default function QuotationPage() {
                         </tbody>
                       </table>
 	                      <p className="chain">
-	                        {resultShown.sasche
-	                          ? "国内調達の銅版単価にはPDF掲載金額に12%販売マージンを適用しています。版費はロット固定費として全発注数量に配賦します。"
+	                      {resultShown.sasche
+	                          ? "銅版費はSKUごとの色数に応じて別計上します。版費はロット固定費として全発注数量に配賦します。"
 	                          : "常に新規銅版を作成する前提です。計算額が¥32,000未満の場合は¥32,000を適用し、小数は切り上げて整数円にします。版費はロット固定費として全発注数量に配賦します。"}
 	                      </p>
                     </details>

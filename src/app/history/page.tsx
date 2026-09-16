@@ -968,10 +968,10 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
                         <div><dt>金額</dt><dd>{formatCurrency(order.copperPlate.priceYen, 0)}</dd></div>
                       </dl>
 	                      {order.procurementRoute === "Y" ? (
-	                        <ol>
+	                      <ol>
 	                          <li>銅版数 ＝ SKUごとの印刷色数の合計。</li>
-	                          <li>1本 ＝ PDF掲載金額に12%販売マージンを適用。</li>
-	                          <li>金額 ＝ 1本単価 × 銅版数。SKUごとに銅版は共用しません。</li>
+	                          <li>金額 ＝ 定めた単価 × 銅版数。</li>
+	                          <li>SKUごとに銅版は共用しません。</li>
 	                        </ol>
 	                      ) : (
 	                        <ol>

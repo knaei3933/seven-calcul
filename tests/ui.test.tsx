@@ -254,7 +254,7 @@ describe("quotation UI", () => {
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
     expect(screen.getAllByTestId("gravure-parameters").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("cost-copper").length).toBeGreaterThan(0);
-    expect(screen.getAllByTestId("cost-film").some((node) => node.textContent?.includes("国内サプライヤー調達の販売マージン"))).toBe(true);
+    expect(screen.getAllByTestId("cost-film").every((node) => !node.textContent?.includes("販売マージン"))).toBe(true);
     expect(screen.getAllByTestId("cost-copper").some((node) => node.textContent?.includes("新規銅版費"))).toBe(true);
   });
 
@@ -400,8 +400,9 @@ describe("quotation UI", () => {
 	    expect(screen.getByLabelText("利益率 30%")).toBeChecked();
 	    await user.click(screen.getByTestId("cost-copper").querySelector("summary")!);
 	    expect(screen.getByTestId("copper-plate-amount")).toHaveTextContent("￥120,960");
-	    expect(screen.getByTestId("cost-copper")).toHaveTextContent("4色 × ￥30,240（PDF掲載金額に12%適用）");
-	    expect(screen.getByTestId("cost-copper")).toHaveTextContent("PDF掲載金額に12%販売マージンを適用");
+	    expect(screen.getByTestId("cost-copper")).toHaveTextContent("4色分を別計上");
+	    expect(screen.getByTestId("cost-copper")).not.toHaveTextContent("PDF掲載金額に12%適用");
+	    expect(screen.getByTestId("cost-copper")).not.toHaveTextContent("12%販売マージン");
 
 	    await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "候補一覧" }));

@@ -640,20 +640,6 @@ header .version-badge { display: none; }
 .calc-guide-cards > div { display: grid; gap: 3px; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: white; padding: 8px; }
 .calc-guide-cards span { color: var(--muted); font-size: 10px; font-weight: 800; }
 .calc-guide-cards strong { overflow-wrap: anywhere; font-size: 13px; }
-.purchase-selling-guide {
-  display: grid;
-  gap: 6px;
-  border: 1px solid #f0b429;
-  border-radius: 9px;
-  background: #fff8e6;
-  padding: 10px;
-}
-.purchase-selling-guide p {
-  margin: 0;
-  color: var(--ink);
-  font-size: 12px;
-  line-height: 1.5;
-}
 .calc-formula { margin: 0; border-left: 3px solid var(--primary); background: white; padding: 8px 10px; font-size: 12px; line-height: 1.6; }
 .calc-steps { margin: 0; padding-left: 18px; color: #374151; font-size: 12px; line-height: 1.65; }
 .calc-mode { margin: 0; border-radius: 999px; padding: 7px 10px; text-align: center; font-size: 11px; font-weight: 900; }
