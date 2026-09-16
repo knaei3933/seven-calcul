@@ -306,6 +306,49 @@ function isNearTargetShortage(candidate: PrintCandidate, originalQuantity: Decim
     && shortagePieces.div(originalQuantity).lte(NEAR_TARGET_SHORTAGE_RATIO);
 }
 
+function repeatSascheCandidate(
+  candidate: SascheCandidate,
+  count: number,
+  requiredLengthM: Decimal,
+): SascheCandidate {
+  const outputLengthM = D(candidate.outputLengthM).times(count);
+  const filmTotalYen = D(candidate.filmTotalYen).times(count);
+  const quantity = D(candidate.quantity);
+  const perPieceRequiredLength = quantity.gt(0) ? requiredLengthM.div(quantity) : D(0);
+  const adjustedQuantity = perPieceRequiredLength.gt(0)
+    ? outputLengthM.div(perPieceRequiredLength).toDecimalPlaces(0, Decimal.ROUND_FLOOR)
+    : D(0);
+  const quantityReductionRatio = quantity.gt(0)
+    ? Decimal.max(D(0), quantity.minus(adjustedQuantity)).div(quantity).times(100)
+    : D(0);
+  const surplusLengthM = Decimal.max(outputLengthM.minus(requiredLengthM), D(0));
+  const shortageLengthM = Decimal.max(requiredLengthM.minus(outputLengthM), D(0));
+  return {
+    ...candidate,
+    id: `${candidate.id}x${count}`,
+    patternCount: count,
+    baseApproxLengthM: outputLengthM.toNumber(),
+    outputLengthM: outputLengthM.toString(),
+    filmTotalYen: filmTotalYen.toString(),
+    filmUnitPriceYen: outputLengthM.gt(0) ? filmTotalYen.div(outputLengthM).toString() : "0",
+    supplierUnitPriceYenPerM: outputLengthM.gt(0)
+      ? filmTotalYen.div("1.12").div(outputLengthM).toString()
+      : "0",
+    requiredLengthM: requiredLengthM.toString(),
+    adjustedQuantity: adjustedQuantity.toString(),
+    quantityReductionRatio: quantityReductionRatio.toString(),
+    quantityToleranceExceeded: quantityReductionRatio.gt("0.15"),
+    surplusLengthM: surplusLengthM.toString(),
+    shortageLengthM: shortageLengthM.toString(),
+    surplusRatio: requiredLengthM.gt(0)
+      ? surplusLengthM.div(requiredLengthM).times(100).toString()
+      : "0",
+    feasible: outputLengthM.gte(requiredLengthM) || quantityReductionRatio.lte("0.15"),
+    skuOutputLengthsM: [outputLengthM.toString()],
+    skuPatternIds: Array.from({ length: count }, () => candidate.id),
+  };
+}
+
 function candidateCommon(
   route: PrintCandidateRoute,
   originalQuantity: Decimal,
@@ -779,6 +822,22 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
     });
     if (options.length === 0) return [];
 
+    // One SKU may need several rolls of the same domestic pattern. Plate cost
+    // stays once per SKU/colour while film repeats with each fixed roll.
+    const expandedOptions = options.flatMap((candidate) => {
+      const outputLengthM = D(candidate.outputLengthM);
+      if (!outputLengthM.gt(0)) return [candidate];
+      const minimumRepeatCount = Decimal.max(
+        D(1),
+        D(candidate.requiredLengthM).div(outputLengthM).toDecimalPlaces(0, Decimal.ROUND_CEIL),
+      ).toNumber();
+      if (minimumRepeatCount <= 1) return [candidate];
+      return [
+        candidate,
+        repeatSascheCandidate(candidate, minimumRepeatCount, D(candidate.requiredLengthM)),
+      ];
+    });
+
     const createCombination = (candidate: SascheCandidate): DomesticCombination => ({
       sasche: candidate,
       adjustedQuantities: [D(candidate.adjustedQuantity)],
@@ -788,12 +847,12 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
       skuColorCounts: [candidate.colorCount],
     });
 
-    combinations = options.map(createCombination) as typeof combinations;
+    combinations = expandedOptions.map(createCombination) as typeof combinations;
     if (skuIndex === 0) continue;
 
     const next: DomesticCombination[] = [];
     for (const left of combinations) {
-      for (const right of options) {
+      for (const right of expandedOptions) {
         const outputLengthM = left.outputLengthM.plus(right.outputLengthM);
         const filmTotalYen = left.filmTotalYen.plus(right.filmTotalYen);
         const plateTotalYen = left.plateTotalYen.plus(right.plateTotalYen);
@@ -1036,21 +1095,34 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     selectionTagForRank(candidate, ranked),
   ]));
 
-  return displayCandidates.map((candidate) => ({
-    ...candidate,
-    selectionTag: displayTags.get(candidate.id) ?? candidate.selectionTag,
-    recommended: recommendedCandidate?.id === candidate.id,
-    ...(
-      context.basisFilmTotalYen
-        ? {
-            incrementalFilmTotalYen: D(candidate.filmTotalYen).minus(context.basisFilmTotalYen).toString(),
-            incrementalQuantity: D(candidate.adjustedQuantity).minus(originalQuantity).toString(),
-            incrementalCostPerAdditionalPieceYen: D(candidate.adjustedQuantity).gt(originalQuantity)
-              ? D(candidate.filmTotalYen).minus(context.basisFilmTotalYen)
-                  .div(D(candidate.adjustedQuantity).minus(originalQuantity)).toString()
-              : undefined,
-          }
-        : {}
-    ),
-  }));
+  return displayCandidates.map((candidate) => {
+    const fulfillingUpgrade = candidate.route !== "D" && !candidate.isFulfilling
+      ? candidates.filter((item) => (
+        item.route === candidate.route && item.isFulfilling && D(item.orderLengthM).gt(D(candidate.orderLengthM))
+      )).sort((left, right) => D(left.orderLengthM).minus(D(right.orderLengthM)).toNumber())[0]
+      : null;
+    const upgradeText = fulfillingUpgrade
+      ? ` 不足解消には ${fulfillingUpgrade.orderLengthM}m計画への切上げが必要です（+${
+        D(fulfillingUpgrade.orderLengthM).minus(candidate.orderLengthM).toFixed(0)
+      }m）。`
+      : "";
+    return {
+      ...candidate,
+      selectionTag: displayTags.get(candidate.id) ?? candidate.selectionTag,
+      recommended: recommendedCandidate?.id === candidate.id,
+      orderReason: `${candidate.orderReason}${upgradeText}`,
+      ...(
+        context.basisFilmTotalYen
+          ? {
+              incrementalFilmTotalYen: D(candidate.filmTotalYen).minus(context.basisFilmTotalYen).toString(),
+              incrementalQuantity: D(candidate.adjustedQuantity).minus(originalQuantity).toString(),
+              incrementalCostPerAdditionalPieceYen: D(candidate.adjustedQuantity).gt(originalQuantity)
+                ? D(candidate.filmTotalYen).minus(context.basisFilmTotalYen)
+                    .div(D(candidate.adjustedQuantity).minus(originalQuantity)).toString()
+                : undefined,
+            }
+          : {}
+      ),
+    };
+  });
 }

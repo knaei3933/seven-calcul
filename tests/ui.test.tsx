@@ -526,13 +526,13 @@ describe("quotation UI", () => {
       spec: {
         sizeKey: "tube-50x90", fillMlPerChamber: "3", connectedChambers: 1 as const, fillingMethod: "hopper" as const,
         fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
-        skuQuantities: ["500000"], skuColorCounts: ["4"],
+        skuQuantities: ["30000"], skuColorCounts: ["4"],
       } as PouchSpec,
-      quantity: "500000", printingMethod: "digital" as const,
+      quantity: "30000", printingMethod: "digital" as const,
       parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
     };
     const originalCalculation = calculatePouchCost({ ...input, recommendationMode: true });
-    const shortage = originalCalculation.recommendationCandidates!.find((candidate) => candidate.route === "Y" && !candidate.isFulfilling)!;
+    const shortage = originalCalculation.recommendationCandidates!.find((candidate) => candidate.route === "D" && !candidate.isFulfilling)!;
     expect(shortage).toBeTruthy();
     global.fetch = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body));
@@ -555,7 +555,7 @@ describe("quotation UI", () => {
     await user.selectOptions(screen.getByLabelText("サイズ"), "tube-50x90");
     const quantityInput = screen.getByLabelText("発注数量 (枚)");
     await user.clear(quantityInput);
-    await user.type(quantityInput, "500000");
+    await user.type(quantityInput, "30000");
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
     const disclosure = screen.getByRole("button", { name: "不足プランを比較する" });
@@ -563,15 +563,15 @@ describe("quotation UI", () => {
     expect(screen.getByText(/顧客発注に届かない小さいまとめ購入です/)).toBeInTheDocument();
 
     await user.click(disclosure);
-    expect(screen.getByTestId("comparison-Y")).toBeInTheDocument();
-    const shortageCard = screen.getByRole("button", { name: /Y \/ 国内調達/ });
+    expect(screen.getByTestId("comparison-D")).toBeInTheDocument();
+    const shortageCard = screen.getByRole("button", { name: /D \/ デジタル.*700/ });
     expect(shortageCard).toBeEnabled();
     await user.click(shortageCard);
-    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
-    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("63,000 枚");
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("25,000 枚");
     await user.click(screen.getByRole("button", { name: "候補一覧" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /Y \/ 国内調達/ })).toBeVisible());
-    expect(screen.getByTestId("comparison-Y")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: /D \/ デジタル.*700/ })).toBeVisible());
+    expect(screen.getByTestId("comparison-D")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "不足プラン選択中" })).toBeDisabled();
   });
 
