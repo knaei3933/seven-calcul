@@ -1,5 +1,6 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QuotePage from "@/app/quote/page";
 
@@ -51,7 +52,7 @@ describe("quotation page stale draft", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("keeps purchase and selling price guidance editor-side only", async () => {
+	  it("keeps purchase and selling price guidance editor-side only", async () => {
     render(<QuotePage />);
 
     const editorGuide = await waitFor(() => {
@@ -69,6 +70,28 @@ describe("quotation page stale draft", () => {
     const a4Sheet = screen.getByLabelText("お見積書A4プレビュー");
     expect(within(a4Sheet).queryByTestId("purchase-selling-guide")).not.toBeInTheDocument();
     expect(a4Sheet).not.toHaveTextContent("仕入価格と販売価格の見方");
-    expect(a4Sheet).not.toHaveTextContent("PDF掲載金額に12%の販売マージン");
-  });
+	    expect(a4Sheet).not.toHaveTextContent("PDF掲載金額に12%の販売マージン");
+	  });
+
+	  it("keeps side editor cards collapsed by default and lets users expand them independently", async () => {
+	    const user = userEvent.setup();
+	    render(<QuotePage />);
+
+	    const leftPanel = screen.getByTestId("quote-editor-left");
+	    const rightPanel = screen.getByTestId("quote-editor-right");
+	    expect(leftPanel).toHaveClass("desktop-collapsed");
+	    expect(rightPanel).toHaveClass("desktop-collapsed");
+
+	    await user.click(screen.getByTestId("toggle-editor-left"));
+	    expect(leftPanel).not.toHaveClass("desktop-collapsed");
+	    expect(rightPanel).toHaveClass("desktop-collapsed");
+
+	    await user.click(screen.getByTestId("toggle-editor-right"));
+	    expect(leftPanel).not.toHaveClass("desktop-collapsed");
+	    expect(rightPanel).not.toHaveClass("desktop-collapsed");
+
+	    await user.click(screen.getByTestId("toggle-editor-left"));
+	    expect(leftPanel).toHaveClass("desktop-collapsed");
+	    expect(rightPanel).not.toHaveClass("desktop-collapsed");
+	  });
 });

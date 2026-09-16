@@ -267,8 +267,9 @@ export default function PrintableQuotationPage() {
   const [checklistOpening, setChecklistOpening] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [quoteDraftStale, setQuoteDraftStale] = useState(false);
-  const [mobileDrawer, setMobileDrawer] = useState<"left" | "right" | null>(null);
-  const [isMobileWorkspace, setIsMobileWorkspace] = useState(false);
+	  const [mobileDrawer, setMobileDrawer] = useState<"left" | "right" | null>(null);
+	  const [isMobileWorkspace, setIsMobileWorkspace] = useState(false);
+	  const [expandedDesktopPanels, setExpandedDesktopPanels] = useState({ left: false, right: false });
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrderSnapshot | null>(null);
   const [calculationChecklistSnapshot, setCalculationChecklistSnapshot] = useState<CalculationChecklistSnapshot | null>(null);
 
@@ -280,14 +281,26 @@ export default function PrintableQuotationPage() {
     return () => query.removeEventListener("change", update);
   }, []);
 
-  useEffect(() => {
-    if (!mobileDrawer) return;
+	  useEffect(() => {
+	    if (!mobileDrawer) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setMobileDrawer(null);
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mobileDrawer]);
+	    return () => window.removeEventListener("keydown", onKeyDown);
+	  }, [mobileDrawer]);
+
+	  const toggleSidePanel = (side: "left" | "right") => {
+	    if (isMobileWorkspace) {
+	      setMobileDrawer((current) => (current === side ? null : side));
+	      return;
+	    }
+	    setExpandedDesktopPanels((current) => ({ ...current, [side]: !current[side] }));
+	  };
+
+	  const isSidePanelExpanded = (side: "left" | "right") => (
+	    isMobileWorkspace ? mobileDrawer === side : expandedDesktopPanels[side]
+	  );
 
   useEffect(() => {
     try {
@@ -1044,18 +1057,30 @@ export default function PrintableQuotationPage() {
         {saveError ? <p className="error" role="alert" data-testid="save-error">{saveError}</p> : null}
       </section>
 
-      <div className={`quote-workspace ${mobileDrawer ? `drawer-open drawer-${mobileDrawer}` : ""}`}>
-        <aside
-          className="panel quote-side quote-side-left no-print"
-          id="quote-editor-left"
-          data-testid="quote-editor-left"
-          aria-label="見積書基本編集"
-          inert={isMobileWorkspace && mobileDrawer !== "left" ? true : undefined}
-        >
-          <div className="side-header">
-            <span className="side-kicker">LEFT</span>
-            <h2>基本・宛先</h2>
-            <button className="side-close" type="button" onClick={() => setMobileDrawer(null)}>閉じる</button>
+      <div
+        className={`quote-workspace ${mobileDrawer ? `drawer-open drawer-${mobileDrawer}` : ""} ${
+          !isMobileWorkspace && !expandedDesktopPanels.left ? "left-collapsed" : ""
+        } ${!isMobileWorkspace && !expandedDesktopPanels.right ? "right-collapsed" : ""}`}
+      >
+	        <aside
+	          className={`panel quote-side quote-side-left no-print ${!isSidePanelExpanded("left") ? "desktop-collapsed" : ""}`}
+	          id="quote-editor-left"
+	          data-testid="quote-editor-left"
+	          aria-label="見積書基本編集"
+	          inert={!isSidePanelExpanded("left") ? true : undefined}
+	        >
+	          <div className="side-header">
+	            <span className="side-kicker">LEFT</span>
+	            <h2>基本・宛先</h2>
+	            <button
+	              className="side-toggle"
+	              type="button"
+	              data-testid="toggle-editor-left"
+	              aria-expanded={isSidePanelExpanded("left")}
+	              onClick={() => toggleSidePanel("left")}
+	            >
+	              {isSidePanelExpanded("left") ? "閉じる" : "開く"}
+	            </button>
           </div>
           <div className="side-body">{renderEditorGroups("left")}</div>
         </aside>
@@ -1249,17 +1274,25 @@ export default function PrintableQuotationPage() {
           </article>
         </div>
 
-        <aside
-          className="panel quote-side quote-side-right no-print"
-          id="quote-editor-right"
-          data-testid="quote-editor-right"
-          aria-label="見積書金額編集"
-          inert={isMobileWorkspace && mobileDrawer !== "right" ? true : undefined}
-        >
-          <div className="side-header">
-            <span className="side-kicker">RIGHT</span>
-            <h2>明細・金額</h2>
-            <button className="side-close" type="button" onClick={() => setMobileDrawer(null)}>閉じる</button>
+	        <aside
+	          className={`panel quote-side quote-side-right no-print ${!isSidePanelExpanded("right") ? "desktop-collapsed" : ""}`}
+	          id="quote-editor-right"
+	          data-testid="quote-editor-right"
+	          aria-label="見積書金額編集"
+	          inert={!isSidePanelExpanded("right") ? true : undefined}
+	        >
+	          <div className="side-header">
+	            <span className="side-kicker">RIGHT</span>
+	            <h2>明細・金額</h2>
+	            <button
+	              className="side-toggle"
+	              type="button"
+	              data-testid="toggle-editor-right"
+	              aria-expanded={isSidePanelExpanded("right")}
+	              onClick={() => toggleSidePanel("right")}
+	            >
+	              {isSidePanelExpanded("right") ? "閉じる" : "開く"}
+	            </button>
           </div>
           <div className="side-body">{renderEditorGroups("right")}</div>
         </aside>
