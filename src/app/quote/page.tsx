@@ -1067,7 +1067,7 @@ export default function PrintableQuotationPage() {
 	          id="quote-editor-left"
 	          data-testid="quote-editor-left"
 	          aria-label="見積書基本編集"
-	          inert={!isSidePanelExpanded("left") ? true : undefined}
+	          inert={isMobileWorkspace && mobileDrawer !== "left" ? true : undefined}
 	        >
 	          <div className="side-header">
 	            <span className="side-kicker">LEFT</span>
@@ -1279,7 +1279,7 @@ export default function PrintableQuotationPage() {
 	          id="quote-editor-right"
 	          data-testid="quote-editor-right"
 	          aria-label="見積書金額編集"
-	          inert={!isSidePanelExpanded("right") ? true : undefined}
+	          inert={isMobileWorkspace && mobileDrawer !== "right" ? true : undefined}
 	        >
 	          <div className="side-header">
 	            <span className="side-kicker">RIGHT</span>
