@@ -117,13 +117,25 @@ function candidateRouteText(candidate: PrintCandidate): string {
 }
 
 function preferredComparisonCandidates(candidates: PrintCandidate[], shortagePlansVisible: boolean): PrintCandidate[] {
-  const visible = candidates.filter((candidate) => candidate.isFulfilling || shortagePlansVisible);
+  const visible = candidates.filter((candidate) => (
+    candidate.isFulfilling
+    || shortagePlansVisible
+    || isNearTargetShortage(candidate)
+  ));
   return (["D", "K", "Y"] as const).map((route) => {
     const routeCandidates = visible.filter((candidate) => candidate.route === route);
     return routeCandidates.find((candidate) => candidate.isExactQuantity)
       ?? routeCandidates.find((candidate) => candidate.isFulfilling)
       ?? routeCandidates[0];
   }).filter((candidate): candidate is PrintCandidate => Boolean(candidate));
+}
+
+function isNearTargetShortage(candidate: PrintCandidate): boolean {
+  if (candidate.isFulfilling) return false;
+  const originalQuantity = D(candidate.originalQuantity);
+  const shortagePieces = D(candidate.shortagePieces);
+  return shortagePieces.gt(0) && originalQuantity.gt(0)
+    && shortagePieces.div(originalQuantity).lte("0.15");
 }
 
 function overproductionMultiple(candidate: PrintCandidate): Decimal | null {
@@ -1016,7 +1028,12 @@ export default function QuotationPage() {
     : null;
   const selectedShortageReference = Boolean(selectedRecommendation && !selectedRecommendation.isFulfilling);
   const fulfillingRecommendationCandidates = serverResult?.candidates.filter((candidate) => candidate.isFulfilling) ?? [];
-  const shortageRecommendationCandidates = serverResult?.candidates.filter((candidate) => !candidate.isFulfilling) ?? [];
+  const shortageRecommendationCandidates = serverResult?.candidates.filter((candidate) => (
+    !candidate.isFulfilling && !isNearTargetShortage(candidate)
+  )) ?? [];
+  const nearTargetShortageCandidates = serverResult?.candidates.filter((candidate) => (
+    isNearTargetShortage(candidate)
+  )) ?? [];
   const shortagePlansVisible = shortagePlansOpen || selectedShortageReference;
   const isInputBasisSelection = !serverResult?.selectedCandidateId
     || serverResult.selectedCandidateId === INPUT_BASIS_SELECTION_ID;
@@ -1748,6 +1765,15 @@ export default function QuotationPage() {
                           <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
                         </button>
                         {fulfillingRecommendationCandidates.map((candidate) => (
+                          <RecommendationCandidateCard
+                            key={candidate.id}
+                            candidate={candidate}
+                            selected={serverResult.selectedCandidateId === candidate.id}
+                            pending={pending}
+                            onSelect={(target) => void selectCandidate(target)}
+                          />
+                        ))}
+                        {nearTargetShortageCandidates.map((candidate) => (
                           <RecommendationCandidateCard
                             key={candidate.id}
                             candidate={candidate}

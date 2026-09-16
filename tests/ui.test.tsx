@@ -469,6 +469,56 @@ describe("quotation UI", () => {
     expect(screen.getByTestId("candidate-K-risk")).toHaveTextContent("顧客発注の4.1倍製造／在庫リスク");
   });
 
+  it("shows a near-target domestic shortage as a selectable comparison", async () => {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+    const input = {
+      spec: {
+        sizeKey: "tube-35x80", fillMlPerChamber: "3", connectedChambers: 1 as const, fillingMethod: "hopper" as const,
+        fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+        skuQuantities: ["150000"], skuColorCounts: ["4"],
+      } as PouchSpec,
+      quantity: "150000", printingMethod: "digital" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+    };
+    const originalCalculation = calculatePouchCost({ ...input, recommendationMode: true });
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const result = body.selectedCandidateId
+        ? calculatePouchCost({
+          ...input,
+          targetMargins: body.targetMargins,
+          recommendationMode: true,
+          selectedCandidateId: body.selectedCandidateId,
+          selectedCandidateTargetMargins: body.selectedCandidateTargetMargins,
+        })
+        : originalCalculation;
+      return new Response(JSON.stringify({
+        result,
+        originalResult: originalCalculation,
+        candidates: originalCalculation.recommendationCandidates ?? [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+
+    const nearCandidates = originalCalculation.recommendationCandidates?.filter((candidate) => candidate.route === "Y" && !candidate.isFulfilling);
+    expect(nearCandidates?.map((candidate) => candidate.orderLengthM)).toEqual(["3500", "3400"]);
+    const closestCard = screen.getByRole("button", { name: /Y \/ 国内調達（グラビア印刷）.*3,500/ });
+    const lowestCostCard = screen.getByRole("button", { name: /Y \/ 国内調達（グラビア印刷）.*3,400/ });
+    expect(closestCard).toBeEnabled();
+    expect(lowestCostCard).toBeEnabled();
+    expect(closestCard).toHaveTextContent("目標数近似・不足参考");
+    expect(lowestCostCard).toHaveTextContent("目標数近似・不足参考");
+    expect(closestCard).toHaveTextContent("数量不足 4,000枚（2.7%）");
+    expect(lowestCostCard).toHaveTextContent("数量不足 8,000枚（5.4%）");
+
+    await user.click(lowestCostCard);
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("142,000 枚"));
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）");
+  });
+
   it("progressively discloses and keeps a selected shortage reference accessible", async () => {
     const user = userEvent.setup();
     render(<QuotationPage />);

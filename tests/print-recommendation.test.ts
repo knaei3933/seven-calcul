@@ -29,11 +29,11 @@ function context(spec: PouchSpec = baseSpec, quantity = "133000") {
 }
 
 describe("print recommendation engine", () => {
-  it("returns a deterministic route-balanced candidate list capped at three", () => {
+  it("returns a deterministic route-balanced candidate list capped at six", () => {
     const first = buildPrintCandidates(context());
     const second = buildPrintCandidates(context());
     expect(first.length).toBeGreaterThan(0);
-    expect(first.length).toBeLessThanOrEqual(3);
+    expect(first.length).toBeLessThanOrEqual(6);
     expect(first.map((candidate) => candidate.id)).toEqual(second.map((candidate) => candidate.id));
     expect(first.some((candidate) => candidate.route === "D")).toBe(true);
     expect(first.some((candidate) => candidate.route === "Y")).toBe(true);
@@ -45,7 +45,7 @@ describe("print recommendation engine", () => {
       const displayed = buildPrintCandidates(context(baseSpec, quantity));
       const repeat = buildPrintCandidates(context(baseSpec, quantity));
       expect(displayed.length).toBeGreaterThan(0);
-      expect(displayed.length).toBeLessThanOrEqual(3);
+      expect(displayed.length).toBeLessThanOrEqual(6);
       expect(displayed.map((candidate) => candidate.id)).toEqual(repeat.map((candidate) => candidate.id));
 
       const digitalIndex = displayed.findIndex((candidate) => candidate.route === "D");
@@ -63,22 +63,30 @@ describe("print recommendation engine", () => {
     }
   });
 
-  it("shows the fulfilling minimum and the small-lot shortage reference", () => {
-    const candidates = buildPrintCandidates(context(baseSpec, "20000"));
+  it("shows fulfilling plans and both relevant near-target domestic references", () => {
+    const nearTargetSpec: PouchSpec = {
+      ...baseSpec,
+      colorCount: 4,
+      skuCount: 1,
+      skuQuantities: ["150000"],
+      skuColorCounts: ["4"],
+    };
+    const candidates = buildPrintCandidates(context(nearTargetSpec, "150000"));
     const recommended = candidates.find((candidate) => candidate.recommended)!;
-    const fulfilling = candidates.filter((candidate) => (
-      Number(candidate.adjustedQuantity) >= 20000
-    ));
-    expect(candidates).toHaveLength(3);
-    expect(recommended.route).toBe("D");
-    expect(recommended.orderLengthM).toBe("600");
-    expect(recommended.capacityQuantity).toBe("24186");
+    expect(candidates).toHaveLength(5);
+    expect(recommended.route).toBe("K");
+    expect(recommended.orderLengthM).toBe("6000");
+    expect(recommended.capacityQuantity).toBe("230232");
     expect(recommended.isExactQuantity).toBe(true);
-    expect(recommended.adjustedQuantity).toBe("20000");
-    // Shortage references are progressively disclosed in the UI and are not
-    // part of the primary route-balanced candidate list.
-    expect(candidates.every((candidate) => candidate.isFulfilling)).toBe(true);
-    expect(fulfilling.some((candidate) => candidate.orderLengthM === "600")).toBe(true);
+    expect(recommended.adjustedQuantity).toBe("150000");
+    // 3,500m is closest to the requested quantity; 3,400m is the lower-cost
+    // domestic pattern inside the same negotiation window.
+    expect(candidates.filter((candidate) => candidate.route === "Y" && !candidate.isFulfilling)
+      .map((candidate) => candidate.orderLengthM)).toEqual(["3500", "3400"]);
+    for (const candidate of candidates.filter((item) => !item.isFulfilling)) {
+      expect(candidate.selectionTag).toBe("目標数近似・不足参考");
+      expect(Number(candidate.shortagePieces) / 150000).toBeLessThanOrEqual(0.15);
+    }
   });
 
   it("uses real deliverable capacity and keeps the shortage comparison selectable", () => {

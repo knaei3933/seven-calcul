@@ -63,7 +63,7 @@ describe("calculate API recommendations", () => {
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.candidates.length).toBeGreaterThan(0);
-    expect(payload.candidates.length).toBeLessThanOrEqual(3);
+    expect(payload.candidates.length).toBeLessThanOrEqual(6);
     expect(payload.candidates[0].recommended).toBe(true);
     const recommended = payload.candidates.find((candidate: any) => candidate.recommended);
     expect(recommended).toBeDefined();
@@ -99,8 +99,11 @@ describe("calculate API recommendations", () => {
     }));
     expect(response.status).toBe(200);
     const payload = await response.json();
-    expect(payload.candidates).toHaveLength(3);
-    expect(payload.candidates.map((candidate: any) => candidate.route).sort()).toEqual(["D", "K", "Y"]);
+    expect(payload.candidates).toHaveLength(6);
+    expect(payload.candidates.filter((candidate: any) => candidate.isFulfilling)
+      .map((candidate: any) => candidate.route).sort()).toEqual(["D", "D", "K", "Y"]);
+    expect(payload.candidates.filter((candidate: any) => !candidate.isFulfilling)
+      .map((candidate: any) => candidate.orderLengthM)).toEqual(["1300", "1200"]);
     for (const candidate of payload.candidates) {
       expect(typeof candidate.copperPlateTotalYen).toBe("string");
       expect(typeof candidate.allInTotalCostYen).toBe("string");

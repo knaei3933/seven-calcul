@@ -121,8 +121,10 @@ export type PrintCandidateContext = {
   basisFilmTotalYen: Decimal | null;
 };
 
-const PRINT_CANDIDATE_LIMIT = 3;
+const PRINT_CANDIDATE_LIMIT = 6;
 const PRACTICAL_SURPLUS_PERCENT = 15;
+const NEAR_TARGET_SHORTAGE_RATIO = "0.15";
+const NEAR_TARGET_SHORTAGE_REFERENCE_LIMIT = 2;
 
 type CandidateDraft = Omit<
   PrintCandidate,
@@ -274,7 +276,15 @@ function createExactQuantityCandidate(candidate: PrintCandidate, originalQuantit
 }
 
 function selectionTagForRank(candidate: PrintCandidate, ranked: PrintCandidate[]): string {
-  if (!candidate.isFulfilling) return "不足のため参考";
+  if (!candidate.isFulfilling) {
+    const shortagePieces = D(candidate.shortagePieces);
+    const originalQuantity = D(candidate.originalQuantity);
+    if (shortagePieces.gt(0) && originalQuantity.gt(0)
+      && shortagePieces.div(originalQuantity).lte("0.15")) {
+      return "目標数近似・不足参考";
+    }
+    return "不足のため参考";
+  }
   const feasible = ranked.filter((item) => item.isFulfilling);
   const tags: string[] = [candidate.isExactQuantity ? "発注数一致" : candidate.isPractical ? "実用充足" : "充足・余剰大"];
   if (feasible.length > 0 && candidate.id === feasible.reduce((best, item) => (
@@ -287,6 +297,13 @@ function selectionTagForRank(candidate: PrintCandidate, ranked: PrintCandidate[]
     D(item.orderLengthM).lt(D(best.orderLengthM)) ? item : best
   )).id) tags.push("最短充足");
   return tags.join("／");
+}
+
+function isNearTargetShortage(candidate: PrintCandidate, originalQuantity: Decimal): boolean {
+  if (candidate.isFulfilling || originalQuantity.lte(0)) return false;
+  const shortagePieces = D(candidate.shortagePieces);
+  return shortagePieces.gt(0)
+    && shortagePieces.div(originalQuantity).lte(NEAR_TARGET_SHORTAGE_RATIO);
 }
 
 function candidateCommon(
@@ -942,8 +959,8 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
     });
 
   // A shortage proposal is not recommended, but it is the user's explicit
-  // "what if we buy only the small lot?" comparison. Keep it among the first
-  // three cards whenever it exists so the tradeoff is selectable, not hidden.
+  // "what if we buy only the small lot?" comparison. Keep one far-shortage
+  // reference when no near-target plan represents that tradeoff.
   const shortageReference = ranked
     .filter((candidate) => !candidate.isFulfilling)
     .sort((left, right) => {
@@ -955,6 +972,41 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
       if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
       return left.id.localeCompare(right.id);
     })[0] ?? null;
+
+  // A near-target shortage can be a real negotiation option (for example
+  // "reduce the order by a few percent to avoid a large fixed-roll jump").
+  // Preserve both the closest plan and the lowest-film-cost plan so users can
+  // compare "maximum deliverable quantity" against "minimum material cost".
+  // These references are never recommended automatically.
+  const nearTargetCandidates = ranked
+    .filter((candidate) => isNearTargetShortage(candidate, originalQuantity))
+    .filter((candidate) => !recommendedCandidate || candidate.id !== recommendedCandidate.id);
+  const closestNearTarget = [...nearTargetCandidates].sort((left, right) => {
+    const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
+    const rightDelta = D(right.adjustedQuantity).minus(originalQuantity).abs();
+    if (!leftDelta.eq(rightDelta)) return leftDelta.lt(rightDelta) ? -1 : 1;
+    const leftTotal = D(left.filmTotalYen);
+    const rightTotal = D(right.filmTotalYen);
+    if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
+    return left.id.localeCompare(right.id);
+  })[0] ?? null;
+  const cheapestNearTarget = [...nearTargetCandidates].sort((left, right) => {
+    const leftTotal = D(left.filmTotalYen);
+    const rightTotal = D(right.filmTotalYen);
+    if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
+    const leftDelta = D(left.adjustedQuantity).minus(originalQuantity).abs();
+    const rightDelta = D(right.adjustedQuantity).minus(originalQuantity).abs();
+    if (!leftDelta.eq(rightDelta)) return leftDelta.lt(rightDelta) ? -1 : 1;
+    return left.id.localeCompare(right.id);
+  })[0] ?? null;
+  const nearTargetShortageReferences = [
+    closestNearTarget,
+    cheapestNearTarget,
+  ].filter((candidate): candidate is PrintCandidate => (
+    Boolean(candidate) && (!recommendedCandidate || recommendedCandidate.id !== candidate.id)
+  )).filter((candidate, index, items) => (
+    items.findIndex((item) => item.id === candidate.id) === index
+  )).slice(0, NEAR_TARGET_SHORTAGE_REFERENCE_LIMIT);
 
   // The input basis must always remain selectable. Without this, the card can
   // display a concrete planning quantity while no candidate exists to apply it.
@@ -972,6 +1024,7 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
 
   const displayCandidates = [
     ...guaranteedRouteCandidates,
+    ...nearTargetShortageReferences,
     ...(basisCandidate ? [basisCandidate] : []),
     ...(shortageReference ? [shortageReference] : []),
     ...rankedAlternatives,
