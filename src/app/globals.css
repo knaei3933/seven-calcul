@@ -114,7 +114,6 @@ a { color: var(--primary); }
   55% { box-shadow: 0 0 0 7px rgb(234 88 12 / 0); }
 }
 .unit-cost-grid {
-.unit-cost-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
