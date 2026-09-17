@@ -17,6 +17,8 @@ import { isCalculationRequest } from "@/lib/calculation-provenance";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
 import { SIMULATOR_STALE_STATUS_KEY, type CustomerMaster, type CustomerMasterInput } from "@/lib/quotation-shared";
 import type { PrintCandidate } from "@/lib/print-recommendation";
+import type { GravureRollCostResult } from "@/lib/gravure-roll";
+import type { SascheCandidate } from "@/lib/sasche-gravure";
 
 const MARGIN_OPTIONS = {
   digital: ["0.4", "0.35", "0.3"],
@@ -39,10 +41,28 @@ const INPUT_PRINTING_METHOD: PrintingMethod = "digital";
 const CALCULATION_REQUEST_TIMEOUT_MS = 15000;
 
 type CalculationPayload = {
-  result?: CostResult;
-  originalResult?: CostResult;
-  candidates?: PrintCandidate[];
+  result?: unknown;
+  originalResult?: unknown;
+  candidates?: unknown;
   error?: string;
+};
+
+type ServerCalculation = {
+  result: CostResult;
+  originalResult: CostResult;
+  candidates: PrintCandidate[];
+  inputJson: string;
+  requestNonQuantityJson?: string;
+  selectedCandidateId: string;
+  originalQuantity?: string;
+  originalSkuQuantities?: string[];
+  originalInputJson?: string;
+  originalRequestNonQuantityJson?: string;
+  originalPrintingMethod?: PrintingMethod;
+  originalTargetMargin?: string;
+  originalTargetMarginMode?: TargetMarginMode;
+  calculationRequest?: CalculationInput;
+  originalCalculationRequest?: CalculationInput;
 };
 
 async function postCalculationWithTimeout(request: CalculationInput): Promise<{
@@ -99,6 +119,247 @@ function calculationErrorFor(error: unknown, fallbackCode: string): { code: stri
     code,
     message: `計算を続けられませんでした。入力内容を見直して、もう一度「サーバーで再計算する」を押してください。（エラー: ${code}）`,
   };
+}
+
+function candidateSelectionErrorMessage(code: string): string {
+  return `候補を反映できませんでした。状態は変わっていません。もう一度候補を選択してください。このダイアログの「閉じる」で状態を確認することもできます。（エラー: ${code}）`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumberString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && Number.isFinite(Number(value));
+}
+
+function hasRequiredFields(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  return isRecord(value) && keys.every((key) => value[key] !== undefined);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return isFiniteNumber(value) && Number.isInteger(value) && value >= 0;
+}
+
+function isCostResult(value: unknown): value is CostResult {
+  if (
+    !hasRequiredFields(value, [
+      "printingMethod", "quantity", "connectedChambers", "chamberCount", "fillMlPerChamber",
+      "totalFillMlPerPouch", "fillingMethod", "fillingLanes", "baseProductionSpeedPerMinute",
+      "effectiveProductionSpeed", "lanesPerCycle", "productionRunQuantity", "productionHours",
+      "inspectionHours", "bulkLossRate", "initialChargeMl", "testFillMl", "bulkUsageMl", "bulkCost",
+      "bulkCostPerPiece", "materialCostPerPiece", "variableLaborPerPiece", "machineVariablePerPiece",
+      "variableProcessingPerPiece", "variableProcessingTotal", "fixedLotCost", "fixedCostPerPiece",
+      "customCharge", "sellerProfitBaseCost", "sellerProfitRate", "sellerProfitCost", "totalCostPerPiece",
+      "costTotal", "costComponents", "costPerPieceComponents", "sellingPrices", "film",
+      "copperPlateCost", "copperPlateCostPerPiece", "gravurePricingMode", "warnings", "audit",
+    ])
+  ) {
+    return false;
+  }
+
+  const result = value as unknown as CostResult;
+  const numericStringKeys = [
+    "quantity", "chamberCount", "fillMlPerChamber", "totalFillMlPerPouch", "baseProductionSpeedPerMinute",
+    "effectiveProductionSpeed", "productionRunQuantity", "productionHours", "inspectionHours", "bulkLossRate",
+    "initialChargeMl", "testFillMl", "bulkUsageMl", "bulkCost", "bulkCostPerPiece", "materialCostPerPiece",
+    "variableLaborPerPiece", "machineVariablePerPiece", "variableProcessingPerPiece", "variableProcessingTotal",
+    "fixedLotCost", "fixedCostPerPiece", "customCharge", "sellerProfitBaseCost", "sellerProfitRate",
+    "sellerProfitCost", "totalCostPerPiece", "costTotal", "copperPlateCost", "copperPlateCostPerPiece",
+  ] as const;
+  if (
+    !["digital", "gravure"].includes(result.printingMethod)
+    || ![1, 2, 3, 4].includes(result.connectedChambers)
+    || typeof result.fillingMethod !== "string"
+    || !Number.isInteger(result.fillingLanes)
+    || result.fillingLanes <= 0
+    || !["standard", "sasche"].includes(result.gravurePricingMode)
+    || !Array.isArray(result.warnings)
+    || result.warnings.some((warning) => typeof warning !== "string")
+    || !numericStringKeys.every((key) => isFiniteNumberString(result[key]))
+  ) {
+    return false;
+  }
+
+  const costComponentKeys = ["film", "copperPlate", "bulk", "variableProcessing", "fixedLot", "custom"] as const;
+  if (
+    !hasRequiredFields(result.costComponents, costComponentKeys)
+    || !costComponentKeys.every((key) => isFiniteNumberString(result.costComponents[key]))
+    || !hasRequiredFields(result.costPerPieceComponents, costComponentKeys)
+    || !costComponentKeys.every((key) => isFiniteNumberString(result.costPerPieceComponents[key]))
+  ) {
+    return false;
+  }
+
+  if (
+    !Array.isArray(result.sellingPrices)
+    || result.sellingPrices.length === 0
+    || !result.sellingPrices.every((price) => hasRequiredFields(price, [
+      "margin", "pricePerPiece", "totalSales", "profit",
+    ]) && [price.margin, price.pricePerPiece, price.totalSales, price.profit].every(isFiniteNumberString))
+  ) {
+    return false;
+  }
+
+  if (
+    !hasRequiredFields(result.film, [
+      "requiredLengthM", "orderLengthM", "lossM", "effectiveLengthM", "actualQuantity", "pricingQuantity",
+      "unitPrice", "filmBaseCost", "domesticShipping", "overseasShipping", "customs", "filmTotal",
+      "filmCostPerPiece", "shippingTrips", "orderAdjustment", "skuCosts",
+    ])
+    || !["none", "minimum_sku_allocation", "minimum_total_allocation"].includes(result.film.orderAdjustment)
+    || !Array.isArray(result.film.skuCosts)
+    || !result.film.skuCosts.every((skuCost) => hasRequiredFields(skuCost, [
+      "skuCode", "name", "quantity", "fillMlPerChamber", "colorCount", "requiredLengthM", "orderLengthM",
+      "filmCost", "multiplier", "consideredLengthM", "appliedBand", "webWidthMm",
+    ]) && isFiniteNumberString(skuCost.quantity) && isFiniteNumberString(skuCost.filmCost))
+  ) {
+    return false;
+  }
+
+  return hasRequiredFields(result.audit, [
+    "calculationVersion", "inputJsonSha256", "resultJsonSha256", "digitalFilmPriceMode",
+    "unresolvedInputFlags", "componentReconciliationDifference",
+  ])
+    && typeof result.audit.calculationVersion === "string"
+    && typeof result.audit.inputJsonSha256 === "string"
+    && typeof result.audit.resultJsonSha256 === "string"
+    && typeof result.audit.digitalFilmPriceMode === "string"
+    && Array.isArray(result.audit.unresolvedInputFlags)
+    && result.audit.unresolvedInputFlags.every((flag) => typeof flag === "string")
+    && isFiniteNumberString(result.audit.componentReconciliationDifference);
+}
+
+function isFilmOrder(value: unknown): value is { skuCode: string; requiredLengthM: string; orderLengthM: string } {
+  return hasRequiredFields(value, ["skuCode", "requiredLengthM", "orderLengthM"])
+    && typeof value.skuCode === "string"
+    && isFiniteNumberString(value.requiredLengthM)
+    && isFiniteNumberString(value.orderLengthM);
+}
+
+function isSascheCandidate(value: unknown): value is SascheCandidate {
+  if (
+    !hasRequiredFields(value, [
+      "id", "webWidthMm", "matchedWidthMm", "laneCount", "printTierM", "patternCount", "filmLabel",
+      "baseApproxLengthM", "outputLengthM", "requiredLengthM", "quantity", "adjustedQuantity",
+      "quantityReductionRatio", "quantityToleranceExceeded", "colorCount", "supplierUnitPriceYenPerM",
+      "sellerMarkup", "filmUnitPriceYen", "filmTotalYen", "plateUnitPriceYen", "plateTotalYen",
+      "surplusLengthM", "shortageLengthM", "surplusRatio", "feasible", "recommended", "comparisonRank",
+    ])
+  ) {
+    return false;
+  }
+
+  const sasche = value as unknown as SascheCandidate;
+  const numericStringKeys = [
+    "outputLengthM", "requiredLengthM", "quantity", "adjustedQuantity", "quantityReductionRatio",
+    "supplierUnitPriceYenPerM", "filmUnitPriceYen", "filmTotalYen", "plateUnitPriceYen", "plateTotalYen",
+    "surplusLengthM", "shortageLengthM", "surplusRatio",
+  ] as const;
+  return typeof sasche.id === "string" && sasche.id.length > 0
+    && [sasche.webWidthMm, sasche.matchedWidthMm, sasche.baseApproxLengthM].every((width) => isFiniteNumber(width) && width > 0)
+    && [1, 2].includes(sasche.laneCount)
+    && [2000, 4000].includes(sasche.printTierM)
+    && isNonNegativeInteger(sasche.patternCount)
+    && isNonNegativeInteger(sasche.colorCount)
+    && sasche.filmLabel === "Y"
+    && sasche.sellerMarkup === "1.12"
+    && typeof sasche.quantityToleranceExceeded === "boolean"
+    && typeof sasche.feasible === "boolean"
+    && typeof sasche.recommended === "boolean"
+    && isFiniteNumber(sasche.comparisonRank)
+    && numericStringKeys.every((key) => isFiniteNumberString(sasche[key]))
+    && (sasche.skuOutputLengthsM === undefined
+      || (Array.isArray(sasche.skuOutputLengthsM) && sasche.skuOutputLengthsM.every(isFiniteNumberString)))
+    && (sasche.skuPatternIds === undefined
+      || (Array.isArray(sasche.skuPatternIds) && sasche.skuPatternIds.every((id) => typeof id === "string")));
+}
+
+function isGravureRollCostResult(value: unknown): value is GravureRollCostResult {
+  if (
+    !hasRequiredFields(value, [
+      "requiredLengthM", "orderPatternCount", "deliverableLengthM", "productionLengthM", "lossLengthM",
+      "materialWidthMm", "finalHeatSealWidthMm", "materialCostYen", "printingCostYen", "laminationCostYen",
+      "filmCostYen", "manufacturerMarginCostYen", "customsBaseCostYen", "customsCostYen",
+      "overseasShippingCostYen", "shippingTrips", "filmLabel", "copperPlateCount",
+      "copperPlateUnitPriceYen", "copperPlateCostYen", "totalGravureCostYen", "smallWidthTier",
+      "smallWidthManufacturerUnitPriceKRWPerM", "filmCostPerPieceYen", "copperPlateCostPerPieceYen",
+      "recommendedQuantity", "recommendedQuantityUtilization",
+    ])
+  ) {
+    return false;
+  }
+
+  const roll = value as unknown as GravureRollCostResult;
+  const numericStringKeys = [
+    "requiredLengthM", "deliverableLengthM", "productionLengthM", "lossLengthM", "materialWidthMm",
+    "finalHeatSealWidthMm", "materialCostYen", "printingCostYen", "laminationCostYen", "filmCostYen",
+    "manufacturerMarginCostYen", "customsBaseCostYen", "customsCostYen", "overseasShippingCostYen",
+    "copperPlateUnitPriceYen", "copperPlateCostYen", "totalGravureCostYen",
+    "smallWidthManufacturerUnitPriceKRWPerM", "filmCostPerPieceYen", "copperPlateCostPerPieceYen",
+    "recommendedQuantity", "recommendedQuantityUtilization",
+  ] as const;
+  return isNonNegativeInteger(roll.orderPatternCount)
+    && isNonNegativeInteger(roll.shippingTrips)
+    && isNonNegativeInteger(roll.copperPlateCount)
+    && ["K", "Y"].includes(roll.filmLabel)
+    && typeof roll.smallWidthTier === "boolean"
+    && numericStringKeys.every((key) => isFiniteNumberString(roll[key]));
+}
+
+function isPrintCandidate(value: unknown): value is PrintCandidate {
+  if (
+    !hasRequiredFields(value, [
+      "id", "route", "routeLabel", "sourceLabel", "detailLabel", "printingMethod",
+      "originalQuantity", "capacityQuantity", "capacityPlanningDifference", "adjustedQuantity",
+      "adjustedSkuQuantities", "requiredLengthM", "orderLengthM", "effectiveLengthM",
+      "surplusLengthM", "shortageLengthM", "surplusRatio", "quantityDelta",
+      "quantityShortfallRatio", "surplusPieces", "shortagePieces", "isFulfilling",
+      "isPractical", "isExactQuantity", "selectionTag", "includedUnitPricePerM",
+      "filmTotalYen", "filmCostPerPieceYen", "recommended", "toleranceExceeded", "priceBreak",
+    ])
+  ) {
+    return false;
+  }
+
+  const candidate = value as unknown as PrintCandidate;
+  const numericStringKeys = [
+    "originalQuantity", "capacityQuantity", "capacityPlanningDifference", "adjustedQuantity",
+    "requiredLengthM", "orderLengthM", "effectiveLengthM", "surplusLengthM", "shortageLengthM",
+    "surplusRatio", "quantityDelta", "quantityShortfallRatio", "surplusPieces", "shortagePieces",
+    "includedUnitPricePerM", "filmTotalYen", "filmCostPerPieceYen",
+  ] as const;
+  const optionalNumericStringKeys = [
+    "incrementalFilmTotalYen", "incrementalQuantity", "incrementalCostPerAdditionalPieceYen",
+    "copperPlateTotalYen", "allInTotalCostYen", "allInCostPerPieceYen", "allInDeltaYen",
+  ] as const;
+  const optionalTextKeys = [
+    "pouchSpecText", "colorText", "materialText", "compositionText", "patternText", "orderReason",
+  ] as const;
+
+  return typeof candidate.id === "string" && candidate.id.length > 0
+    && ["D", "K", "Y"].includes(candidate.route)
+    && ["digital", "gravure"].includes(candidate.printingMethod)
+    && [candidate.routeLabel, candidate.sourceLabel, candidate.detailLabel, candidate.selectionTag]
+      .every((label) => typeof label === "string")
+    && [candidate.isFulfilling, candidate.isPractical, candidate.isExactQuantity, candidate.recommended,
+      candidate.toleranceExceeded, candidate.priceBreak].every((flag) => typeof flag === "boolean")
+    && Array.isArray(candidate.adjustedSkuQuantities)
+    && candidate.adjustedSkuQuantities.length > 0
+    && candidate.adjustedSkuQuantities.every(isFiniteNumberString)
+    && numericStringKeys.every((key) => isFiniteNumberString(candidate[key]))
+    && optionalTextKeys.every((key) => candidate[key] === undefined || typeof candidate[key] === "string")
+    && optionalNumericStringKeys.every((key) => candidate[key] === undefined || isFiniteNumberString(candidate[key]))
+    && (candidate.skuPatternCounts === undefined
+      || (Array.isArray(candidate.skuPatternCounts) && candidate.skuPatternCounts.every(isNonNegativeInteger)))
+    && (candidate.filmOrders === undefined
+      || (Array.isArray(candidate.filmOrders) && candidate.filmOrders.every(isFilmOrder)))
+    && (candidate.sasche === undefined || (candidate.route === "Y" && isSascheCandidate(candidate.sasche)))
+    && (candidate.gravureRoll === undefined || (candidate.route === "K" && isGravureRollCostResult(candidate.gravureRoll)));
 }
 
 function withMarginForPrintingMethod<T extends { printingMethod: PrintingMethod; targetMargin: string }>(form: T): T {
@@ -230,6 +491,340 @@ function RecommendationCandidateCard({
   );
 }
 
+function RecommendationModal({
+  serverResult,
+  inputBasisSelection,
+  fulfillingCandidates,
+  shortageCandidates,
+  nearTargetShortageCandidates,
+  shortagePlansVisible,
+  onToggleShortagePlans,
+  onSelect,
+  onRestore,
+  onClose,
+  selecting,
+  selectionError,
+  inputBasis,
+}: {
+  serverResult: ServerCalculation;
+  inputBasisSelection: boolean;
+  fulfillingCandidates: PrintCandidate[];
+  shortageCandidates: PrintCandidate[];
+  nearTargetShortageCandidates: PrintCandidate[];
+  shortagePlansVisible: boolean;
+  onToggleShortagePlans: () => void;
+  onSelect: (candidate: PrintCandidate) => void;
+  onRestore: () => void;
+  onClose: () => void;
+  selecting: boolean;
+  selectionError: { code: string; message: string } | null;
+  inputBasis: {
+    routeText: string;
+    colorText: string;
+    webWidthMm: number;
+    multiplier: number;
+    filmComposition: string;
+    requiredLengthM: Decimal;
+    orderLengthM: Decimal;
+    surplusLengthM: Decimal;
+    orderReason: string;
+  };
+}) {
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const initialFocusRef = useRef<HTMLButtonElement | null>(null);
+  const selectionStatusRef = useRef<HTMLParagraphElement | null>(null);
+  const previousFocusRef = useRef<Element | null>(null);
+  const selectedCandidate = serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId) ?? null;
+  const selectedShortageReference = Boolean(selectedCandidate && !selectedCandidate.isFulfilling);
+
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement;
+    initialFocusRef.current?.focus({ preventScroll: true });
+    const previousOverflow = document.body.style.overflow;
+    const previousPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPaddingRight;
+      if (previousFocusRef.current instanceof HTMLElement) {
+        previousFocusRef.current.focus({ preventScroll: true });
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !selecting) {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, selecting]);
+
+  useEffect(() => {
+    if (!selecting && !selectionError) return;
+
+    selectionStatusRef.current?.focus({ preventScroll: true });
+    let restoreFocusId: ReturnType<typeof setTimeout> | undefined;
+    const focusInModal = () => {
+      if (modalRef.current?.isConnected && !modalRef.current.contains(document.activeElement)) {
+        selectionStatusRef.current?.focus({ preventScroll: true });
+      }
+    };
+    const focusLeftModal = (event: FocusEvent) => {
+      const modal = modalRef.current;
+      if (!modal || !(event.target instanceof Node) || !modal.contains(event.target)) return;
+      if (event.relatedTarget instanceof Node && modal.contains(event.relatedTarget)) return;
+      clearTimeout(restoreFocusId);
+      restoreFocusId = setTimeout(focusInModal, 0);
+    };
+    const focusOutsideModal = (event: FocusEvent) => {
+      const modal = modalRef.current;
+      if (!modal || !(event.target instanceof Node) || modal.contains(event.target)) return;
+      focusInModal();
+    };
+
+    document.addEventListener("focusout", focusLeftModal, true);
+    document.addEventListener("focusin", focusOutsideModal, true);
+    return () => {
+      clearTimeout(restoreFocusId);
+      document.removeEventListener("focusout", focusLeftModal, true);
+      document.removeEventListener("focusin", focusOutsideModal, true);
+    };
+  }, [selecting, selectionError]);
+
+  const trapTabFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(
+      modalRef.current?.querySelectorAll<HTMLElement>([
+        "a[href]",
+        "area[href]",
+        "button:not([disabled])",
+        "input:not([disabled])",
+        "select:not([disabled])",
+        "textarea:not([disabled])",
+        '[tabindex]:not([tabindex="-1"])',
+      ].join(",")) ?? [],
+    );
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || active === modalRef.current)) {
+      event.preventDefault();
+      last.focus();
+      return;
+    }
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  return (
+    <div
+      className="recommendation-modal-overlay"
+      data-testid="recommendation-modal-overlay"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !selecting) onClose();
+      }}
+    >
+      <div
+        ref={modalRef}
+        aria-modal="true"
+        aria-labelledby="recommendation-modal-title"
+        aria-describedby="recommendation-modal-description"
+        className="recommendation-modal"
+        data-testid="recommendation-modal"
+        data-state={selecting ? "selecting" : "ready"}
+        onKeyDown={trapTabFocus}
+        role="dialog"
+      >
+        <header className="recommendation-modal-header">
+          <div>
+            <h2 id="recommendation-modal-title">フィルム調達・製造計画候補</h2>
+            <p id="recommendation-modal-description" className="comparison-legend">
+              D=デジタル ／ K=韓国輸入 ／ Y=国内調達
+            </p>
+          </div>
+          <button
+            ref={initialFocusRef}
+            type="button"
+            className="button secondary small"
+            data-testid="recommendation-modal-close"
+            onClick={onClose}
+            disabled={selecting}
+          >
+            閉じる
+          </button>
+        </header>
+
+        <div className="comparison-help">
+          <HoverInfo label="比較の見方" testId="comparison-guide">
+            まず下の表で「すべて合算した原価」を比べてください。フィルム差額はフィルム代だけの差です。銅版・加工費を足すと不利になることがあります。
+          </HoverInfo>
+          <HoverInfo label="選択ルール" testId="selection-rule-guide">
+            候補を選ぶと調達・製造計画のみ切り替わります。左側の顧客発注数は固定され、「元の数量へ戻る」で入力値計算へ復元します。
+          </HoverInfo>
+        </div>
+
+        <div className="input-basis-card" data-testid="modal-input-basis">
+          <strong>入力条件</strong>
+          <span>{inputBasis.routeText} ／ 顧客発注 {formatNumber(serverResult.originalResult.quantity, 0)}枚 ／ {inputBasis.colorText}</span>
+          <span>パウチ仕様と計算パラメータは、この入力値基準から候補を生成しています。</span>
+        </div>
+
+        <section className="modal-comparison-region">
+          <h3 id="all-in-comparison-title">すべて合算した原価比較</h3>
+          <div
+            aria-labelledby="all-in-comparison-title"
+            className="comparison-table-wrap"
+            data-testid="all-in-comparison"
+            role="region"
+            tabIndex={0}
+          >
+            <table className="table comparison-table">
+              <thead>
+                <tr>
+                  <th scope="col">方法</th>
+                  <th scope="col">製造数</th>
+                  <th scope="col">フィルム</th>
+                  <th scope="col">銅版</th>
+                  <th scope="col">すべて合算</th>
+                  <th scope="col">合算 / 枚</th>
+                  <th scope="col">入力値との差</th>
+                  <th scope="col">注意</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr data-testid="comparison-input">
+                  <th scope="row">発注計画／{inputBasis.routeText}</th>
+                  <td>{formatNumber(serverResult.originalResult.quantity, 0)}枚</td>
+                  <td>{formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</td>
+                  <td>{formatCurrency(serverResult.originalResult.copperPlateCost, 0)}</td>
+                  <td>{formatCurrency(serverResult.originalResult.costTotal, 0)}</td>
+                  <td>{formatCurrency(serverResult.originalResult.totalCostPerPiece, 2)}</td>
+                  <td>基準</td>
+                  <td>入力した発注数の計算</td>
+                </tr>
+                {preferredComparisonCandidates(serverResult.candidates, shortagePlansVisible).map((candidate) => (
+                  <tr key={candidate.id} data-testid={`comparison-${candidate.route}`}>
+                    <th scope="row">{candidateRouteText(candidate)}</th>
+                    <td>{formatNumber(candidate.adjustedQuantity, 0)}枚</td>
+                    <td>{formatCurrency(candidate.filmTotalYen, 0)}</td>
+                    <td>{formatCurrency(candidate.copperPlateTotalYen ?? "0", 0)}</td>
+                    <td>{formatCurrency(candidate.allInTotalCostYen ?? "0", 0)}</td>
+                    <td>{formatCurrency(candidate.allInCostPerPieceYen ?? "0", 2)}</td>
+                    <td>{formatCurrency(candidate.allInDeltaYen ?? "0", 0)}</td>
+                    <td>{comparisonRisk(candidate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {selectionError ? (
+          <div aria-live="assertive" id="candidate-selection-error" role="alert" data-testid="candidate-selection-error">
+            <strong>候補を反映できませんでした。</strong>
+            <p>{selectionError.message}</p>
+          </div>
+        ) : null}
+        <p
+          ref={selectionStatusRef}
+          aria-live={selecting ? "assertive" : undefined}
+          className={selecting ? "selection-progress" : "visually-hidden"}
+          data-testid={selecting ? "candidate-selection-progress" : "candidate-selection-status"}
+          role={selecting ? "status" : undefined}
+          tabIndex={-1}
+        >
+          {selecting ? "選択を反映しています…" : ""}
+        </p>
+
+        <div className="recommendation-grid">
+          <button
+            type="button"
+            data-testid="input-basis-card"
+            className={inputBasisSelection ? "recommendation-card selected" : "recommendation-card"}
+            onClick={onRestore}
+            disabled={selecting}
+          >
+            {inputBasisSelection ? <span className="selection-status card-selection-status">選択中</span> : null}
+            <span className="recommendation-label">
+              発注計画 / {inputBasis.routeText}
+              <em>参考</em>
+            </span>
+            <span>原反 {formatNumber(inputBasis.webWidthMm)}mm{inputBasis.multiplier > 1 ? ` ×${inputBasis.multiplier}` : ""} ／ フィルム {inputBasis.filmComposition}</span>
+            <span>
+              必要 {formatNumber(inputBasis.requiredLengthM.toString(), 0)}m ／ 発注 {formatNumber(inputBasis.orderLengthM.toString(), 0)}m ／ 余剰 {formatNumber(inputBasis.surplusLengthM.toString(), 0)}m
+            </span>
+            <span>
+              顧客 {formatNumber(serverResult.originalResult.quantity, 0)}枚 ／ 製作可能 {formatNumber(serverResult.originalResult.film.actualQuantity, 0)}枚 ／ 計画 {formatNumber(D(serverResult.originalResult.film.actualQuantity).div(1000).toDecimalPlaces(0, Decimal.ROUND_FLOOR).times(1000).toString(), 0)}枚
+            </span>
+            <span>{inputBasis.orderReason}</span>
+            {D(serverResult.originalResult.film.actualQuantity).lt(serverResult.originalResult.quantity) ? <span className="warning">不足のため参考</span> : null}
+            <span>押すと入力した発注数量の計算へ戻ります。候補の製造計画数は左側入力を変更しません。</span>
+            <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
+          </button>
+          {fulfillingCandidates.map((candidate) => (
+            <RecommendationCandidateCard
+              key={candidate.id}
+              candidate={candidate}
+              selected={serverResult.selectedCandidateId === candidate.id}
+              pending={selecting}
+              onSelect={onSelect}
+            />
+          ))}
+          {nearTargetShortageCandidates.map((candidate) => (
+            <RecommendationCandidateCard
+              key={candidate.id}
+              candidate={candidate}
+              selected={serverResult.selectedCandidateId === candidate.id}
+              pending={selecting}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+
+        {shortageCandidates.length ? (
+          <div className="shortage-plans">
+            <button
+              type="button"
+              className="button secondary small"
+              data-testid="shortage-plans-toggle"
+              aria-expanded={shortagePlansVisible}
+              onClick={onToggleShortagePlans}
+              disabled={selecting || selectedShortageReference}
+            >
+              {selectedShortageReference ? "不足プラン選択中" : shortagePlansVisible ? "不足プランを隠す" : "不足プランを比較する"}
+            </button>
+            <p className="help">
+              顧客発注に届かない小さいまとめ購入です。費用は安く見えても全数は製造できないため、参考として比較します。
+            </p>
+            {shortagePlansVisible ? (
+              <div className="recommendation-grid">
+                {shortageCandidates.map((candidate) => (
+                  <RecommendationCandidateCard
+                    key={candidate.id}
+                    candidate={candidate}
+                    selected={serverResult.selectedCandidateId === candidate.id}
+                    pending={selecting}
+                    onSelect={onSelect}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function targetMarginsForPrintingMethod(printingMethod: PrintingMethod, effectiveMargin: string): string[] {
   const seen = new Set<number>();
   return [...MARGIN_OPTIONS[printingMethod], effectiveMargin]
@@ -333,28 +928,13 @@ export default function QuotationPage() {
   const [parameters, setParameters] = useState<CostParameters>(defaultParameters);
   const [gravureParameters, setGravureParameters] = useState<GravureRollParameters>(() => normalizeGravureParameters(defaultGravureRollParameters()));
   const [machineBreakdown, setMachineBreakdown] = useState<Record<MachineBreakdownKey, string>>(() => ({ ...MACHINE_BREAKDOWN_DEFAULTS }));
-  type ServerCalculation = {
-    result: CostResult;
-    originalResult: CostResult;
-    candidates: PrintCandidate[];
-    inputJson: string;
-    requestNonQuantityJson?: string;
-    selectedCandidateId: string;
-    originalQuantity?: string;
-    originalSkuQuantities?: string[];
-    originalInputJson?: string;
-    originalRequestNonQuantityJson?: string;
-    originalPrintingMethod?: PrintingMethod;
-    originalTargetMargin?: string;
-    originalTargetMarginMode?: TargetMarginMode;
-    calculationRequest?: CalculationInput;
-    originalCalculationRequest?: CalculationInput;
-  };
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [calculationError, setCalculationError] = useState<{ code: string; message: string } | null>(null);
-  const [recommendationPanelOpen, setRecommendationPanelOpen] = useState(true);
+  const [recommendationModalOpen, setRecommendationModalOpen] = useState(false);
+  const [selectionError, setSelectionError] = useState<{ code: string; message: string } | null>(null);
+  const [selecting, setSelecting] = useState(false);
   const [shortagePlansOpen, setShortagePlansOpen] = useState(false);
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
@@ -501,6 +1081,7 @@ export default function QuotationPage() {
               }));
             }
           }
+
           if (savedServerResult) {
             const hasOriginalCandidateBasis = savedServerResult.originalQuantity !== undefined
               && savedServerResult.originalSkuQuantities !== undefined
@@ -730,18 +1311,17 @@ export default function QuotationPage() {
   }, [effectiveParameters, effectiveSize, form.bulkPrice, form.customerCode, form.customerName, form.lengthMm, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate]);
 
   const selectCandidate = async (candidate: PrintCandidate) => {
-    if (!serverResult || pending) {
-      if (serverResult?.selectedCandidateId === candidate.id) setRecommendationPanelOpen(false);
-      return;
-    }
+    if (!serverResult || pending || selecting) return;
     if (serverResult.selectedCandidateId === candidate.id) {
-      setRecommendationPanelOpen(false);
+      setRecommendationModalOpen(false);
       return;
     }
     const selectingShortageReference = !candidate.isFulfilling;
     const requestOrder = ++requestOrderRef.current;
     setPending(true);
+    setSelecting(true);
     setCalculationError(null);
+    setSelectionError(null);
     try {
       const originalPrintingMethod = INPUT_PRINTING_METHOD;
       const originalTargetMargin = serverResult.originalTargetMargin ?? effectiveMargin;
@@ -773,18 +1353,43 @@ export default function QuotationPage() {
       const { response, payload } = await postCalculationWithTimeout(calculationRequest);
       if (!response.ok) throw new Error(payload.error ?? "candidate_calculation_failed");
       if (requestOrder !== requestOrderRef.current) return;
-      if (!payload.result) throw new Error("calculation_response_invalid");
+      if (!isCostResult(payload.result) || !isCostResult(payload.originalResult)) {
+        throw new Error("candidate_response_invalid");
+      }
       const activeResult: CostResult = payload.result;
-      const expectedAdjustedQuantity = sum(candidate.adjustedSkuQuantities.map((quantity) => D(quantity)));
+      const originalResult: CostResult = payload.originalResult;
       if (
-        activeResult.selectedCandidateId !== candidate.id
+        !Array.isArray(payload.candidates)
+        || payload.candidates.length === 0
+        || !payload.candidates.every(isPrintCandidate)
+        || !payload.candidates.some((returnedCandidate) => returnedCandidate.id === candidate.id)
+      ) {
+        throw new Error("candidate_response_invalid");
+      }
+      const candidates: PrintCandidate[] = payload.candidates;
+      const expectedAdjustedQuantity = sum(candidate.adjustedSkuQuantities.map((quantity) => D(quantity)));
+      const returnedSelectedCandidate = candidates.find((returnedCandidate) => returnedCandidate.id === candidate.id) ?? null;
+      const returnedSelectedSkuQuantitiesMatch = Boolean(returnedSelectedCandidate
+        && returnedSelectedCandidate.adjustedSkuQuantities.length === candidate.adjustedSkuQuantities.length
+        && candidate.adjustedSkuQuantities.every((quantity, index) => (
+          D(returnedSelectedCandidate.adjustedSkuQuantities[index]).eq(D(quantity))
+        )));
+      if (
+        !returnedSelectedCandidate
+        || returnedSelectedCandidate.route !== candidate.route
+        || !returnedSelectedSkuQuantitiesMatch
+      ) {
+        throw new Error("candidate_response_invalid");
+      }
+      if (
+        returnedSelectedCandidate.printingMethod !== candidate.printingMethod
+        || !D(returnedSelectedCandidate.adjustedQuantity).eq(expectedAdjustedQuantity)
+        || activeResult.selectedCandidateId !== candidate.id
         || activeResult.printingMethod !== candidate.printingMethod
-        || !D(activeResult.quantity).eq(expectedAdjustedQuantity)
+        || !D(activeResult.quantity).eq(D(returnedSelectedCandidate.adjustedQuantity))
       ) {
         throw new Error("candidate_result_mismatch");
       }
-      const originalResult: CostResult = payload.originalResult ?? serverResult.originalResult;
-      const candidates: PrintCandidate[] = payload.candidates ?? serverResult.candidates;
       setCalculationError(null);
       const candidateCalculationInput = {
         ...calculationInput,
@@ -797,7 +1402,7 @@ export default function QuotationPage() {
         spec: candidateNonQuantitySpec,
         ...candidateNonQuantityRest,
       });
-      setRecommendationPanelOpen(false);
+      setRecommendationModalOpen(false);
       setShortagePlansOpen(selectingShortageReference);
       setServerResult({
         result: activeResult,
@@ -831,13 +1436,13 @@ export default function QuotationPage() {
         const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate);
         const orderLengthM = candidate.route === "D"
           ? D(candidate.filmOrders?.[index]?.orderLengthM ?? activeResult.film.orderLengthM)
-	            : candidate.route === "K"
-	              ? D(candidate.skuPatternCounts?.[index] ?? 1).times(normalizedGravureParameters.productionPatternLengthM)
-	            : candidate.route === "Y"
-	              ? D(candidate.sasche?.skuOutputLengthsM?.[index] ?? activeResult.film.orderLengthM)
-	              : totalAdjustedQuantity.gt(0)
-	                ? D(activeResult.film.orderLengthM).times(quantity.div(totalAdjustedQuantity))
-	                : D(activeResult.film.orderLengthM);
+          : candidate.route === "K"
+            ? D(candidate.skuPatternCounts?.[index] ?? 1).times(normalizedGravureParameters.productionPatternLengthM)
+            : candidate.route === "Y"
+              ? D(candidate.sasche?.skuOutputLengthsM?.[index] ?? activeResult.film.orderLengthM)
+              : totalAdjustedQuantity.gt(0)
+                ? D(activeResult.film.orderLengthM).times(quantity.div(totalAdjustedQuantity))
+                : D(activeResult.film.orderLengthM);
         return {
           name: sku.name,
           quantity: quantity.toString(),
@@ -849,12 +1454,19 @@ export default function QuotationPage() {
       }));
     } catch (error) {
       if (requestOrder === requestOrderRef.current) {
-        const displayError = calculationErrorFor(error, "candidate_calculation_failed");
-        setCalculationError(displayError);
+        const mappedError = calculationErrorFor(error, "candidate_calculation_failed");
+        const displayError = {
+          code: mappedError.code,
+          message: candidateSelectionErrorMessage(mappedError.code),
+        };
+        setSelectionError(displayError);
         window.dispatchDebugError?.(displayError.code);
       }
     } finally {
-      if (requestOrder === requestOrderRef.current) setPending(false);
+      if (requestOrder === requestOrderRef.current) {
+        setPending(false);
+        setSelecting(false);
+      }
     }
   };
 
@@ -863,7 +1475,7 @@ export default function QuotationPage() {
     // When the input-basis card is already selected, clicking it is a toggle:
     // collapse the candidate list just like clicking another selected card.
     if (!serverResult.selectedCandidateId) {
-      setRecommendationPanelOpen(false);
+      setRecommendationModalOpen(false);
       return;
     }
     const restoredQuantity = serverResult.originalQuantity ?? D(serverResult.originalResult.quantity).toString();
@@ -882,7 +1494,7 @@ export default function QuotationPage() {
         quantity: restoredSkuQuantities[index] ?? restoredQuantity,
       })),
     }));
-    setRecommendationPanelOpen(true);
+    setRecommendationModalOpen(false);
     setServerResult({
       ...serverResult,
       result: serverResult.originalResult,
@@ -942,8 +1554,16 @@ export default function QuotationPage() {
       const { response, payload } = await postCalculationWithTimeout(calculationRequest);
       if (!response.ok) throw new Error(payload.error ?? "calculation_failed");
       if (requestOrder !== requestOrderRef.current) return;
-      if (!payload.result) throw new Error("calculation_response_invalid");
-      const originalResult: CostResult = payload.originalResult ?? payload.result;
+      if (
+        !isCostResult(payload.result)
+        || !isCostResult(payload.originalResult)
+        || !Array.isArray(payload.candidates)
+        || payload.candidates.length === 0
+        || !payload.candidates.every(isPrintCandidate)
+      ) {
+        throw new Error("calculation_response_invalid");
+      }
+      const originalResult: CostResult = payload.originalResult;
       if (
         originalResult.printingMethod !== requestedPrintingMethod
         || payload.result.printingMethod !== requestedPrintingMethod
@@ -953,9 +1573,9 @@ export default function QuotationPage() {
       // With no candidate selected, even a malformed/mock response must not
       // replace the customer's digital input basis with an active candidate.
       const selectedResult: CostResult = originalResult;
-      const candidates: PrintCandidate[] = payload.candidates ?? [];
+      const candidates: PrintCandidate[] = payload.candidates;
       setCalculationError(null);
-      setRecommendationPanelOpen(true);
+      setRecommendationModalOpen(candidates.length > 0);
       setServerResult({
         result: selectedResult,
         originalResult,
@@ -1067,16 +1687,16 @@ export default function QuotationPage() {
 
   useEffect(() => {
     if (!serverResult || !quotationDraftResult || !customerDraft) return;
-	    const draftSkus = form.skus.map((sku, index) => {
+    const draftSkus = form.skus.map((sku, index) => {
       const quantity = D(selectedRecommendation?.adjustedSkuQuantities[index] ?? sku.quantity);
       const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate);
       const orderLengthM = selectedRecommendation?.route === "D"
         ? D(selectedRecommendation.filmOrders?.[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM)
         : selectedRecommendation?.route === "K"
           ? D(selectedRecommendation.skuPatternCounts?.[index] ?? 1).times(normalizedGravureParameters.productionPatternLengthM)
-	          : selectedRecommendation?.route === "Y"
-	            ? D(selectedRecommendation.sasche?.skuOutputLengthsM?.[index] ?? quotationDraftResult.film.orderLengthM)
-	            : quotationDraftResult.film.skuCosts[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM;
+          : selectedRecommendation?.route === "Y"
+            ? D(selectedRecommendation.sasche?.skuOutputLengthsM?.[index] ?? quotationDraftResult.film.orderLengthM)
+            : quotationDraftResult.film.skuCosts[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM;
       return {
         name: sku.name,
         quantity: quantity.toString(),
@@ -1656,7 +2276,7 @@ export default function QuotationPage() {
                       </p>
                     ) : null}
                   </details>
-                  {serverResult && !staleResult && !recommendationPanelOpen ? (
+                  {serverResult && !staleResult ? (
                     <div className="recommendation-collapsed" data-testid="selected-candidate-summary">
                       <strong>
                         {isInputBasisSelection
@@ -1667,154 +2287,23 @@ export default function QuotationPage() {
                         {formatNumber(isInputBasisSelection ? serverResult.originalResult.quantity : serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.adjustedQuantity ?? 0, 0)}枚 ／
                         {formatNumber(isInputBasisSelection ? serverResult.originalResult.film.orderLengthM : serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.orderLengthM ?? 0, 0)}m ／
                         {formatCurrency(isInputBasisSelection ? serverResult.originalResult.film.filmCostPerPiece : serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId)?.filmCostPerPieceYen ?? 0, 2)}/枚
+                        ／ 総原価 {formatCurrency(displayAmount(resultShown.costTotal), 0)}
                       </span>
                       <div className="recommendation-collapsed-actions">
-                        <button className="button secondary small" type="button" onClick={() => setRecommendationPanelOpen(true)}>候補一覧</button>
+                        <button
+                          className="button secondary small"
+                          type="button"
+                          data-testid="candidate-recompare"
+                          onClick={() => setRecommendationModalOpen(true)}
+                          disabled={pending || selecting}
+                        >
+                          候補を比較
+                        </button>
                         {serverResult.selectedCandidateId ? (
                           <button className="button secondary small" type="button" onClick={clearCandidate} disabled={pending}>元の数量へ戻る</button>
                         ) : null}
                       </div>
                     </div>
-                  ) : null}
-                  {serverResult && !staleResult && recommendationPanelOpen ? (
-                    <section className="panel recommendation-panel" aria-labelledby="recommendation-title">
-	                      <h3 id="recommendation-title">フィルム調達・製造計画候補</h3>
-	                      <div className="comparison-help">
-	                        <span className="comparison-legend">
-	                          D=デジタル ／ K=韓国輸入 ／ Y=国内調達
-	                        </span>
-	                        <HoverInfo label="比較の見方" testId="comparison-guide">
-	                          まず下の表で「すべて合算した原価」を比べてください。フィルム差額はフィルム代だけの差です。銅版・加工費を足すと不利になることがあります。
-	                        </HoverInfo>
-	                        <HoverInfo label="選択ルール" testId="selection-rule-guide">
-	                          候補を選ぶと調達・製造計画のみ切り替わります。左側の顧客発注数は固定され、「元の数量へ戻る」で入力値計算へ復元します。
-	                        </HoverInfo>
-	                      </div>
-                      <button className="button secondary small" type="button" onClick={clearCandidate} disabled={pending}>元の数量へ戻る</button>
-                      <div className="comparison-table-wrap" data-testid="all-in-comparison">
-                        <table className="table comparison-table">
-                          <thead>
-                            <tr>
-                              <th scope="col">方法</th>
-                              <th scope="col">製造数</th>
-                              <th scope="col">フィルム</th>
-                              <th scope="col">銅版</th>
-                              <th scope="col">すべて合算</th>
-                              <th scope="col">合算 / 枚</th>
-                              <th scope="col">入力値との差</th>
-                              <th scope="col">注意</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr data-testid="comparison-input">
-                              <th scope="row">発注計画／{originalRouteText}</th>
-                              <td>{formatNumber(serverResult.originalResult.quantity, 0)}枚</td>
-                              <td>{formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</td>
-                              <td>{formatCurrency(serverResult.originalResult.copperPlateCost, 0)}</td>
-                              <td>{formatCurrency(serverResult.originalResult.costTotal, 0)}</td>
-                              <td>{formatCurrency(serverResult.originalResult.totalCostPerPiece, 2)}</td>
-                              <td>基準</td>
-                              <td>入力した発注数の計算</td>
-                            </tr>
-                            {preferredComparisonCandidates(serverResult.candidates, shortagePlansVisible)
-                              .map((candidate) => (
-                              <tr key={candidate.id} data-testid={`comparison-${candidate.route}`}>
-                                <th scope="row">{candidateRouteText(candidate)}</th>
-                                <td>{formatNumber(candidate.adjustedQuantity, 0)}枚</td>
-                                <td>{formatCurrency(candidate.filmTotalYen, 0)}</td>
-                                <td>{formatCurrency(candidate.copperPlateTotalYen ?? "0", 0)}</td>
-                                <td>{formatCurrency(candidate.allInTotalCostYen ?? "0", 0)}</td>
-                                <td>{formatCurrency(candidate.allInCostPerPieceYen ?? "0", 2)}</td>
-                                <td>{formatCurrency(candidate.allInDeltaYen ?? "0", 0)}</td>
-                                <td>{comparisonRisk(candidate)}</td>
-                              </tr>
-                              ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="recommendation-grid">
-                        <button
-                          type="button"
-                          data-testid="input-basis-card"
-                          className={(!serverResult.selectedCandidateId || isInputBasisSelection) ? "recommendation-card selected" : "recommendation-card"}
-                          onClick={clearCandidate}
-                          disabled={pending}
-                        >
-                          {(!serverResult.selectedCandidateId || isInputBasisSelection) ? <span className="selection-status card-selection-status">選択中</span> : null}
-                          <span className="recommendation-label">
-                            発注計画 / {originalRouteText}
-                            <em>参考</em>
-                          </span>
-                          <span>
-                            パウチ {form.widthMm}×{form.lengthMm}mm ／ {form.connected}連 ／ {form.lanes}列 ／ {originalColorText}
-                          </span>
-                          <span>
-                            原反 {formatNumber(originalWebWidthMm)}mm{originalMultiplier > 1 ? ` ×${originalMultiplier}` : ""} ／ フィルム {originalFilmComposition}
-                          </span>
-                          <span>
-                            必要 {formatNumber(originalRequiredLengthM.toString(), 0)}m ／ 発注 {formatNumber(originalOrderLengthM.toString(), 0)}m ／ 余剰 {formatNumber(originalSurplusLengthM.toString(), 0)}m
-                          </span>
-                          <span>
-                            顧客 {formatNumber(serverResult.originalResult.quantity, 0)}枚 ／ 製作可能 {formatNumber(serverResult.originalResult.film.actualQuantity, 0)}枚 ／ 計画 {formatNumber(D(serverResult.originalResult.film.actualQuantity).div(1000).toDecimalPlaces(0, Decimal.ROUND_FLOOR).times(1000).toString(), 0)}枚
-                          </span>
-                          <span>{originalOrderReason}</span>
-                          {D(serverResult.originalResult.film.actualQuantity).lt(serverResult.originalResult.quantity)
-                            ? <span className="warning">不足のため参考</span>
-                            : null}
-                          <span>押すと入力した発注数量の計算へ戻ります。候補の製造計画数は左側入力を変更しません。</span>
-                          <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
-                        </button>
-                        {fulfillingRecommendationCandidates.map((candidate) => (
-                          <RecommendationCandidateCard
-                            key={candidate.id}
-                            candidate={candidate}
-                            selected={serverResult.selectedCandidateId === candidate.id}
-                            pending={pending}
-                            onSelect={(target) => void selectCandidate(target)}
-                          />
-                        ))}
-                        {nearTargetShortageCandidates.map((candidate) => (
-                          <RecommendationCandidateCard
-                            key={candidate.id}
-                            candidate={candidate}
-                            selected={serverResult.selectedCandidateId === candidate.id}
-                            pending={pending}
-                            onSelect={(target) => void selectCandidate(target)}
-                          />
-                        ))}
-                      </div>
-                      {shortageRecommendationCandidates.length ? (
-                        <div className="shortage-plans">
-                          <button
-                            type="button"
-                            className="button secondary small"
-                            data-testid="shortage-plans-toggle"
-                            aria-expanded={shortagePlansVisible}
-                            onClick={() => setShortagePlansOpen((open) => !open)}
-                            disabled={selectedShortageReference}
-                          >
-                            {selectedShortageReference ? "不足プラン選択中" : "不足プランを比較する"}
-                          </button>
-                          <p className="help">
-                            顧客発注に届かない小さいまとめ購入です。費用は安く見えても全数は製造できないため、参考として比較します。
-                          </p>
-                          {shortagePlansVisible ? (
-                            <div className="recommendation-grid">
-                              {shortageRecommendationCandidates.map((candidate) => (
-                                <RecommendationCandidateCard
-                                  key={candidate.id}
-                                  candidate={candidate}
-                                  selected={serverResult.selectedCandidateId === candidate.id}
-                                  pending={pending}
-                                  onSelect={(target) => void selectCandidate(target)}
-                                />
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      {pending ? <p className="warning">候補計算中です。</p> : null}
-                    </section>
                   ) : null}
                   <details className="cost-block" data-testid="cost-film">
                     <summary><h3>③ フィルム費用</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.film))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.film))} /枚）</small></span></summary>
@@ -2087,7 +2576,7 @@ export default function QuotationPage() {
 	                data-state={staleResult ? "needs-recalc" : "current"}
 	                disabled={blocker || pending}
 	              >
-	                {pending ? "計算中..." : staleResult ? "入力が変わりました。再計算する" : "サーバーで再計算する"}
+	                {pending ? "計算中..." : staleResult ? "再計算して候補を見る" : serverResult ? "候補を再取得" : "フィルム候補を探す"}
 	              </button>
               {resultShown ? (
                 <Link className="button secondary" href="/checklists/current" data-testid="current-checklist-link">
@@ -2104,7 +2593,7 @@ export default function QuotationPage() {
 	              data-state={staleResult ? "needs-recalc" : "current"}
 	              disabled={blocker || pending}
 	            >
-	              {pending ? "計算中..." : staleResult ? "入力が変わりました。再計算する" : "サーバーで再計算する"}
+	              {pending ? "計算中..." : staleResult ? "再計算して候補を見る" : serverResult ? "候補を再取得" : "フィルム候補を探す"}
 	            </button>
             {resultShown ? (
               <Link className="button secondary" href="/checklists/current" data-testid="current-checklist-link-mobile">
@@ -2114,6 +2603,33 @@ export default function QuotationPage() {
           </div>
         </form>
       </div>
+      {serverResult && !staleResult && recommendationModalOpen ? (
+        <RecommendationModal
+          serverResult={serverResult}
+          fulfillingCandidates={fulfillingRecommendationCandidates}
+          shortageCandidates={shortageRecommendationCandidates}
+          nearTargetShortageCandidates={nearTargetShortageCandidates}
+          shortagePlansVisible={shortagePlansVisible}
+          onToggleShortagePlans={() => setShortagePlansOpen((open) => !open)}
+          onSelect={(candidate) => void selectCandidate(candidate)}
+          onRestore={clearCandidate}
+          onClose={() => setRecommendationModalOpen(false)}
+          selecting={selecting}
+          selectionError={selectionError}
+          inputBasisSelection={isInputBasisSelection}
+          inputBasis={{
+            routeText: originalRouteText,
+            colorText: originalColorText,
+            webWidthMm: originalWebWidthMm,
+            multiplier: originalMultiplier,
+            filmComposition: originalFilmComposition,
+            requiredLengthM: originalRequiredLengthM,
+            orderLengthM: originalOrderLengthM,
+            surplusLengthM: originalSurplusLengthM,
+            orderReason: originalOrderReason,
+          }}
+        />
+      ) : null}
       {customerListOpen ? (
         <div className="customer-list-layer" role="dialog" aria-modal="true" aria-labelledby="customer-list-title">
           <div className="customer-list-panel">

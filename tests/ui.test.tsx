@@ -14,6 +14,91 @@ describe("quotation UI", () => {
   beforeEach(() => sessionStorage.clear());
   afterEach(cleanup);
 
+  function candidateTestInput(quantity = "50000") {
+    return {
+      spec: {
+        sizeKey: "tube-50x90", fillMlPerChamber: "3", connectedChambers: 1, fillingMethod: "hopper", fillingLanes: 4,
+        isCustom: false, colorCount: 4, bulkUnitPrice: "0", skuCount: 1,
+      } as PouchSpec,
+      quantity, printingMethod: "digital" as const,
+      parameters: defaultParameters, gravureParameters: defaultGravureRollParameters(),
+    };
+  }
+
+  function candidateFetch(input: ReturnType<typeof candidateTestInput>) {
+    const originalCalculation = calculatePouchCost({ ...input, recommendationMode: true });
+    return {
+      originalCalculation,
+      fetch: vi.fn(async (_url: RequestInfo | URL | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body));
+        const result = body.selectedCandidateId
+          ? calculatePouchCost({
+            ...input,
+            targetMargins: body.targetMargins,
+            recommendationMode: true,
+            selectedCandidateId: body.selectedCandidateId,
+            selectedCandidateTargetMargins: body.selectedCandidateTargetMargins,
+          })
+          : originalCalculation;
+        return new Response(JSON.stringify({
+          result,
+          originalResult: originalCalculation,
+          candidates: originalCalculation.recommendationCandidates ?? [],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }),
+    };
+  }
+
+  async function openCandidateModal(quantity = "50000") {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+    const input = candidateTestInput(quantity);
+    if (quantity !== "10000") {
+      const quantityInput = screen.getByLabelText("発注数量 (枚)");
+      await user.clear(quantityInput);
+      await user.type(quantityInput, quantity);
+    }
+    const { fetch, originalCalculation } = candidateFetch(input);
+    global.fetch = fetch;
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+    return { user, fetch, originalCalculation };
+  }
+
+  async function rejectTamperedSelectedCandidate(tamperSelected: (selected: PrintCandidate) => PrintCandidate) {
+    const { user, fetch, originalCalculation } = await openCandidateModal();
+    const modal = screen.getByTestId("recommendation-modal");
+    const stateBefore = screen.getByTestId("selected-candidate-summary").textContent;
+    const candidate = within(modal).getByRole("button", { name: /Y \/ 国内調達/ });
+    const selected = originalCalculation.recommendationCandidates!.find((item) => item.route === "Y")!;
+    global.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.selectedCandidateId) {
+        return Response.json({
+          result: calculatePouchCost({
+            ...candidateTestInput(),
+            recommendationMode: true,
+            selectedCandidateId: selected.id,
+            targetMargins: ["0.3", "0.35", "0.4"],
+          }),
+          originalResult: originalCalculation,
+          candidates: originalCalculation.recommendationCandidates!.map((item) => (
+            item.id === selected.id ? tamperSelected(item) : item
+          )),
+        }, { status: 200 });
+      }
+      return await fetch(url, init);
+    });
+
+    await user.click(candidate);
+    const alert = await screen.findByTestId("candidate-selection-error");
+    expect(alert).toHaveTextContent("candidate_response_invalid");
+    expect(screen.getByTestId("recommendation-modal")).toBe(modal);
+    expect(screen.getByTestId("selected-candidate-summary").textContent).toBe(stateBefore);
+    expect(screen.queryByTestId("active-candidate-note")).not.toBeInTheDocument();
+    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
+  }
+
   it("does not calculate automatically before server recalculation", async () => {
     render(<QuotationPage />);
     expect(screen.queryByTestId("bulk-usage")).not.toBeInTheDocument();
@@ -91,9 +176,13 @@ describe("quotation UI", () => {
         fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0",
         skuCount: 2,
       },
-      quantity: "10000", printingMethod: "digital",
+      quantity: "10000", printingMethod: "digital", recommendationMode: true,
     });
-    global.fetch = vi.fn(async () => new Response(JSON.stringify({ result }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      result,
+      originalResult: result,
+      candidates: result.recommendationCandidates ?? [],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
     await user.clear(screen.getByLabelText("発注数量 (枚)"));
@@ -103,12 +192,12 @@ describe("quotation UI", () => {
 	    expect(screen.getByTestId("server-result")).toHaveTextContent("再計算が必要");
 	    expect(screen.getByTestId("stale-input-warning")).toHaveTextContent("入力内容が変わりました");
 	    expect(screen.getByTestId("stale-input-warning")).toHaveTextContent("今すぐ再計算");
-	    expect(screen.getByTestId("calculate-desktop")).toHaveTextContent("入力が変わりました。再計算する");
+	    expect(screen.getByTestId("calculate-desktop")).toHaveTextContent("再計算して候補を見る");
 
 	    await user.click(screen.getByTestId("stale-recalc-button"));
 	    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
 	    expect(screen.queryByTestId("stale-input-warning")).not.toBeInTheDocument();
-	    expect(screen.getByTestId("calculate-desktop")).toHaveTextContent("サーバーで再計算する");
+	    expect(screen.getByTestId("calculate-desktop")).toHaveTextContent("候補を再取得");
 	  });
 
   it("keeps only the latest server calculation when responses arrive out of order", async () => {
@@ -133,10 +222,14 @@ describe("quotation UI", () => {
         fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0",
         skuCount: 2,
       },
-      quantity: "20000", printingMethod: "digital",
+      quantity: "20000", printingMethod: "digital", recommendationMode: true,
     });
     await act(async () => {
-      resolvers[1](new Response(JSON.stringify({ result: secondResult }), { status: 200 }));
+      resolvers[1](new Response(JSON.stringify({
+        result: secondResult,
+        originalResult: secondResult,
+        candidates: secondResult.recommendationCandidates ?? [],
+      }), { status: 200 }));
     });
     await waitFor(() => expect(screen.getByTestId("bulk-usage")).toHaveTextContent("722,000 ml"));
   });
@@ -313,9 +406,9 @@ describe("quotation UI", () => {
     await user.click(screen.getByTestId("calculate-desktop"));
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
-    expect(screen.getByText("フィルム調達・製造計画候補")).toBeInTheDocument();
+    expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Y \/ 国内調達（グラビア印刷）/ })).toBeInTheDocument();
-    expect(screen.getByText(/パウチ 50×60mm ／ 1連 ／ 4列/)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /パウチ 35×80mm/ }).length).toBeGreaterThan(0);
     expect(screen.queryByTestId("selection-status")).not.toBeInTheDocument();
     expect(screen.getByTestId("unit-cost-summary")).toHaveTextContent("総単価（初期費用込）");
     expect(screen.getByTestId("unit-cost-summary")).toHaveTextContent("パウチ単価（変動費）");
@@ -329,8 +422,8 @@ describe("quotation UI", () => {
     await user.click(screen.getByTestId("input-basis-card"));
     await waitFor(() => expect(screen.queryByText("フィルム調達・製造計画候補")).not.toBeInTheDocument());
     expect(screen.getByTestId("selected-candidate-summary")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "候補一覧" }));
-    await waitFor(() => expect(screen.getByText("フィルム調達・製造計画候補")).toBeInTheDocument());
+    await user.click(screen.getByTestId("candidate-recompare"));
+    await waitFor(() => expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument());
 
 	    await user.click(screen.getByRole("button", { name: /Y \/ 国内調達（グラビア印刷）/ }));
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
@@ -404,17 +497,17 @@ describe("quotation UI", () => {
 	    expect(screen.getByTestId("cost-copper")).not.toHaveTextContent("PDF掲載金額に12%適用");
 	    expect(screen.getByTestId("cost-copper")).not.toHaveTextContent("12%販売マージン");
 
-	    await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "候補一覧" }));
+	    await waitFor(() => expect(screen.getByTestId("candidate-recompare")).toBeEnabled());
+    await user.click(screen.getByTestId("candidate-recompare"));
     await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
     expect(screen.getByLabelText("利益率 40%")).toBeChecked();
     expect(screen.getByLabelText("利益率 30%")).not.toBeChecked();
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "候補一覧" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /Y \/ 国内調達/ })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: /Y \/ 国内調達/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "元の数量へ戻る" })).toBeEnabled());
+    await user.click(screen.getByTestId("candidate-recompare"));
+    await waitFor(() => expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument());
+    await user.click(within(screen.getByTestId("recommendation-modal")).getByRole("button", { name: /Y \/ 国内調達/ }));
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
     expect(screen.getByLabelText("利益率 30%")).toBeChecked();
 
@@ -429,7 +522,7 @@ describe("quotation UI", () => {
     expect(recalculationBasis.printingMethod).toBe("digital");
     expect(recalculationBasis.selectedCandidateId).toBe("");
 
-    await user.click(screen.getAllByRole("button", { name: "元の数量へ戻る" })[0]);
+    await user.click(screen.getByTestId("candidate-recompare"));
     await waitFor(() => expect(screen.getByTestId("input-summary")).toHaveTextContent("デジタル印刷"));
     expect(screen.getByLabelText("利益率 40%")).toBeChecked();
     expect(screen.getByLabelText("利益率 30%")).not.toBeChecked();
@@ -569,7 +662,7 @@ describe("quotation UI", () => {
     await user.click(shortageCard);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
     expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("25,000 枚");
-    await user.click(screen.getByRole("button", { name: "候補一覧" }));
+    await user.click(screen.getByTestId("candidate-recompare"));
     await waitFor(() => expect(screen.getByRole("button", { name: /D \/ デジタル.*700/ })).toBeVisible());
     expect(screen.getByTestId("comparison-D")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "不足プラン選択中" })).toBeDisabled();
@@ -633,8 +726,8 @@ describe("quotation UI", () => {
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
 
     await user.click(screen.getByRole("button", { name: /Y \/ 国内調達/ }));
-    await waitFor(() => expect(screen.getByTestId("calculation-error")).toHaveTextContent("candidate_result_mismatch"));
-    expect(screen.getByTestId("calculation-error")).toHaveTextContent("もう一度「サーバーで再計算する」を押してください");
+    await waitFor(() => expect(screen.getByTestId("candidate-selection-error")).toHaveTextContent("candidate_result_mismatch"));
+    expect(screen.queryByTestId("calculation-error")).not.toBeInTheDocument();
     expect(screen.queryByTestId("active-candidate-note")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Y \/ 国内調達/ })).toBeEnabled();
     expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
@@ -692,23 +785,24 @@ describe("quotation UI", () => {
     expect(sameMethodBody.printingMethod).toBe("digital");
     expect(sameMethodBody.targetMargins).toEqual(originalTargetMargins);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "候補一覧" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /Y \/ 国内調達/ })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: /Y \/ 国内調達/ }));
+    await waitFor(() => expect(screen.getByTestId("candidate-recompare")).toBeEnabled());
+    await user.click(screen.getByTestId("candidate-recompare"));
+    const reopenedModal = screen.getByTestId("recommendation-modal");
+    await user.click(within(reopenedModal).getByRole("button", { name: /Y \/ 国内調達/ }));
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
     expect(screen.getByLabelText("利益率 30%")).toBeChecked();
     expect(screen.getByLabelText("利益率 カスタム")).not.toBeChecked();
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "候補一覧" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "候補一覧" }));
+    await waitFor(() => expect(screen.getByTestId("candidate-recompare")).toBeEnabled());
+    await user.click(screen.getByTestId("candidate-recompare"));
+    await waitFor(() => expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument());
     await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
     expect(screen.getByLabelText("利益率 カスタム")).toBeChecked();
     expect(screen.getByLabelText("カスタム利益率 (%)")).toHaveValue("42");
 
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /元の数量へ戻る/ })[0]).toBeEnabled());
-    await user.click(screen.getAllByRole("button", { name: /元の数量へ戻る/ })[0]);
+    await waitFor(() => expect(screen.getByRole("button", { name: "元の数量へ戻る" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "元の数量へ戻る" }));
     await waitFor(() => expect(screen.getByTestId("input-summary")).toHaveTextContent("デジタル印刷"));
     expect(screen.getByLabelText("利益率 カスタム")).toBeChecked();
     expect(screen.getByLabelText("カスタム利益率 (%)")).toHaveValue("42");
@@ -861,8 +955,8 @@ describe("quotation UI", () => {
       expect(sessionStorage.getItem("pouch-simulator-stale-status-v1")).toBeNull();
     });
 
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /元の数量へ戻る/ })[0]).toBeEnabled());
-    await user.click(screen.getAllByRole("button", { name: /元の数量へ戻る/ })[0]);
+    await waitFor(() => expect(screen.getByRole("button", { name: "元の数量へ戻る" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "元の数量へ戻る" }));
     await waitFor(() => expect(screen.getByTestId("input-summary")).toHaveTextContent("デジタル印刷"));
     await waitFor(() => {
       const draft = JSON.parse(sessionStorage.getItem(QUOTATION_DRAFT_KEY)!);
@@ -877,6 +971,303 @@ describe("quotation UI", () => {
       expect(sessionStorage.getItem(QUOTATION_DRAFT_KEY)).toBeNull();
       expect(sessionStorage.getItem("pouch-simulator-stale-status-v1")).toBe("input-changed");
     });
+  });
+
+  it("exposes one accessible, focus-managed modal with complete comparison content", async () => {
+    const { user, fetch } = await openCandidateModal("30000");
+    const modal = screen.getByTestId("recommendation-modal");
+    const dialog = screen.getByRole("dialog", { name: "フィルム調達・製造計画候補" });
+    expect(dialog).toBe(modal);
+    expect(modal).toHaveAttribute("aria-modal", "true");
+    expect(modal).toHaveTextContent("入力条件");
+    for (const route of ["D", "K", "Y"]) {
+      expect(within(modal).getAllByRole("button", { name: new RegExp(`${route} /`) }).length).toBeGreaterThan(0);
+    }
+    expect(within(modal).getAllByRole("button", { name: /推奨/ })[0]).toHaveTextContent("推奨");
+    expect(within(modal).getByTestId("all-in-comparison")).toHaveAccessibleName(/すべて合算した原価比較/);
+    expect(within(modal).getByTestId("comparison-input")).toBeInTheDocument();
+    expect(within(modal).getByTestId("comparison-Y")).toBeInTheDocument();
+    expect(within(modal).getByRole("button", { name: "不足プランを比較する" })).toBeInTheDocument();
+
+    expect(screen.getAllByTestId("recommendation-modal")).toHaveLength(1);
+    expect(screen.getAllByTestId("all-in-comparison")).toHaveLength(1);
+    expect(document.body).toHaveStyle({ overflow: "hidden" });
+    const closeButton = within(modal).getByTestId("recommendation-modal-close");
+    expect(closeButton).toHaveFocus();
+
+    const focusable = within(modal).getAllByRole("button").filter((button) => !button.hasAttribute("disabled"));
+    expect(focusable.length).toBeGreaterThan(1);
+    const first = focusable[0];
+    const last = focusable.at(-1)!;
+    first.focus();
+    fireEvent.keyDown(modal, { key: "Tab", shiftKey: true });
+    expect(last).toHaveFocus();
+    last.focus();
+    fireEvent.keyDown(modal, { key: "Tab" });
+    expect(first).toHaveFocus();
+    expect(first).toBe(closeButton);
+    fireEvent.keyDown(closeButton, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("recommendation-modal")).not.toBeInTheDocument());
+    expect(document.body).toHaveStyle({ overflow: "" });
+    expect(screen.getByTestId("calculate-desktop")).toHaveFocus();
+
+    const callsBeforeRecompare = fetch.mock.calls.length;
+    await user.click(screen.getByTestId("candidate-recompare"));
+    expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument();
+    expect(fetch.mock.calls).toHaveLength(callsBeforeRecompare);
+  });
+
+  it("protects dismissal during selection and closes only after a validated candidate commit", async () => {
+    const { user, fetch, originalCalculation } = await openCandidateModal();
+    const modal = screen.getByTestId("recommendation-modal");
+    const candidate = within(modal).getByRole("button", { name: /Y \/ 国内調達/ });
+    let resolveSelection: (value: Response) => void = () => {};
+    global.fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.selectedCandidateId) {
+        return new Promise<Response>((resolve) => {
+          resolveSelection = resolve;
+        });
+      }
+      return fetch(url, init);
+    });
+    await user.click(candidate);
+
+    expect(screen.getByTestId("candidate-selection-progress")).toHaveTextContent("選択を反映しています…");
+    expect(modal).toHaveAttribute("data-state", "selecting");
+    expect(within(modal).getByTestId("recommendation-modal-close")).toBeDisabled();
+    expect(within(modal).getAllByRole("button", { name: /D \/|K \/|Y \// }).every((button) => button.hasAttribute("disabled"))).toBe(true);
+    const activeDuringSelection = document.activeElement;
+    expect(activeDuringSelection).not.toBe(document.body);
+    expect(activeDuringSelection instanceof Node && modal.contains(activeDuringSelection)).toBe(true);
+    expect(within(modal).getByTestId("candidate-selection-progress")).toHaveFocus();
+    fireEvent.mouseDown(screen.getByTestId("recommendation-modal-overlay"));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument();
+    activeDuringSelection?.dispatchEvent(new FocusEvent("focusout", { relatedTarget: document.body }));
+    await waitFor(() => expect(modal).toContainElement(document.activeElement as HTMLElement));
+    expect(document.activeElement).not.toBe(document.body);
+
+    const selected = originalCalculation.recommendationCandidates!.find((item) => item.route === "Y")!;
+    await act(async () => {
+      resolveSelection(Response.json({
+        result: calculatePouchCost({
+          ...candidateTestInput(),
+          recommendationMode: true,
+          selectedCandidateId: selected.id,
+          targetMargins: ["0.3", "0.35", "0.4"],
+        }),
+        originalResult: originalCalculation,
+        candidates: originalCalculation.recommendationCandidates ?? [],
+      }));
+    });
+    await waitFor(() => expect(screen.queryByTestId("recommendation-modal")).not.toBeInTheDocument());
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）");
+    expect(screen.getByTestId("selected-candidate-summary")).toHaveTextContent("Y / 国内調達（グラビア印刷）");
+    expect(screen.getByTestId("selected-candidate-summary")).toHaveTextContent("総原価");
+  });
+
+  it("keeps a failed candidate selection in the modal with retryable alert semantics", async () => {
+    const { user, fetch } = await openCandidateModal();
+    const candidate = within(screen.getByTestId("recommendation-modal")).getByRole("button", { name: /Y \/ 国内調達/ });
+    let selectionAttempts = 0;
+    global.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.selectedCandidateId && selectionAttempts++ === 0) throw new Error("candidate_calculation_failed");
+      return await fetch(url, init);
+    });
+
+    await user.click(candidate);
+    const alert = await screen.findByTestId("candidate-selection-error");
+    expect(alert).toHaveTextContent("candidate_calculation_failed");
+    expect(alert).toHaveTextContent("もう一度候補を選択してください");
+    expect(alert).toHaveTextContent("「閉じる」");
+    expect(alert).not.toHaveTextContent("サーバーで再計算する");
+    expect(within(screen.getByTestId("recommendation-modal")).getByRole("alert")).toBe(alert);
+    expect(screen.queryByTestId("active-candidate-note")).not.toBeInTheDocument();
+
+    const retry = within(screen.getByTestId("recommendation-modal")).getByRole("button", { name: /Y \/ 国内調達/ });
+    await user.click(retry);
+    await waitFor(() => expect(screen.queryByTestId("recommendation-modal")).not.toBeInTheDocument());
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）");
+  });
+
+  it("keeps focus inside the modal when a failed selection finishes", async () => {
+    const { user } = await openCandidateModal();
+    const modal = screen.getByTestId("recommendation-modal");
+    const candidate = within(modal).getByRole("button", { name: /Y \/ 国内調達/ });
+    global.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.selectedCandidateId) throw new Error("candidate_calculation_failed");
+      return await fetch(_url, init);
+    });
+
+    await user.click(candidate);
+    await screen.findByTestId("candidate-selection-error");
+    const status = screen.getByTestId("candidate-selection-status");
+    expect(status).toHaveFocus();
+    expect(status).toHaveClass("visually-hidden");
+    expect(status).not.toHaveAttribute("aria-live");
+    expect(status).not.toHaveAttribute("role");
+    expect(modal.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("rejects a malformed candidate original result and preserves prior state", async () => {
+    const { user, fetch, originalCalculation } = await openCandidateModal();
+    const modal = screen.getByTestId("recommendation-modal");
+    const stateBefore = screen.getByTestId("selected-candidate-summary").textContent;
+    const candidate = within(modal).getByRole("button", { name: /Y \/ 国内調達/ });
+    global.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.selectedCandidateId) {
+        const selected = originalCalculation.recommendationCandidates!.find((item) => item.route === "Y")!;
+        return Response.json({
+          result: calculatePouchCost({
+            ...candidateTestInput(),
+            recommendationMode: true,
+            selectedCandidateId: selected.id,
+            targetMargins: ["0.3", "0.35", "0.4"],
+          }),
+          originalResult: { quantity: originalCalculation.quantity },
+          candidates: originalCalculation.recommendationCandidates ?? [],
+        }, { status: 200 });
+      }
+      return await fetch(url, init);
+    });
+
+    await user.click(candidate);
+    const alert = await screen.findByTestId("candidate-selection-error");
+    expect(alert).toHaveTextContent("candidate_response_invalid");
+    expect(screen.getByTestId("recommendation-modal")).toBe(modal);
+    expect(screen.queryByTestId("active-candidate-note")).not.toBeInTheDocument();
+    expect(screen.getByTestId("selected-candidate-summary").textContent).toBe(stateBefore);
+    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
+  });
+
+  it("rejects a candidate response that omits the exact selected candidate", async () => {
+    const { user, fetch, originalCalculation } = await openCandidateModal();
+    const candidate = within(screen.getByTestId("recommendation-modal")).getByRole("button", { name: /Y \/ 国内調達/ });
+    const stateBefore = screen.getByTestId("selected-candidate-summary").textContent;
+    global.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.selectedCandidateId) {
+        const selected = originalCalculation.recommendationCandidates!.find((item) => item.route === "Y")!;
+        return Response.json({
+          result: calculatePouchCost({
+            ...candidateTestInput(),
+            recommendationMode: true,
+            selectedCandidateId: selected.id,
+            targetMargins: ["0.3", "0.35", "0.4"],
+          }),
+          originalResult: originalCalculation,
+          candidates: originalCalculation.recommendationCandidates!.filter((item) => item.id !== selected.id),
+        }, { status: 200 });
+      }
+      return await fetch(url, init);
+    });
+
+    await user.click(candidate);
+    const alert = await screen.findByTestId("candidate-selection-error");
+    expect(alert).toHaveTextContent("candidate_response_invalid");
+    expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument();
+    expect(screen.getByTestId("selected-candidate-summary").textContent).toBe(stateBefore);
+    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
+  });
+
+  it("rejects a selected candidate that has only an ID and preserves prior state", async () => {
+    const { user, fetch, originalCalculation } = await openCandidateModal();
+    const modal = screen.getByTestId("recommendation-modal");
+    const stateBefore = screen.getByTestId("selected-candidate-summary").textContent;
+    const candidate = within(modal).getByRole("button", { name: /Y \/ 国内調達/ });
+    global.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.selectedCandidateId) {
+        const selected = originalCalculation.recommendationCandidates!.find((item) => item.route === "Y")!;
+        return Response.json({
+          result: calculatePouchCost({
+            ...candidateTestInput(),
+            recommendationMode: true,
+            selectedCandidateId: selected.id,
+            targetMargins: ["0.3", "0.35", "0.4"],
+          }),
+          originalResult: originalCalculation,
+          candidates: [{ id: selected.id }],
+        }, { status: 200 });
+      }
+      return await fetch(url, init);
+    });
+
+    await user.click(candidate);
+    const alert = await screen.findByTestId("candidate-selection-error");
+    expect(alert).toHaveTextContent("candidate_response_invalid");
+    expect(screen.getByTestId("recommendation-modal")).toBe(modal);
+    expect(screen.getByTestId("selected-candidate-summary").textContent).toBe(stateBefore);
+    expect(screen.queryByTestId("active-candidate-note")).not.toBeInTheDocument();
+    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
+  });
+
+  it("rejects a returned selected candidate with a mismatched route and preserves prior state", async () => {
+    await rejectTamperedSelectedCandidate((selected) => {
+      const { sasche: _sasche, ...withoutRouteSpecificRoll } = selected;
+      return { ...withoutRouteSpecificRoll, route: "K" };
+    });
+  });
+
+  it("rejects a returned selected candidate with a mismatched SKU allocation and preserves prior state", async () => {
+    await rejectTamperedSelectedCandidate((selected) => ({
+      ...selected,
+      adjustedSkuQuantities: selected.adjustedSkuQuantities.map((quantity, index) => (index === 0 ? "1" : quantity)),
+    }));
+  });
+
+  it.each([
+    ["copper economics", (selected: PrintCandidate) => ({ ...selected, copperPlateTotalYen: "NaN" })],
+    ["film orders", (selected: PrintCandidate) => ({
+      ...selected,
+      filmOrders: [{ skuCode: selected.id, requiredLengthM: "100", orderLengthM: "NaN" }],
+    })],
+    ["domestic roll metadata", (selected: PrintCandidate) => ({
+      ...selected,
+      sasche: { ...selected.sasche!, matchedWidthMm: Number.NaN },
+    })],
+  ])("rejects malformed candidate %s and preserves prior state", async (_label, tamperSelected) => {
+    await rejectTamperedSelectedCandidate(tamperSelected);
+  });
+
+  it("reports an invalid fresh calculation response without a result fallback", async () => {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+    global.fetch = vi.fn(async () => Response.json({ result: { quantity: "10000" } }, { status: 200 }));
+
+    await user.click(screen.getByTestId("calculate-desktop"));
+    const alert = await screen.findByTestId("calculation-error");
+    expect(alert).toHaveTextContent("calculation_response_invalid");
+    expect(alert).toHaveTextContent("もう一度「サーバーで再計算する」を押してください");
+    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "not_calculated");
+    expect(screen.queryByTestId("bulk-usage")).not.toBeInTheDocument();
+  });
+
+  it("stale recalculation sends an empty selected candidate ID and reopens recommendations", async () => {
+    const { user, fetch } = await openCandidateModal();
+    const modal = screen.getByTestId("recommendation-modal");
+    await user.click(within(modal).getByTestId("recommendation-modal-close"));
+    const callsBeforeRecompare = fetch.mock.calls.length;
+    await user.click(screen.getByTestId("candidate-recompare"));
+    expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument();
+    expect(fetch.mock.calls).toHaveLength(callsBeforeRecompare);
+    const reopened = screen.getByTestId("recommendation-modal");
+    await user.click(within(reopened).getByRole("button", { name: /Y \/ 国内調達/ }));
+    await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
+
+    fireEvent.change(screen.getByLabelText("発注数量 (枚)"), { target: { value: "50001" } });
+    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "stale");
+    expect(screen.getByTestId("calculate-desktop")).toHaveTextContent("再計算して候補を見る");
+    await user.click(screen.getByTestId("calculate-desktop"));
+
+    await waitFor(() => expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument());
+    const staleBody = JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body));
+    expect(staleBody.selectedCandidateId).toBe("");
   });
 
   it("supports per-SKU pouch quantities and blocks when the sum differs from the order quantity", async () => {
