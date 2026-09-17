@@ -1017,6 +1017,33 @@ describe("quotation UI", () => {
     expect(fetch.mock.calls).toHaveLength(callsBeforeRecompare);
   });
 
+  it("merges a minimum digital order with the equivalent input basis", async () => {
+    const user = userEvent.setup();
+    render(<QuotationPage />);
+    const input = {
+      ...candidateTestInput("10000"),
+      spec: {
+        ...candidateTestInput("10000").spec,
+        sizeKey: "round-50x60",
+      },
+    } as ReturnType<typeof candidateTestInput>;
+    global.fetch = candidateFetch(input).fetch;
+    await user.click(screen.getByTestId("calculate-desktop"));
+    await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated"));
+
+    const modal = screen.getByTestId("recommendation-modal");
+    const basis = within(modal).getByTestId("input-basis-card");
+    expect(basis).toHaveTextContent("入力値と同一発注");
+    expect(basis).toHaveTextContent("推奨");
+    expect(basis).toHaveTextContent("合計最低発注 500mのため、最低発注量まで注文しました。");
+    expect(basis).not.toHaveTextContent("undefined");
+    expect(basis).toHaveTextContent("顧客 10,000枚 ／ 製作可能 25,454枚 ／ 計画 10,000枚");
+    expect(within(modal).queryByRole("button", { name: /D \/ デジタル/ })).not.toBeInTheDocument();
+    expect(within(modal).queryByTestId("comparison-D")).not.toBeInTheDocument();
+    expect(within(modal).getByTestId("comparison-input")).toHaveTextContent("￥182,200");
+    expect(within(modal).getByTestId("comparison-input")).toHaveTextContent("入力した発注数の計算");
+  });
+
   it("protects dismissal during selection and closes only after a validated candidate commit", async () => {
     const { user, fetch, originalCalculation } = await openCandidateModal();
     const modal = screen.getByTestId("recommendation-modal");

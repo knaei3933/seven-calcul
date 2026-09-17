@@ -580,6 +580,7 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
       compositionText: compositionText,
       pouchSpecText: pouchSpecText,
       patternText: patternText,
+      orderReason,
       priceBreak,
       adjustedSkuQuantities: adjustedSkuQuantities.map((value) => value.toString()),
       filmOrders: skuRows.map((row) => ({

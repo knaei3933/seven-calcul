@@ -399,6 +399,14 @@ function isNearTargetShortage(candidate: PrintCandidate): boolean {
     && shortagePieces.div(originalQuantity).lte("0.15");
 }
 
+function sameFilmPlanAsInput(candidate: PrintCandidate, originalResult: CostResult): boolean {
+  return candidate.route === "D"
+    && candidate.printingMethod === "digital"
+    && candidate.isFulfilling
+    && D(candidate.orderLengthM).eq(D(originalResult.film.orderLengthM))
+    && D(candidate.filmTotalYen).eq(D(originalResult.film.filmTotal));
+}
+
 function overproductionMultiple(candidate: PrintCandidate): Decimal | null {
   const customerQuantity = D(candidate.originalQuantity);
   // The roll/pattern may remain much larger than the released plan even when
@@ -497,6 +505,7 @@ function RecommendationModal({
   fulfillingCandidates,
   shortageCandidates,
   nearTargetShortageCandidates,
+  inputBasisEquivalent,
   shortagePlansVisible,
   onToggleShortagePlans,
   onSelect,
@@ -511,6 +520,7 @@ function RecommendationModal({
   fulfillingCandidates: PrintCandidate[];
   shortageCandidates: PrintCandidate[];
   nearTargetShortageCandidates: PrintCandidate[];
+  inputBasisEquivalent: PrintCandidate | null;
   shortagePlansVisible: boolean;
   onToggleShortagePlans: () => void;
   onSelect: (candidate: PrintCandidate) => void;
@@ -536,6 +546,9 @@ function RecommendationModal({
   const previousFocusRef = useRef<Element | null>(null);
   const selectedCandidate = serverResult.candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId) ?? null;
   const selectedShortageReference = Boolean(selectedCandidate && !selectedCandidate.isFulfilling);
+  const inputBasisEquivalentSelected = Boolean(inputBasisEquivalent && serverResult.selectedCandidateId === inputBasisEquivalent.id);
+  const comparisonCandidates = preferredComparisonCandidates(serverResult.candidates, shortagePlansVisible)
+    .filter((candidate) => candidate.id !== inputBasisEquivalent?.id);
 
   useEffect(() => {
     previousFocusRef.current = document.activeElement;
@@ -711,7 +724,7 @@ function RecommendationModal({
                   <td>基準</td>
                   <td>入力した発注数の計算</td>
                 </tr>
-                {preferredComparisonCandidates(serverResult.candidates, shortagePlansVisible).map((candidate) => (
+                {comparisonCandidates.map((candidate) => (
                   <tr key={candidate.id} data-testid={`comparison-${candidate.route}`}>
                     <th scope="row">{candidateRouteText(candidate)}</th>
                     <td>{formatNumber(candidate.adjustedQuantity, 0)}枚</td>
@@ -749,23 +762,26 @@ function RecommendationModal({
           <button
             type="button"
             data-testid="input-basis-card"
-            className={inputBasisSelection ? "recommendation-card selected" : "recommendation-card"}
+            className={(inputBasisSelection || inputBasisEquivalentSelected) ? "recommendation-card selected" : "recommendation-card"}
             onClick={onRestore}
             disabled={selecting}
           >
-            {inputBasisSelection ? <span className="selection-status card-selection-status">選択中</span> : null}
+            {(inputBasisSelection || inputBasisEquivalentSelected) ? <span className="selection-status card-selection-status">選択中</span> : null}
             <span className="recommendation-label">
               発注計画 / {inputBasis.routeText}
-              <em>参考</em>
+              {inputBasisEquivalent?.recommended ? <em>推奨</em> : <em>参考</em>}
             </span>
+            {inputBasisEquivalent ? (
+              <span className="selection-tag">入力値と同一発注／{inputBasisEquivalent.selectionTag}</span>
+            ) : null}
             <span>原反 {formatNumber(inputBasis.webWidthMm)}mm{inputBasis.multiplier > 1 ? ` ×${inputBasis.multiplier}` : ""} ／ フィルム {inputBasis.filmComposition}</span>
             <span>
               必要 {formatNumber(inputBasis.requiredLengthM.toString(), 0)}m ／ 発注 {formatNumber(inputBasis.orderLengthM.toString(), 0)}m ／ 余剰 {formatNumber(inputBasis.surplusLengthM.toString(), 0)}m
             </span>
             <span>
-              顧客 {formatNumber(serverResult.originalResult.quantity, 0)}枚 ／ 製作可能 {formatNumber(serverResult.originalResult.film.actualQuantity, 0)}枚 ／ 計画 {formatNumber(D(serverResult.originalResult.film.actualQuantity).div(1000).toDecimalPlaces(0, Decimal.ROUND_FLOOR).times(1000).toString(), 0)}枚
+              顧客 {formatNumber(serverResult.originalResult.quantity, 0)}枚 ／ 製作可能 {formatNumber(serverResult.originalResult.film.actualQuantity, 0)}枚 ／ 計画 {formatNumber(serverResult.originalResult.quantity, 0)}枚
             </span>
-            <span>{inputBasis.orderReason}</span>
+            <span>{inputBasisEquivalent?.orderReason ?? inputBasis.orderReason}</span>
             {D(serverResult.originalResult.film.actualQuantity).lt(serverResult.originalResult.quantity) ? <span className="warning">不足のため参考</span> : null}
             <span>押すと入力した発注数量の計算へ戻ります。候補の製造計画数は左側入力を変更しません。</span>
             <strong>フィルム {formatCurrency(serverResult.originalResult.film.filmTotal, 0)}</strong>
@@ -1658,6 +1674,12 @@ export default function QuotationPage() {
   const isInputBasisSelection = !serverResult?.selectedCandidateId
     || serverResult.selectedCandidateId === INPUT_BASIS_SELECTION_ID;
   const originalResult = serverResult?.originalResult;
+  const inputBasisEquivalentCandidate = originalResult
+    ? serverResult?.candidates.find((candidate) => sameFilmPlanAsInput(candidate, originalResult)) ?? null
+    : null;
+  const visibleFulfillingRecommendationCandidates = fulfillingRecommendationCandidates.filter((candidate) => (
+    candidate.id !== inputBasisEquivalentCandidate?.id
+  ));
   const originalFilm = originalResult?.film;
   const originalWebWidthMm = originalResult?.gravure?.materialWidthMm
     ? Number(originalResult.gravure.materialWidthMm)
@@ -2606,7 +2628,8 @@ export default function QuotationPage() {
       {serverResult && !staleResult && recommendationModalOpen ? (
         <RecommendationModal
           serverResult={serverResult}
-          fulfillingCandidates={fulfillingRecommendationCandidates}
+          fulfillingCandidates={visibleFulfillingRecommendationCandidates}
+          inputBasisEquivalent={inputBasisEquivalentCandidate}
           shortageCandidates={shortageRecommendationCandidates}
           nearTargetShortageCandidates={nearTargetShortageCandidates}
           shortagePlansVisible={shortagePlansVisible}
