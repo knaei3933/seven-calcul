@@ -3,6 +3,7 @@ import {
   SESSION_COOKIE_NAME,
   authenticate,
   createSession,
+  isSecureRequest,
   sessionCookieOptions,
 } from "@/lib/auth-store";
 
@@ -22,6 +23,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const response = NextResponse.json({ user });
     response.cookies.set(SESSION_COOKIE_NAME, session.token, sessionCookieOptions(
       Math.max(1, Math.floor((session.expiresAt.getTime() - Date.now()) / 1000)),
+      isSecureRequest(request),
     ));
     return response;
   } catch {

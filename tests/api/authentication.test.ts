@@ -61,6 +61,12 @@ describe("authentication and authorization APIs", () => {
     expect(setCookie).toContain("HttpOnly");
     expect(setCookie).toMatch(/SameSite=Lax/i);
     expect(setCookie).not.toContain("Secure");
+    const httpsLogin = await login(request("https://localhost/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "admin@auth-api.test", password: "admin-auth-api-password" }),
+    }));
+    expect(httpsLogin.headers.get("set-cookie") ?? "").toContain("Secure");
     const current = await session(request("http://localhost/api/auth/session", {}, admin));
     expect(current.status).toBe(200);
     const payload = await current.json();

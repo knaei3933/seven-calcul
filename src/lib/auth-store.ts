@@ -331,11 +331,24 @@ async function seedAdministrator(): Promise<void> {
   `).run(email, name, "admin", passwordHash, now, now);
 }
 
-export function sessionCookieOptions(maxAge: number) {
+export function isSecureRequest(request: Request): boolean {
+  const forwardedProtocol = request.headers.get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim()
+    .toLowerCase();
+  if (forwardedProtocol) return forwardedProtocol === "https";
+  try {
+    return new URL(request.url).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function sessionCookieOptions(maxAge: number, secure = false) {
   return {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure,
     path: "/",
     maxAge,
   } as const;
