@@ -7,6 +7,7 @@ import {
 } from "@/lib/quotation-store";
 import { CHECKLIST_VERSION, readCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 import { printingMethodOf } from "@/lib/quotation-history";
+import { requirePageUser } from "@/lib/page-auth";
 import { CalculationChecklistClient } from "./checklist-client";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ type PageProps = {
 
 export default async function ChecklistPage({ params }: PageProps) {
   const { quotationId } = await params;
+  await requirePageUser(`/checklists/${quotationId}`);
   const id = Number(quotationId);
   if (!Number.isInteger(id) || id <= 0) notFound();
 

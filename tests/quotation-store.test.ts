@@ -13,6 +13,12 @@ import type { QuotationRecordInput } from "@/lib/quotation-shared";
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-store-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
 const { createChecklistsForQuotation, createLegacyChecklistsForQuotation, getChecklistsForQuotation, getQuotation, saveQuotation, updateChecklistItem } = await import("@/lib/quotation-store");
+const { createUser } = await import("@/lib/auth-store");
+
+process.env.ADMIN_EMAIL = "admin@quotation-store.test";
+process.env.ADMIN_PASSWORD = "admin-store-password";
+process.env.ADMIN_NAME = "Store Admin";
+const actor = await createUser({ email: "actor@quotation-store.test", name: "Quotation Actor", password: "actor-store-password", role: "user" });
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
@@ -67,7 +73,7 @@ describe("quotation persistence with a manually edited selling price", () => {
       },
     };
 
-    const saved = await saveQuotation(input);
+    const saved = await saveQuotation(input, actor.id);
     const persisted = await getQuotation(saved.id);
     expect(persisted).not.toBeNull();
     expect(persisted!.pricePerPiece).toBe("8.1");
@@ -142,7 +148,7 @@ describe("quotation persistence with a manually edited selling price", () => {
         calculationChecklistSnapshot: snapshot,
       },
     };
-    const saved = await saveQuotation(quotationInput);
+    const saved = await saveQuotation(quotationInput, actor.id);
     const created = await createChecklistsForQuotation(saved, snapshot);
     expect(created).toHaveLength(2);
     expect(created.map((record) => record.audience)).toEqual(["CUSTOMER", "INTERNAL_QA"]);
@@ -175,7 +181,7 @@ describe("quotation persistence with a manually edited selling price", () => {
         calculationChecklistSnapshot: changedSnapshot,
       },
     };
-    const updatedQuotation = await saveQuotation(updatedInput);
+    const updatedQuotation = await saveQuotation(updatedInput, actor.id);
     const rebuilt = await createChecklistsForQuotation(updatedQuotation, changedSnapshot);
     const rebuiltCustomerItem = rebuilt[0]!.items.find((item) => item.id === "basic.quantity")!;
 
@@ -230,7 +236,7 @@ describe("quotation persistence with a manually edited selling price", () => {
       resultHash: "same-result-hash",
       payload: { calculationChecklistSnapshot: baseSnapshot },
     };
-    const saved = await saveQuotation(input);
+    const saved = await saveQuotation(input, actor.id);
     await createChecklistsForQuotation(saved, baseSnapshot);
 
     const changedSnapshot = {
@@ -238,7 +244,7 @@ describe("quotation persistence with a manually edited selling price", () => {
       quantity: "20000",
       skus: (baseSnapshot.skus ?? []).map((sku) => ({ ...sku, quantity: "20000" })),
     };
-    const updated = await saveQuotation({ ...input, quantity: "20000", payload: { calculationChecklistSnapshot: changedSnapshot } });
+    const updated = await saveQuotation({ ...input, quantity: "20000", payload: { calculationChecklistSnapshot: changedSnapshot } }, actor.id);
     const rebuilt = await createChecklistsForQuotation(updated, changedSnapshot);
     expect(rebuilt[0]!.snapshot.quantity).toBe("20000");
     expect(rebuilt[0]!.items.find((item) => item.id === "basic.quantity")!.result).toBe("20,000");
@@ -497,7 +503,7 @@ describe("quotation persistence with a manually edited selling price", () => {
       resultHash: "legacy-hash",
       payload: {},
     };
-    const saved = await saveQuotation(quotationInput);
+    const saved = await saveQuotation(quotationInput, actor.id);
     const items = buildLegacyChecklistItems(saved, "digital");
     expect(items.length).toBeGreaterThan(5);
     expect(items.every((item) => item.id && item.result !== "")).toBe(true);

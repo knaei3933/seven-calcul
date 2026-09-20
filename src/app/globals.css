@@ -16,7 +16,7 @@
 
 * { box-sizing: border-box; }
 html { color-scheme: light; }
-body { margin: 0; background: var(--background); color: var(--ink); font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif; line-height: 1.6; }
+body { margin: 0; max-width: 100%; background: var(--background); color: var(--ink); font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif; line-height: 1.6; }
 main { max-width: 1440px; margin: 0 auto; padding: 24px; }
 a { color: var(--primary); }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -58,7 +58,18 @@ a { color: var(--primary); }
 .provisional-quote { border-color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger); }
 .stale-result { opacity: .58; }
 .input-summary { color: var(--muted); font-size: 13px; font-weight: 700; margin: 0 0 8px; }
-.mobile-actions { display: none; position: fixed; width: 100%; right: auto; bottom: 0; left: 0; z-index: 20; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); background: rgba(255, 255, 255, .96); border-top: 1px solid var(--line); box-shadow: 0 -6px 18px rgba(23, 33, 58, .12); }
+.mobile-actions {
+  display: none;
+  position: fixed;
+  inset: auto 0 0 0;
+  width: auto;
+  max-width: 100dvw;
+  z-index: 20;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, .96);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -6px 18px rgba(23, 33, 58, .12);
+}
 .mobile-actions .button { width: 100%; min-height: 48px; }
 .result-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .result-status { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
@@ -296,7 +307,7 @@ header .version-badge { display: none; }
 }
 .global-header-inner {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto);
   align-items: center;
   gap: 18px;
   width: min(100%, 1720px);
@@ -309,11 +320,22 @@ header .version-badge { display: none; }
   justify-content: flex-end;
   gap: 5px;
   overflow-x: auto;
+  contain: paint;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: white;
   padding: 4px;
 }
+.global-user-area { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.global-menu { min-width: 0; }
+.current-user { display: flex; flex-direction: column; line-height: 1.2; max-width: 220px; }
+.current-user strong { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.current-user small { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.login-page { display: grid; place-items: center; min-height: calc(100dvh - var(--global-header-height)); padding: 28px; }
+.login-panel { width: min(100%, 440px); }
+.login-panel h1 { margin: 8px 0 10px; }
+.admin-user-form { display: grid; grid-template-columns: 1.4fr 1fr .8fr 1.1fr auto; align-items: end; gap: 10px; margin-top: 18px; }
+.admin-users-page { display: flex; flex-direction: column; gap: 18px; }
 .global-menu a {
   display: inline-flex;
   align-items: center;
@@ -353,7 +375,7 @@ header .version-badge { display: none; }
 .history-meta { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .history-meta h2 { margin: 0; font-size: 18px; }
 .history-table-wrap { overflow-x: auto; margin-top: 12px; }
-.history-table { min-width: 930px; }
+.history-table { min-width: 1070px; }
 .history-table small { display: block; color: var(--muted); font-size: 11px; }
 .history-table select { min-height: 36px; padding: 5px 7px; font-size: 12px; }
 .history-actions { white-space: nowrap; }
@@ -1557,4 +1579,19 @@ header .version-badge { display: none; }
   font-size: 11px;
   font-weight: 800;
   color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .admin-user-form { grid-template-columns: 1fr; align-items: stretch; }
+  .current-user { display: none; }
+  .global-header-inner {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+    padding: 9px 14px;
+  }
+  .global-menu,
+  .global-user-area {
+    max-width: 100%;
+    justify-content: flex-start;
+  }
 }

@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { listCustomers, saveCustomer, validateCustomerInput } from "@/lib/customer-store";
+import { getSessionUser } from "@/lib/api-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<NextResponse> {
+  const user = await getSessionUser(request);
+  if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
   const url = new URL(request.url);
   try {
     const customers = await listCustomers(url.searchParams.get("q") ?? "", Number(url.searchParams.get("limit") ?? 100));
@@ -16,6 +19,8 @@ export async function GET(request: Request): Promise<NextResponse> {
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
+    const user = await getSessionUser(request);
+    if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
     const input = validateCustomerInput(await request.json());
     if (!input) return NextResponse.json({ error: "invalid_customer" }, { status: 400 });
     return NextResponse.json({ customer: await saveCustomer(input) }, { status: 201 });

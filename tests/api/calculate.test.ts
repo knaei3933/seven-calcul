@@ -1,5 +1,29 @@
-import { describe, expect, it } from "vitest";
-import { POST } from "@/app/api/calculate/route";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+
+const databaseDirectory = await mkdtemp(join(tmpdir(), "calculate-api-test-"));
+process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
+process.env.ADMIN_EMAIL = "admin@calculate.test";
+process.env.ADMIN_PASSWORD = "admin-calculate-password";
+process.env.ADMIN_NAME = "Calculate Admin";
+const { POST } = await import("@/app/api/calculate/route");
+const { createUser, createSession } = await import("@/lib/auth-store");
+const user = await createUser({ email: "user@calculate.test", name: "Calculate User", password: "user-calculate-password", role: "user" });
+const session = await createSession(user.id);
+
+function authenticatedRequest(url: string, body: string): Request {
+  return new Request(url, {
+    method: "POST",
+    body,
+    headers: { "content-type": "application/json", cookie: `pouch_session=${session.token}` },
+  });
+}
+
+afterAll(async () => {
+  await rm(databaseDirectory, { recursive: true, force: true });
+});
 
 const validInput = {
   spec: {
@@ -21,19 +45,13 @@ const validInput = {
 
 describe("calculate API", () => {
   it("rejects an incomplete request before calculation", async () => {
-    const response = await POST(new Request("http://localhost/api/calculate", {
-      method: "POST",
-      body: JSON.stringify({ quantity: "10000", printingMethod: "digital" }),
-    }));
+    const response = await POST(authenticatedRequest("http://localhost/api/calculate", JSON.stringify({ quantity: "10000", printingMethod: "digital" })));
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "invalid_request" });
   });
 
   it("rejects an invalid parallel SKU count", async () => {
-    const response = await POST(new Request("http://localhost/api/calculate", {
-      method: "POST",
-      body: JSON.stringify({ ...validInput, spec: { ...validInput.spec, skuCount: 0 } }),
-    }));
+    const response = await POST(authenticatedRequest("http://localhost/api/calculate", JSON.stringify({ ...validInput, spec: { ...validInput.spec, skuCount: 0 } })));
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "invalid_sku_count" });
   });
@@ -56,10 +74,7 @@ describe("calculate API recommendations", () => {
   };
 
   it("returns a recommended near-quantity candidate and preserves the original basis", async () => {
-    const response = await POST(new Request("http://localhost/api/calculate", {
-      method: "POST",
-      body: JSON.stringify({ ...recommendationInput, recommendationMode: true }),
-    }));
+    const response = await POST(authenticatedRequest("http://localhost/api/calculate", JSON.stringify({ ...recommendationInput, recommendationMode: true })));
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.candidates.length).toBeGreaterThan(0);
@@ -74,9 +89,7 @@ describe("calculate API recommendations", () => {
   });
 
   it("serializes server-calculated all-in economics for every displayed candidate", async () => {
-    const response = await POST(new Request("http://localhost/api/calculate", {
-      method: "POST",
-      body: JSON.stringify({
+    const response = await POST(authenticatedRequest("http://localhost/api/calculate", JSON.stringify({
         spec: {
           sizeKey: "tube-50x90",
           customWidthMm: "50",
@@ -95,8 +108,7 @@ describe("calculate API recommendations", () => {
         quantity: "50000",
         printingMethod: "digital",
         recommendationMode: true,
-      }),
-    }));
+      })));
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.candidates).toHaveLength(6);
@@ -113,22 +125,16 @@ describe("calculate API recommendations", () => {
   });
 
   it("switches the active result to a selected candidate while returning the original", async () => {
-    const first = await POST(new Request("http://localhost/api/calculate", {
-      method: "POST",
-      body: JSON.stringify({ ...recommendationInput, recommendationMode: true }),
-    }));
+    const first = await POST(authenticatedRequest("http://localhost/api/calculate", JSON.stringify({ ...recommendationInput, recommendationMode: true })));
     const list = (await first.json()).candidates as Array<{
       id: string; adjustedQuantity: string; filmTotalYen: string;
       capacityQuantity: string; shortagePieces: string;
     }>;
-    const response = await POST(new Request("http://localhost/api/calculate", {
-      method: "POST",
-      body: JSON.stringify({
+    const response = await POST(authenticatedRequest("http://localhost/api/calculate", JSON.stringify({
         ...recommendationInput,
         recommendationMode: true,
         selectedCandidateId: list[0].id,
-      }),
-    }));
+      })));
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.result.selectedCandidateId).toBe(list[0].id);
@@ -139,14 +145,11 @@ describe("calculate API recommendations", () => {
 	  });
 
   it("rejects an unknown selected candidate", async () => {
-    const response = await POST(new Request("http://localhost/api/calculate", {
-      method: "POST",
-      body: JSON.stringify({
+    const response = await POST(authenticatedRequest("http://localhost/api/calculate", JSON.stringify({
         ...recommendationInput,
         recommendationMode: true,
         selectedCandidateId: "unknown-candidate",
-      }),
-    }));
+      })));
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "candidate_not_found" });
   });

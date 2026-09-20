@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { quotationStatuses, type QuotationStatus } from "./quotation-shared";
 import { QUOTATION_RESTORE_KEY } from "./quotation-shared";
 import { D } from "./decimal";
+import { ensureAdministratorSeed, type UserRole } from "./auth-store";
 import type { QuotationRecord, QuotationRecordInput, ChecklistAudience } from "./quotation-shared";
 import {
   buildChecklistItems,
@@ -47,18 +48,33 @@ interface DatabaseRow {
   payload_json: string;
   created_at: string;
   updated_at: string;
+  created_by: number | null;
+  updated_by: number | null;
+  creator_name: string | null;
+  creator_email: string | null;
+  updater_name: string | null;
+  updater_email: string | null;
 }
 
 const databasePath = process.env.POUCH_QUOTATION_DB
   ?? (process.env.VERCEL === "1" ? "/tmp/pouch-quotations.db" : resolve(process.cwd(), ".data/quotations.db"));
 let database: DatabaseSync | null = null;
 
+export class QuotationOwnershipConflictError extends Error {
+  constructor() {
+    super("quotation_ownership_conflict");
+    this.name = "QuotationOwnershipConflictError";
+  }
+}
+
 async function getDatabase(): Promise<DatabaseSync> {
   if (database) return database;
+  const administratorId = await ensureAdministratorSeed();
   await mkdir(dirname(databasePath), { recursive: true });
   database = new DatabaseSync(databasePath);
   database.exec(`
     PRAGMA journal_mode = WAL;
+    PRAGMA foreign_keys = ON;
     CREATE TABLE IF NOT EXISTS quotations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       quotation_number TEXT NOT NULL UNIQUE,
@@ -87,7 +103,9 @@ async function getDatabase(): Promise<DatabaseSync> {
       result_hash TEXT NOT NULL,
       payload_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      created_by INTEGER NOT NULL REFERENCES users(id),
+      updated_by INTEGER REFERENCES users(id)
     );
     CREATE INDEX IF NOT EXISTS idx_quotations_updated_at ON quotations(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_quotations_customer ON quotations(customer_name);
@@ -105,6 +123,7 @@ async function getDatabase(): Promise<DatabaseSync> {
       FOREIGN KEY (quotation_id) REFERENCES quotations(id)
     );
   `);
+  await migrateOwnershipColumns(database, administratorId);
   // 社名表記を「金井貿易株式会社」へ統一する（旧default・既存DB値を含む）。
   database.exec(`
     UPDATE quotation_checklists
@@ -124,6 +143,18 @@ async function getDatabase(): Promise<DatabaseSync> {
        OR items_json LIKE '%カネイ貿易%'
   `);
   return database;
+}
+
+async function migrateOwnershipColumns(db: DatabaseSync, administratorId: number): Promise<void> {
+  const columns = db.prepare("PRAGMA table_info(quotations)").all() as unknown as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+  if (!columnNames.has("created_by")) {
+    db.exec("ALTER TABLE quotations ADD COLUMN created_by INTEGER REFERENCES users(id)");
+  }
+  if (!columnNames.has("updated_by")) {
+    db.exec("ALTER TABLE quotations ADD COLUMN updated_by INTEGER REFERENCES users(id)");
+  }
+  db.prepare("UPDATE quotations SET created_by = ? WHERE created_by IS NULL").run(administratorId);
 }
 
 function isNonNegativeNumber(value: unknown): value is string {
@@ -176,6 +207,7 @@ export function validateQuotationInput(value: unknown): QuotationRecordInput | n
 }
 
 function mapRow(row: DatabaseRow): QuotationRecord {
+  const updatedById = row.updated_by == null ? null : Number(row.updated_by);
   return {
     id: Number(row.id),
     quotationNumber: row.quotation_number,
@@ -205,10 +237,24 @@ function mapRow(row: DatabaseRow): QuotationRecord {
     payload: JSON.parse(row.payload_json) as Record<string, unknown>,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    createdBy: {
+      id: Number(row.created_by),
+      email: row.creator_email ?? "",
+      name: row.creator_name ?? "",
+    },
+    updatedBy: updatedById == null ? null : {
+      id: updatedById,
+      email: row.updater_email ?? "",
+      name: row.updater_name ?? "",
+    },
   };
 }
 
-export async function saveQuotation(value: QuotationRecordInput): Promise<QuotationRecord> {
+export async function saveQuotation(
+  value: QuotationRecordInput,
+  actorId: number,
+  actorRole: UserRole = "user",
+): Promise<QuotationRecord> {
   const db = await getDatabase();
   const now = new Date().toISOString();
   const payloadJson = JSON.stringify(value.payload);
@@ -217,8 +263,8 @@ export async function saveQuotation(value: QuotationRecordInput): Promise<Quotat
       quotation_number,status,issue_date,valid_until,customer_name,customer_contact,product_name,size_summary,
       quantity,filling_cost_per_piece,film_cost_per_piece,film_meter_price,film_order_length_m,target_margin,
       tax_rate_percent,price_per_piece,subtotal,tax,grand_total,delivery_date,payment_terms,notes,
-      calculation_version,result_hash,payload_json,created_at,updated_at
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      calculation_version,result_hash,payload_json,created_at,updated_at,created_by,updated_by
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(quotation_number) DO UPDATE SET
       status=excluded.status, issue_date=excluded.issue_date, valid_until=excluded.valid_until,
       customer_name=excluded.customer_name, customer_contact=excluded.customer_contact,
@@ -229,42 +275,66 @@ export async function saveQuotation(value: QuotationRecordInput): Promise<Quotat
       price_per_piece=excluded.price_per_piece, subtotal=excluded.subtotal, tax=excluded.tax,
       grand_total=excluded.grand_total, delivery_date=excluded.delivery_date, payment_terms=excluded.payment_terms,
       notes=excluded.notes, calculation_version=excluded.calculation_version, result_hash=excluded.result_hash,
-      payload_json=excluded.payload_json, updated_at=excluded.updated_at
+      payload_json=excluded.payload_json, updated_at=excluded.updated_at, updated_by=excluded.updated_by
+      WHERE quotations.created_by = excluded.updated_by OR ? = 'admin'
   `).run(
     value.quotationNumber, value.status, value.issueDate, value.validUntil, value.customerName, value.customerContact,
     value.productName, value.sizeSummary, value.quantity, value.fillingCostPerPiece, value.filmCostPerPiece,
     value.filmMeterPrice, value.filmOrderLengthM, value.targetMargin, value.taxRatePercent, value.pricePerPiece,
     value.subtotal, value.tax, value.grandTotal, value.deliveryDate, value.paymentTerms, value.notes,
-    value.calculationVersion, value.resultHash, payloadJson, now, now,
+    value.calculationVersion, value.resultHash, payloadJson, now, now, actorId, actorId, actorRole,
   );
-  const saved = db.prepare("SELECT * FROM quotations WHERE quotation_number = ?").get(value.quotationNumber) as DatabaseRow | undefined;
+  const saved = await selectRecordByNumber(db, value.quotationNumber);
   if (!saved) throw new Error("quotation_save_failed");
-  return mapRow(saved);
+  const record = mapRow(saved);
+  if (actorRole !== "admin" && record.createdBy.id !== actorId) {
+    throw new QuotationOwnershipConflictError();
+  }
+  return record;
 }
 
-export async function listQuotations({ q = "", status = "all", limit = 100 }: { q?: string; status?: string; limit?: number } = {}): Promise<QuotationRecord[]> {
+export async function getDatabaseForTest(): Promise<DatabaseSync> {
+  return getDatabase();
+}
+
+export async function listQuotations({
+  q = "",
+  status = "all",
+  limit = 100,
+  creatorId,
+}: { q?: string; status?: string; limit?: number; creatorId?: number } = {}): Promise<QuotationRecord[]> {
   const db = await getDatabase();
   const safeLimit = Math.min(Math.max(Number.isFinite(limit) ? Number(limit) : 100, 1), 500);
   const search = `%${q.trim()}%`;
   const statusFilter = quotationStatuses.find((item) => item === status);
+  const ownershipFilter = Number.isInteger(creatorId) && creatorId! > 0 ? " AND quotations.created_by = ?" : "";
+  const ownershipArguments: Array<string | number | null> = ownershipFilter ? [creatorId ?? 0] : [];
   const rows = statusFilter
     ? db.prepare(`
-        SELECT * FROM quotations
-        WHERE status = ? AND (quotation_number LIKE ? OR customer_name LIKE ? OR customer_contact LIKE ? OR product_name LIKE ?)
+        SELECT quotations.*, creator.name AS creator_name, creator.email AS creator_email,
+               updater.name AS updater_name, updater.email AS updater_email
+        FROM quotations
+        JOIN users AS creator ON creator.id = quotations.created_by
+        LEFT JOIN users AS updater ON updater.id = quotations.updated_by
+        WHERE status = ?${ownershipFilter} AND (quotation_number LIKE ? OR customer_name LIKE ? OR customer_contact LIKE ? OR product_name LIKE ?)
         ORDER BY updated_at DESC, id DESC LIMIT ?
-      `).all(statusFilter, search, search, search, search, safeLimit) as unknown as DatabaseRow[]
+      `).all(statusFilter, ...ownershipArguments, search, search, search, search, safeLimit) as unknown as DatabaseRow[]
     : db.prepare(`
-        SELECT * FROM quotations
-        WHERE quotation_number LIKE ? OR customer_name LIKE ? OR customer_contact LIKE ? OR product_name LIKE ?
+        SELECT quotations.*, creator.name AS creator_name, creator.email AS creator_email,
+               updater.name AS updater_name, updater.email AS updater_email
+        FROM quotations
+        JOIN users AS creator ON creator.id = quotations.created_by
+        LEFT JOIN users AS updater ON updater.id = quotations.updated_by
+        WHERE (quotation_number LIKE ? OR customer_name LIKE ? OR customer_contact LIKE ? OR product_name LIKE ?)${ownershipFilter}
         ORDER BY updated_at DESC, id DESC LIMIT ?
-      `).all(search, search, search, search, safeLimit) as unknown as DatabaseRow[];
+      `).all(search, search, search, search, ...ownershipArguments, safeLimit) as unknown as DatabaseRow[];
   return rows.map(mapRow);
 }
 
 export async function getQuotation(id: number): Promise<QuotationRecord | null> {
   const db = await getDatabase();
   if (!Number.isInteger(id) || id <= 0) return null;
-  const row = db.prepare("SELECT * FROM quotations WHERE id = ?").get(id) as DatabaseRow | undefined;
+  const row = await selectRecordById(db, id);
   return row ? mapRow(row) : null;
 }
 
@@ -272,16 +342,40 @@ export async function getQuotationByNumber(quotationNumber: string): Promise<Quo
   const db = await getDatabase();
   const code = quotationNumber.trim();
   if (!code) return null;
-  const row = db.prepare("SELECT * FROM quotations WHERE quotation_number = ?").get(code) as DatabaseRow | undefined;
+  const row = await selectRecordByNumber(db, code);
   return row ? mapRow(row) : null;
 }
 
-export async function updateQuotationStatus(id: number, status: QuotationStatus): Promise<QuotationRecord | null> {
+export async function updateQuotationStatus(id: number, status: QuotationStatus, actorId: number): Promise<QuotationRecord | null> {
   const db = await getDatabase();
   if (!Number.isInteger(id) || id <= 0 || !quotationStatuses.includes(status)) return null;
-  const result = db.prepare("UPDATE quotations SET status = ?, updated_at = ? WHERE id = ?").run(status, new Date().toISOString(), id);
+  const result = db.prepare("UPDATE quotations SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?")
+    .run(status, actorId, new Date().toISOString(), id);
   if (Number(result.changes) === 0) return null;
   return getQuotation(id);
+}
+
+async function selectRecordById(db: DatabaseSync, id: number): Promise<DatabaseRow | undefined> {
+  return db.prepare(`
+    SELECT quotations.*, creator.name AS creator_name, creator.email AS creator_email,
+           updater.name AS updater_name, updater.email AS updater_email
+    FROM quotations
+    JOIN users AS creator ON creator.id = quotations.created_by
+    LEFT JOIN users AS updater ON updater.id = quotations.updated_by
+    WHERE quotations.id = ?
+  `).get(id) as unknown as DatabaseRow | undefined;
+}
+
+async function selectRecordByNumber(db: DatabaseSync, quotationNumber: string): Promise<DatabaseRow | undefined> {
+  if (!quotationNumber.trim()) return undefined;
+  return db.prepare(`
+    SELECT quotations.*, creator.name AS creator_name, creator.email AS creator_email,
+           updater.name AS updater_name, updater.email AS updater_email
+    FROM quotations
+    JOIN users AS creator ON creator.id = quotations.created_by
+    LEFT JOIN users AS updater ON updater.id = quotations.updated_by
+    WHERE quotations.quotation_number = ?
+  `).get(quotationNumber) as unknown as DatabaseRow | undefined;
 }
 
 export async function deleteQuotation(id: number): Promise<boolean> {

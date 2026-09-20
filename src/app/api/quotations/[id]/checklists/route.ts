@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getChecklistsForQuotation, updateChecklistItem } from "@/lib/quotation-store";
 import { checklistAudiences, type ChecklistAudience } from "@/lib/quotation-shared";
+import { getSessionUser } from "@/lib/api-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,8 +12,10 @@ function parseAudience(value: unknown): ChecklistAudience | null {
   return checklistAudiences.find((audience) => audience === value) ?? null;
 }
 
-export async function GET(_request: Request, context: Context): Promise<NextResponse> {
+export async function GET(request: Request, context: Context): Promise<NextResponse> {
   const { id } = await context.params;
+  const user = await getSessionUser(request);
+  if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
   const quotationId = Number(id);
   if (!Number.isInteger(quotationId) || quotationId <= 0) {
     return NextResponse.json({ error: "invalid_quotation_id" }, { status: 400 });
@@ -26,6 +29,8 @@ export async function GET(_request: Request, context: Context): Promise<NextResp
 
 export async function PATCH(request: Request, context: Context): Promise<NextResponse> {
   const { id } = await context.params;
+  const user = await getSessionUser(request);
+  if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
   const quotationId = Number(id);
   try {
     const body = await request.json() as {
@@ -41,7 +46,7 @@ export async function PATCH(request: Request, context: Context): Promise<NextRes
     if (typeof body.itemId !== "string" || !body.itemId.trim() || typeof body.accepted !== "boolean") {
       return NextResponse.json({ error: "invalid_checklist_update" }, { status: 400 });
     }
-    const checkedBy = typeof body.checkedBy === "string" ? body.checkedBy.trim().slice(0, 200) : "";
+    const checkedBy = user.name.slice(0, 200);
     const record = await updateChecklistItem(
       quotationId,
       audience,

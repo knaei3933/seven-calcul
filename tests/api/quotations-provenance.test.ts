@@ -12,7 +12,20 @@ import type { PouchSpec } from "@/lib/types";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-provenance-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
+process.env.ADMIN_EMAIL = "admin@provenance.test";
+process.env.ADMIN_PASSWORD = "admin-provenance-password";
+process.env.ADMIN_NAME = "Provenance Admin";
 const { POST } = await import("@/app/api/quotations/route");
+const { createSession } = await import("@/lib/auth-store");
+const { createUser } = await import("@/lib/auth-store");
+
+const author = await createUser({
+  email: "author@provenance.test",
+  name: "Provenance Author",
+  password: "author-provenance-password",
+  role: "user",
+});
+const authorSession = await createSession(author.id);
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
@@ -198,6 +211,7 @@ async function post(body: unknown): Promise<Response> {
   return POST(new Request("http://localhost/api/quotations", {
     method: "POST",
     body: JSON.stringify(body),
+    headers: { cookie: `pouch_session=${authorSession.token}` },
   }));
 }
 
@@ -207,6 +221,10 @@ describe("quotation calculation provenance", () => {
     expect(response.status).toBe(201);
     const payload = await response.json();
     expect(payload.record.resultHash).toBe(selectedResult.audit.resultJsonSha256);
+    expect(payload.record.createdBy.email).toBe(author.email);
+    expect(payload.record.updatedBy.email).toBe(author.email);
+    expect(JSON.stringify(payload)).not.toContain("password_hash");
+    expect(JSON.stringify(payload)).not.toContain(authorSession.token);
   });
 
   it("accepts the original no-selection request after clearing a selected candidate", async () => {

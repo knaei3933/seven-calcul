@@ -38,6 +38,14 @@ export interface QuotationRecord extends QuotationRecordInput {
   id: number;
   createdAt: string;
   updatedAt: string;
+  createdBy: UserSummary;
+  updatedBy: UserSummary | null;
+}
+
+export interface UserSummary {
+  id: number;
+  email: string;
+  name: string;
 }
 
 export type { QuotationPayload } from "./quotation-history-types";
