@@ -146,7 +146,7 @@ function activeAdminCount(db: DatabaseSync, excludeUserId?: number): number {
 }
 
 export function validatePassword(password: unknown): password is string {
-  return typeof password === "string" && password.length >= 12 && password.length <= 200;
+  return typeof password === "string" && password.length >= 10 && password.length <= 200;
 }
 
 export function validateUserName(name: unknown): name is string {

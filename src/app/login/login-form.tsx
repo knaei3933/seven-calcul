@@ -57,7 +57,7 @@ export default function LoginForm({ next }: { next: string }) {
           name="password"
           autoComplete="current-password"
           required
-          minLength={12}
+          minLength={10}
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           data-testid="login-password"

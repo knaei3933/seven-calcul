@@ -79,7 +79,7 @@ export default function AdminUsersClient() {
       setError(payload.error === "last_active_admin"
         ? "少なくとも1人の有効な管理者が必要です。"
         : payload.error === "invalid_password"
-          ? "パスワードは12文字以上にしてください。"
+          ? "パスワードは10文字以上にしてください。"
           : "ユーザーを更新できませんでした。");
       return;
     }
@@ -88,7 +88,7 @@ export default function AdminUsersClient() {
   };
 
   const resetPassword = async (user: PublicUser) => {
-    const password = window.prompt(`${user.name} の新しいパスワード（12文字以上）`);
+    const password = window.prompt(`${user.name} の新しいパスワード（10文字以上）`);
     if (!password) return;
     await patchUser(user, { password }, "パスワードを直ちに変更しました。");
   };
@@ -119,7 +119,7 @@ export default function AdminUsersClient() {
           </div>
           <div className="field">
             <label htmlFor="new-password">初期パスワード</label>
-            <input id="new-password" type="password" required minLength={12} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} data-testid="new-user-password" />
+            <input id="new-password" type="password" required minLength={10} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} data-testid="new-user-password" />
           </div>
           <button className="button" type="submit" disabled={saving}>作成</button>
         </form>
