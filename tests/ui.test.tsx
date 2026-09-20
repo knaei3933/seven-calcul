@@ -657,13 +657,13 @@ describe("quotation UI", () => {
 
     await user.click(disclosure);
     expect(screen.getByTestId("comparison-D")).toBeInTheDocument();
-    const shortageCard = screen.getByRole("button", { name: /D \/ デジタル.*700/ });
+    const shortageCard = screen.getByRole("button", { name: /D \/ デジタル.*不足のため参考/ });
     expect(shortageCard).toBeEnabled();
     await user.click(shortageCard);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
-    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("25,000 枚");
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("17,000 枚");
     await user.click(screen.getByTestId("candidate-recompare"));
-    await waitFor(() => expect(screen.getByRole("button", { name: /D \/ デジタル.*700/ })).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("button", { name: /D \/ デジタル.*不足のため参考/ })).toBeVisible());
     expect(screen.getByTestId("comparison-D")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "不足プラン選択中" })).toBeDisabled();
   });

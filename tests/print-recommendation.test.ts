@@ -112,6 +112,28 @@ describe("print recommendation engine", () => {
     expect(D(shortestFulfilling!.incrementalQuantity!).toNumber()).toBe(0);
   });
 
+  it("generates digital shortage alternatives only at structural order boundaries", () => {
+    const spec: PouchSpec = {
+      ...baseSpec,
+      sizeKey: "round-60x80",
+      colorCount: 4,
+      skuCount: 1,
+      skuQuantities: ["50000"],
+      skuColorCounts: ["4"],
+    };
+    const candidates = buildPrintCandidates(context(spec, "50000"));
+    const digital = candidates.filter((candidate) => candidate.route === "D");
+
+    expect(digital.map((candidate) => candidate.orderLengthM)).toEqual(["1200", "1000"]);
+    expect(digital.some((candidate) => candidate.orderLengthM === "1100")).toBe(false);
+    expect(digital.some((candidate) => candidate.orderLengthM === "1300")).toBe(false);
+    const basis = digital.find((candidate) => candidate.isFulfilling);
+    const boundaryShortage = digital.find((candidate) => !candidate.isFulfilling);
+    expect(basis?.orderLengthM).toBe("1200");
+    expect(boundaryShortage?.orderLengthM).toBe("1000");
+    expect(boundaryShortage?.priceBreak).toBe(true);
+  });
+
   it("recommends exact customer quantity candidates first", () => {
     const candidates = buildPrintCandidates(context());
     const recommended = candidates.find((candidate) => candidate.recommended)!;

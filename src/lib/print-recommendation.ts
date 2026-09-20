@@ -468,10 +468,6 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
   const targets = new Set<string>();
   const minimumCandidateTotal = maxDecimal(minimumTotal, sum(minimums));
   if (naturalTotal.gte(minimumCandidateTotal)) targets.add(naturalTotal.toFixed(0));
-  for (const offset of [0, 100, 200]) {
-    const target = totalFloor.minus(offset);
-    if (target.gte(minimumCandidateTotal)) targets.add(target.toFixed(0));
-  }
   for (const boundary of ["500", "1000", "1500"]) {
     const target = D(boundary);
     if (target.gte(minimumCandidateTotal)) targets.add(boundary);
@@ -986,27 +982,52 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
 
   // Show at most one representative per D/K/Y route. If the recommended
   // candidate belongs to a route, it replaces that route's alternative so the
-  // three-card limit can cover all production routes instead of duplicating a
-  // route (for example two D rows plus Y and K).
-	  const routeRepresentatives = (["D", "K", "Y"] as const)
-	    .map((route) => {
-	      const rankedRoute = ranked.filter((candidate) => candidate.route === route);
-		      const fulfillingRoute = rankedRoute.filter((candidate) => candidate.isFulfilling);
-		      const practicalRoute = fulfillingRoute.filter((candidate) => candidate.isPractical);
-		      const paretoRoute = pareto.filter((candidate) => candidate.route === route);
-		      const paretoFulfillingRoute = paretoRoute.filter((candidate) => candidate.isFulfilling);
-		      return practicalRoute[0] ?? fulfillingRoute[0] ?? paretoFulfillingRoute[0] ?? paretoRoute[0] ?? rankedRoute[0];
-		    })
+  // card limit can cover all production routes instead of duplicating a route.
+  const routeRepresentatives = (["D", "K", "Y"] as const)
+    .map((route) => {
+      const rankedRoute = ranked.filter((candidate) => candidate.route === route);
+      const fulfillingRoute = rankedRoute.filter((candidate) => candidate.isFulfilling);
+      const practicalRoute = fulfillingRoute.filter((candidate) => candidate.isPractical);
+      const paretoRoute = pareto.filter((candidate) => candidate.route === route);
+      const paretoFulfillingRoute = paretoRoute.filter((candidate) => candidate.isFulfilling);
+      return practicalRoute[0] ?? fulfillingRoute[0] ?? paretoFulfillingRoute[0] ?? paretoRoute[0] ?? rankedRoute[0];
+    })
     .filter((candidate): candidate is PrintCandidate => Boolean(candidate));
-  const paretoOrder = new Map(pareto.map((candidate, index) => [candidate.id, index]));
-
   const routeCandidatesForDisplay = [
     ...(recommendedCandidate ? [recommendedCandidate] : []),
     ...routeRepresentatives.filter((candidate) => (
       !recommendedCandidate || candidate.route !== recommendedCandidate.route
     )),
   ];
-  const uniqueRouteCandidates = routeCandidatesForDisplay.filter((candidate, index, items) => (
+
+  // Arbitrary 100m reductions are not decision alternatives. Show a digital
+  // price-boundary order only when its total film cost is actually lower than
+  // the route representative (for example 1,500m over 1,200m at a lower /m).
+  const meaningfulBoundaryCandidates = routeCandidatesForDisplay.map((representative) => {
+    if (representative.route !== "D") return [representative];
+    const lowerPriceBreak = candidates
+      .filter((candidate) => (
+        candidate.route === "D"
+        && candidate.isFulfilling
+        && candidate.isPractical
+        && candidate.priceBreak
+        && candidate.id !== representative.id
+      ))
+      .sort((left, right) => {
+        const leftTotal = D(left.filmTotalYen);
+        const rightTotal = D(right.filmTotalYen);
+        if (!leftTotal.eq(rightTotal)) return leftTotal.lt(rightTotal) ? -1 : 1;
+        return left.id.localeCompare(right.id);
+      })[0];
+    return lowerPriceBreak && D(lowerPriceBreak.filmTotalYen).lt(D(representative.filmTotalYen))
+      ? [representative, lowerPriceBreak]
+      : [representative];
+  }).flat();
+  const paretoOrder = new Map(pareto.map((candidate, index) => [candidate.id, index]));
+  const routeCandidatesForDisplayWithBoundaries = meaningfulBoundaryCandidates.filter((candidate, index, items) => (
+    items.findIndex((item) => item.id === candidate.id) === index
+  ));
+  const uniqueRouteCandidates = routeCandidatesForDisplayWithBoundaries.filter((candidate, index, items) => (
     items.findIndex((item) => item.id === candidate.id) === index
   ));
   const rankedAlternatives = uniqueRouteCandidates
