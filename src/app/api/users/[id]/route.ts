@@ -35,6 +35,9 @@ export async function PATCH(request: Request, context: Context): Promise<NextRes
     }
     if (error.message === "user_not_found") return NextResponse.json({ error }, { status: 404 });
     if (error.message === "last_active_admin") return NextResponse.json({ error }, { status: 400 });
+    if (error.message === "user_management_unavailable") {
+      return NextResponse.json({ error }, { status: 501 });
+    }
     return NextResponse.json({ error: error.message || "invalid_user" }, { status: 400 });
   }
 }

@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -13,6 +13,7 @@ const scrypt = promisify(scryptCallback) as (
 
 export const SESSION_COOKIE_NAME = "pouch_session";
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
+const ENV_AUTH_MODE = process.env.VERCEL === "1" || process.env.AUTH_MODE === "env";
 const SCRYPT_PARAMETERS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 } as const;
 const PASSWORD_KEY_LENGTH = 64;
 
@@ -40,6 +41,10 @@ export interface UserInput {
   isActive?: boolean;
 }
 
+interface EnvAdminUser extends PublicUser {
+  password: string;
+}
+
 interface UserRow {
   id: number;
   email: string;
@@ -64,6 +69,83 @@ let database: DatabaseSync | null = null;
 
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+function envAdminUsers(): EnvAdminUser[] {
+  const now = new Date(0).toISOString();
+  const users: EnvAdminUser[] = [];
+  const primaryEmail = normalizeEmail(process.env.ADMIN_EMAIL ?? "admin@example.com");
+  users.push({
+    id: 1,
+    email: primaryEmail,
+    name: process.env.ADMIN_NAME?.trim() || "System Administrator",
+    role: "admin",
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+    password: process.env.ADMIN_PASSWORD ?? "pouch-admin-change-me-2026",
+  });
+  if (process.env.SECOND_ADMIN_EMAIL) {
+    users.push({
+      id: 2,
+      email: normalizeEmail(process.env.SECOND_ADMIN_EMAIL),
+      name: process.env.SECOND_ADMIN_NAME?.trim() || "Administrator",
+      role: "admin",
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+      password: process.env.SECOND_ADMIN_PASSWORD ?? "",
+    });
+  }
+  return users.filter((user) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user.email));
+}
+
+function authSecret(): string {
+  const secret = process.env.AUTH_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === "production" && ENV_AUTH_MODE) {
+    throw new Error("AUTH_SECRET_required_in_production");
+  }
+  return "pouch-development-auth-secret";
+}
+
+function signedSessionToken(user: PublicUser, expiresAt: Date): string {
+  const payload = {
+    sub: user.id,
+    email: user.email,
+    role: user.role,
+    exp: Math.floor(expiresAt.getTime() / 1000),
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = createHmac("sha256", authSecret()).update(encodedPayload).digest("base64url");
+  return `${encodedPayload}.${signature}`;
+}
+
+function verifySignedSessionToken(token: string): PublicUser | null {
+  const [encodedPayload, signature] = token.split(".");
+  if (!encodedPayload || !signature) return null;
+  const expectedSignature = createHmac("sha256", authSecret()).update(encodedPayload).digest();
+  const actualSignature = Buffer.from(signature, "base64url");
+  if (actualSignature.length !== expectedSignature.length || !timingSafeEqual(actualSignature, expectedSignature)) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as {
+      sub?: unknown; email?: unknown; role?: unknown; exp?: unknown;
+    };
+    if (
+      typeof payload.sub !== "number" || typeof payload.email !== "string"
+      || typeof payload.exp !== "number" || payload.exp * 1000 <= Date.now()
+    ) return null;
+    const user = envAdminUsers().find((candidate) => (
+      candidate.id === payload.sub
+      && candidate.email === payload.email
+      && candidate.isActive
+    ));
+    return user ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -158,6 +240,7 @@ export function validateRole(role: unknown): role is UserRole {
 }
 
 export async function createUser(input: UserInput): Promise<PublicUser> {
+  if (ENV_AUTH_MODE) throw new Error("user_management_unavailable");
   if (!validatePassword(input.password) || !validateUserName(input.name) || !validateRole(input.role)) {
     throw new Error("invalid_user");
   }
@@ -180,6 +263,10 @@ export async function createUser(input: UserInput): Promise<PublicUser> {
 }
 
 export async function getUserByEmail(email: string): Promise<PublicUser | null> {
+  if (ENV_AUTH_MODE) {
+    const normalized = normalizeEmail(email);
+    return envAdminUsers().find((user) => user.email === normalized) ?? null;
+  }
   const db = await getDatabase();
   const row = db.prepare("SELECT * FROM users WHERE email = ?").get(normalizeEmail(email)) as UserRow | undefined;
   return row ? mapUser(row) : null;
@@ -187,12 +274,14 @@ export async function getUserByEmail(email: string): Promise<PublicUser | null> 
 
 export async function getUserById(id: number): Promise<PublicUser | null> {
   if (!Number.isInteger(id) || id <= 0) return null;
+  if (ENV_AUTH_MODE) return envAdminUsers().find((user) => user.id === id) ?? null;
   const db = await getDatabase();
   const row = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
   return row ? mapUser(row) : null;
 }
 
 export async function listUsers(): Promise<PublicUser[]> {
+  if (ENV_AUTH_MODE) return envAdminUsers();
   const db = await getDatabase();
   const rows = db.prepare("SELECT * FROM users ORDER BY created_at, id").all() as unknown as UserRow[];
   return rows.map(mapUser);
@@ -202,6 +291,7 @@ export async function updateUser(
   id: number,
   patch: { name?: string; password?: string; role?: UserRole; isActive?: boolean },
 ): Promise<PublicUser> {
+  if (ENV_AUTH_MODE) throw new Error("user_management_unavailable");
   const db = await getDatabase();
   const row = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
   if (!row) throw new Error("user_not_found");
@@ -249,6 +339,15 @@ export async function updateUser(
 }
 
 export async function authenticate(email: string, password: string): Promise<PublicUser | null> {
+  if (ENV_AUTH_MODE) {
+    const normalized = normalizeEmail(email);
+    const user = envAdminUsers().find((candidate) => candidate.email === normalized && candidate.isActive);
+    if (!user) return null;
+    const secret = authSecret();
+    const expected = createHmac("sha256", secret).update(`${normalized}:${password}`).digest();
+    const actual = createHmac("sha256", secret).update(`${user.email}:${user.password}`).digest();
+    return expected.length === actual.length && timingSafeEqual(expected, actual) ? user : null;
+  }
   const db = await getDatabase();
   const row = db.prepare("SELECT * FROM users WHERE email = ?").get(normalizeEmail(email)) as UserRow | undefined;
   if (!row || Number(row.is_active) !== 1) return null;
@@ -258,6 +357,12 @@ export async function authenticate(email: string, password: string): Promise<Pub
 }
 
 export async function createSession(userId: number): Promise<{ token: string; expiresAt: Date }> {
+  if (ENV_AUTH_MODE) {
+    const user = envAdminUsers().find((candidate) => candidate.id === userId && candidate.isActive);
+    if (!user) throw new Error("user_not_found");
+    const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000);
+    return { token: signedSessionToken(user, expiresAt), expiresAt };
+  }
   const db = await getDatabase();
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000);
@@ -270,6 +375,10 @@ export async function createSession(userId: number): Promise<{ token: string; ex
 
 export async function getSessionUserFromToken(token: string | undefined | null): Promise<AuthenticatedUser | null> {
   if (!token) return null;
+  if (ENV_AUTH_MODE) {
+    const user = verifySignedSessionToken(token);
+    return user ? { ...user, sessionId: 0 } : null;
+  }
   const db = await getDatabase();
   const digest = createHash("sha256").update(token, "utf8").digest("hex");
   const row = db.prepare(`
@@ -287,7 +396,7 @@ export async function getSessionUserFromToken(token: string | undefined | null):
 }
 
 export async function deleteSession(token: string | undefined | null): Promise<void> {
-  if (!token) return;
+  if (!token || ENV_AUTH_MODE) return;
   const db = await getDatabase();
   const digest = createHash("sha256").update(token, "utf8").digest("hex");
   db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(digest);
@@ -314,21 +423,19 @@ export async function readSessionCookie(request: Request): Promise<string | null
 async function seedAdministrator(): Promise<void> {
   const db = database;
   if (!db) return;
-  const email = normalizeEmail(process.env.ADMIN_EMAIL ?? "admin@example.com");
-  const password = process.env.ADMIN_PASSWORD ?? "pouch-admin-change-me-2026";
-  const name = process.env.ADMIN_NAME?.trim() || "System Administrator";
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("invalid_admin_email");
-  const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email) as { id: number } | undefined;
-  if (existing) return;
-  if (process.env.NODE_ENV === "production" && process.env.ADMIN_PASSWORD === undefined) {
-    throw new Error("ADMIN_PASSWORD_required_in_production");
+  for (const user of envAdminUsers()) {
+    const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(user.email) as { id: number } | undefined;
+    if (existing) continue;
+    if (process.env.NODE_ENV === "production" && !process.env.ADMIN_PASSWORD) {
+      throw new Error("ADMIN_PASSWORD_required_in_production");
+    }
+    const now = new Date().toISOString();
+    const passwordHash = await hashPassword(user.password);
+    db.prepare(`
+      INSERT INTO users (email,name,role,is_active,password_hash,created_at,updated_at)
+      VALUES (?,?,?,1,?,?,?)
+    `).run(user.email, user.name, "admin", passwordHash, now, now);
   }
-  const now = new Date().toISOString();
-  const passwordHash = await hashPassword(password);
-  db.prepare(`
-    INSERT INTO users (email,name,role,is_active,password_hash,created_at,updated_at)
-    VALUES (?,?,?,1,?,?,?)
-  `).run(email, name, "admin", passwordHash, now, now);
 }
 
 export function isSecureRequest(request: Request): boolean {
@@ -360,6 +467,12 @@ export async function closeDatabaseForTest(): Promise<void> {
 }
 
 export async function ensureAdministratorSeed(): Promise<number> {
+  if (ENV_AUTH_MODE) {
+    // Quotation ownership still uses stable IDs 1/2. Open the local SQLite file
+    // once so both environment-defined owners exist as valid foreign keys.
+    await getDatabase();
+    return 1;
+  }
   const db = await getDatabase();
   const email = normalizeEmail(process.env.ADMIN_EMAIL ?? "admin@example.com");
   const row = db.prepare("SELECT id FROM users WHERE email = ?").get(email) as { id: number } | undefined;
