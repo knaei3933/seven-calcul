@@ -45,6 +45,11 @@ interface EnvAdminUser extends PublicUser {
   password: string;
 }
 
+function toPublicUser(user: EnvAdminUser): PublicUser {
+  const { password: _password, ...publicUser } = user;
+  return publicUser;
+}
+
 interface UserRow {
   id: number;
   email: string;
@@ -142,7 +147,7 @@ function verifySignedSessionToken(token: string): PublicUser | null {
       && candidate.email === payload.email
       && candidate.isActive
     ));
-    return user ?? null;
+    return user ? toPublicUser(user) : null;
   } catch {
     return null;
   }
@@ -265,7 +270,8 @@ export async function createUser(input: UserInput): Promise<PublicUser> {
 export async function getUserByEmail(email: string): Promise<PublicUser | null> {
   if (ENV_AUTH_MODE) {
     const normalized = normalizeEmail(email);
-    return envAdminUsers().find((user) => user.email === normalized) ?? null;
+    const user = envAdminUsers().find((candidate) => candidate.email === normalized);
+    return user ? toPublicUser(user) : null;
   }
   const db = await getDatabase();
   const row = db.prepare("SELECT * FROM users WHERE email = ?").get(normalizeEmail(email)) as UserRow | undefined;
@@ -274,14 +280,17 @@ export async function getUserByEmail(email: string): Promise<PublicUser | null> 
 
 export async function getUserById(id: number): Promise<PublicUser | null> {
   if (!Number.isInteger(id) || id <= 0) return null;
-  if (ENV_AUTH_MODE) return envAdminUsers().find((user) => user.id === id) ?? null;
+  if (ENV_AUTH_MODE) {
+    const user = envAdminUsers().find((candidate) => candidate.id === id);
+    return user ? toPublicUser(user) : null;
+  }
   const db = await getDatabase();
   const row = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
   return row ? mapUser(row) : null;
 }
 
 export async function listUsers(): Promise<PublicUser[]> {
-  if (ENV_AUTH_MODE) return envAdminUsers();
+  if (ENV_AUTH_MODE) return envAdminUsers().map(toPublicUser);
   const db = await getDatabase();
   const rows = db.prepare("SELECT * FROM users ORDER BY created_at, id").all() as unknown as UserRow[];
   return rows.map(mapUser);
@@ -346,7 +355,9 @@ export async function authenticate(email: string, password: string): Promise<Pub
     const secret = authSecret();
     const expected = createHmac("sha256", secret).update(`${normalized}:${password}`).digest();
     const actual = createHmac("sha256", secret).update(`${user.email}:${user.password}`).digest();
-    return expected.length === actual.length && timingSafeEqual(expected, actual) ? user : null;
+    return expected.length === actual.length && timingSafeEqual(expected, actual)
+      ? toPublicUser(user)
+      : null;
   }
   const db = await getDatabase();
   const row = db.prepare("SELECT * FROM users WHERE email = ?").get(normalizeEmail(email)) as UserRow | undefined;
@@ -361,7 +372,7 @@ export async function createSession(userId: number): Promise<{ token: string; ex
     const user = envAdminUsers().find((candidate) => candidate.id === userId && candidate.isActive);
     if (!user) throw new Error("user_not_found");
     const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000);
-    return { token: signedSessionToken(user, expiresAt), expiresAt };
+    return { token: signedSessionToken(toPublicUser(user), expiresAt), expiresAt };
   }
   const db = await getDatabase();
   const token = randomBytes(32).toString("base64url");
