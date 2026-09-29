@@ -117,6 +117,7 @@ export function buildQuotationDraft(
         prodMultiplier: context.prodMultiplier,
         colorCount: result.gravure?.copperPlateCount ?? context.colorCount,
         lossRate: context.lossRate,
+        gravureParameters: context.gravureParameters,
       });
       if (context.skus?.length) {
         snapshot.skuColorCounts = context.skus.map((sku) => String(sku.colorCount ?? 0));

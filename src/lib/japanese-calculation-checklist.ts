@@ -97,17 +97,21 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
   });
   add("film.required-length", film, "必要フィルム長", "全SKUの必要フィルム長合計です。", skus.length ? skus.map((sku) => `${sku.name}: ${number(sku.requiredLengthM)}m`).join(" + ") : `必要長 = ${number(snapshot.film.requiredLengthM)}m`, "SKU別必要長の合計", requiredLengthTerms.length ? `${requiredLengthTerms.join(" + ")} = ${number(snapshot.film.requiredLengthM)}` : `保存値 = ${number(snapshot.film.requiredLengthM)}`, number(snapshot.film.requiredLengthM), "m");
   if (!isGravure) {
-  const orderLengthTerms = skus.length ? skus.map((sku) => number(sku.orderLengthM)) : [];
-  add("film.order-length", film, "フィルム発注長", "発注単位・最小ロットを考慮した発注長です。", skus.length ? skus.map((sku) => `${sku.name}: ${number(sku.orderLengthM)}m`).join(" + ") : `必要長 = ${number(snapshot.film.requiredLengthM)}m`, "SKU別発注長の合計（100m単位切上げ）", orderLengthTerms.length ? `${orderLengthTerms.join(" + ")} = ${number(snapshot.film.orderLengthM)}` : `保存値 = ${number(snapshot.film.orderLengthM)}`, number(snapshot.film.orderLengthM), "m");
-  add("film.loss", film, "フィルムロス", "ロス率と最小ロスを比較して大きい方を適用します。", `ロス率 = ${lossRate}／最小ロス = ${number(p.lossMinM)}m`, "MAX(最小ロス, 対象長 × ロス率)", `MAX(${number(p.lossMinM)}, 対象長 × ${p.lossRate})`, number(snapshot.film.lossM), "m");
-  add("film.effective-length", film, "有効フィルム長", "ロスを除いて製造に使える長さです。", `対象長 = ${number(snapshot.film.orderLengthM)}m／ロス = ${number(snapshot.film.lossM)}m`, "対象長 − ロス", `${number(snapshot.film.orderLengthM)} − ${number(snapshot.film.lossM)}`, number(snapshot.film.effectiveLengthM), "m");
-    add("film.unit-price", film, "適用フィルム単価", "原反幅と発注長の価格帯から選択したデジタル用単価です。", `原反幅 = ${number(materialWidth)}mm／発注長 = ${number(snapshot.film.orderLengthM)}m`, "価格表から選択", `適用帯 = ${snapshot.film.skuCosts[0]?.appliedBand ?? "-"}`, number(snapshot.film.unitPrice), "円/m");
-    add("film.base-cost", film, "フィルム本体費", "発注長に対するフィルム本体費用です。", `発注長 = ${number(snapshot.film.orderLengthM)}m／単価 = ${number(snapshot.film.unitPrice)}円/m`, "発注長 × 単価", `${number(snapshot.film.orderLengthM)} × ${number(snapshot.film.unitPrice)}`, number(snapshot.film.filmBaseCost), "円");
-    add("film.shipping-trips", film, "配送回数", "原反幅別の配送単位長で必要回数を切り上げます。", `生産換算長 = ${number(snapshot.film.orderLengthM)}m／原反幅 = ${number(materialWidth)}mm`, "生産換算長 ÷ 配送単位長 の切り上げ", "配送単位は原反幅設定を使用", String(snapshot.film.shippingTrips), "回");
+    const orderLengthTerms = skus.length ? skus.map((sku) => number(sku.orderLengthM)) : [];
+    const consideredRows = skus.map((sku) => D(sku.orderLengthM).times(sku.multiplier));
+    const lossRows = consideredRows.map((considered) => Decimal.max(D(p.lossMinM), considered.times(p.lossRate)));
+    const consideredTotal = consideredRows.reduce((total, value) => total.plus(value), D(0));
+    const effectiveTotal = consideredRows.reduce((total, value, index) => total.plus(value).minus(lossRows[index]), D(0));
+    add("film.order-length", film, "フィルム発注長", "発注単位・最小ロットを考慮した発注長です。", skus.length ? skus.map((sku) => `${sku.name}: ${number(sku.orderLengthM)}m×${sku.multiplier}`).join(" + ") : `必要長 = ${number(snapshot.film.requiredLengthM)}m`, "SKU別発注長の合計（100m単位切上げ）", orderLengthTerms.length ? `${orderLengthTerms.join(" + ")} = ${number(snapshot.film.orderLengthM)}` : `保存値 = ${number(snapshot.film.orderLengthM)}`, number(snapshot.film.orderLengthM), "m");
+    add("film.loss", film, "フィルムロス", "SKU別の生産換算長にロス率と最小ロスを適用します。", `生産換算長 = ${consideredRows.map((value) => number(value)).join(" + ")}m／ロス率 = ${lossRate}／最小ロス = ${number(p.lossMinM)}m`, "Σ MAX(最小ロス, SKU発注長×倍率×ロス率)", lossRows.map((loss, index) => `MAX(${number(p.lossMinM)}, ${number(consideredRows[index])}×${p.lossRate})=${number(loss)}`).join(" + "), number(snapshot.film.lossM), "m");
+    add("film.effective-length", film, "有効フィルム長", "ロスを除いて製造に使える長さです。", `生産換算長 = ${number(consideredTotal)}m／ロス合計 = ${number(snapshot.film.lossM)}m`, "Σ(SKU発注長×倍率) − ロス合計", `${number(consideredTotal)} − ${number(snapshot.film.lossM)} = ${number(effectiveTotal)}`, number(snapshot.film.effectiveLengthM), "m");
+    add("film.unit-price", film, "適用フィルム単価", "SKU別の価格帯から適用した後、全体で加重平均した値です。", skus.length ? skus.map((sku) => `${sku.name}: ${number(sku.orderLengthM)}m／${sku.appliedBand || "-"}`).join("／") : `発注長 = ${number(snapshot.film.orderLengthM)}m`, "SKU別単価を発注長で加重平均", `全体適用単価 = ${number(snapshot.film.unitPrice)}`, number(snapshot.film.unitPrice), "円/m");
+    add("film.base-cost", film, "フィルム本体費", "SKU別発注長と単価から計算した本体費用です。", skus.map((sku) => `${sku.name}: ${number(sku.orderLengthM)}m×${number(sku.unitPriceYen ?? snapshot.film.unitPrice)}円/m`).join("／"), "Σ(SKU発注長 × SKU単価)", skus.map((sku) => `${number(sku.orderLengthM)}×${number(sku.unitPriceYen ?? snapshot.film.unitPrice)}`).join(" + "), number(snapshot.film.filmBaseCost), "円");
+    add("film.shipping-trips", film, "配送回数", "原反幅別の配送単位長で必要回数を切り上げます。", `生産換算長 = ${number(consideredTotal)}m／原反幅 = ${number(materialWidth)}mm`, "生産換算長 ÷ 配送単位長 の切り上げ", "配送単位はSKU別原反幅設定を使用", String(snapshot.film.shippingTrips), "回");
     add("film.domestic-shipping", film, "国内配送費", "国内輸送費用です。", `回数 = ${snapshot.film.shippingTrips}回／単価 = ${number(p.domesticShippingPerTrip)}円/回`, "回数 × 国内配送単価", `${snapshot.film.shippingTrips} × ${number(p.domesticShippingPerTrip)}`, number(snapshot.film.domesticShipping), "円");
     add("film.overseas-shipping", film, "海外配送費", "海外輸送費用です。", `回数 = ${snapshot.film.shippingTrips}回／単価 = ${number(p.overseasShippingPerTrip)}円/回`, "回数 × 海外配送単価", `${snapshot.film.shippingTrips} × ${number(p.overseasShippingPerTrip)}`, number(snapshot.film.overseasShipping), "円");
     add("film.customs", film, "通関料", "閾値超過時は固定額、未満は回数×単価です。", `本体費 = ${number(snapshot.film.filmBaseCost)}円／閾値 = ${number(p.customsThreshold)}円`, "閾値超過: 固定額／未満: 回数 × 回単価", snapshot.film.customs === p.customsHighCharge ? `閾値超過 = ${number(p.customsHighCharge)}円` : `${snapshot.film.shippingTrips} × ${number(p.customsPerTrip)}`, number(snapshot.film.customs), "円");
-  add("film.total", film, "フィルム費用合計", "本体費と物流・通関費用の合計です。金額は円単位に四捨五入しています。", `本体費 = ${number(snapshot.film.filmBaseCost)}円／国内 = ${number(snapshot.film.domesticShipping)}円／海外 = ${number(snapshot.film.overseasShipping)}円／通関 = ${number(snapshot.film.customs)}円`, "本体費 + 国内配送 + 海外配送 + 通関料（円未満四捨五入）", `${number(snapshot.film.filmBaseCost)} + ${number(snapshot.film.domesticShipping)} + ${number(snapshot.film.overseasShipping)} + ${number(snapshot.film.customs)} = ${number(snapshot.film.filmTotal)}円（円未満四捨五入済み）`, number(snapshot.film.filmTotal), "円");
+  add("film.total", film, "フィルム費用合計", "本体費と物流・通関費用の合計です。", `本体費 = ${number(snapshot.film.filmBaseCost)}円／国内 = ${number(snapshot.film.domesticShipping)}円／海外 = ${number(snapshot.film.overseasShipping)}円／通関 = ${number(snapshot.film.customs)}円`, "本体費 + 国内配送 + 海外配送 + 通関料", `${number(snapshot.film.filmBaseCost)} + ${number(snapshot.film.domesticShipping)} + ${number(snapshot.film.overseasShipping)} + ${number(snapshot.film.customs)} = ${number(snapshot.film.filmTotal)}円`, number(snapshot.film.filmTotal), "円");
   }
 
 
@@ -125,17 +129,31 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
     const filmTotalYen = D(snapshot.film.filmTotal).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
     const saleMeterUnit = filmTotalYen.div(D(productionLength));
     const saleMeterDisplay = number(saleMeterUnit, 2);
-    add(
-      "gravure.pattern-count",
-      gravure,
-      "発注パターン数",
-      "必要長を納品パターン長で切り上げた発注回数です。",
-      `必要長 = ${number(snapshot.film.requiredLengthM)}m／納品パターン = ${number(snapshot.deliverablePatternLengthM)}m`,
-      "ceil(必要長 ÷ 納品パターン長)",
-      `${number(snapshot.film.requiredLengthM)} ÷ ${number(snapshot.deliverablePatternLengthM)} の切り上げ = ${snapshot.orderPatternCount}`,
-      String(snapshot.orderPatternCount),
-      "回",
-    );
+    if (snapshot.sascheCandidate) {
+      add(
+        "gravure.pattern-count",
+        gravure,
+        "国内調達 出荷長",
+        "国内調達はSKUごとに独立した出荷長を使用します。",
+        `必要納品長 = ${number(snapshot.film.requiredLengthM)}m／出荷長 = ${number(snapshot.film.effectiveLengthM)}m`,
+        "保存されたSKU別出荷パターンを採用",
+        `出荷長 = ${number(snapshot.film.effectiveLengthM)}m`,
+        number(snapshot.film.effectiveLengthM),
+        "m",
+      );
+    } else {
+      add(
+        "gravure.pattern-count",
+        gravure,
+        "発注パターン数",
+        "必要長を1パターンあたり納品長で切り上げた発注回数です。",
+        `必要長 = ${number(snapshot.film.requiredLengthM)}m／納品パターン長 = ${number(snapshot.deliverablePatternLengthM)}m／納品合計 = ${number(snapshot.film.effectiveLengthM)}m`,
+        "ceil(必要長 ÷ 1パターン納品長)",
+        `${number(snapshot.film.requiredLengthM)} ÷ ${number(snapshot.deliverablePatternLengthM)} の切り上げ = ${snapshot.orderPatternCount}`,
+        String(snapshot.orderPatternCount),
+        "回",
+      );
+    }
     add(
       "gravure.production-length",
       gravure,

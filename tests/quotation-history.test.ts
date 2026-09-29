@@ -154,4 +154,40 @@ describe("quotation history analysis", () => {
     expect(analysis.filmAmount.toNumber()).toBe(225000);
     expect(analysis.profitRate.toFixed(4)).toBe("40.0107");
   });
+
+  it("reconstructs legacy copper pricing with the fixed ten-percent target margin", () => {
+    const analysis = analyzeQuotation({
+      ...baseRecord,
+      payload: {
+        ...baseRecord.payload,
+        printingMethod: "gravure",
+        fillingCostPerPiece: "3",
+        filmCostPerPiece: "2",
+        copperPlateCostPerPiece: "1",
+        copperColorCount: "4",
+        targetMargin: "0.4",
+      },
+    });
+
+    expect(analysis.targetCopperUnit.toFixed(10)).toBe("1.1111111111");
+    expect(analysis.copperColorUnit.toNumber()).toBe(2778);
+    expect(analysis.copperColorCount.toNumber()).toBe(4);
+    expect(analysis.copperAmount.toNumber()).toBe(11112);
+  });
+
+  it("reconstructs custom mold quantity and unit from the mold-set basis", () => {
+    const analysis = analyzeQuotation({
+      ...baseRecord,
+      payload: {
+        ...baseRecord.payload,
+        customLotCost: "30000",
+        customQuantity: "2",
+        targetMargin: "0.4",
+      },
+    });
+
+    expect(analysis.customQuantity.toNumber()).toBe(2);
+    expect(analysis.customUnit.toNumber()).toBe(25000);
+    expect(analysis.customAmount.toNumber()).toBe(50000);
+  });
 });

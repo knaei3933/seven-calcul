@@ -123,6 +123,7 @@ export interface FilmSkuCostResult {
   requiredLengthM: string;
   orderLengthM: string;
   filmCost: string;
+  unitPriceYen: string;
   multiplier: number;
   consideredLengthM: string;
   appliedBand: PriceBand;
@@ -272,15 +273,16 @@ function calculatePouchCostCore(
         skuCosts: [],
       }
     : calculateFilmCost(
-        size,
-        quantityD,
-        printingMethod,
-        params,
-        digitalOrders,
-        orderAdjustment,
-        recommendation?.aggregateDigitalPrice,
-        Boolean(recommendation?.filmOrderOverride),
-      );
+      size,
+      quantityD,
+      printingMethod,
+      params,
+      digitalOrders,
+      orderAdjustment,
+      recommendation?.aggregateDigitalPrice,
+      Boolean(recommendation?.filmOrderOverride),
+      skuQuantitiesList,
+    );
   const skuCosts = film.skuCosts.map((skuCost, index) => ({
     ...skuCost,
     name: (spec.skuNames?.[index] ?? "").trim() || `充填物${index + 1}`,
@@ -398,7 +400,12 @@ function calculatePouchCostCore(
     copperPlateCostPerPiece,
     ...(gravureRoll ? {
       orderPatternCount: gravureRoll.orderPatternCount,
-      deliverablePatternLengthM: gravureRoll.deliverableLengthM,
+      // This is the length of one delivery pattern. The total deliverable
+      // length remains film.effectiveLengthM; using the total here made
+      // multi-pattern order-count formulas divide by the total twice.
+      deliverablePatternLengthM: gravureRoll.orderPatternCount > 0
+        ? D(gravureRoll.deliverableLengthM).div(gravureRoll.orderPatternCount).toString()
+        : gravureRoll.deliverableLengthM,
       recommendedQuantity: gravureRoll.recommendedQuantity,
       gravure: {
         pricingMode: sascheCandidate ? "sasche" : "standard",
@@ -570,10 +577,11 @@ function calculateFilmCost(
   orderAdjustment: FilmOrderAdjustment,
   aggregateDigitalPrice = false,
   preserveOrderOverride = false,
+  skuQuantities: Decimal[],
 ): FilmCostResult {
   if (printingMethod !== "digital") throw validationError("gravure_not_configured");
   const pitch = D(size.lengthMm).plus(size.pitchAddMm);
-  const skuResults = digitalOrders.map((sku) => {
+  const skuResults = digitalOrders.map((sku, skuIndex) => {
     const required = D(sku.requiredLengthM);
     // Excel規則: 35mm幅品・Xraラウンドは必要長が900m超で736mm幅・2倍生産に切替（検討長さ＝発注×2・200m刻み）
     const useLargeLot = Boolean(size.largeLotWebWidthMm) && required.gt(900);
@@ -589,7 +597,25 @@ function calculateFilmCost(
     if (pricing.lte(0)) throw validationError("no_priceable_quantity");
     const appliedBand: PriceBand = useLargeLot ? "571to740" : size.priceBand;
     const webWidthMm = useLargeLot ? size.largeLotWebWidthMm! : size.webWidthMm;
-    return { skuCode: sku.skuCode, required, orderLength, multiplier, considered, appliedBand, webWidthMm, loss, effective, actual, pricing, unitPrice: D(0), baseCost: D(0) };
+    const result = { skuCode: sku.skuCode, required, orderLength, multiplier, considered, appliedBand, webWidthMm, loss, effective, actual, pricing, unitPrice: D(0), baseCost: D(0) };
+    // The documented formula inflates demand by loss and then subtracts loss
+    // from procurement. At a rounding boundary that can leave the normalized
+    // order one piece short; grow that SKU's physical order until it covers
+    // its own demand. SKU demand is not fungible with another SKU's surplus.
+    let guard = 0;
+    while (result.actual.lt(skuQuantities[skuIndex] ?? D(0)) && guard < 10000) {
+      result.orderLength = result.orderLength.plus(100);
+      result.considered = result.orderLength.times(result.multiplier);
+      result.loss = maxD(params.lossMinM, result.considered.times(params.lossRate));
+      result.effective = result.considered.minus(result.loss);
+      result.actual = result.effective.times(1000).div(pitch).times(size.lanes).floor();
+      result.pricing = result.actual.div(500).floor().times(500);
+      guard += 1;
+    }
+    if (result.actual.lt(skuQuantities[skuIndex] ?? D(0))) {
+      throw validationError("digital_sku_capacity_not_reached");
+    }
+    return result;
   });
   const priceTierLength = aggregateDigitalPrice
     ? sum(skuResults.map((sku) => sku.orderLength))
@@ -628,9 +654,10 @@ function calculateFilmCost(
     domesticShipping: domestic.toString(), overseasShipping: overseas.toString(), customs: customs.toString(), filmTotal: total.toString(), filmCostPerPiece: perPiece.toString(),
     shippingTrips: shippingTrips.toString(),
     orderAdjustment,
-    skuCosts: skuResults.map(({ skuCode, required, orderLength, multiplier, considered, appliedBand, webWidthMm, baseCost }) => ({
+    skuCosts: skuRows.map(({ skuCode, required, orderLength, multiplier, considered, appliedBand, webWidthMm, baseCost, unitPrice }) => ({
       skuCode, name: "", quantity: "", fillMlPerChamber: "", colorCount: "",
       requiredLengthM: required.toString(), orderLengthM: orderLength.toString(), filmCost: baseCost.toString(),
+      unitPriceYen: unitPrice.toString(),
       multiplier, consideredLengthM: considered.toString(), appliedBand, webWidthMm,
     })),
   };

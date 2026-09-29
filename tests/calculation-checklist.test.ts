@@ -97,6 +97,55 @@ describe("calculation checklist snapshot", () => {
     expect(snapshot.materialWidthMm).not.toBe("999");
   });
 
+  it("shows mixed large-lot digital film formulas that reconcile to the saved result", () => {
+    const result = calculatePouchCost({
+      spec: {
+        sizeKey: "tube-35x60",
+        fillMlPerChamber: "3",
+        connectedChambers: 1,
+        fillingMethod: "hopper",
+        fillingLanes: 4,
+        isCustom: false,
+        colorCount: 4,
+        bulkUnitPrice: "0",
+        skuCount: 2,
+        skuQuantities: ["60000", "30000"],
+        skuFillMlPerChamber: ["3", "3"],
+        skuColorCounts: ["4", "4"],
+      },
+      quantity: "90000",
+      printingMethod: "digital",
+    });
+    const snapshot = buildCalculationChecklistSnapshot(result, {
+      quotationNumber: "mixed",
+      printingMethod: "digital",
+      sourceHash: "source",
+      resultHash: "result",
+      filmComposition: "PET12+AL7+PET12+LLDPE50",
+      widthMm: "35",
+      lengthMm: "60",
+      pitchMm: "66",
+      pitchAddMm: "6",
+      webWidthMm: 356,
+    });
+    const items = buildChecklistItems(snapshot);
+    const loss = items.find((item) => item.id === "film.loss")!;
+    const effective = items.find((item) => item.id === "film.effective-length")!;
+    const unitPrice = items.find((item) => item.id === "film.unit-price")!;
+    const shipping = items.find((item) => item.id === "film.shipping-trips")!;
+    const baseCost = items.find((item) => item.id === "film.base-cost")!;
+
+    expect(loss.substitution).toContain("MAX(80, 1,200×0.10)=120");
+    expect(loss.substitution).toContain("MAX(80, 600×0.10)=80");
+    expect(loss.result).toBe("200");
+    expect(effective.substitution).toContain("1,800 − 200 = 1,600");
+    expect(unitPrice.explanation).toContain("加重平均");
+    expect(unitPrice.result).toBe("346.5");
+    expect(baseCost.substitution).toContain("600×365");
+    expect(baseCost.substitution).toContain("600×328");
+    expect(shipping.inputs).toContain("生産換算長 = 1,800m");
+  });
+
   it("rejects stale checklist snapshots with missing separated dimensions", () => {
     expect(readCalculationChecklistSnapshot({ checklistVersion: "2026-09.1", quantity: "1" })).toBeNull();
   });

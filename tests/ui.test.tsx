@@ -558,8 +558,8 @@ describe("quotation UI", () => {
     expect(screen.getByTestId("candidate-Y-all-in-delta")).toHaveTextContent("-￥23,024");
     expect(screen.getByTestId("comparison-K")).toHaveTextContent("50,000枚");
     expect(screen.getByTestId("comparison-K")).toHaveTextContent("￥856,513");
-    expect(screen.getByTestId("comparison-K")).toHaveTextContent("顧客発注の4.1倍製造／在庫リスク");
-    expect(screen.getByTestId("candidate-K-risk")).toHaveTextContent("顧客発注の4.1倍製造／在庫リスク");
+    expect(screen.getByTestId("comparison-K")).toHaveTextContent("製作可能数は顧客発注の4.1倍／在庫リスク");
+    expect(screen.getByTestId("candidate-K-risk")).toHaveTextContent("製作可能数は顧客発注の4.1倍／在庫リスク");
   });
 
   it("shows a near-target domestic shortage as a selectable comparison", async () => {
@@ -1034,7 +1034,6 @@ describe("quotation UI", () => {
     const modal = screen.getByTestId("recommendation-modal");
     const basis = within(modal).getByTestId("input-basis-card");
     expect(basis).toHaveTextContent("入力値と同一発注");
-    expect(basis).toHaveTextContent("推奨");
     expect(basis).toHaveTextContent("合計最低発注 500mのため、最低発注量まで注文しました。");
     expect(basis).not.toHaveTextContent("undefined");
     expect(basis).toHaveTextContent("顧客 10,000枚 ／ 製作可能 25,454枚 ／ 計画 10,000枚");

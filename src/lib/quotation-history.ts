@@ -1,16 +1,17 @@
-import { D, Decimal } from "./decimal";
+import { D, Decimal, parseDecimal } from "./decimal";
 import { DEFAULT_FILM_COMPOSITION } from "./quotation-shared";
+import { COPPER_TARGET_MARGIN } from "./quotation-pricing";
 import type { QuotationRecord } from "./quotation-shared";
 
 const storedNumber = (value: unknown): Decimal => {
-  const numeric = typeof value === "string" ? Number(value.trim()) : Number(value);
-  return Number.isFinite(numeric) ? D(numeric) : D(0);
+  if (typeof value === "string") return parseDecimal(value) ?? D(0);
+  return typeof value === "number" && Number.isFinite(value) ? D(value) : D(0);
 };
 
 const editedNumber = (value: unknown): Decimal | null => {
+  if (typeof value === "number") return Number.isFinite(value) ? D(value) : null;
   if (typeof value !== "string" || value.trim() === "") return null;
-  const numeric = Number(value.trim());
-  return Number.isFinite(numeric) ? D(numeric) : null;
+  return parseDecimal(value);
 };
 
 const positiveNumber = (value: unknown): Decimal | null => {
@@ -47,21 +48,29 @@ export function analyzeQuotation(record: QuotationRecord) {
   const fillingCostUnit = storedNumber(payload.fillingCostPerPiece ?? record.fillingCostPerPiece);
   const filmCostUnit = storedNumber(payload.filmCostPerPiece ?? record.filmCostPerPiece);
   const copperCostUnit = storedNumber(payload.copperPlateCostPerPiece);
-  const customCostUnit = storedNumber(payload.customLotCost).div(quantity);
+  const customLotCost = storedNumber(payload.customLotCost);
+  const customQuantity = positiveNumber(payload.customQuantity) ?? D(1);
+  const customCostUnit = customLotCost.div(quantity);
   const costUnit = fillingCostUnit.plus(filmCostUnit).plus(copperCostUnit).plus(customCostUnit);
 
   const targetMargin = positiveNumber(payload.targetMargin ?? record.targetMargin) ?? D(0);
   const marginDivider = D(1).minus(targetMargin.lt(1) ? targetMargin : D(0));
+  const copperMarginDivider = D(1).minus(COPPER_TARGET_MARGIN);
   const targetFillingUnit = fillingCostUnit.div(marginDivider);
   const targetFilmUnit = filmCostUnit.div(marginDivider);
-  const targetCopperUnit = copperCostUnit.div(marginDivider);
-  const targetCustomUnit = customCostUnit.div(marginDivider);
+  const targetCopperUnit = copperCostUnit.div(copperMarginDivider);
+  const targetCustomSaleTotal = Decimal.max(
+    customLotCost.div(customQuantity).div(marginDivider).toDecimalPlaces(0, Decimal.ROUND_CEIL).div(1000).ceil().times(1000).times(customQuantity),
+    D(0),
+  );
+  const targetCustomUnit = customQuantity.gt(0) ? targetCustomSaleTotal.div(customQuantity) : D(0);
+  const targetCustomSalePerPiece = quantity.gt(0) ? targetCustomSaleTotal.div(quantity) : D(0);
 
   // record側の単価・合計は保存時に見積書表示値として確定しているため、
   // 旧payload（表示snapshotがない履歴）でも必ずrecord値をfallbackにする。
   const sellingUnit = editedNumber(payload.pricePerPieceDisplay)
     ?? editedNumber(record.pricePerPiece)
-    ?? targetFillingUnit.plus(targetFilmUnit);
+    ?? targetFillingUnit.plus(targetFilmUnit).plus(targetCopperUnit).plus(targetCustomSalePerPiece);
 
   const displayedFilmMeterUnit = editedNumber(payload.filmUnitDisplay)
     ?? legacyRecommendedFilmMeterUnit(payload.filmOrderLengthM ?? record.filmOrderLengthM);
@@ -81,14 +90,22 @@ export function analyzeQuotation(record: QuotationRecord) {
   const displayedCopperAmount = editedNumber(payload.copperAmountDisplay);
   const displayedCopperUnit = editedNumber(payload.copperUnitDisplay);
   // copperUnitDisplay は新版では色単価。旧データはパウチ単価として扱う。
+  const automaticCopperAmount = copperCostUnit.div(copperMarginDivider).times(quantity);
+  const fallbackCopperColorUnit = copperColorCount && copperColorCount.gt(0)
+    ? automaticCopperAmount.div(copperColorCount).toDecimalPlaces(0, Decimal.ROUND_CEIL)
+    : null;
+  const copperColorUnit = displayedCopperUnit
+    ?? (displayedCopperAmount && copperColorCount && copperColorCount.gt(0)
+      ? displayedCopperAmount.div(copperColorCount).toDecimalPlaces(0, Decimal.ROUND_CEIL)
+      : fallbackCopperColorUnit);
   const copperAmount = displayedCopperAmount
-    ?? (displayedCopperUnit && copperColorCount ? displayedCopperUnit.times(copperColorCount) : copperCostUnit.div(marginDivider).times(quantity));
+    ?? (copperColorUnit && copperColorCount ? copperColorUnit.times(copperColorCount) : automaticCopperAmount);
   const copperUnit = displayedCopperUnit && !copperColorCount
     ? displayedCopperUnit
     : quantity.gt(0) ? copperAmount.div(quantity) : D(0);
   const customUnit = editedNumber(payload.customUnitDisplay)
-    ?? (quantity.gt(0) ? customCostUnit.div(marginDivider) : D(0));
-  const customAmount = editedNumber(payload.customAmountDisplay) ?? customUnit.times(quantity);
+    ?? targetCustomUnit;
+  const customAmount = editedNumber(payload.customAmountDisplay) ?? customUnit.times(customQuantity);
   const profitUnit = sellingUnit.minus(costUnit);
   const profitRate = sellingUnit.gt(0) ? profitUnit.div(sellingUnit).times(100) : D(0);
   const markupRate = costUnit.gt(0) ? profitUnit.div(costUnit).times(100) : D(0);
@@ -131,6 +148,7 @@ export function analyzeQuotation(record: QuotationRecord) {
     filmCostUnit,
     copperCostUnit,
     customCostUnit,
+    customQuantity,
     displayedFilmMeterUnit,
     orderPatternCount: storedNumber(payload.orderPatternCount),
     deliverablePatternLengthM: storedNumber(payload.deliverablePatternLengthM),
@@ -143,9 +161,12 @@ export function analyzeQuotation(record: QuotationRecord) {
     targetFilmUnit,
     targetCopperUnit,
     targetCustomUnit,
+    targetCustomSalePerPiece,
     fillingUnit,
     filmUnit,
     copperUnit,
+    copperColorUnit: copperColorUnit ?? D(0),
+    copperColorCount: copperColorCount ?? D(0),
     copperAmount,
     customUnit,
     customAmount,

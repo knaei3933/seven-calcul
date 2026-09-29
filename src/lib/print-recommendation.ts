@@ -63,6 +63,30 @@ export type PrintCandidate = {
   gravureRoll?: GravureRollCostResult;
 };
 
+export function candidateSkuOrderLengthM(
+  candidate: PrintCandidate,
+  index: number,
+  fallback: string | number | Decimal,
+): string {
+  if (candidate.route === "D" && candidate.filmOrders?.[index]) {
+    return candidate.filmOrders[index].orderLengthM;
+  }
+  if (candidate.route === "Y" && candidate.sasche?.skuOutputLengthsM?.[index]) {
+    return candidate.sasche.skuOutputLengthsM[index];
+  }
+  if (candidate.route === "K" && candidate.skuPatternCounts?.length) {
+    const patternCount = D(candidate.skuPatternCounts[index] ?? 0);
+    const totalPatternCount = sum(candidate.skuPatternCounts.map((value) => D(value)));
+    if (patternCount.gt(0) && totalPatternCount.gt(0)) {
+      // K patterns for one product width all have the same production length.
+      // Derive each SKU share from the selected candidate's actual total so a
+      // small-width 12,000m tier is not mistaken for the standard 6,000m tier.
+      return D(candidate.orderLengthM).times(patternCount.div(totalPatternCount)).toString();
+    }
+  }
+  return D(fallback).toString();
+}
+
 export function createPrintCandidateContext({
   spec,
   quantity,
@@ -147,27 +171,42 @@ function aggregateIncludedPrice(totalCost: Decimal, orderLengthM: Decimal): stri
 function finishCandidate(
   draft: CandidateDraft,
   originalQuantity: Decimal,
+  originalSkuQuantities: Decimal[],
 ): PrintCandidate {
   const capacityQuantity = D(draft.capacityQuantity);
   const capacityExactQuantity = D(draft.adjustedQuantity);
-  const adjustedQuantity = capacityExactQuantity.gt(0) ? floorTo(capacityExactQuantity, 1000) : capacityExactQuantity;
   const plannedSkuQuantities = draft.adjustedSkuQuantities.map((value) => floorTo(D(value), 1000));
-  const plannedSkuTotal = sum(plannedSkuQuantities);
-  const planningDifference = adjustedQuantity.minus(plannedSkuTotal);
-  if (!planningDifference.eq(0)) {
-    const order = plannedSkuQuantities
-      .map((value, index) => ({ index, value }))
-      .sort((left, right) => (
-        left.value.eq(right.value)
-          ? left.index - right.index
-          : planningDifference.gt(0) ? right.value.minus(left.value).toNumber() : left.value.minus(right.value).toNumber()
-      ));
-    let remaining = planningDifference;
-    for (const { index } of order) {
-      if (remaining.eq(0)) break;
-      const step = remaining.gt(0) ? D(1000) : D(-1000);
-      plannedSkuQuantities[index] = plannedSkuQuantities[index].plus(step);
-      remaining = remaining.minus(step);
+  const perSkuShortage = originalSkuQuantities.reduce(
+    (total, quantity, index) => total.plus(Decimal.max(D(0), quantity.minus(plannedSkuQuantities[index] ?? D(0)))),
+    D(0),
+  );
+  let adjustedQuantity: Decimal;
+  if (perSkuShortage.gt(0)) {
+    // A shortage reference must preserve the customer's SKU mix. Surplus from
+    // another SKU cannot replace a short SKU's sellable quantity.
+    plannedSkuQuantities.forEach((quantity, index) => {
+      plannedSkuQuantities[index] = Decimal.min(quantity, originalSkuQuantities[index] ?? D(0));
+    });
+    adjustedQuantity = sum(plannedSkuQuantities);
+  } else {
+    adjustedQuantity = capacityExactQuantity.gt(0) ? floorTo(capacityExactQuantity, 1000) : capacityExactQuantity;
+    const plannedSkuTotal = sum(plannedSkuQuantities);
+    const planningDifference = adjustedQuantity.minus(plannedSkuTotal);
+    if (!planningDifference.eq(0)) {
+      const order = plannedSkuQuantities
+        .map((value, index) => ({ index, value }))
+        .sort((left, right) => (
+          left.value.eq(right.value)
+            ? left.index - right.index
+            : planningDifference.gt(0) ? right.value.minus(left.value).toNumber() : left.value.minus(right.value).toNumber()
+        ));
+      let remaining = planningDifference;
+      for (const { index } of order) {
+        if (remaining.eq(0)) break;
+        const step = remaining.gt(0) ? D(1000) : D(-1000);
+        plannedSkuQuantities[index] = plannedSkuQuantities[index].plus(step);
+        remaining = remaining.minus(step);
+      }
     }
   }
   const original = D(draft.originalQuantity);
@@ -176,7 +215,7 @@ function finishCandidate(
     : D(0);
   const surplusPieces = Decimal.max(D(0), adjustedQuantity.minus(original));
   const shortagePieces = Decimal.max(D(0), original.minus(adjustedQuantity));
-  const isFulfilling = shortagePieces.lte(0);
+  const isFulfilling = shortagePieces.lte(0) && perSkuShortage.lte(0);
   const surplusRatio = original.gt(0) ? surplusPieces.div(original).times(100) : D(0);
   const isPractical = isFulfilling && surplusRatio.lte(D(PRACTICAL_SURPLUS_PERCENT));
   const isExactQuantity = isFulfilling && adjustedQuantity.eq(original);
@@ -236,21 +275,20 @@ function compareCandidates(left: PrintCandidate, right: PrintCandidate, original
   return left.id.localeCompare(right.id);
 }
 
-function createExactQuantityCandidate(candidate: PrintCandidate, originalQuantity: Decimal): PrintCandidate | null {
+function createExactQuantityCandidate(
+  candidate: PrintCandidate,
+  originalQuantity: Decimal,
+  originalSkuQuantities: Decimal[],
+): PrintCandidate | null {
   const requested = D(originalQuantity);
   if (!candidate.isFulfilling || D(candidate.adjustedQuantity).eq(requested)) return null;
 
   const sourceQuantities = candidate.adjustedSkuQuantities.map((value) => D(value));
-  const sourceTotal = sum(sourceQuantities);
-  const exactSkus = sourceQuantities.map((value) => (
-    sourceTotal.gt(0) ? value.times(requested).div(sourceTotal).toDecimalPlaces(0, Decimal.ROUND_FLOOR) : D(0)
-  ));
-  let remaining = requested.minus(sum(exactSkus));
-  while (remaining.gt(0)) {
-    const target = exactSkus.reduce((largest, value, index) => value.gt(exactSkus[largest]) ? index : largest, 0);
-    exactSkus[target] = exactSkus[target].plus(1);
-    remaining = remaining.minus(1);
-  }
+  if (
+    sourceQuantities.length !== originalSkuQuantities.length
+    || sourceQuantities.some((quantity, index) => quantity.lt(originalSkuQuantities[index]))
+  ) return null;
+  const exactSkus = originalSkuQuantities.map((value) => D(value));
   const capacityQuantity = D(candidate.capacityQuantity);
   return {
     ...candidate,
@@ -366,8 +404,9 @@ function candidateCommon(
   | "shortageLengthM" | "surplusRatio" | "includedUnitPricePerM" | "filmTotalYen"
   | "filmCostPerPieceYen" | "toleranceExceeded"
 > {
-  const surplus = maxDecimal(orderLengthM.minus(requiredLengthM), D(0));
-  const shortage = maxDecimal(requiredLengthM.minus(orderLengthM), D(0));
+  const comparisonLength = comparisonLengthM ?? orderLengthM;
+  const surplus = maxDecimal(comparisonLength.minus(requiredLengthM), D(0));
+  const shortage = maxDecimal(requiredLengthM.minus(comparisonLength), D(0));
   const surplusRatio = requiredLengthM.gt(0) ? surplus.div(requiredLengthM).times(100) : D(0);
   return {
     route,
@@ -473,6 +512,23 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
     if (target.gte(minimumCandidateTotal)) targets.add(boundary);
   }
 
+  // Keep one allocation that is independently sufficient for every SKU. A
+  // proportional total allocation can give a tiny SKU far more film than it
+  // needs while still leaving an asymmetric SKU short.
+  {
+    const independentOrders = skuRequiredLengths.map((required, index) => {
+      const minimum = minimums[index];
+      const start = maxDecimal(floorTo(required, 100), minimum);
+      for (let target = start; target.lte(start.plus(50000)); target = target.plus(100)) {
+        if (digitalCapacity(size, required, target, parameters).proposedQuantity.gte(context.skuQuantities[index])) {
+          return target;
+        }
+      }
+      return start;
+    });
+    targets.add(maxDecimal(sum(independentOrders), minimumCandidateTotal).toFixed(0));
+  }
+
   // The rounded requirement can still be short after loss and 1,000-piece
   // planning. Add the smallest 100m procurement length that actually covers
   // the fixed customer quantity (for example 500m -> 600m for 20,000 pieces).
@@ -482,10 +538,13 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
     for (let target = start; target.lte(limit); target = target.plus(100)) {
       const allocations = allocateTotalLength(purchaseWeights, target, minimums);
       if (!allocations) continue;
-      const capacity = allocations.reduce((total, orderLength, index) => (
-        total.plus(digitalCapacity(size, skuRequiredLengths[index], orderLength, parameters).proposedQuantity)
-      ), D(0));
-      if (capacity.gte(originalQuantity)) {
+      const capacities = allocations.map((orderLength, index) => (
+        digitalCapacity(size, skuRequiredLengths[index], orderLength, parameters)
+      ));
+      const perSkuFulfilling = capacities.every((capacity, index) => (
+        capacity.proposedQuantity.gte(context.skuQuantities[index])
+      ));
+      if (perSkuFulfilling) {
         targets.add(target.toFixed(0));
         break;
       }
@@ -504,6 +563,13 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
     const adjustedQuantity = sum(adjustedSkuQuantities);
     const capacityQuantity = sum(capacities.map((capacity) => capacity.capacityQuantity));
     if (!adjustedQuantity.gt(0)) continue;
+    // Aggregate capacity cannot compensate for one SKU's physical shortage:
+    // customer SKU demand is not fungible. Drop mixed allocations whose total
+    // looks sufficient only because another SKU overproduces.
+    const perSkuFulfilling = capacities.every((capacity, index) => (
+      capacity.proposedQuantity.gte(context.skuQuantities[index])
+    ));
+    if (!perSkuFulfilling && adjustedQuantity.gte(originalQuantity)) continue;
 
     const aggregateOrderLength = sum(allocations);
     const priceLength = aggregateOrderLength.lt(1000) ? "500" : aggregateOrderLength.lt(1500) ? "1000" : "1500";
@@ -603,7 +669,9 @@ function buildKOptions(context: PrintCandidateContext, skuIndex: number): KOptio
   const materialWidth = Decimal.max(500, context.size.webWidthMm);
   const requiredPatternLength = D(context.gravureParameters.deliverablePatternLengthM);
   const productionPatternLength = D(context.gravureParameters.productionPatternLengthM);
-  const smallWidthTier = materialWidth.lte(D(context.gravureParameters.smallWidthThresholdMm)) && requiredLength.gt(requiredPatternLength);
+  const pouchWidth = D(context.spec.customWidthMm ?? context.size.widthMm);
+  const smallWidthTier = pouchWidth.lte(D(context.gravureParameters.smallWidthThresholdMm))
+    && requiredLength.gt(requiredPatternLength);
   const deliveryPattern = smallWidthTier
     ? D(context.gravureParameters.smallWidthOrderPatternLengthM)
     : requiredPatternLength;
@@ -623,6 +691,7 @@ function buildKOptions(context: PrintCandidateContext, skuIndex: number): KOptio
     const result = calculateGravureRollCost({
       requiredLengthM: candidateRequiredLength,
       materialWidthMm: materialWidth,
+      pouchWidthMm: pouchWidth,
       colors,
       quantity: adjustedQuantity,
       parameters: context.gravureParameters,
@@ -844,8 +913,10 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
       skuColorCounts: [candidate.colorCount],
     });
 
-    combinations = expandedOptions.map(createCombination) as typeof combinations;
-    if (skuIndex === 0) continue;
+    if (skuIndex === 0) {
+      combinations = expandedOptions.map(createCombination) as typeof combinations;
+      continue;
+    }
 
     const next: DomesticCombination[] = [];
     for (const left of combinations) {
@@ -856,7 +927,7 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
         const adjustedQuantity = left.adjustedQuantities.reduce(
           (total, value) => total.plus(value),
           D(0),
-        );
+        ).plus(right.adjustedQuantity);
         const requiredLengthM = D(left.sasche.requiredLengthM).plus(right.requiredLengthM);
         const surplusLengthM = Decimal.max(outputLengthM.minus(requiredLengthM), D(0));
         const shortageLengthM = Decimal.max(requiredLengthM.minus(outputLengthM), D(0));
@@ -910,7 +981,25 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
         });
       }
     }
-    combinations = next;
+    next.sort((left, right) => {
+      const leftPerSkuFulfilled = left.adjustedQuantities.every((quantity, index) => (
+        quantity.gte(context.skuQuantities[index])
+      ));
+      const rightPerSkuFulfilled = right.adjustedQuantities.every((quantity, index) => (
+        quantity.gte(context.skuQuantities[index])
+      ));
+      if (leftPerSkuFulfilled !== rightPerSkuFulfilled) return leftPerSkuFulfilled ? -1 : 1;
+      const leftQuantity = sum(left.adjustedQuantities);
+      const rightQuantity = sum(right.adjustedQuantities);
+      const leftCost = leftQuantity.gt(0) ? left.filmTotalYen.div(leftQuantity) : D(999999999);
+      const rightCost = rightQuantity.gt(0) ? right.filmTotalYen.div(rightQuantity) : D(999999999);
+      if (!leftCost.eq(rightCost)) return leftCost.lt(rightCost) ? -1 : 1;
+      const leftDelta = leftQuantity.minus(context.originalQuantity).abs();
+      const rightDelta = rightQuantity.minus(context.originalQuantity).abs();
+      if (!leftDelta.eq(rightDelta)) return leftDelta.lt(rightDelta) ? -1 : 1;
+      return left.sasche.id.localeCompare(right.sasche.id);
+    });
+    combinations = next.slice(0, 32);
   }
 
   const colorTotal = sum(context.spec.skuColorCounts?.length
@@ -967,9 +1056,11 @@ export function buildPrintCandidates(context: PrintCandidateContext): PrintCandi
       seen.add(draft.id);
       return true;
     })
-    .map((draft) => finishCandidate(draft, context.originalQuantity));
+    .map((draft) => finishCandidate(draft, context.originalQuantity, context.skuQuantities));
 
-  candidates.push(...candidates.flatMap((candidate) => createExactQuantityCandidate(candidate, context.originalQuantity) ?? []));
+  candidates.push(...candidates.flatMap((candidate) => (
+    createExactQuantityCandidate(candidate, context.originalQuantity, context.skuQuantities) ?? []
+  )));
 
   const originalQuantity = context.originalQuantity;
   const ranked = [...candidates].sort((left, right) => compareCandidates(left, right, originalQuantity));

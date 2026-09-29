@@ -376,9 +376,13 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
                   <thead><tr><th>品目</th><th>単価</th><th>数量</th><th>金額</th></tr></thead>
                   <tbody>
                     <tr><td>充填・加工費</td><td>{formatCurrency(analysis.fillingUnit.toFixed(2), 2)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.fillingAmount.toFixed(0), 0)}</td></tr>
-                    <tr><td>フィルム費用<br /><small>{composition || DEFAULT_FILM_COMPOSITION}</small></td><td>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toFixed(0), 0)} /m` : "-"}</td><td>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</td><td>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</td></tr>
-                    {printingMethodOf(record) === "gravure" ? <tr><td>新規銅版費</td><td>{formatCurrency(analysis.copperUnit.toFixed(2), 2)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.copperAmount.toFixed(0), 0)}</td></tr> : null}
-                    {analysis.customCostUnit.gt(0) ? <tr><td>金型費用</td><td>{formatCurrency(analysis.customUnit.toFixed(2), 2)}</td><td>1 式</td><td>{formatCurrency(analysis.customAmount.toFixed(0), 0)}</td></tr> : null}
+                    <tr><td>フィルム費用<br /><small>{composition || DEFAULT_FILM_COMPOSITION}</small></td><td>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toFixed(2), 2)} /m` : "-"}</td><td>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</td><td>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</td></tr>
+                    {printingMethodOf(record) === "gravure" && analysis.copperColorCount.gt(0)
+                      ? <tr><td>新規銅版費</td><td>{formatCurrency(analysis.copperColorUnit.toFixed(2), 2)}</td><td>{formatNumber(analysis.copperColorCount.toNumber(), 0)} 色</td><td>{formatCurrency(analysis.copperAmount.toFixed(0), 0)}</td></tr>
+                      : printingMethodOf(record) === "gravure"
+                        ? <tr><td>新規銅版費</td><td>{formatCurrency(analysis.copperUnit.toFixed(2), 2)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.copperAmount.toFixed(0), 0)}</td></tr>
+                        : null}
+                    {analysis.customCostUnit.gt(0) ? <tr><td>金型費用</td><td>{formatCurrency(analysis.customUnit.toFixed(2), 2)}</td><td>{formatNumber(analysis.customQuantity.toNumber(), 0)} 式</td><td>{formatCurrency(analysis.customAmount.toFixed(0), 0)}</td></tr> : null}
                   </tbody>
                   <tfoot>
                     <tr><th colSpan={3}>小計（税抜）</th><td>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</td></tr>
@@ -431,7 +435,7 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
                       <tr><td>充填・加工</td><td>{formatCurrency(analysis.fillingCostUnit.toFixed(4), 4)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.fillingCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.fillingAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.fillingAmount.minus(analysis.fillingCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr>
                       <tr><td>フィルム</td><td>{formatCurrency(filmMeterCost.toFixed(2), 2)} /m</td><td>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</td><td>{formatCurrency(filmCostTotal.toFixed(0), 0)}</td><td>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.filmAmount.minus(filmCostTotal).toFixed(0), 0)}</td></tr>
                       <tr><td>新規銅版</td><td>{formatCurrency(analysis.copperCostUnit.toFixed(4), 4)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.copperCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.copperAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.copperAmount.minus(analysis.copperCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr>
-                      {analysis.customCostUnit.gt(0) ? <tr><td>金型</td><td>{formatCurrency(analysis.customCostUnit.toFixed(4), 4)}</td><td>1 式</td><td>{formatCurrency(analysis.customCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.customAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.customAmount.minus(analysis.customCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr> : null}
+                    {analysis.customCostUnit.gt(0) ? <tr><td>金型</td><td>{formatCurrency(analysis.customCostUnit.toFixed(4), 4)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.customCostUnit.times(analysis.quantity).toFixed(0), 0)}</td><td>{formatCurrency(analysis.customAmount.toFixed(0), 0)}</td><td>{formatCurrency(analysis.customAmount.minus(analysis.customCostUnit.times(analysis.quantity)).toFixed(0), 0)}</td></tr> : null}
                     </tbody>
                     <tfoot><tr><th colSpan={3}>総原価 / 税抜見積 / 総利益</th><td>{formatCurrency(costTotal.toFixed(0), 0)}</td><td>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</td><td>{formatCurrency(finalProfit.toFixed(0), 0)}</td></tr></tfoot>
                   </table>
@@ -639,7 +643,7 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
               <div><span>お見積単価</span><strong>{formatCurrency(analysis.sellingUnit.toFixed(2), 2)} /枚</strong></div>
               <div><span>充填・加工単価</span><strong>{formatCurrency(analysis.fillingUnit.toFixed(2), 2)}</strong></div>
               <div><span>充填・加工金額</span><strong>{formatCurrency(analysis.fillingAmount.toFixed(0), 0)}</strong></div>
-              <div><span>フィルム m単価</span><strong>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toFixed(0), 0)} /m` : "-"}</strong></div>
+              <div><span>フィルム m単価</span><strong>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toFixed(2), 2)} /m` : "-"}</strong></div>
               <div><span>フィルム パウチ換算</span><strong>{formatCurrency(analysis.filmUnit.toFixed(2), 2)} /枚</strong></div>
               <div><span>フィルム金額</span><strong>{formatCurrency(analysis.filmAmount.toFixed(0), 0)}</strong></div>
               {printingMethodOf(record) === "gravure" ? (
@@ -729,7 +733,7 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
               <div><span>発注数量</span><strong>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</strong></div>
               <div><span>フィルム構成</span><strong>{composition || DEFAULT_FILM_COMPOSITION}</strong></div>
               <div><span>フィルム購入単価</span><strong>{formatCurrency(analysis.filmMeterPrice.toFixed(0), 0)} /m</strong></div>
-              <div><span>フィルム見積単価</span><strong>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toFixed(0), 0)} /m` : "-"}</strong></div>
+              <div><span>フィルム見積単価</span><strong>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toFixed(2), 2)} /m` : "-"}</strong></div>
               <div><span>フィルム発注長</span><strong>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</strong></div>
               <div><span>納期</span><strong>{record.deliveryDate || "-"}</strong></div>
               <div><span>支払条件</span><strong>{record.paymentTerms || "-"}</strong></div>
@@ -784,22 +788,32 @@ function fallbackPurchaseOrder(record: QuotationRecord): PurchaseOrderSnapshot {
   const effectiveLengthM = D(orderLengthM).minus(D(orderLengthM).times(lossRate)).toString();
 
   if (printingMethodOf(record) === "gravure") {
-    const savedDeliverable = typeof record.payload.deliverablePatternLengthM === "string"
+    const savedDeliverableRaw = typeof record.payload.deliverablePatternLengthM === "string"
       ? record.payload.deliverablePatternLengthM
       : "0";
-    const deliverablePatternLengthM = savedDeliverable
-      ? D(savedDeliverable).toString()
-      : D(orderLengthM).div(Number(record.payload.orderPatternCount) || 1).toString();
+    const patternCount = Number(record.payload.orderPatternCount) || 1;
+    const savedDeliverable = D(savedDeliverableRaw);
+    // Older payloads could store either one-pattern length or the delivery
+    // total. Reconcile against the saved production length before displaying
+    // a count formula, instead of multiplying a total by its pattern count.
+    const asPerPatternError = savedDeliverable.times(patternCount).minus(D(orderLengthM)).abs();
+    const asTotalError = savedDeliverable.minus(D(orderLengthM)).abs();
+    const savedLooksLikePerPattern = savedDeliverable.gt(0)
+      && asPerPatternError.lte(asTotalError);
+    const deliverablePatternLengthM = savedDeliverable.gt(0) && savedLooksLikePerPattern
+      ? savedDeliverable.toString()
+      : savedDeliverable.gt(0)
+        ? savedDeliverable.div(patternCount).toString()
+        : D(orderLengthM).div(patternCount).toString();
+    const deliverableTotalLengthM = D(deliverablePatternLengthM).times(patternCount);
     return {
       printingMethod: "gravure",
       pouchQuantity: record.quantity,
       filmComposition: typeof record.payload.filmComposition === "string" ? record.payload.filmComposition : "PET12+AL7+PET12+LLDPE50",
       requiredLengthM,
       orderLengthM,
-      effectiveLengthM: record.payload.deliverablePatternLengthM
-        ? D(String(record.payload.deliverablePatternLengthM ?? 0)).times(Number(record.payload.orderPatternCount) || 1).toString()
-        : effectiveLengthM,
-      lossM: D(orderLengthM).minus(D(savedDeliverable)).toString(),
+      effectiveLengthM: deliverableTotalLengthM.gt(0) ? deliverableTotalLengthM.toString() : effectiveLengthM,
+      lossM: D(orderLengthM).minus(deliverableTotalLengthM).toString(),
       lossRate: String(lossRate),
       webWidthMm,
       lanes,
@@ -808,10 +822,10 @@ function fallbackPurchaseOrder(record: QuotationRecord): PurchaseOrderSnapshot {
       colorCount,
       skuColorCounts: [],
       skuOrderDetails: [],
-      orderPatternCount: Number(record.payload.orderPatternCount) || 1,
+      orderPatternCount: patternCount,
       deliverablePatternLengthM,
       productionPatternLengthM: orderLengthM,
-      gravureLossM: D(orderLengthM).minus(D(savedDeliverable)).toString(),
+      gravureLossM: D(orderLengthM).minus(deliverableTotalLengthM).toString(),
       copperPlate: {
         quantity: colorCount,
         plateWidthMm: D(webWidthMm).plus(100).toString(),
@@ -865,15 +879,17 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
   const { order, legacy } = resolvePurchaseOrder(record);
   const analysis = analyzeQuotation(record);
   const filmOrderLength = D(order?.orderLengthM ?? record.filmOrderLengthM);
-  const filmCostTotal = analysis.filmCostUnit.times(analysis.quantity);
+  const filmCostTotal = D(order?.filmCostYen ?? analysis.filmCostUnit.times(analysis.quantity));
   const filmOrderUnit = filmOrderLength.gt(0) ? filmCostTotal.div(filmOrderLength) : D(record.filmMeterPrice);
   const filmOrderTotal = filmOrderLength.gt(0) ? filmCostTotal : filmOrderUnit.times(filmOrderLength);
+  const orderWidths = [...new Set((order?.webWidthsMm ?? [order?.webWidthMm ?? 0]).map((width) => Number(width)))].filter(Number.isFinite);
+  const webWidthText = orderWidths.length > 1 ? `SKU別（${orderWidths.join(" / ")}）` : `${formatNumber(order?.webWidthMm ?? 0, 0)}`;
   const copperQuantity = D(order?.copperPlate?.quantity ?? order?.colorCount ?? 0);
   const copperOrderUnit = copperQuantity.gt(0)
     ? D(order?.copperPlate?.unitPriceYen ?? analysis.copperCostUnit.times(analysis.quantity).div(copperQuantity))
     : D(0);
   const copperOrderTotal = copperOrderUnit.times(copperQuantity);
-  const moldQuantity = D(order?.customMold?.quantity ?? "1");
+  const moldQuantity = D(order?.customMold?.quantity ?? analysis.customQuantity);
   const moldOrderTotal = D(order?.customMold?.costYen ?? String(record.payload.customLotCost ?? "0"));
   const moldOrderUnit = moldQuantity.gt(0) ? moldOrderTotal.div(moldQuantity) : D(0);
   const purchaseOrderTotal = filmOrderTotal.plus(copperOrderTotal).plus(moldOrderTotal);
@@ -900,7 +916,7 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
                   <div><dt>印刷方式</dt><dd>{order.printingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}</dd></div>
                   <div><dt>発注数量</dt><dd>{formatNumber(record.quantity, 0)} 枚</dd></div>
                   <div><dt>フィルム構成</dt><dd>{order.filmComposition}</dd></div>
-                  <div><dt>原反幅</dt><dd>{formatNumber(order.webWidthMm, 0)} mm</dd></div>
+                  <div><dt>原反幅</dt><dd>{webWidthText} mm</dd></div>
                   <div><dt>列数</dt><dd>{formatNumber(order.lanes, 0)} 列</dd></div>
                   <div><dt>発注長</dt><dd>{formatNumber(order.orderLengthM, 0)} m</dd></div>
                   <div><dt>印刷色数</dt><dd>{order.colorCount >= 0 ? `${formatNumber(order.colorCount, 0)} 色` : "旧データ（要確認）"}</dd></div>
@@ -963,7 +979,9 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
                   <ol>
                     <li>必要長 ＝ 発注枚数 ÷ (1 − ロス率 {formatNumber(Number(order.lossRate) * 100, 1)}%) × ピッチ {formatNumber(order.pitchMm, 0)}mm ÷ 1000 ÷ {formatNumber(order.lanes, 0)}列 ＝ {formatNumber(order.requiredLengthM, 3)}m</li>
                     <li>SKUごとに必要長を100m単位へ切り上げ、最低発注長を満たした合計が発注長 {formatNumber(order.orderLengthM, 0)}m。</li>
-                    <li>原反幅 {formatNumber(order.webWidthMm, 0)}mm は、このサイズを {formatNumber(order.lanes, 0)}列で生産する登録済み確認幅です。1列あたり {formatNumber(D(order.webWidthMm).div(order.lanes).toString(), 1)}mm 確保できます。</li>
+                    {orderWidths.length > 1
+                      ? <li>原反幅はSKUごとに異なります（{orderWidths.join(" / ")}mm）。SKU別内訳の幅を確認してください。</li>
+                      : <li>原反幅 {formatNumber(order.webWidthMm, 0)}mm は、このサイズを {formatNumber(order.lanes, 0)}列で生産する登録済み確認幅です。1列あたり {formatNumber(D(order.webWidthMm).div(order.lanes).toString(), 1)}mm 確保できます。</li>}
                     {order.prodMultiplier > 1 ? <li>このサイズは大ロット切替のため生産倍率 {formatNumber(order.prodMultiplier, 0)}倍、検討幅 736mm を使用します。</li> : null}
                   </ol>
 	                ) : order.procurementRoute === "Y" && order.skuOrderLengthsM?.length ? (
@@ -980,7 +998,7 @@ function PurchaseOrderModal({ record, onClose }: { record: QuotationRecord; onCl
 	                  <ol>
                     <li>必要納品長 ＝ {formatNumber(order.requiredLengthM, 3)}m。</li>
                     <li>発注パターン ＝ ceil(必要納品長 ÷ {formatNumber(order.deliverablePatternLengthM ?? "0", 0)}m) ＝ {formatNumber(order.orderPatternCount ?? 1, 0)}回。</li>
-                    <li>発注（製作）長 ＝ パターン数 × 製作パターン長 ＝ {formatNumber(order.orderLengthM, 0)}m。納品可能長は {formatNumber(order.deliverablePatternLengthM ?? "0", 0)}m、ロスは {formatNumber(order.gravureLossM ?? "0", 0)}m。</li>
+                    <li>発注（製作）長 ＝ パターン数 × 製作パターン長 ＝ {formatNumber(order.orderLengthM, 0)}m。納品可能合計長は {formatNumber(order.effectiveLengthM, 0)}m、ロスは {formatNumber(order.gravureLossM ?? "0", 0)}m。</li>
                     <li>原反幅 {formatNumber(order.webWidthMm, 0)}mm はグラビア用に確保する幅です（最小500mm / 最大1100mm）。</li>
                   </ol>
                 )}

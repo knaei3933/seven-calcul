@@ -16,7 +16,7 @@ import { activeMaterialWidthMm } from "@/lib/purchase-order";
 import { isCalculationRequest } from "@/lib/calculation-provenance";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
 import { SIMULATOR_STALE_STATUS_KEY, type CustomerMaster, type CustomerMasterInput } from "@/lib/quotation-shared";
-import type { PrintCandidate } from "@/lib/print-recommendation";
+import { candidateSkuOrderLengthM, type PrintCandidate } from "@/lib/print-recommendation";
 import type { GravureRollCostResult } from "@/lib/gravure-roll";
 import type { SascheCandidate } from "@/lib/sasche-gravure";
 
@@ -421,7 +421,7 @@ function overproductionMultiple(candidate: PrintCandidate): Decimal | null {
 
 function comparisonRisk(candidate: PrintCandidate): string {
   const multiple = overproductionMultiple(candidate);
-  if (multiple) return `顧客発注の${formatNumber(multiple.toString(), 1)}倍製造／在庫リスク`;
+  if (multiple) return `製作可能数は顧客発注の${formatNumber(multiple.toString(), 1)}倍／在庫リスク`;
   if (D(candidate.shortagePieces ?? "0").gt(0)) {
     return `顧客発注に ${formatNumber(candidate.shortagePieces, 0)}枚不足`;
   }
@@ -487,7 +487,7 @@ function RecommendationCandidateCard({
       ) : null}
       {overproduction ? (
         <span className="warning" data-testid={`candidate-${candidate.route}-risk`}>
-          顧客発注の{formatNumber(overproduction.toString(), 1)}倍製造／在庫リスク
+          製作可能数は顧客発注の{formatNumber(overproduction.toString(), 1)}倍／在庫リスク
         </span>
       ) : null}
       {D(candidate.shortagePieces ?? "0").gt(0)
@@ -1450,15 +1450,11 @@ export default function QuotationPage() {
       writeChecklistSnapshot(activeResult, form.skus.map((sku, index) => {
         const quantity = D(adjustedQuantities[index] ?? activeResult.quantity);
         const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate);
-        const orderLengthM = candidate.route === "D"
-          ? D(candidate.filmOrders?.[index]?.orderLengthM ?? activeResult.film.orderLengthM)
-          : candidate.route === "K"
-            ? D(candidate.skuPatternCounts?.[index] ?? 1).times(normalizedGravureParameters.productionPatternLengthM)
-            : candidate.route === "Y"
-              ? D(candidate.sasche?.skuOutputLengthsM?.[index] ?? activeResult.film.orderLengthM)
-              : totalAdjustedQuantity.gt(0)
-                ? D(activeResult.film.orderLengthM).times(quantity.div(totalAdjustedQuantity))
-                : D(activeResult.film.orderLengthM);
+        const orderLengthM = candidate.route === "D" || candidate.route === "K" || candidate.route === "Y"
+          ? D(candidateSkuOrderLengthM(candidate, index, activeResult.film.orderLengthM))
+          : totalAdjustedQuantity.gt(0)
+            ? D(activeResult.film.orderLengthM).times(quantity.div(totalAdjustedQuantity))
+            : D(activeResult.film.orderLengthM);
         return {
           name: sku.name,
           quantity: quantity.toString(),
@@ -1712,13 +1708,14 @@ export default function QuotationPage() {
     const draftSkus = form.skus.map((sku, index) => {
       const quantity = D(selectedRecommendation?.adjustedSkuQuantities[index] ?? sku.quantity);
       const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate);
-      const orderLengthM = selectedRecommendation?.route === "D"
-        ? D(selectedRecommendation.filmOrders?.[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM)
-        : selectedRecommendation?.route === "K"
-          ? D(selectedRecommendation.skuPatternCounts?.[index] ?? 1).times(normalizedGravureParameters.productionPatternLengthM)
-          : selectedRecommendation?.route === "Y"
-            ? D(selectedRecommendation.sasche?.skuOutputLengthsM?.[index] ?? quotationDraftResult.film.orderLengthM)
-            : quotationDraftResult.film.skuCosts[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM;
+      const orderLengthM = selectedRecommendation
+        && (selectedRecommendation.route === "D" || selectedRecommendation.route === "K" || selectedRecommendation.route === "Y")
+        ? D(candidateSkuOrderLengthM(
+          selectedRecommendation,
+          index,
+          quotationDraftResult.film.skuCosts[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM,
+        ))
+        : quotationDraftResult.film.skuCosts[index]?.orderLengthM ?? quotationDraftResult.film.orderLengthM;
       return {
         name: sku.name,
         quantity: quantity.toString(),
@@ -2134,8 +2131,8 @@ export default function QuotationPage() {
                   {group.title === "加工・固定費" ? (
                     <div className="machine-breakdown" data-testid="machine-breakdown">
                       <p className="help">
-                        機械チャージ＝(年間減価償却＋年間電気代＋年間賃借料)÷年間稼働時間で自動計算します。
-                        6項目すべて設計ドキュメント6.3「機械関連」の初期値です。
+                        機械チャージ＝(年間減価償却＋年間電気代)÷年間稼働時間で自動計算します。
+                        5項目すべて設計ドキュメント6.3「機械関連」の初期値です。月額賃借料は含みません。
                       </p>
                       {(Object.keys(MACHINE_BREAKDOWN_LABELS) as MachineBreakdownKey[]).map((key) => (
                         <label key={key} className="parameter-label">
@@ -2232,7 +2229,12 @@ export default function QuotationPage() {
 	                ) : null}
 	                <p className="total">
 	                  {formatCurrency(displayAmount(resultShown.totalCostPerPiece))}<span className="help"> / 枚</span>
-	                  <span className="total-sub">総原価 <strong>{formatCurrency(displayAmount(resultShown.costTotal))}</strong> ／ 参考: フィルム発注 {formatNumber(resultShown.film.orderLengthM)}m で製造可能 {formatNumber(resultShown.film.actualQuantity)} 枚（余剰 ≈ {formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）</span>
+	                  <span className="total-sub">
+	                    総原価 <strong>{formatCurrency(displayAmount(resultShown.costTotal))}</strong> ／ フィルム発注 {formatNumber(resultShown.film.orderLengthM)}m ／ 製造計画 {formatNumber(resultShown.quantity)} 枚
+                    {resultPrintingMethod === "gravure" && resultShown.recommendedQuantity
+                      ? ` ／ 製作可能 ${formatNumber(resultShown.recommendedQuantity)} 枚（在庫余剰 ≈ ${formatNumber(Decimal.max(D(resultShown.recommendedQuantity).minus(resultShown.quantity), D(0)).toString())} 枚）`
+                      : `（製造可能 ${formatNumber(resultShown.film.actualQuantity)} 枚・余剰 ≈ ${formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）`}
+	                  </span>
 	                </p>
 	                <div className="unit-cost-grid" data-testid="unit-cost-summary">
 	                  <div>
@@ -2263,7 +2265,7 @@ export default function QuotationPage() {
 	                        ? `国内調達はSKUごとに独立発注します。幅${formatNumber(resultShown.sasche.matchedWidthMm)}mm ／ ${formatNumber(resultShown.sasche.laneCount)}丁の固定出荷パターンを使い、SKUごとの出荷長は ${outputText} です。必要納品長 ${formatNumber(resultShown.film.requiredLengthM)}m に対する未使用長さは ${formatNumber(resultShown.film.lossM)}m、稼働率は ${formatNumber(D(resultShown.film.requiredLengthM).div(resultShown.film.effectiveLengthM).times(100).toString(), 1)}%です。`
 	                        : `国内調達は幅${formatNumber(resultShown.sasche.matchedWidthMm)}mm ／ ${formatNumber(resultShown.sasche.laneCount)}丁 ／ ${formatNumber(resultShown.sasche.printTierM)}m印刷グレードの固定出荷パターン（出荷長 ${formatNumber(resultShown.film.orderLengthM)}m）を採用しています。必要納品長 ${formatNumber(resultShown.film.requiredLengthM)}m に対する未使用長さは ${formatNumber(resultShown.film.lossM)}m、稼働率は ${formatNumber(D(resultShown.film.requiredLengthM).div(resultShown.film.effectiveLengthM).times(100).toString(), 1)}%です。`;
 	                    })()
-	                    : `グラビアは、幅${formatNumber(normalizedGravureParameters.smallWidthThresholdMm)}mm以下で必要納品長が5,500mを超える場合は${formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・${formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作に切り替えます。それ以外は5,500m納品・6,000m製作パターンです。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品 ${formatNumber(resultShown.deliverablePatternLengthM ?? "0")}m / 製作 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
+	                    : `グラビアは、幅${formatNumber(normalizedGravureParameters.smallWidthThresholdMm)}mm以下で必要納品長が5,500mを超える場合は${formatNumber(normalizedGravureParameters.smallWidthOrderPatternLengthM)}m納品・${formatNumber(normalizedGravureParameters.smallWidthProductionPatternLengthM)}m製作に切り替えます。それ以外は5,500m納品・6,000m製作パターンです。現在 ${formatNumber(resultShown.orderPatternCount ?? 1)} パターン（納品合計 ${formatNumber(resultShown.film.effectiveLengthM)}m / 製作合計 ${formatNumber(resultShown.film.orderLengthM)}m）です。推奨発注数量は ${formatNumber(resultShown.recommendedQuantity ?? resultShown.quantity)} 枚です。`
 	                  : "「単価計算用数量」は発注したフィルムから実際に作れる枚数（ロス控除後・500枚単位）です。フィルム発注を100m単位で切り上げるため、発注枚数より多くなることがあります。"}
 	                </HoverInfo>
                 <div className="cost-breakdown">
@@ -2345,7 +2347,7 @@ export default function QuotationPage() {
                         )}
                       </tbody>
                     </table>
-                    <p className="chain">フィルム費用合計は円単位に四捨五入しています。単価は小数2桁まで表示できます。</p>
+                    <p className="chain">{resultPrintingMethod === "gravure" ? "グラビア／Y調達のフィルム費用合計は円単位に四捨五入しています。" : "デジタルのフィルム費用合計は内部計算値をそのまま使用します。"}</p>
                     <div className="chain-steps" data-testid="film-loss-chain">
                       {(() => {
                         const f = resultShown.film;
@@ -2398,7 +2400,7 @@ export default function QuotationPage() {
                                     </>
                                   )}
                                   <p>⑦ 海外配送はロスを含めず、納品可能長基準で計算します。ceil(納品可能長 {formatNumber(f.effectiveLengthM)}m ÷ {formatNumber(normalizedGravureParameters.overseasShippingUnitM)}m)×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatNumber(f.shippingTrips)}回×{formatCurrency(displayAmount(normalizedGravureParameters.overseasShippingPerTripYen))}＝{formatCurrency(displayAmount(f.overseasShipping))}。この金額は上記のフィルムm単価に含めて表示します。</p>
-                                  <p>⑥ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(resultShown.deliverablePatternLengthM ?? "1").times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
+                                  <p>⑥ 現在入力の稼働率は {formatNumber(Number(resultShown.gravure ? D(resultShown.film.requiredLengthM).div(f.effectiveLengthM).times(100) : 0), 1)}% です。80%未満では前パターンの推奨数量を表示します。</p>
                                 </>
                               )
                             ) : (
@@ -2407,7 +2409,7 @@ export default function QuotationPage() {
                                 <p>② SKUごとに 100m単位へ切り上げます。切り上げ後の合計は {formatNumber(String(sumRounded))}m です。</p>
                                 <p>③ 最低発注ルールを適用します。各SKUは {formatNumber(parameters.digitalFilmMinSkuM)}m 以上、合計は {formatNumber(parameters.digitalFilmMinTotalM)}m 以上のため、発注長さは {formatNumber(f.orderLengthM)}m{Number(f.orderLengthM) > sumRounded ? " になります（最低値を満たすまで切り上げました）" : " です（切り上げ後の長さがそのまま使えます）"}。</p>
                                 <p>④ フィルムのロス {formatNumber(f.lossM)}m を差し引きます。ロスは{f.skuCosts.some((sku) => sku.multiplier === 2) ? "生産検討長さ（発注×2倍）" : "発注長さ"}の {formatNumber(Number(parameters.lossRate) * 100, 3)}% で、最低 {formatNumber(parameters.lossMinM)}m を保証します。差し引いたあとの有効長は {formatNumber(f.effectiveLengthM)}m です。</p>
-                                <p>⑤ 参考として、有効なフィルム長から作れる枚数は {formatNumber(f.actualQuantity)}枚 です。計算は「有効 {formatNumber(f.effectiveLengthM)}m ÷ ピッチ × 列数」で、価格計算は500枚単位の {formatNumber(f.pricingQuantity)}枚 を使います。</p>
+                                <p>⑤ 参考として、有効なフィルム長から作れる枚数は {formatNumber(f.actualQuantity)}枚 です。計算は「有効 {formatNumber(f.effectiveLengthM)}m × 1000 ÷ ピッチ(mm) × 列数」で、価格計算は500枚単位の {formatNumber(f.pricingQuantity)}枚 を使います。</p>
                               </>
                             )}
                           </>
@@ -2426,7 +2428,7 @@ export default function QuotationPage() {
 	                            <td>
 	                              {resultShown.sasche
 	                                ? `${formatNumber(resultShown.sasche.colorCount)}色分を別計上`
-	                                : `MAX(¥32,000, 色数 × (原反幅+100mm) × ¥${formatNumber(normalizedGravureParameters.newCopperPlateUnitPriceYen)} × 42cm を切り上げ)`}
+                                : `色数 × MAX(¥32,000, ((原反幅+${formatNumber(normalizedGravureParameters.copperPlateWidthExtraMm)}mm)÷10)cm × ¥${formatNumber(normalizedGravureParameters.newCopperPlateUnitPriceYen)} × ${formatNumber(D(normalizedGravureParameters.copperPlateMinimumDiameterMm).div(10).toString())}cm)`}
 	                            </td>
 	                            <td data-testid="copper-plate-amount">{formatCurrency(displayAmount(resultShown.costComponents.copperPlate), 0)}</td>
 	                          </tr>
@@ -2511,30 +2513,46 @@ export default function QuotationPage() {
                     <p>変動加工費＝人件費×(生産時間＋検品時間)＋機械チャージ×生産時間＝{formatNumber(parameters.laborPerHour)}×({resultShown ? formatNumber(resultShown.productionHours) : "-"}＋{resultShown ? formatNumber(resultShown.inspectionHours) : "-"})h＋{formatNumber(parameters.machineChargePerHour)}×{resultShown ? formatNumber(resultShown.productionHours) : "-"}h</p>
                     <p>ロット固定＝({formatNumber(parameters.setupTime)}＋{formatNumber(parameters.cleanupTime)})h×({formatNumber(parameters.laborPerHour)}＋{formatNumber(parameters.machineChargePerHour)})円/h</p>
                     <p>カスタム費用＝{form.custom ? formatCurrency(displayAmount(parameters.customPouchCharge)) : "0"}（カスタム区分時のみ）</p>
-                    <p>総原価＝フィルム＋バルク＋変動加工＋ロット固定</p>
-                    <p>販売単価＝総原価/枚÷(1−利益率)</p>
+                    <p>総原価＝フィルム＋バルク＋変動加工＋ロット固定＋カスタム＋銅版</p>
+                    <p>参考販売単価（原価シミュレーター表）＝総原価/枚÷(1−利益率)</p>
+                    <p>見積書単価＝充填・加工＋フィルム＋金型は各原価/枚÷(1−利益率)、銅版費は各原価/枚÷(1−10%)</p>
                   </div>
                   <div className="formula-group">
                     <h4>フィルム費用</h4>
-                    <table className="table formula-vars"><tbody>
-                      <tr><th scope="row">原反幅</th><td>{effectiveSize.webWidthMm} mm</td><td>{form.custom ? "カスタムの左右幅から、1列あたりのフィルム原反幅を自動で求めます。" : "サイズマスタに登録された確定値です。"}</td></tr>
-                      <tr><th scope="row">価格帯</th><td>{effectiveSize.priceBand === "lte570" ? "570mm以下" : "571〜740mm"}</td><td>原反幅で判定します。単価は「計算パラメータ調整＞価格帯別フィルム単価」で確認・変更できます。</td></tr>
-                      <tr><th scope="row">適用m単価</th><td>{formatCurrency(displayAmount(resultShown.film.unitPrice))} /m</td><td>発注長さ（500m・1000m・1500mの帯）と価格帯から決まります。</td></tr>
-                      <tr><th scope="row">ピッチ加算</th><td>{formatNumber(effectiveSize.pitchAddMm)} mm</td><td>製品の長さに加えるシールや運送のための余白です。ピッチ＝製品長さ＋ピッチ加算です。</td></tr>
-                      <tr><th scope="row">生産列数</th><td>{effectiveSize.lanes} 列</td><td>フィルム原反を何列並べて生産するかを表します。サイズマスタに登録された確定値です。</td></tr>
-                      <tr><th scope="row">フィルムロス率</th><td>{formatNumber(Number(parameters.lossRate) * 100, 3)}%</td><td>印刷や搬送で出るフィルムロスの割合です。発注長さに対して計算します。</td></tr>
-                      <tr><th scope="row">最小ロス</th><td>{formatNumber(parameters.lossMinM)} m</td><td>ロス率によらず、必ず確保する最低のロス長です。</td></tr>
-                      <tr><th scope="row">SKU最低発注</th><td>各SKU≥{formatNumber(parameters.digitalFilmMinSkuM)}m／合計≥{formatNumber(parameters.digitalFilmMinTotalM)}m</td><td>この長さに満たない場合は、最低発注長へ自動的に修正します。</td></tr>
-                      <tr><th scope="row">国内・海外配送</th><td>{formatCurrency(displayAmount(parameters.domesticShippingPerTrip))} ＋ {formatCurrency(displayAmount(parameters.overseasShippingPerTrip))} /回</td><td>配送単位（{shippingUnitLabel(effectiveSize.webWidthMm, parameters)}m/回）ごとに回数を切り上げて、費用に含めます。</td></tr>
-                      <tr><th scope="row">通関料</th><td>{formatCurrency(displayAmount(parameters.customsPerTrip))} /回</td><td>フィルム費が{formatCurrency(displayAmount(parameters.customsThreshold))}を超える場合は、回数に関係なく一括{formatCurrency(displayAmount(parameters.customsHighCharge))}を適用します。</td></tr>
-                    </tbody></table>
-                    <p>必要生産長さ＝発注枚数÷(1−{formatNumber(Number(parameters.lossRate) * 100, 3)}%)×({form.lengthMm}＋{formatNumber(effectiveSize.pitchAddMm)}mm)÷1000÷{effectiveSize.lanes}列</p>
-                    <p>SKU別必要長さ＝各SKUの発注枚数÷(1−{formatNumber(Number(parameters.lossRate) * 100, 3)}%)×ピッチ÷1000÷{effectiveSize.lanes}列。SKU別に100m切上げ、各SKU≥{formatNumber(parameters.digitalFilmMinSkuM)}m・合計≥{formatNumber(parameters.digitalFilmMinTotalM)}m</p>
-                    <p>SKU別フィルム費＝発注長さ×{formatCurrency(displayAmount(resultShown.film.unitPrice))}/m</p>
-                    <p>配送回数＝ceil(必要生産長さ×{effectiveSize.prodMultiplier}÷{shippingUnitLabel(effectiveSize.webWidthMm, parameters)}m)</p>
-                    <p>フィルム総額＝SKUフィルム費合計＋国内配送＋海外配送＋通関料</p>
+                    {resultPrintingMethod === "gravure" ? (
+                      <>
+                        <table className="table formula-vars"><tbody>
+                          <tr><th scope="row">原反幅</th><td>{formatNumber(resultShown.sasche?.matchedWidthMm ?? resultShown.gravure?.materialWidthMm ?? effectiveSize.webWidthMm)} mm</td><td>選択した調達候補の実幅です。</td></tr>
+                          <tr><th scope="row">適用販売m単価</th><td>{formatCurrency(displayAmount(resultShown.film.unitPrice), 2)} /m</td><td>確定したフィルム費用合計を出荷・製作長で割って算出します。</td></tr>
+                          <tr><th scope="row">発注パターン</th><td>{formatNumber(resultShown.orderPatternCount ?? 1)} 回</td><td>{resultShown.sasche ? "国内Y調達はSKUごとに独立発注します。" : "韓国輸入は納品パターンを切り上げて発注します。"}</td></tr>
+                          <tr><th scope="row">ピッチ</th><td>{formatNumber(D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString())} mm</td><td>製品長さ＋ピッチ加算です。</td></tr>
+                        </tbody></table>
+                        <p>必要納品長さ＝発注枚数÷(1−{formatNumber(Number(parameters.lossRate) * 100, 3)}%)×ピッチ÷1000÷{effectiveSize.lanes}列</p>
+                        <p>フィルム総額＝{formatCurrency(displayAmount(resultShown.film.filmTotal))}（銅版費は別計上）</p>
+                      </>
+                    ) : (
+                      <>
+                        <table className="table formula-vars"><tbody>
+                          <tr><th scope="row">原反幅</th><td>{effectiveSize.webWidthMm} mm</td><td>{form.custom ? "カスタムの左右幅から、1列あたりのフィルム原反幅を自動で求めます。" : "サイズマスタに登録された確定値です。"}</td></tr>
+                          <tr><th scope="row">価格帯</th><td>{effectiveSize.priceBand === "lte570" ? "570mm以下" : "571〜740mm"}</td><td>原反幅で判定します。単価は「計算パラメータ調整＞価格帯別フィルム単価」で確認・変更できます。</td></tr>
+                          <tr><th scope="row">適用m単価</th><td>{formatCurrency(displayAmount(resultShown.film.unitPrice))} /m</td><td>発注長さ（500m・1000m・1500mの帯）と価格帯から決まります。SKU混在時は加重平均になる場合があります。</td></tr>
+                          <tr><th scope="row">ピッチ加算</th><td>{formatNumber(effectiveSize.pitchAddMm)} mm</td><td>製品の長さに加えるシールや運送のための余白です。ピッチ＝製品長さ＋ピッチ加算です。</td></tr>
+                          <tr><th scope="row">生産列数</th><td>{effectiveSize.lanes} 列</td><td>フィルム原反を何列並べて生産するかを表します。サイズマスタに登録された確定値です。</td></tr>
+                          <tr><th scope="row">フィルムロス率</th><td>{formatNumber(Number(parameters.lossRate) * 100, 3)}%</td><td>印刷や搬送で出るフィルムロスの割合です。発注長さに対して計算します。</td></tr>
+                          <tr><th scope="row">最小ロス</th><td>{formatNumber(parameters.lossMinM)} m</td><td>ロス率によらず、必ず確保する最低のロス長です。</td></tr>
+                          <tr><th scope="row">SKU最低発注</th><td>各SKU≥{formatNumber(parameters.digitalFilmMinSkuM)}m／合計≥{formatNumber(parameters.digitalFilmMinTotalM)}m</td><td>この長さに満たない場合は、最低発注長へ自動的に修正します。</td></tr>
+                          <tr><th scope="row">国内・海外配送</th><td>{formatCurrency(displayAmount(parameters.domesticShippingPerTrip))} ＋ {formatCurrency(displayAmount(parameters.overseasShippingPerTrip))} /回</td><td>配送単位（{shippingUnitLabel(effectiveSize.webWidthMm, parameters)}m/回）ごとに回数を切り上げて、費用に含めます。</td></tr>
+                          <tr><th scope="row">通関料</th><td>{formatCurrency(displayAmount(parameters.customsPerTrip))} /回</td><td>フィルム費が{formatCurrency(displayAmount(parameters.customsThreshold))}を超える場合は、回数に関係なく一括{formatCurrency(displayAmount(parameters.customsHighCharge))}を適用します。</td></tr>
+                        </tbody></table>
+                        <p>必要生産長さ＝発注枚数÷(1−{formatNumber(Number(parameters.lossRate) * 100, 3)}%)×({form.lengthMm}＋{formatNumber(effectiveSize.pitchAddMm)}mm)÷1000÷{effectiveSize.lanes}列</p>
+                        <p>SKU別必要長さ＝各SKUの発注枚数÷(1−{formatNumber(Number(parameters.lossRate) * 100, 3)}%)×ピッチ÷1000÷{effectiveSize.lanes}列。SKU別に100m切上げ、各SKU≥{formatNumber(parameters.digitalFilmMinSkuM)}m・合計≥{formatNumber(parameters.digitalFilmMinTotalM)}m</p>
+                        <p>SKU別フィルム費＝発注長さ×対応価格帯のm単価</p>
+                        <p>配送回数＝ceil(発注長さ合計×{effectiveSize.prodMultiplier}÷{shippingUnitLabel(effectiveSize.webWidthMm, parameters)}m)</p>
+                        <p>フィルム総額＝SKUフィルム費合計＋国内配送＋海外配送＋通関料</p>
+                      </>
+                    )}
                   </div>
-                  <p className="help">表示は小数第2位四捨五入、内部計算はDecimal精度を維持します。</p>
+                  <p className="help">表示は小数第2位に切り上げ、内部計算はDecimal精度を維持します。</p>
                 </details>
               </>
             )}

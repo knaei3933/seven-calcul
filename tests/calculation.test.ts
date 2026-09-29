@@ -190,6 +190,28 @@ describe("multi-SKU film aggregation", () => {
     expect(result.film.filmBaseCost).toBe("219000");
   });
 
+  it("serializes priced film costs for every digital SKU", () => {
+    const result = calculatePouchCost({
+      spec: { ...baseSpec, sizeKey: "round-50x60", connectedChambers: 1, skuCount: 2 },
+      quantity: "10000",
+      printingMethod: "digital",
+      parameters: { sellerProfitRate: "0" },
+    });
+    expect(result.film.skuCosts.map((sku) => sku.filmCost)).toEqual(["98400", "98400"]);
+    expect(result.film.skuCosts.reduce((total, sku) => total + Number(sku.filmCost), 0)).toBe(Number(result.film.filmBaseCost));
+  });
+
+  it("grows a normalized digital order when loss rounding would leave it one piece short", () => {
+    const result = calculatePouchCost({
+      spec: { ...baseSpec, sizeKey: "tube-35x60", connectedChambers: 1, skuCount: 1 },
+      quantity: "25455",
+      printingMethod: "digital",
+      parameters: { sellerProfitRate: "0" },
+    });
+    expect(Number(result.film.actualQuantity)).toBeGreaterThanOrEqual(25455);
+    expect(result.film.orderLengthM).toBe("600");
+  });
+
   it("keeps 35mm sizes on 356mm single production at or below 900m", () => {
     // 必要長 ≈ 366.7m ≤ 900m → 1倍生産: 最小発注500m（合計最低適用）, 単価 570mm以下 328円/m
     const result = calculatePouchCost({
@@ -273,6 +295,17 @@ describe("gravure roll integration", () => {
     expect(Number(result.film.filmTotal)).toBeGreaterThan(0);
   });
 
+  it("does not automatically select a physically short domestic gravure roll", () => {
+    const result = calculatePouchCost({
+      spec: { ...baseSpec, sizeKey: "tube-35x80", connectedChambers: 1, colorCount: 4 },
+      quantity: "80000",
+      printingMethod: "gravure",
+    });
+
+    expect(result.sasche?.outputLengthM).toBe("3400");
+    expect(Number(result.film.requiredLengthM)).toBeLessThanOrEqual(Number(result.film.effectiveLengthM));
+  });
+
   it("replaces only film cost, keeps processing unchanged, and separates copper plates", () => {
     const result = calculatePouchCost({
       spec: { ...baseSpec, sizeKey: "mouthwash-45x145", connectedChambers: 1 },
@@ -347,6 +380,40 @@ describe("gravure roll integration", () => {
 
     expect(result.gravure?.copperPlateCount).toBe(5);
     expect(Number(result.copperPlateCost)).toBe(145600);
+  });
+
+  it("reports one-pattern delivery length separately from the multi-pattern total", () => {
+    const requestSpec: PouchSpec = {
+      ...baseSpec,
+      sizeKey: "tube-35x80",
+      connectedChambers: 1,
+      colorCount: 4,
+      skuCount: 1,
+      skuQuantities: ["500000"],
+      skuColorCounts: ["4"],
+    };
+    const request = {
+      spec: requestSpec,
+      quantity: "500000",
+      printingMethod: "digital" as const,
+      parameters: defaultParameters,
+      recommendationMode: true,
+      targetMargins: ["0.3", "0.25", "0.2"],
+    };
+    const candidate = calculatePouchCost(request).recommendationCandidates
+      ?.find((item) => item.route === "K" && item.gravureRoll?.smallWidthTier);
+    expect(candidate).toBeDefined();
+    expect(candidate!.gravureRoll?.orderPatternCount).toBe(2);
+
+    const selected = calculatePouchCost({
+      ...request,
+      selectedCandidateId: candidate!.id,
+      selectedCandidateTargetMargins: request.targetMargins,
+    });
+    expect(selected.orderPatternCount).toBe(2);
+    expect(selected.deliverablePatternLengthM).toBe("11000");
+    expect(Number(selected.film.effectiveLengthM)).toBe(22000);
+    expect(Number(selected.film.orderLengthM)).toBe(24000);
   });
 });
 

@@ -1,6 +1,11 @@
 import { D } from "./decimal";
 import type { CostResult } from "./calculation";
 import type { PrintingMethod } from "./types";
+import {
+  defaultGravureRollParameters,
+  GRAVURE_ROLL_COPPER_PLATE_MINIMUM_YEN,
+  type GravureRollParameters,
+} from "./gravure-roll";
 
 export type PurchaseOrderSnapshot = {
   printingMethod: PrintingMethod;
@@ -12,6 +17,8 @@ export type PurchaseOrderSnapshot = {
   lossM: string;
   lossRate: string;
   webWidthMm: number;
+  webWidthsMm?: number[];
+  filmCostYen?: string;
   lanes: number;
   pitchMm: string;
   prodMultiplier: number;
@@ -40,6 +47,7 @@ export type PurchaseOrderSnapshot = {
   copperPlate?: {
     quantity: number;
     plateWidthMm: string;
+    // Legacy serialized contract. The value is centimeters despite the name.
     diameterMm: number;
     minimumPriceYen: string;
     unitPriceYen: string;
@@ -55,6 +63,7 @@ export type PurchaseContext = {
   prodMultiplier: number;
   colorCount: number;
   lossRate: string;
+  gravureParameters?: GravureRollParameters;
 };
 
 export function activeMaterialWidthMm(result: CostResult, fallback?: number): number | null {
@@ -66,6 +75,10 @@ export function buildPurchaseOrderSnapshot(result: CostResult, context: Purchase
   const skuColorCounts = result.film.skuCosts.length > 0
     ? result.film.skuCosts.map((sku) => sku.colorCount)
     : [String(context.colorCount)];
+  const activeWidthMm = activeMaterialWidthMm(result, context.webWidthMm);
+  const webWidthsMm = result.film.skuCosts.length > 0
+    ? result.film.skuCosts.map((sku) => sku.webWidthMm)
+    : activeWidthMm == null ? [] : [activeWidthMm];
 
   return {
     printingMethod: result.film.skuCosts.length > 0 || !result.gravure ? "digital" : "gravure",
@@ -76,7 +89,9 @@ export function buildPurchaseOrderSnapshot(result: CostResult, context: Purchase
     effectiveLengthM: result.film.effectiveLengthM,
     lossM: result.film.lossM,
     lossRate: context.lossRate,
-    webWidthMm: activeMaterialWidthMm(result, context.webWidthMm) ?? context.webWidthMm,
+    webWidthMm: activeWidthMm ?? context.webWidthMm,
+    webWidthsMm,
+    filmCostYen: result.film.filmTotal,
     lanes: context.lanes,
     pitchMm: context.pitchMm,
     prodMultiplier: context.prodMultiplier,
@@ -104,9 +119,13 @@ export function buildPurchaseOrderSnapshot(result: CostResult, context: Purchase
     gravureLossM: result.film.lossM,
     copperPlate: result.gravure && result.gravure.copperPlateCount > 0 ? {
       quantity: result.gravure.copperPlateCount,
-      plateWidthMm: D(result.gravure.finalHeatSealWidthMm).minus(10).plus(100).toString(),
-      diameterMm: 42,
-      minimumPriceYen: "32000",
+      plateWidthMm: D(result.gravure.materialWidthMm).plus(
+        (context.gravureParameters ?? defaultGravureRollParameters()).copperPlateWidthExtraMm,
+      ).toString(),
+      diameterMm: D((context.gravureParameters ?? defaultGravureRollParameters()).copperPlateMinimumDiameterMm)
+        .div(10)
+        .toNumber(),
+      minimumPriceYen: GRAVURE_ROLL_COPPER_PLATE_MINIMUM_YEN,
       unitPriceYen: result.gravure.copperPlateUnitPriceYen,
       priceYen: result.gravure.copperPlateCostYen,
     } : undefined,

@@ -103,6 +103,7 @@ export type CalculationChecklistSnapshot = {
     colorCount: string;
     requiredLengthM: string;
     orderLengthM: string;
+    unitPriceYen?: string;
     multiplier: number;
     webWidthMm: number;
     appliedBand: string;
@@ -159,6 +160,7 @@ export type CalculationChecklistContext = {
     colorCount: string;
     requiredLengthM?: string;
     orderLengthM?: string;
+    unitPriceYen?: string;
     multiplier?: number;
     webWidthMm?: number;
     appliedBand?: string;
@@ -234,6 +236,7 @@ export function buildCalculationChecklistSnapshot(
         colorCount: contextSku.colorCount ?? skuCost?.colorCount ?? "0",
         requiredLengthM: contextSku.requiredLengthM ?? skuCost?.requiredLengthM ?? result.film.requiredLengthM,
         orderLengthM: contextSku.orderLengthM ?? skuCost?.orderLengthM ?? result.film.orderLengthM,
+        unitPriceYen: contextSku.unitPriceYen ?? skuCost?.unitPriceYen,
         multiplier: contextSku.multiplier ?? skuCost?.multiplier ?? 1,
         webWidthMm: skuCost?.webWidthMm
           ?? (result.gravure ? activeWidthMm : contextSku.webWidthMm ?? activeWidthMm)

@@ -50,7 +50,7 @@ test("fresh selected gravure candidate carries film planning and cost into the q
   await page.getByRole("link", { name: "見積書発行" }).click();
   await expect(page).toHaveURL(/\/quote$/);
   await expect(page.getByTestId("quote-source")).toContainText("原価計算結果連携済み");
-  await expect(page.getByTestId("film-meter-price")).toContainText(/￥[0-9,]+\s*\/m/);
+  await expect(page.getByTestId("film-meter-price")).toContainText(/￥[0-9,.]+\s*\/m/);
   await expect(page.getByTestId("film-pouch-price")).toContainText(/￥[0-9,.]+\s*\/枚/);
   await expect(page.getByTestId("film-order-length")).toContainText(`${orderLengthM.replace(/,/g, "")} m`);
   await expect(page.getByTestId("stale-quote-warning")).toHaveCount(0);

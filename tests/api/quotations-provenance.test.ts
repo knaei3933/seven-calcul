@@ -235,6 +235,51 @@ describe("quotation calculation provenance", () => {
     expect(payload.record.resultHash).toBe(originalResult.audit.resultJsonSha256);
   });
 
+  it("rejects tampered purchase-order economics and route metadata", async () => {
+    for (const tamper of [
+      (order: Record<string, unknown>) => { order.filmCostYen = "1"; },
+      (order: Record<string, unknown>) => { order.procurementRoute = "K"; },
+      (order: Record<string, unknown>) => { order.webWidthsMm = [1, 2]; },
+	      (order: Record<string, unknown>) => { order.lossM = "999"; },
+	      (order: Record<string, unknown>) => { order.skuOrderLengthsM = ["1", "2"]; },
+	      (order: Record<string, unknown>) => {
+	        const copper = order.copperPlate as Record<string, unknown> | undefined;
+	        if (copper) copper.plateWidthMm = "1";
+	      },
+	      (order: Record<string, unknown>) => {
+	        const copper = order.copperPlate as Record<string, unknown> | undefined;
+	        if (copper) copper.diameterMm = 1;
+	      },
+	      (order: Record<string, unknown>) => {
+	        const copper = order.copperPlate as Record<string, unknown> | undefined;
+	        if (copper) copper.minimumPriceYen = "1";
+	      },
+	    ]) {
+      const body = quotationBody(`S7-PROVENANCE-PO-${Date.now()}-${Math.random()}`);
+      const order = body.payload.purchaseOrder as Record<string, unknown>;
+      tamper(order);
+      const response = await post(body);
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: "calculation_provenance_invalid" });
+    }
+
+    const checklistBody = quotationBody(`S7-PROVENANCE-CHECKLIST-${Date.now()}-${Math.random()}`);
+    const checklist = checklistBody.payload.calculationChecklistSnapshot as { film: { filmBaseCost: string } };
+    checklist.film.filmBaseCost = "1";
+    const checklistResponse = await post(checklistBody);
+	    expect(checklistResponse.status).toBe(400);
+	    await expect(checklistResponse.json()).resolves.toEqual({ error: "calculation_provenance_invalid" });
+
+	    const copperChecklistBody = quotationBody(`S7-PROVENANCE-COPPER-${Date.now()}-${Math.random()}`);
+	    const copperChecklist = copperChecklistBody.payload.calculationChecklistSnapshot as {
+	      gravure?: { copperPlateUnitPriceYen: string };
+	    };
+	    if (copperChecklist.gravure) copperChecklist.gravure.copperPlateUnitPriceYen = "1";
+	    const copperChecklistResponse = await post(copperChecklistBody);
+	    expect(copperChecklistResponse.status).toBe(400);
+	    await expect(copperChecklistResponse.json()).resolves.toEqual({ error: "calculation_provenance_invalid" });
+	  });
+
 	  it("accepts an original multi-SKU gravure calculation with no selected candidate", async () => {
     const response = await post(quotationBody("S7-PROVENANCE-GRAVURE-ORIGINAL", gravureDraft, gravureResult));
     expect(response.status).toBe(201);
@@ -306,6 +351,34 @@ describe("quotation calculation provenance", () => {
 
 	    const body = quotationBody("S7-PROVENANCE-Y-MULTI", draft, selectedY);
 	    const response = await post(body);
+	    expect(response.status).toBe(201);
+	  });
+
+	  it("accepts a selected small-width Korean request using its actual production pattern", async () => {
+	    const smallWidthRequest: CalculationInput = {
+	      ...baseInput,
+	      spec: { ...spec, sizeKey: "tube-35x80", colorCount: 4 },
+	      quantity: "250000",
+	      selectedCandidateId: "",
+	      selectedCandidateTargetMargins: baseInput.targetMargins,
+	    };
+	    const candidate = calculatePouchCost(smallWidthRequest).recommendationCandidates
+	      ?.find((item) => item.route === "K" && item.gravureRoll?.smallWidthTier);
+	    expect(candidate).toBeDefined();
+
+	    const selectedKRequest: CalculationInput = {
+	      ...smallWidthRequest,
+	      selectedCandidateId: candidate!.id,
+	      selectedCandidateTargetMargins: ["0.2", "0.25", "0.3"],
+	    };
+	    const selectedK = calculatePouchCost(selectedKRequest);
+	    expect(selectedK.film.orderLengthM).toBe("12000");
+
+	    const response = await post(quotationBody(
+	      "S7-PROVENANCE-K-SMALL",
+	      draftFor(selectedK, selectedKRequest),
+	      selectedK,
+	    ));
 	    expect(response.status).toBe(201);
 	  });
 

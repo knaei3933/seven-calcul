@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { D, Decimal } from "@/lib/decimal";
 import { defaultParameters } from "@/lib/constants";
-import { defaultGravureRollParameters } from "@/lib/gravure-roll";
-import { buildPrintCandidates, createPrintCandidateContext } from "@/lib/print-recommendation";
+import { calculateGravureRollCost, defaultGravureRollParameters } from "@/lib/gravure-roll";
+import { buildPrintCandidates, candidateSkuOrderLengthM, createPrintCandidateContext } from "@/lib/print-recommendation";
 import { calculatePouchCost, calculateSelectedCandidateCore } from "@/lib/calculation";
 import { buildSascheCandidates } from "@/lib/sasche-gravure";
 import type { PouchSpec } from "@/lib/types";
@@ -340,5 +340,130 @@ describe("print recommendation engine", () => {
     });
     expect(selected.film.orderLengthM).toBe("3400");
     expect(D(selected.film.filmTotal).eq(D(candidate!.filmTotalYen))).toBe(true);
+  });
+
+  it("keeps three-SKU domestic combinations structurally replayable", () => {
+    const spec: PouchSpec = {
+      ...baseSpec,
+      sizeKey: "tube-50x90",
+      skuCount: 3,
+      skuQuantities: ["10000", "10000", "10000"],
+      skuFillMlPerChamber: ["3", "3", "3"],
+      skuColorCounts: ["4", "4", "4"],
+    };
+    const input = {
+      spec,
+      quantity: "30000",
+      printingMethod: "digital" as const,
+      parameters: defaultParameters,
+      gravureParameters: defaultGravureRollParameters(),
+      recommendationMode: true,
+    };
+    const original = calculatePouchCost(input);
+    expect(original.recommendationCandidates?.length).toBeGreaterThan(0);
+    for (const candidate of original.recommendationCandidates ?? []) {
+      expect(candidate.adjustedSkuQuantities).toHaveLength(spec.skuCount);
+      expect(D(candidate.adjustedSkuQuantities.reduce((total, value) => total.plus(D(value)), D(0))).eq(D(candidate.adjustedQuantity))).toBe(true);
+    }
+    const domestic = original.recommendationCandidates?.find((candidate) => candidate.route === "Y");
+    expect(domestic?.sasche?.skuOutputLengthsM).toHaveLength(3);
+  });
+
+  it("preserves asymmetric SKU demand in digital fulfillment and shortage references", () => {
+    const displayed = buildPrintCandidates(context({
+      ...baseSpec,
+      sizeKey: "tube-50x90",
+      skuCount: 2,
+      skuQuantities: ["1000", "46000"],
+      skuFillMlPerChamber: ["3", "3"],
+      skuColorCounts: ["4", "4"],
+    }, "47000"));
+    const fulfilling = displayed.find((candidate) => candidate.route === "D" && candidate.isFulfilling);
+    expect(fulfilling).toBeDefined();
+    expect(fulfilling!.adjustedSkuQuantities).toEqual(["1000", "46000"]);
+    expect(D(fulfilling!.adjustedSkuQuantities.reduce((total, value) => total.plus(D(value)), D(0))).eq(D(fulfilling!.adjustedQuantity))).toBe(true);
+
+    const shortage = displayed.find((candidate) => candidate.route === "D" && !candidate.isFulfilling);
+    expect(shortage).toBeDefined();
+    expect(shortage!.adjustedSkuQuantities.every((quantity, index) => D(quantity).lte(D("46000")))).toBe(true);
+    expect(D(shortage!.adjustedQuantity).lte(D("47000"))).toBe(true);
+  });
+
+  it("does not prune the only per-SKU fulfilling domestic combination", () => {
+    const displayed = buildPrintCandidates(context({
+      ...baseSpec,
+      sizeKey: "round-60x80-2",
+      skuCount: 3,
+      skuQuantities: ["155891", "167758", "146489"],
+      skuFillMlPerChamber: ["3", "3", "3"],
+      skuColorCounts: ["4", "4", "4"],
+    }, "470138"));
+    const fulfilling = displayed.find((candidate) => candidate.route === "Y" && candidate.isFulfilling);
+    expect(fulfilling).toBeDefined();
+    expect(fulfilling!.adjustedSkuQuantities.every((quantity, index) => D(quantity).gte(D([
+      "155891", "167758", "146489",
+    ][index])))).toBe(true);
+  });
+
+  it("uses the small-width Korean tier from pouch width in recommendations", () => {
+    const input = {
+      spec: { ...baseSpec, skuQuantities: ["250000"], skuColorCounts: ["4"] },
+      quantity: "250000",
+      printingMethod: "digital" as const,
+      parameters: defaultParameters,
+      gravureParameters: defaultGravureRollParameters(),
+      recommendationMode: true,
+    };
+    const candidate = calculatePouchCost(input).recommendationCandidates
+      ?.find((item) => item.route === "K");
+    expect(candidate).toBeDefined();
+    expect(candidate!.orderLengthM).toBe("12000");
+    expect(candidate!.gravureRoll?.smallWidthTier).toBe(true);
+
+    const direct = calculateGravureRollCost({
+      requiredLengthM: "5972.222222222222222222222222222222222222",
+      materialWidthMm: 500,
+      pouchWidthMm: 35,
+      colors: "4",
+      quantity: "250000",
+      parameters: defaultGravureRollParameters(),
+    });
+    expect(D(candidate!.filmTotalYen).toDecimalPlaces(0).toString()).toBe(
+      D(direct.customsBaseCostYen).plus(direct.customsCostYen).plus(direct.overseasShippingCostYen)
+        .times("1.12")
+        .toDecimalPlaces(0)
+        .toString(),
+    );
+  });
+
+  it("allocates Korean SKU order lengths from actual selected patterns", () => {
+    const spec: PouchSpec = {
+      ...baseSpec,
+      colorCount: 4,
+      skuCount: 2,
+      skuQuantities: ["250000", "550000"],
+      skuColorCounts: ["4", "4"],
+    };
+    const candidate = buildPrintCandidates(context(spec, "800000"))
+      .find((item) => item.route === "K" && item.gravureRoll?.smallWidthTier);
+    expect(candidate).toBeDefined();
+    expect(candidate!.skuPatternCounts).toEqual([1, 2]);
+    expect(candidateSkuOrderLengthM(candidate!, 0, "0")).toBe("12000");
+    expect(candidateSkuOrderLengthM(candidate!, 1, "0")).toBe("24000");
+  });
+
+  it("compares large-lot digital candidates by production-equivalent length", () => {
+    const displayed = buildPrintCandidates(context({
+      ...baseSpec,
+      sizeKey: "tube-35x60",
+      skuQuantities: ["60000"],
+      skuColorCounts: ["4"],
+    }, "60000"));
+    const candidate = displayed.find((item) => item.route === "D" && item.isFulfilling);
+    expect(candidate).toBeDefined();
+    expect(candidate!.orderLengthM).toBe("600");
+    expect(candidate!.effectiveLengthM).toBe("1080");
+    expect(candidate!.surplusLengthM).toBe("100");
+    expect(candidate!.shortageLengthM).toBe("0");
   });
 });

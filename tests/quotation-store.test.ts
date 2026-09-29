@@ -463,6 +463,7 @@ describe("quotation persistence with a manually edited selling price", () => {
 
     expect(draft.purchaseOrder?.orderLengthM).toBe("3400");
     expect(draft.purchaseOrder?.procurementRoute).toBe("Y");
+    expect(draft.purchaseOrder?.copperPlate?.diameterMm).toBe(42);
     expect(draft.purchaseOrder?.skuOrderLengthsM).toEqual(["1700", "1700"]);
     expect(draft.purchaseOrder?.skuOrderDetails.map((sku) => ({
       quantity: Number(sku.quantity),

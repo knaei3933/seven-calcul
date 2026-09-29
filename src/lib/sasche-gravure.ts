@@ -147,7 +147,11 @@ function buildSascheRows({ webWidthMm, requiredLengthM, quantity, colorCount }: 
 
 export function selectSascheCandidate(input: SascheSelectorInput): SascheCandidate | null {
   const candidates = buildSascheRows(input);
-  const acceptableCandidates = candidates.filter((candidate) => candidate.feasible);
+  // Automatic selection must physically cover the required length. Shortage
+  // rows remain available as explicit recommendation references only.
+  const acceptableCandidates = candidates.filter((candidate) => (
+    D(candidate.outputLengthM).gte(D(candidate.requiredLengthM))
+  ));
   const recommendedCandidate = acceptableCandidates.length > 0
     ? acceptableCandidates.reduce((best, candidate) =>
         D(candidate.filmTotalYen).lt(D(best.filmTotalYen)) ? candidate : best,
