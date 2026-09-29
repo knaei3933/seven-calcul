@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { calculatePouchCost } from "@/lib/calculation";
 import { defaultParameters } from "@/lib/constants";
 import { defaultGravureRollParameters } from "@/lib/gravure-roll";
-import { calculateAutomaticQuotation } from "@/lib/quotation-pricing";
+import { calculateAutomaticQuotation, COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
 import { D } from "@/lib/decimal";
 
 describe("automatic quotation pricing", () => {
@@ -35,5 +35,9 @@ describe("automatic quotation pricing", () => {
     expect(quote!.filmOrderLength.eq(D(candidate!.orderLengthM))).toBe(true);
     expect(quote!.display.filmAmount).toBe("384421");
     expect(quote!.display.filmPouchUnit).toBe("7.68842");
+    expect(quote!.copperCostPerPiece.eq(D(selected.copperPlateCostPerPiece))).toBe(true);
+    expect(quote!.copperSellingUnit.eq(
+      D(selected.copperPlateCostPerPiece).div(D(1).minus(COPPER_TARGET_MARGIN)),
+    )).toBe(true);
   });
 });

@@ -3,6 +3,7 @@ import { ceilTo, D, Decimal } from "./decimal";
 
 const FILM_METER_PRICE_MIN = D(380);
 const FILM_METER_PRICE_MAX = D(480);
+export const COPPER_TARGET_MARGIN = D("0.10");
 
 function recommendedFilmMeterUnit(orderLength: Decimal) {
   if (orderLength.gte(1500)) return D(380);
@@ -85,7 +86,7 @@ export function calculateAutomaticQuotation(
   const copperColorCount = D(result.gravure?.copperPlateCount ?? 1);
 
   const fillingSellingUnit = fillingCostPerPiece.div(D(1).minus(margin));
-  const copperSellingUnit = copperCostPerPiece.div(D(1).minus(margin));
+  const copperSellingUnit = copperCostPerPiece.div(D(1).minus(COPPER_TARGET_MARGIN));
   const filmSellingUnit = filmCostPerPiece.div(D(1).minus(margin));
   const customSaleBase = customLotCost.div(customQuantity).div(D(1).minus(margin));
   const customUnit = ceilTo(customSaleBase, 1000);

@@ -15,6 +15,7 @@ import {
   QUOTATION_RESTORE_KEY,
   SIMULATOR_STALE_STATUS_KEY,
 } from "@/lib/quotation-shared";
+import { COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
 
 const LAST_CHECKLIST_URL_KEY = "pouch-last-checklist-url-v1";
 import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
@@ -549,7 +550,7 @@ export default function PrintableQuotationPage() {
     const margin = parsedTargetMargin;
     const taxRate = parsedTaxRatePercent.div(100);
     const fillingSellingUnit = parsedFillingCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
-    const copperSellingUnit = parsedCopperCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
+    const copperSellingUnit = parsedCopperCost.div(D(1).minus(COPPER_TARGET_MARGIN));
     const filmSellingUnit = parsedFilmCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
     const customLotSaleBase = parsedCustomLotCost
       .div(parsedCustomQuantity)
@@ -1443,7 +1444,7 @@ export default function PrintableQuotationPage() {
               <strong>銅版費の計算確認（非印刷）</strong>
               <p>
                 原価 = {formatCurrency(parsedCopperCost.times(parsedQuantity).toString())}（{formatCurrency(D(parsedCopperCost.times(parsedQuantity)).div(parseDecimal(form.copperColorCount) ?? D(1)).toString())} /色）<br />
-                目標利益率 = {formatNumber(D(parsedTargetMargin).times(100).toString(), 1)}%<br />
+                銅版目標利益率 = {formatNumber(COPPER_TARGET_MARGIN.times(100).toString(), 0)}%<br />
                 見積金額 = {formatCurrency(shownTotals.copperAmount)}（{formatCurrency(shownTotals.copperColorUnit)} /色・1円単位切上げ）
               </p>
             </div>
