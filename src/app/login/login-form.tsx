@@ -1,10 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export default function LoginForm({ next }: { next: string }) {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -15,6 +13,7 @@ export default function LoginForm({ next }: { next: string }) {
     if (submitting) return;
     setError("");
     setSubmitting(true);
+    let waitingForBrowserNavigation = false;
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
@@ -25,12 +24,16 @@ export default function LoginForm({ next }: { next: string }) {
         setError("メールアドレスまたはパスワードが正しくありません。");
         return;
       }
-      router.replace(next as Parameters<typeof router.replace>[0]);
-      router.refresh();
+      // The API response installs the session cookie. A hard navigation makes
+      // the browser send that cookie to the protected RSC request immediately;
+      // replacing and refreshing the App Router concurrently can race on some
+      // production clients and leave the user on the login screen.
+      waitingForBrowserNavigation = true;
+      window.location.assign(next);
     } catch {
       setError("ログイン処理中にエラーが発生しました。");
     } finally {
-      setSubmitting(false);
+      if (!waitingForBrowserNavigation) setSubmitting(false);
     }
   };
 

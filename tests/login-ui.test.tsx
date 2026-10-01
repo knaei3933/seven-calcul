@@ -4,16 +4,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import LoginForm from "@/app/login/login-form";
 
-const replace = vi.fn();
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace }),
-}));
+const assign = vi.fn();
 
 describe("login form", () => {
   beforeEach(() => {
-    replace.mockClear();
+    assign.mockClear();
     vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal("location", { assign });
   });
 
   afterEach(() => {
@@ -33,7 +30,7 @@ describe("login form", () => {
     await user.type(screen.getByLabelText("パスワード"), "user-login-password");
     await user.click(screen.getByTestId("login-submit"));
 
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/history"));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/history"));
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/login", expect.objectContaining({ method: "POST" }));
   });
 
@@ -47,6 +44,6 @@ describe("login form", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("メールアドレスまたはパスワードが正しくありません。");
-    expect(replace).not.toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
   });
 });
