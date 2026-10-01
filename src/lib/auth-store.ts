@@ -102,6 +102,18 @@ function envAdminUsers(): EnvAdminUser[] {
       password: process.env.SECOND_ADMIN_PASSWORD ?? "",
     });
   }
+  if (process.env.THIRD_ADMIN_EMAIL) {
+    users.push({
+      id: 3,
+      email: normalizeEmail(process.env.THIRD_ADMIN_EMAIL),
+      name: process.env.THIRD_ADMIN_NAME?.trim() || "Administrator",
+      role: "admin",
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+      password: process.env.THIRD_ADMIN_PASSWORD ?? "",
+    });
+  }
   return users.filter((user) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user.email));
 }
 
