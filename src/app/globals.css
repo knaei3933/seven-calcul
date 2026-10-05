@@ -428,6 +428,12 @@ header .version-badge { display: none; }
   font-size: 9.6pt;
   overflow: visible;
 }
+.history-a4-fit {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
 .history-a4 + .history-a4 { margin-top: 18px; }
 .history-page2-header {
   display: flex;
@@ -831,12 +837,13 @@ header .version-badge { display: none; }
   .printable-detail .detail-scroll { display: block !important; overflow: visible !important; padding: 0 !important; }
   .history-a4 {
     width: 210mm !important;
+    height: 296mm !important;
     min-height: 296mm !important;
     margin: 0 auto !important;
     border: 0 !important;
     border-top: 2.2mm solid #1f3a5f !important;
     box-shadow: none !important;
-    overflow: visible !important;
+    overflow: hidden !important;
     print-color-adjust: exact !important;
     -webkit-print-color-adjust: exact !important;
   }
@@ -844,6 +851,14 @@ header .version-badge { display: none; }
     margin-top: 0 !important;
     break-before: page !important;
     page-break-before: always !important;
+  }
+  .history-a4-fit {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    /* Chrome/Edge PDF printing applies zoom before pagination. Unlike a pure
+       transform, this reflows the printed text and prevents clipped lines. */
+    zoom: var(--history-a4-fit-scale, 1);
   }
   .history-a4-section { margin-top: 4mm !important; padding-top: 2.5mm !important; }
   .history-a4-section header { margin-bottom: 2mm !important; }

@@ -303,6 +303,47 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
   const copperCostPerColor = copperColorCountValue.gt(0) ? copperCostTotal.div(copperColorCountValue) : D(0);
   const storedCostDifference = analysis.costUnit.minus(analysis.storedCostUnit);
   const profitVerificationDifference = finalProfit.minus(analysis.storedProfitUnit.times(analysis.quantity));
+  const fitContentRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+  useEffect(() => {
+    const fitForPrint = () => {
+      for (const content of fitContentRefs.current) {
+        if (!content) continue;
+        content.style.removeProperty("--history-a4-fit-scale");
+        // scrollHeight is measured before zoom is applied and therefore
+        // remains the unscaled content height; clientHeight is the A4 page box.
+        const availableHeight = content.clientHeight;
+        const requiredHeight = content.scrollHeight;
+        const scale = availableHeight > 0 && requiredHeight > availableHeight
+          ? availableHeight / requiredHeight
+          : 1;
+        content.style.setProperty("--history-a4-fit-scale", scale.toFixed(5));
+      }
+    };
+    const resetFit = () => {
+      for (const content of fitContentRefs.current) content?.style.removeProperty("--history-a4-fit-scale");
+    };
+    const printMedia = window.matchMedia("print");
+    const handleMediaChange = (event: MediaQueryListEvent) => {
+      if (event.matches) fitForPrint();
+      else resetFit();
+    };
+    window.addEventListener("beforeprint", fitForPrint);
+    window.addEventListener("afterprint", resetFit);
+    printMedia.addEventListener("change", handleMediaChange);
+    return () => {
+      window.removeEventListener("beforeprint", fitForPrint);
+      window.removeEventListener("afterprint", resetFit);
+      printMedia.removeEventListener("change", handleMediaChange);
+    };
+  }, [record.id]);
+
+  const printA4Document = () => {
+    setDetailTab("document");
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => window.print());
+    });
+  };
 
   return (
     <div className="history-detail-layer printable-detail" role="dialog" aria-modal="true" aria-labelledby="history-detail-title">
@@ -314,7 +355,7 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
             <p data-testid="history-film-composition">{record.customerName || "得意先未設定"} / {record.productName} / フィルム構成 {composition || DEFAULT_FILM_COMPOSITION}</p>
           </div>
           <div className="detail-header-actions">
-            <button className="button small" type="button" onClick={() => window.print()}>PDF出力</button>
+            <button className="button small" type="button" onClick={printA4Document}>PDF出力</button>
             {record.status === "approved" ? (
               <button className="button small" type="button" onClick={() => onPurchase(record)}>発注内容</button>
             ) : null}
@@ -331,6 +372,7 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
           {detailTab === "document" ? (
           <>
             <article className="a4-sheet history-a4" aria-label="見積詳細A4帳票">
+              <div className="history-a4-fit" ref={(element) => { fitContentRefs.current[0] = element; }}>
               <header className="sheet-header">
                 <div className="issuer">
                   <div className="issuer-logo">
@@ -414,8 +456,10 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
                   <div><span>利益率</span><strong>{formatNumber(finalProfitRate.toNumber(), 1)}%</strong></div>
                 </div>
               </section>
+              </div>
             </article>
               <article className="a4-sheet history-a4" aria-label="見積原価詳細A4帳票">
+              <div className="history-a4-fit" ref={(element) => { fitContentRefs.current[1] = element; }}>
                 <header className="history-page2-header">
                   <div>
                     <span>QUOTATION COST DETAIL</span>
@@ -540,7 +584,8 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
                   </dl>
                   <footer className="history-a4-footer">金額は保存済みDB値と表示overrideを優先して再構築しています。</footer>
                 </section>
-              </article>
+              </div>
+            </article>
           </>
           ) : (
           <>
