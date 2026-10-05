@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { GlobalHeader } from "@/components/global-header";
+import { notoSansJP, notoSansMono, notoSerifJP } from "./fonts";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   // 번역 확장 프로그램(Trancy 등)이 <html>에 속성을 주입해도 하이드레이션 경고가 발생하지 않도록 억제
   return (
-    <html lang="ja" suppressHydrationWarning>
+    <html lang="ja" className={`${notoSansJP.variable} ${notoSerifJP.variable} ${notoSansMono.variable}`} suppressHydrationWarning>
       <body suppressHydrationWarning>
         <GlobalHeader />
         {children}

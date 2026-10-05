@@ -88,6 +88,21 @@ test("A4 quotation page imports simulator costs and prepares PDF printing", asyn
   await expect(page.locator(".a4-sheet")).not.toContainText("適用利益率");
   await expect(page.locator(".a4-sheet")).not.toContainText("総原価");
 
+  await page.emulateMedia({ media: "print" });
+  await page.evaluate(() => window.dispatchEvent(new Event("beforeprint")));
+  await expect.poll(() => page.evaluate(async () => {
+    await document.fonts.ready;
+    return document.fonts.check("16px notoSerifJP");
+  })).toBe(true);
+  const quotationPdf = await page.pdf({
+    format: "A4",
+    printBackground: true,
+    margin: { top: 0, right: 0, bottom: 0, left: 0 },
+  });
+  expect(quotationPdf.toString("latin1").match(/\/Type\s*\/Page\b/g)).toHaveLength(1);
+  await page.emulateMedia({ media: "screen" });
+  await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+
   await page.getByRole("link", { name: "見積履歴" }).click();
   await expect(page).toHaveURL(/\/history$/);
   await page.getByTestId("history-search").fill("E2E株式会社");

@@ -258,6 +258,7 @@ function EditableText({ value, label, className, multiline = false, onCommit }: 
 
 export default function PrintableQuotationPage() {
   const router = useRouter();
+  const quoteFitRef = useRef<HTMLDivElement | null>(null);
   const [form, setForm] = useState<QuoteForm>(defaultQuote);
   const [sourceVersion, setSourceVersion] = useState("");
   const [storageLoaded, setStorageLoaded] = useState(false);
@@ -273,6 +274,25 @@ export default function PrintableQuotationPage() {
 	  const [expandedDesktopPanels, setExpandedDesktopPanels] = useState({ left: false, right: false });
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrderSnapshot | null>(null);
   const [calculationChecklistSnapshot, setCalculationChecklistSnapshot] = useState<CalculationChecklistSnapshot | null>(null);
+
+  useEffect(() => {
+    const fitForPrint = () => {
+      const content = quoteFitRef.current;
+      if (!content) return;
+      content.style.removeProperty("--quote-a4-fit-scale");
+      const scale = content.scrollHeight > content.clientHeight && content.clientHeight > 0
+        ? content.clientHeight / content.scrollHeight
+        : 1;
+      content.style.setProperty("--quote-a4-fit-scale", scale.toFixed(5));
+    };
+    const resetFit = () => quoteFitRef.current?.style.removeProperty("--quote-a4-fit-scale");
+    window.addEventListener("beforeprint", fitForPrint);
+    window.addEventListener("afterprint", resetFit);
+    return () => {
+      window.removeEventListener("beforeprint", fitForPrint);
+      window.removeEventListener("afterprint", resetFit);
+    };
+  }, []);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 1200px)");
@@ -1117,6 +1137,7 @@ export default function PrintableQuotationPage() {
 
         <div className="sheet-scroll">
           <article className="a4-sheet" aria-label="お見積書A4プレビュー" id="quote-preview">
+          <div className="quote-a4-fit" ref={quoteFitRef}>
           <header className="sheet-header">
             <div className="issuer">
               <div className="issuer-logo">
@@ -1301,6 +1322,7 @@ export default function PrintableQuotationPage() {
               <span className="seal" aria-hidden="true"><EditableText value={form.sealText} label="社内判文言" onCommit={(next) => update("sealText", next.trim())} /></span>
             </div>
           </footer>
+          </div>
           </article>
         </div>
 

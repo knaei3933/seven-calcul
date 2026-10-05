@@ -10,7 +10,7 @@ import Link from "next/link";
 import { defaultGravureRollParameters, type GravureRollParameters } from "@/lib/gravure-roll";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { QUOTATION_DRAFT_KEY, buildQuotationDraft } from "@/lib/quotation-draft";
-import { calculateAutomaticQuotation, type AutomaticQuotationTotals } from "@/lib/quotation-pricing";
+import { calculateAutomaticQuotation } from "@/lib/quotation-pricing";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calculations";
 import { activeMaterialWidthMm } from "@/lib/purchase-order";
 import { isCalculationRequest } from "@/lib/calculation-provenance";
@@ -1899,6 +1899,39 @@ export default function QuotationPage() {
     }
   }, [calculatedAt, customerDraft, form, machineBreakdown, normalizedGravureParameters, parameters, productionSpeedManual, serverResult, simulatorStateLoaded]);
 
+  useEffect(() => {
+    // Print the same simulator layout on every machine. Print media itself is
+    // only 210mm wide, so normalize desktop/mobile to canonical CSS widths and
+    // scale the complete UI to A4 paper.
+    const prepareUiPrint = () => {
+      // Use canonical print widths instead of each developer's browser window
+      // size. Every desktop therefore prints the same three-column layout and
+      // every mobile prints the same one-column layout.
+      const isMobile = window.matchMedia("(max-width: 1100px)").matches;
+      const viewportWidth = isMobile ? 390 : 1440;
+      const a4WidthPx = 793.700787;
+      document.body.dataset.simulatorPrint = "ui";
+      document.body.dataset.simulatorPrintViewport = viewportWidth > 1100 ? "desktop" : "mobile";
+      document.body.dataset.simulatorPrintWidth = String(viewportWidth);
+      document.body.style.width = `${viewportWidth}px`;
+      document.body.style.zoom = String(a4WidthPx / viewportWidth);
+    };
+    const resetUiPrint = () => {
+      delete document.body.dataset.simulatorPrint;
+      delete document.body.dataset.simulatorPrintViewport;
+      delete document.body.dataset.simulatorPrintWidth;
+      document.body.style.width = "";
+      document.body.style.zoom = "";
+    };
+    window.addEventListener("beforeprint", prepareUiPrint);
+    window.addEventListener("afterprint", resetUiPrint);
+    return () => {
+      window.removeEventListener("beforeprint", prepareUiPrint);
+      window.removeEventListener("afterprint", resetUiPrint);
+      resetUiPrint();
+    };
+  }, []);
+
   const lanesPerCycle = Number(form.lanes) > 0 ? Math.max(1, Math.floor(Number(form.lanes) / Number(form.connected))) : 1;
   const effectiveProductionSpeedPerMinute = Number(form.lanes) > 0
     ? Number(effectiveParameters.productionSpeedPerMinute) * lanesPerCycle / Number(form.lanes)
@@ -1926,7 +1959,7 @@ export default function QuotationPage() {
   })();
 
   return (
-    <main>
+    <main className="simulator-page">
       <div className="app-shell">
         <header className="app-header">
           <div><h1>パウチ参考原価・販売価格シミュレーター</h1><p>販売数量は連結後パウチ「枚」、充填は区画「室」で計算します。</p></div>
@@ -2625,7 +2658,7 @@ export default function QuotationPage() {
                     data-testid="simulator-print-pdf"
                     onClick={() => window.print()}
                   >
-                    A4出力（PDF）
+                    A4出力（UIそのまま）
                   </button>
                 ) : null}
 	              {resultShown ? (
@@ -2652,7 +2685,7 @@ export default function QuotationPage() {
 	                data-testid="simulator-print-pdf-mobile"
 	                onClick={() => window.print()}
 	              >
-	                A4出力（PDF）
+                A4出力（UIそのまま）
 	              </button>
 	            ) : null}
 	            {resultShown ? (
@@ -2689,16 +2722,6 @@ export default function QuotationPage() {
             surplusLengthM: originalSurplusLengthM,
             orderReason: originalOrderReason,
           }}
-        />
-      ) : null}
-      {resultShown && quotationPreview ? (
-        <SimulatorPrintReport
-          result={resultShown}
-          quotation={quotationPreview}
-          form={form}
-          effectiveMargin={effectiveMargin}
-          selectedCandidate={selectedRecommendation}
-          calculatedAt={calculatedAt}
         />
       ) : null}
       {customerListOpen ? (
@@ -2770,233 +2793,6 @@ export default function QuotationPage() {
     </main>
   );
 
-}
-
-type SimulatorPrintForm = {
-  customerCode: string;
-  customerName: string;
-  customerPostalCode: string;
-  customerAddress: string;
-  customerContact: string;
-  customerTelephone: string;
-  customerEmail: string;
-  widthMm: string;
-  lengthMm: string;
-  quantity: string;
-  connected: string;
-  method: "hopper" | "pressure";
-  lanes: string;
-  skus: SkuEntry[];
-};
-
-function SimulatorPrintReport({
-  result,
-  quotation,
-  form,
-  effectiveMargin,
-  selectedCandidate,
-  calculatedAt,
-}: {
-  result: CostResult;
-  quotation: AutomaticQuotationTotals;
-  form: SimulatorPrintForm;
-  effectiveMargin: string;
-  selectedCandidate: PrintCandidate | null;
-  calculatedAt: string | null;
-}) {
-  const fitContentRefs = useRef<Array<HTMLDivElement | null>>([]);
-
-  useEffect(() => {
-    const fitForPrint = () => {
-      for (const content of fitContentRefs.current) {
-        if (!content) continue;
-        content.style.removeProperty("--simulator-a4-fit-scale");
-        const availableHeight = content.clientHeight;
-        const requiredHeight = content.scrollHeight;
-        const scale = availableHeight > 0 && requiredHeight > availableHeight
-          ? availableHeight / requiredHeight
-          : 1;
-        content.style.setProperty("--simulator-a4-fit-scale", scale.toFixed(5));
-      }
-    };
-    const resetFit = () => {
-      for (const content of fitContentRefs.current) {
-        content?.style.removeProperty("--simulator-a4-fit-scale");
-      }
-    };
-    window.addEventListener("beforeprint", fitForPrint);
-    window.addEventListener("afterprint", resetFit);
-    return () => {
-      window.removeEventListener("beforeprint", fitForPrint);
-      window.removeEventListener("afterprint", resetFit);
-    };
-  }, []);
-
-  const route = selectedCandidate
-    ? candidateRouteText(selectedCandidate)
-    : `${result.printingMethod === "gravure" ? "グラビア" : "デジタル"} / 入力値基準`;
-  const costRows = [
-    { label: "フィルム費用", total: result.film.filmTotal, unit: result.costPerPieceComponents.film },
-    { label: "バルク費用", total: result.costComponents.bulk, unit: result.costPerPieceComponents.bulk },
-    { label: "加工費（人件費・機械）", total: result.costComponents.variableProcessing, unit: result.costPerPieceComponents.variableProcessing },
-    { label: "段取り・清掃費", total: result.costComponents.fixedLot, unit: result.costPerPieceComponents.fixedLot },
-    { label: "新規銅版費", total: result.copperPlateCost, unit: result.copperPlateCostPerPiece },
-    { label: "カスタム費用", total: result.costComponents.custom, unit: result.costPerPieceComponents.custom },
-  ];
-  const filmWidths = result.film.skuCosts.length > 0
-    ? result.film.skuCosts.map((sku) => `${formatNumber(sku.webWidthMm)}mm×${formatNumber(sku.multiplier)}`).join("／")
-    : `${formatNumber(result.gravure?.materialWidthMm ?? "-")}mm`;
-
-  return (
-    <div className="simulator-print-report" aria-hidden="true">
-      <article className="a4-sheet simulator-a4">
-        <div className="simulator-a4-fit" ref={(element) => { fitContentRefs.current[0] = element; }}>
-          <header className="sheet-header">
-            <div className="issuer">
-              <div className="issuer-logo">
-                <span className="logo-mark large" aria-hidden="true">7</span>
-                <div><strong>株式会社セブン化学</strong><small>SEVEN CHEMICAL CO., LTD.</small></div>
-              </div>
-              <address>
-                代表取締役社長 吾藤 靖<br />
-                〒582-0017 大阪府柏原市太平寺1丁目12番1号<br />
-                TEL 072-971-0726 / https://7chemical.co.jp/
-              </address>
-            </div>
-            <div className="document-title">
-              <p className="english">COST &amp; PRICE SIMULATION</p>
-              <h2>参考原価・販売価格シミュレーション</h2>
-              <dl>
-                <div><dt>出力日</dt><dd>{new Date().toLocaleDateString("ja-JP")}</dd></div>
-                <div><dt>計算時刻</dt><dd>{calculatedAt ?? "-"}</dd></div>
-              </dl>
-            </div>
-          </header>
-
-          <div className="recipient-block simulator-recipient">
-            <p><span className="customer">{form.customerName || "得意先未設定"}</span>　御中</p>
-            <p className="help">
-              {[form.customerContact, form.customerPostalCode, form.customerAddress].filter(Boolean).join("／") || "担当者・住所未入力"}
-            </p>
-            <p className="greeting">パウチ仕様および調達計画に基づく参考原価・参考販売価格を以下の通り整理します。</p>
-          </div>
-
-          <section className="history-a4-section">
-            <header><span>01</span><h2>基本条件</h2></header>
-            <dl className="history-facts">
-              <div><dt>顧客コード</dt><dd>{form.customerCode || "-"}</dd></div>
-              <div><dt>製品寸法</dt><dd>{form.widthMm}×{form.lengthMm}mm</dd></div>
-              <div><dt>連結 / 列数</dt><dd>{form.connected}連／{form.lanes}列</dd></div>
-              <div><dt>発注数量</dt><dd>{formatNumber(result.quantity)} 枚</dd></div>
-              <div><dt>SKU数</dt><dd>{form.skus.length} SKU</dd></div>
-              <div><dt>平均充填量</dt><dd>{formatNumber(result.fillMlPerChamber)} ml/室</dd></div>
-              <div><dt>印刷・調達</dt><dd>{route}</dd></div>
-              <div><dt>充填方式</dt><dd>{form.method === "hopper" ? "ホッパ充填" : "加圧充填"}</dd></div>
-            </dl>
-          </section>
-
-          <section className="history-a4-section">
-            <header><span>02</span><h2>原価内訳</h2></header>
-            <table className="history-line-table">
-              <thead><tr><th>項目</th><th>総額</th><th>原価 /枚</th></tr></thead>
-              <tbody>
-                {costRows.map((row) => (
-                  <tr key={row.label}>
-                    <td>{row.label}</td>
-                    <td>{formatCurrency(displayAmount(row.total), 0)}</td>
-                    <td>{formatCurrency(displayAmount(row.unit), 4)}</td>
-                  </tr>
-                ))}
-                <tr>
-                  <td>総原価</td>
-                  <td>{formatCurrency(displayAmount(result.costTotal), 0)}</td>
-                  <td>{formatCurrency(displayAmount(result.totalCostPerPiece), 4)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-
-          <section className="history-a4-section">
-            <header><span>03</span><h2>参考販売価格</h2></header>
-            <div className="simulator-price-highlight">
-              <div><span>目標利益率</span><strong>{formatNumber(Number(effectiveMargin) * 100, 2)}%</strong></div>
-              <div><span>参考販売単価</span><strong>{formatCurrency(quotation.display.pricePerPiece, 2)} /枚</strong></div>
-              <div><span>参考税抜金額</span><strong>{formatCurrency(quotation.display.subtotal, 0)}</strong></div>
-              <div><span>参考税込金額</span><strong>{formatCurrency(quotation.display.grandTotal, 0)}</strong></div>
-            </div>
-          </section>
-        </div>
-      </article>
-
-      <article className="a4-sheet simulator-a4">
-        <div className="simulator-a4-fit" ref={(element) => { fitContentRefs.current[1] = element; }}>
-          <header className="history-page2-header">
-            <div>
-              <span>PRODUCTION PLAN</span>
-              <h2>フィルム・製造計画</h2>
-              <small>{form.customerName || "得意先未設定"}／{form.widthMm}×{form.lengthMm}mm／{formatNumber(result.quantity)}枚</small>
-            </div>
-            <div><strong>PAGE 2 / 2</strong><small>内部参照用</small></div>
-          </header>
-
-          <section className="history-a4-section">
-            <header><span>04</span><h2>フィルム調達・製造</h2></header>
-            <dl className="history-facts">
-              <div><dt>フィルム構成</dt><dd>PET12+AL7+PET12+LLDPE50</dd></div>
-              <div><dt>原反幅</dt><dd>{filmWidths}</dd></div>
-              <div><dt>必要長</dt><dd>{formatNumber(result.film.requiredLengthM, 3)} m</dd></div>
-              <div><dt>発注長</dt><dd>{formatNumber(result.film.orderLengthM, 3)} m</dd></div>
-              <div><dt>納品可能長</dt><dd>{formatNumber(result.film.effectiveLengthM, 3)} m</dd></div>
-              <div><dt>未使用・ロス長</dt><dd>{formatNumber(result.film.lossM, 3)} m</dd></div>
-              <div><dt>製造計画</dt><dd>{formatNumber(result.quantity)} 枚</dd></div>
-              <div><dt>製造可能数</dt><dd>{formatNumber(result.recommendedQuantity ?? result.film.actualQuantity)} 枚</dd></div>
-            </dl>
-          </section>
-
-          <section className="history-a4-section">
-            <header><span>05</span><h2>SKU構成</h2></header>
-            <table className="history-line-table">
-              <thead><tr><th>SKU</th><th>数量</th><th>充填量</th><th>色数</th></tr></thead>
-              <tbody>
-                {form.skus.map((sku, index) => (
-                  <tr key={`${sku.name}-${index}`}>
-                    <td>{sku.name || `充填物${index + 1}`}</td>
-                    <td>{formatNumber(sku.quantity)} 枚</td>
-                    <td>{formatNumber(sku.fillMl)} ml/室</td>
-                    <td>{formatNumber(sku.colorCount)} 色</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="history-a4-section">
-            <header><span>06</span><h2>利益率別試算</h2></header>
-            <table className="history-line-table">
-              <thead><tr><th>目標利益率</th><th>販売単価</th><th>税抜売上</th><th>利益額</th></tr></thead>
-              <tbody>
-                {result.sellingPrices.map((price) => (
-                  <tr key={price.margin} className={Number(price.margin) === Number(effectiveMargin) ? "selected-margin" : undefined}>
-                    <td>{formatNumber(Number(price.margin) * 100)}%</td>
-                    <td>{formatCurrency(displayAmount(price.pricePerPiece), 2)}</td>
-                    <td>{formatCurrency(displayAmount(price.totalSales), 0)}</td>
-                    <td>{formatCurrency(displayAmount(price.profit), 0)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="history-a4-section">
-            <header><span>07</span><h2>出力条件</h2></header>
-            <p className="simulator-report-note">
-              この書面はシミュレーター画面のサーバー計算結果を出力した参考資料です。見積確定書ではありません。調達候補・数量・SKU構成・目標利益率を変更した場合は、再計算後に再度出力してください。
-            </p>
-          </section>
-        </div>
-      </article>
-    </div>
-  );
 }
 
 function bulkFillMlOf(result: CostResult) { return D(result.bulkUsageMl).minus(result.initialChargeMl).minus(result.testFillMl); }

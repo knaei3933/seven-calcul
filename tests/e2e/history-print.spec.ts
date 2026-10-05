@@ -24,6 +24,10 @@ test("history detail PDF keeps long content on two A4 pages", async ({ page }) =
   });
   await page.emulateMedia({ media: "print" });
   await page.evaluate(() => window.dispatchEvent(new Event("beforeprint")));
+  await expect.poll(() => page.evaluate(async () => {
+    await document.fonts.ready;
+    return document.fonts.check("16px notoSerifJP");
+  })).toBe(true);
 
   const fitResults = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>(".history-a4-fit")).map((element) => {
     const scale = Number(element.style.getPropertyValue("--history-a4-fit-scale") || "1");
