@@ -492,6 +492,31 @@ header .version-badge { display: none; }
   font-size: 7.2pt;
   line-height: 1.45;
 }
+.simulator-print-report { display: none; }
+.simulator-recipient { min-height: 22mm; }
+.simulator-price-highlight {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3mm;
+}
+.simulator-price-highlight div {
+  display: grid;
+  align-content: end;
+  min-height: 0;
+  gap: 1mm;
+  border: .2mm solid #cbd5e1;
+  border-radius: 2mm;
+  padding: 2.5mm;
+  background: #f8fafc;
+}
+.simulator-price-highlight span { color: #526075; font-size: 7.8pt; font-weight: 800; }
+.simulator-price-highlight strong { color: #17213a; font-size: 10.5pt; }
+.simulator-report-note {
+  margin: 0;
+  color: #374151;
+  font-size: 8.6pt;
+  line-height: 1.65;
+ }
 .history-a4-section {
   margin-top: 6mm;
   border: 0;
@@ -903,6 +928,41 @@ header .version-badge { display: none; }
   .history-verify-table th,
   .history-verify-table td { padding: 1mm .8mm !important; font-size: 6.8pt !important; }
   .history-audit-note { margin-top: 1.5mm !important; font-size: 6.5pt !important; }
+
+  body:has(.simulator-print-report) .global-header,
+  body:has(.simulator-print-report) .app-shell { display: none !important; }
+  body:has(.simulator-print-report) main {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .simulator-print-report { display: block !important; }
+  .simulator-a4 {
+    width: 210mm !important;
+    height: 296mm !important;
+    min-height: 296mm !important;
+    margin: 0 auto !important;
+    border: 0 !important;
+    border-top: 2.2mm solid #1f3a5f !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+  .simulator-a4 + .simulator-a4 {
+    margin-top: 0 !important;
+    break-before: page !important;
+    page-break-before: always !important;
+  }
+  .simulator-a4-fit {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    zoom: var(--simulator-a4-fit-scale, 1);
+  }
+  .simulator-price-highlight { gap: 2mm !important; }
+  .simulator-price-highlight div { padding: 1.8mm 2mm !important; }
 }
 
 .customer-list-layer { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 18px; }
