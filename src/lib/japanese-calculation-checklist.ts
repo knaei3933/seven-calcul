@@ -93,7 +93,7 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
   const film = "フィルム費用";
   const requiredLengthTerms = skus.length ? skus.map((sku) => number(sku.requiredLengthM)) : [];
   skus.forEach((sku, index) => {
-    add(`film.sku.${index}`, film, `SKU-${index + 1} 条件`, `${sku.name}の発注条件と必要長です。`, `SKU名 = ${sku.name}／数量 = ${number(sku.quantity)}枚／ピッチ = ${number(pitch)}mm／列数 = ${productionLanes}列／ロス率 = ${percent(p.lossRate)}`, "数量 ÷ (1 − ロス率) × ピッチ ÷ 1000 ÷ 列数", `${number(sku.quantity)} ÷ (1 − ${p.lossRate}) × ${number(pitch)} ÷ 1000 ÷ ${productionLanes} = ${number(sku.requiredLengthM)}`, number(sku.requiredLengthM), "m");
+    add(`film.sku.${index}`, film, `SKU-${index + 1} 条件`, `${sku.name}の発注条件と必要長です。`, `SKU名 = ${sku.name}／数量 = ${number(sku.quantity)}枚／ピッチ = ${number(pitch)}mm／列数 = ${productionLanes}列／連結数 = ${snapshot.connectedChambers}連／ロス率 = ${percent(p.lossRate)}`, "数量 ÷ (1 − ロス率) × ピッチ × 連結数 ÷ 1000 ÷ 列数", `${number(sku.quantity)} ÷ (1 − ${p.lossRate}) × ${number(pitch)} × ${snapshot.connectedChambers} ÷ 1000 ÷ ${productionLanes} = ${number(sku.requiredLengthM)}`, number(sku.requiredLengthM), "m");
   });
   add("film.required-length", film, "必要フィルム長", "全SKUの必要フィルム長合計です。", skus.length ? skus.map((sku) => `${sku.name}: ${number(sku.requiredLengthM)}m`).join(" + ") : `必要長 = ${number(snapshot.film.requiredLengthM)}m`, "SKU別必要長の合計", requiredLengthTerms.length ? `${requiredLengthTerms.join(" + ")} = ${number(snapshot.film.requiredLengthM)}` : `保存値 = ${number(snapshot.film.requiredLengthM)}`, number(snapshot.film.requiredLengthM), "m");
   if (!isGravure) {

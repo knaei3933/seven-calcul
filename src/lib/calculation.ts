@@ -203,7 +203,12 @@ function calculatePouchCostCore(
         return fill;
       })
     : Array.from({ length: spec.skuCount }, () => D(spec.fillMlPerChamber));
-  const skuRequiredLengths = skuQuantitiesList.map((skuQuantity) => calculateRequiredProductionLength(size, skuQuantity, params.lossRate));
+  const skuRequiredLengths = skuQuantitiesList.map((skuQuantity) => calculateRequiredProductionLength(
+    size,
+    skuQuantity,
+    params.lossRate,
+    spec.connectedChambers,
+  ));
   const { orders: digitalOrders, adjustment: orderAdjustment } = recommendation?.filmOrderOverride
     ? {
         orders: recommendation.filmOrderOverride,
@@ -282,6 +287,7 @@ function calculatePouchCostCore(
       recommendation?.aggregateDigitalPrice,
       Boolean(recommendation?.filmOrderOverride),
       skuQuantitiesList,
+      spec.connectedChambers,
     );
   const skuCosts = film.skuCosts.map((skuCost, index) => ({
     ...skuCost,
@@ -578,6 +584,7 @@ function calculateFilmCost(
   aggregateDigitalPrice = false,
   preserveOrderOverride = false,
   skuQuantities: Decimal[],
+  connectedChambers: number,
 ): FilmCostResult {
   if (printingMethod !== "digital") throw validationError("gravure_not_configured");
   const pitch = D(size.lengthMm).plus(size.pitchAddMm);
@@ -592,7 +599,7 @@ function calculateFilmCost(
     const considered = orderLength.times(multiplier);
     const loss = maxD(params.lossMinM, considered.times(params.lossRate));
     const effective = considered.minus(loss);
-    const actual = effective.times(1000).div(pitch).times(size.lanes).floor();
+    const actual = effective.times(1000).div(pitch).times(size.lanes).div(connectedChambers).floor();
     const pricing = actual.div(500).floor().times(500);
     if (pricing.lte(0)) throw validationError("no_priceable_quantity");
     const appliedBand: PriceBand = useLargeLot ? "571to740" : size.priceBand;
@@ -608,7 +615,7 @@ function calculateFilmCost(
       result.considered = result.orderLength.times(result.multiplier);
       result.loss = maxD(params.lossMinM, result.considered.times(params.lossRate));
       result.effective = result.considered.minus(result.loss);
-      result.actual = result.effective.times(1000).div(pitch).times(size.lanes).floor();
+      result.actual = result.effective.times(1000).div(pitch).times(size.lanes).div(connectedChambers).floor();
       result.pricing = result.actual.div(500).floor().times(500);
       guard += 1;
     }

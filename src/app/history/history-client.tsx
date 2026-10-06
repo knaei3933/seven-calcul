@@ -826,8 +826,9 @@ function fallbackPurchaseOrder(record: QuotationRecord): PurchaseOrderSnapshot {
   const webWidthMm = size?.webWidthMm ?? 500;
   const lossRate = 0.1;
   const colorCount = Number(record.payload.colorCount) || 0;
+  const connectedChambers = Number(record.sizeSummary.match(/([1-4])連/)?.[1] ?? 1);
   const requiredLengthM = pitchMm && lanes > 0 && quantity > 0
-    ? D(quantity).div(1 - lossRate).times(pitchMm).div(1000).div(lanes).toString()
+    ? D(quantity).div(1 - lossRate).times(pitchMm).times(connectedChambers).div(1000).div(lanes).toString()
     : "0";
   const orderLengthM = D(record.filmOrderLengthM).toString();
   const effectiveLengthM = D(orderLengthM).minus(D(orderLengthM).times(lossRate)).toString();

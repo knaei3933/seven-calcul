@@ -35,8 +35,10 @@ describe("bulk calculation", () => {
     expect(result.testFillMl).toBe("60000");
     expect(result.bulkUsageMl).toBe("722000");
     expect(result.costComponents.bulk).toBe("267140");
-    expect(result.film.filmTotal).toBe("182200");
-    expect(result.film.shippingTrips).toBe("1");
+    // 2連 pouch: each longitudinal pitch yields lanes/connected = 2 sellable
+    // pouches, so connected production doubles the single-pouch film demand.
+    expect(result.film.filmTotal).toBe("337800");
+    expect(result.film.shippingTrips).toBe("2");
   });
 
   it("changes only initial charge for pressure filling", () => {
@@ -83,11 +85,30 @@ describe("digital film", () => {
 
   it("requires parallel SKU count so film length is multiplied by the count", () => {
     const result = calculatePouchCost({ spec: { ...baseSpec, skuCount: 2 }, quantity: "10000", printingMethod: "digital" });
-    expect(Number(result.film.requiredLengthM)).toBeCloseTo(838.8888888888889, 10);
+    expect(Number(result.film.requiredLengthM)).toBeCloseTo(1677.7777777777778, 10);
     expect(result.film.skuCosts).toHaveLength(2);
-    expect(result.film.orderLengthM).toBe("1000");
+    expect(result.film.orderLengthM).toBe("1800");
     expect(result.film.orderAdjustment).toBe("none");
-    expect(result.film.shippingTrips).toBe("2");
+    expect(result.film.shippingTrips).toBe("4");
+  });
+
+  it("divides film capacity by connected chambers for sellable pouches", () => {
+    const result = calculatePouchCost({
+      spec: {
+        ...baseSpec,
+        sizeKey: "round-60x120",
+        connectedChambers: 2,
+        skuCount: 1,
+      },
+      quantity: "50000",
+      printingMethod: "digital",
+      parameters: { sellerProfitRate: "0" },
+    });
+
+    expect(Number(result.film.requiredLengthM)).toBeCloseTo(3500, 8);
+    expect(result.film.orderLengthM).toBe("3500");
+    expect(result.film.actualQuantity).toBe("50000");
+    expect(result.film.pricingQuantity).toBe("50000");
   });
 });
 
@@ -234,7 +255,7 @@ describe("multi-SKU film aggregation", () => {
     });
     expect(result.film.orderLengthM).toBe("600");
     expect(result.film.orderAdjustment).toBe("minimum_sku_allocation");
-    expect(result.film.pricingQuantity).toBe("11000");
+    expect(result.film.pricingQuantity).toBe("5000");
     expect(result.audit.componentReconciliationDifference).toBe("0");
   });
 
@@ -242,8 +263,8 @@ describe("multi-SKU film aggregation", () => {
     const spec = { ...baseSpec, skuCount: 1 };
     const fourColors = calculatePouchCost({ spec: { ...spec, colorCount: 4 }, quantity: "10000", printingMethod: "digital", parameters: { sellerProfitRate: "0" } });
     const eightColors = calculatePouchCost({ spec: { ...spec, colorCount: 8 }, quantity: "10000", printingMethod: "digital", parameters: { sellerProfitRate: "0" } });
-    expect(fourColors.film.filmBaseCost).toBe("164000");
-    expect(eightColors.film.filmBaseCost).toBe("164000");
+    expect(fourColors.film.filmBaseCost).toBe("295200");
+    expect(eightColors.film.filmBaseCost).toBe("295200");
     expect(fourColors.audit.inputJsonSha256).not.toBe(eightColors.audit.inputJsonSha256);
   });
 
@@ -256,7 +277,7 @@ describe("multi-SKU film aggregation", () => {
     });
     expect(result.audit.digitalFilmPriceMode).toBe("common_fallback");
     expect(result.film.unitPrice).toBe("328");
-    expect(result.film.filmBaseCost).toBe("164000");
+    expect(result.film.filmBaseCost).toBe("295200");
   });
 });
 

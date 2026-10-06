@@ -29,7 +29,11 @@ export const ceilTo = (value: DecimalValueInput, unit: DecimalValueInput): Decim
   const step = D(unit);
   if (step.lte(0)) throw new Error("Ceiling unit must be positive");
   if (amount.lt(0)) throw new Error("Ceiling amount must not be negative");
-  return amount.div(step).ceil().times(step);
+  // Decimal division can leave an exact business boundary at ...000001.
+  // Normalize far-below-monetary precision before ceiling so 3500.000...001
+  // remains 3500 rather than becoming an unintended extra 100m lot.
+  const steps = amount.div(step).toDecimalPlaces(24, Decimal.ROUND_HALF_UP);
+  return steps.ceil().times(step);
 };
 
 export const roundTo2 = (value: DecimalValueInput): string => D(value).toDecimalPlaces(2, Decimal.ROUND_UP).toString();

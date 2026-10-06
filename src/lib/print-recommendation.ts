@@ -114,7 +114,7 @@ export function createPrintCandidateContext({
     ? spec.skuQuantities.map((value) => D(value))
     : Array.from({ length: spec.skuCount }, () => originalQuantity);
   const skuRequiredLengths = skuQuantities.map((quantity) =>
-    calculateRequiredProductionLength(size, quantity, parameters.lossRate),
+    calculateRequiredProductionLength(size, quantity, parameters.lossRate, spec.connectedChambers),
   );
   return {
     spec,
@@ -461,6 +461,7 @@ function digitalCapacity(
   requiredLength: Decimal,
   orderLength: Decimal,
   parameters: CostParameters,
+  connectedChambers: number,
 ) {
   const pitch = D(size.lengthMm).plus(size.pitchAddMm);
   const useLargeLot = Boolean(size.largeLotWebWidthMm) && requiredLength.gt(900);
@@ -468,7 +469,10 @@ function digitalCapacity(
   const considered = orderLength.times(multiplier);
   const loss = Decimal.max(D(parameters.lossMinM), considered.times(parameters.lossRate));
   const effective = considered.minus(loss);
-  const rawQuantity = effective.times(1000).div(pitch).times(size.lanes).toDecimalPlaces(0, Decimal.ROUND_FLOOR);
+  // N connected chambers form one sellable pouch. With four filling lanes,
+  // two 2-connected pouches are produced at each longitudinal pitch.
+  const rawQuantity = effective.times(1000).div(pitch).times(size.lanes).div(connectedChambers)
+    .toDecimalPlaces(0, Decimal.ROUND_FLOOR);
   // Production planning uses a 1,000-piece floor. Exact capacity stays visible
   // so the difference between capacity and released plan is auditable.
   const proposedQuantity = floorTo(rawQuantity, 1000);
@@ -520,7 +524,7 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
       const minimum = minimums[index];
       const start = maxDecimal(floorTo(required, 100), minimum);
       for (let target = start; target.lte(start.plus(50000)); target = target.plus(100)) {
-        if (digitalCapacity(size, required, target, parameters).proposedQuantity.gte(context.skuQuantities[index])) {
+        if (digitalCapacity(size, required, target, parameters, context.spec.connectedChambers).proposedQuantity.gte(context.skuQuantities[index])) {
           return target;
         }
       }
@@ -539,7 +543,7 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
       const allocations = allocateTotalLength(purchaseWeights, target, minimums);
       if (!allocations) continue;
       const capacities = allocations.map((orderLength, index) => (
-        digitalCapacity(size, skuRequiredLengths[index], orderLength, parameters)
+        digitalCapacity(size, skuRequiredLengths[index], orderLength, parameters, context.spec.connectedChambers)
       ));
       const perSkuFulfilling = capacities.every((capacity, index) => (
         capacity.proposedQuantity.gte(context.skuQuantities[index])
@@ -557,7 +561,7 @@ function buildDigitalCandidates(context: PrintCandidateContext): CandidateDraft[
     const allocations = allocateTotalLength(purchaseWeights, target, minimums);
     if (!allocations) continue;
     const capacities = allocations.map((orderLength, index) =>
-      digitalCapacity(size, skuRequiredLengths[index], orderLength, parameters),
+      digitalCapacity(size, skuRequiredLengths[index], orderLength, parameters, context.spec.connectedChambers),
     );
     const adjustedSkuQuantities = capacities.map((capacity) => capacity.proposedQuantity);
     const adjustedQuantity = sum(adjustedSkuQuantities);

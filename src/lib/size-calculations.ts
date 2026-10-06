@@ -7,13 +7,14 @@ export function calculateRequiredProductionLength(
   size: SizeMaster,
   quantity: string | number | Decimal,
   lossRate: string = defaultParameters.lossRate,
+  connectedChambers = 1,
 ): Decimal {
   const pitch = D(size.lengthMm).plus(size.pitchAddMm);
   return D(quantity)
     .div(D(1).minus(lossRate))
     .times(pitch)
     .div(1000)
-    .div(size.lanes);
+    .times(D(connectedChambers).div(size.lanes));
 }
 
 /**

@@ -37,7 +37,7 @@ describe("POST /api/calculate", () => {
     expect(await response.json()).toEqual({ error: "invalid_request" });
   });
 
-  it("succeeds when a short parallel order is raised to the 500m minimum", async () => {
+  it("includes connected chambers in digital film demand", async () => {
     const body = {
       spec: { sizeKey: "mouthwash-45x145", customWidthMm: "45", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 2, fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0.37", skuCount: 1 },
       quantity: "10000",
@@ -46,6 +46,6 @@ describe("POST /api/calculate", () => {
     const response = await POST(request(JSON.stringify(body)));
     const payload = await response.json();
     expect(response.status).toBe(200);
-    expect(payload.result.film.orderLengthM).toBe("500");
+    expect(payload.result.film.orderLengthM).toBe("900");
   });
 });
