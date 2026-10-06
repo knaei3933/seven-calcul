@@ -38,6 +38,13 @@ npm run dev
 
 `http://localhost:3000` を開いてください。
 
+## データ保存
+
+- 既定ではローカル SQLite（`.data/`）を使用します。
+- 環境変数 `DATABASE_URL`（Neon PostgreSQL など）を設定すると、全環境で共有される
+  PostgreSQL に見積履歴・顧客マスタ・チェックリストを保存します。
+- 本番（Vercel）での共有DB設定手順は [docs/NEON_SETUP.md](docs/NEON_SETUP.md) を参照してください。
+
 ## 検証
 
 ```bash

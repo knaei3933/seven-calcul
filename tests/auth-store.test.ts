@@ -78,7 +78,10 @@ describe("SQLite auth store", () => {
 
     const { getDatabase } = await import("@/lib/auth-store");
     const db = await getDatabase();
-    const sessions = db.prepare("SELECT token_hash FROM sessions WHERE user_id = ?").all(user!.id) as Array<{ token_hash: string }>;
+    const sessions = await db.all<{ token_hash: string }>(
+      "SELECT token_hash FROM sessions WHERE user_id = ?",
+      [user!.id],
+    );
     expect(sessions).toHaveLength(1);
     expect(sessions[0].token_hash).not.toContain(issued.token);
 

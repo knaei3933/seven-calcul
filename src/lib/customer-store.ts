@@ -1,6 +1,4 @@
-import { mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { getSqlClient, type SqlClient } from "./db";
 import type { CustomerMaster, CustomerMasterInput } from "./quotation-shared";
 
 interface CustomerRow {
@@ -15,15 +13,9 @@ interface CustomerRow {
   updated_at: string;
 }
 
-const databasePath = process.env.POUCH_CUSTOMER_DB
-  ?? (process.env.VERCEL === "1" ? "/tmp/pouch-customers.db" : resolve(process.cwd(), ".data/customers.db"));
-let database: DatabaseSync | null = null;
+let schemaReady: Promise<SqlClient> | null = null;
 
-async function getDatabase(): Promise<DatabaseSync> {
-  if (database) return database;
-  await mkdir(dirname(databasePath), { recursive: true });
-  database = new DatabaseSync(databasePath);
-  database.exec(`
+const SQLITE_SCHEMA = `
     CREATE TABLE IF NOT EXISTS customers (
       customer_code TEXT PRIMARY KEY,
       customer_name TEXT NOT NULL,
@@ -36,13 +28,37 @@ async function getDatabase(): Promise<DatabaseSync> {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(customer_name);
-  `);
-  try {
-    database.exec("ALTER TABLE customers ADD COLUMN email TEXT NOT NULL DEFAULT ''");
-  } catch {
-    // 기존 DB에 email 컬럼이 이미 있는 경우는 무시한다.
-  }
-  return database;
+`;
+
+const POSTGRES_SCHEMA = `
+    CREATE TABLE IF NOT EXISTS customers (
+      customer_code TEXT PRIMARY KEY,
+      customer_name TEXT NOT NULL,
+      postal_code TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '',
+      contact TEXT NOT NULL DEFAULT '',
+      telephone TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(customer_name);
+`;
+
+async function getDatabase(): Promise<SqlClient> {
+  schemaReady ??= (async () => {
+    const db = await getSqlClient("customers");
+    await db.exec(db.dialect === "postgres" ? POSTGRES_SCHEMA : SQLITE_SCHEMA);
+    if (db.dialect === "sqlite") {
+      try {
+        await db.exec("ALTER TABLE customers ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+      } catch {
+        // 기존 DB에 email 컬럼이 이미 있는 경우는 무시한다.
+      }
+    }
+    return db;
+  })();
+  return schemaReady;
 }
 
 const text = (value: unknown, fallback = "") => typeof value === "string" ? value : fallback;
@@ -81,7 +97,7 @@ function mapRow(row: CustomerRow): CustomerMaster {
 export async function saveCustomer(value: CustomerMasterInput): Promise<CustomerMaster> {
   const db = await getDatabase();
   const now = new Date().toISOString();
-  db.prepare(`
+  await db.run(`
     INSERT INTO customers (customer_code,customer_name,postal_code,address,contact,telephone,email,created_at,updated_at)
     VALUES (?,?,?,?,?,?,?,?,?)
     ON CONFLICT(customer_code) DO UPDATE SET
@@ -92,8 +108,8 @@ export async function saveCustomer(value: CustomerMasterInput): Promise<Customer
       telephone=excluded.telephone,
       email=excluded.email,
       updated_at=excluded.updated_at
-  `).run(value.customerCode, value.customerName, value.customerPostalCode, value.customerAddress, value.customerContact, value.customerTelephone, value.customerEmail, now, now);
-  const row = db.prepare("SELECT * FROM customers WHERE customer_code = ?").get(value.customerCode) as CustomerRow | undefined;
+  `, [value.customerCode, value.customerName, value.customerPostalCode, value.customerAddress, value.customerContact, value.customerTelephone, value.customerEmail, now, now]);
+  const row = await db.get<CustomerRow>("SELECT * FROM customers WHERE customer_code = ?", [value.customerCode]);
   if (!row) throw new Error("customer_save_failed");
   return mapRow(row);
 }
@@ -101,7 +117,7 @@ export async function saveCustomer(value: CustomerMasterInput): Promise<Customer
 export async function getCustomer(code: string): Promise<CustomerMaster | null> {
   const db = await getDatabase();
   if (!code.trim()) return null;
-  const row = db.prepare("SELECT * FROM customers WHERE customer_code = ?").get(code.trim()) as CustomerRow | undefined;
+  const row = await db.get<CustomerRow>("SELECT * FROM customers WHERE customer_code = ?", [code.trim()]);
   return row ? mapRow(row) : null;
 }
 
@@ -109,10 +125,10 @@ export async function listCustomers(query = "", limit = 100): Promise<CustomerMa
   const db = await getDatabase();
   const safeLimit = Math.min(Math.max(Number.isFinite(limit) ? limit : 100, 1), 500);
   const search = `%${query.trim()}%`;
-  const rows = db.prepare(`
+  const rows = await db.all<CustomerRow>(`
     SELECT * FROM customers
     WHERE customer_code LIKE ? OR customer_name LIKE ? OR address LIKE ? OR email LIKE ?
     ORDER BY updated_at DESC LIMIT ?
-  `).all(search, search, search, search, safeLimit) as unknown as CustomerRow[];
+  `, [search, search, search, search, safeLimit]);
   return rows.map(mapRow);
 }

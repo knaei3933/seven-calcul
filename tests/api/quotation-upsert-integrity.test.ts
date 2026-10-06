@@ -90,13 +90,15 @@ describe("quotation upsert ownership and referential integrity", () => {
 
   it("enforces users relationships with foreign keys on the quotation connection", async () => {
     const db = await getDatabaseForTest();
-    const foreignKeys = db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number };
-    expect(Number(foreignKeys.foreign_keys)).toBe(1);
+    if (db.dialect === "sqlite") {
+      const foreignKeys = await db.get<{ foreign_keys: number }>("PRAGMA foreign_keys");
+      expect(Number(foreignKeys?.foreign_keys)).toBe(1);
+    }
 
     const owner = await createUser({ email: "referenced@upsert.test", name: "Referenced Owner", password: "referenced-upsert-password", role: "user" });
     const record = await saveQuotation({ ...baseInput, quotationNumber: "S7-FK-INTEGRITY" }, owner.id, "user");
-    expect(() => db.prepare("DELETE FROM users WHERE id = ?").run(owner.id))
-      .toThrow(/FOREIGN KEY/u);
+    await expect(db.run("DELETE FROM users WHERE id = ?", [owner.id]))
+      .rejects.toThrow(/foreign key/iu);
     expect(await getQuotation(record.id)).not.toBeNull();
   });
 });
