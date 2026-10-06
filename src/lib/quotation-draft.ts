@@ -47,6 +47,8 @@ export interface QuotationDraft {
   orderPatternCount?: string;
   deliverablePatternLengthM?: string;
   recommendedQuantity?: string;
+  originalQuantity?: string;
+  selectedCandidateShortage?: boolean;
   purchaseOrder?: PurchaseOrderSnapshot;
   sascheCandidate?: SascheCandidate;
   sascheCandidates?: SascheCandidate[];
@@ -96,6 +98,8 @@ export function buildQuotationDraft(
     bulkUnitPrice: string;
     gravureParameters?: GravureRollParameters;
     calculationRequest?: CalculationInput;
+    originalQuantity?: string;
+    selectedCandidateShortage?: boolean;
   },
 ): QuotationDraft {
   const fillingCost = D(result.costPerPieceComponents.bulk)
@@ -160,6 +164,8 @@ export function buildQuotationDraft(
     customerAddress: context.customerAddress,
     customerTelephone: context.customerTelephone,
     customerEmail: context.customerEmail,
+    originalQuantity: context.originalQuantity,
+    selectedCandidateShortage: context.selectedCandidateShortage,
     ...(context.printingMethod === "gravure" ? {
       copperPlateCostPerPiece: result.copperPlateCostPerPiece,
       copperColorCount: String(result.gravure?.copperPlateCount ?? context.colorCount),

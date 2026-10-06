@@ -70,6 +70,37 @@ test("changing the selected candidate input makes linked quotation actions stale
   await expect(page.getByTestId("open-checklist")).toBeDisabled();
 });
 
+test("selecting an adjusted plan updates the simulator input quantity", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("サイズ").selectOption("round-60x120");
+  await page.getByLabel("発注数量 (枚)").fill("50000");
+  await page.getByLabel("2連").check();
+  await page.getByTestId("calculate-desktop").click();
+  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
+
+  const modal = page.getByTestId("recommendation-modal");
+  await expect(modal).toBeVisible();
+  const adjustedPlan = modal.getByRole("button", { name: /目標数近似・不足参考/ });
+  await adjustedPlan.click();
+  await expect(modal).toBeHidden();
+
+  await expect(page.getByLabel("発注数量 (枚)")).toHaveValue("49000");
+  await expect(page.getByTestId("sku-quantity-0")).toHaveValue("49000");
+  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
+  await expect(page.getByTestId("shortage-candidate-warning")).toContainText("元入力 50,000 枚");
+  await expect(page.getByTestId("shortage-candidate-warning")).toContainText("選択後発注 49,000 枚");
+
+  await page.getByRole("link", { name: "見積書発行" }).click();
+  await expect(page.locator("#quote-preview")).toContainText("49,000 枚");
+  await expect(page.getByTestId("shortage-quote-warning")).toContainText("数量調整プラン");
+  await expect(page.getByTestId("print-pdf")).toBeEnabled();
+
+  await page.getByRole("link", { name: "原価シミュレーター" }).click();
+  await page.getByRole("button", { name: "元の数量へ戻る" }).click();
+  await expect(page.getByLabel("発注数量 (枚)")).toHaveValue("50000");
+  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
+});
+
 test("explicit recalculation returns to the digital input basis and reopens the modal", async ({ page }) => {
   await prepareSelectedGravureCandidate(page);
 

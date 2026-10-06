@@ -442,8 +442,8 @@ describe("quotation UI", () => {
     expect(screen.queryByText("発注数量・パターン候補")).not.toBeInTheDocument();
     expect(screen.queryByTestId("printing-method-block")).not.toBeInTheDocument();
     expect(screen.queryByTestId("quantity-policy")).not.toBeInTheDocument();
-    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("製造計画");
-    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("固定です");
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択後の発注数量");
+    expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("左側入力へ反映");
     expect(screen.getByLabelText("発注数量 (枚)")).toHaveValue("10000");
     expect(screen.getByLabelText("利益率 30%")).toBeChecked();
     expect(screen.queryByLabelText("利益率 40%")).not.toBeInTheDocument();
@@ -610,6 +610,10 @@ describe("quotation UI", () => {
     await user.click(lowestCostCard);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("142,000 枚"));
     expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）");
+    expect((screen.getByLabelText("発注数量 (枚)") as HTMLInputElement).value).toBe("142000");
+    expect(screen.getByTestId("shortage-candidate-warning")).toHaveTextContent("150,000 枚");
+    expect(screen.getByTestId("shortage-candidate-warning")).toHaveTextContent("142,000 枚");
+    expect(screen.getByTestId("shortage-candidate-warning")).toHaveTextContent("左側入力へ反映");
   });
 
   it("progressively discloses and keeps a selected shortage reference accessible", async () => {
@@ -662,6 +666,11 @@ describe("quotation UI", () => {
     await user.click(shortageCard);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
     expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("17,000 枚");
+    expect((screen.getByLabelText("発注数量 (枚)") as HTMLInputElement).value).toBe("17000");
+    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
+    expect(screen.getByTestId("shortage-candidate-warning")).toHaveTextContent("30,000 枚");
+    expect(screen.getByTestId("shortage-candidate-warning")).toHaveTextContent("17,000 枚");
+    expect(screen.getByTestId("shortage-quote-reference-warning")).toHaveTextContent("元の数量が必要な場合");
     await user.click(screen.getByTestId("candidate-recompare"));
     await waitFor(() => expect(screen.getByRole("button", { name: /D \/ デジタル.*不足のため参考/ })).toBeVisible());
     expect(screen.getByTestId("comparison-D")).toBeInTheDocument();

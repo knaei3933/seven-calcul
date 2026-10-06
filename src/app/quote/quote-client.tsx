@@ -269,6 +269,7 @@ export default function PrintableQuotationPage() {
   const [checklistOpening, setChecklistOpening] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [quoteDraftStale, setQuoteDraftStale] = useState(false);
+  const [selectedCandidateShortage, setSelectedCandidateShortage] = useState(false);
 	  const [mobileDrawer, setMobileDrawer] = useState<"left" | "right" | null>(null);
 	  const [isMobileWorkspace, setIsMobileWorkspace] = useState(false);
 	  const [expandedDesktopPanels, setExpandedDesktopPanels] = useState({ left: false, right: false });
@@ -337,6 +338,7 @@ export default function PrintableQuotationPage() {
           purchaseOrder?: PurchaseOrderSnapshot;
           purchaseOrderJson?: string;
           calculationChecklistSnapshot?: CalculationChecklistSnapshot;
+          selectedCandidateShortage?: boolean;
         };
         const restoredForm = { ...defaultQuote };
         (Object.keys(defaultQuote) as (keyof QuoteForm)[]).forEach((key) => {
@@ -354,6 +356,7 @@ export default function PrintableQuotationPage() {
           setPurchaseOrder(rawPurchaseOrder ? JSON.parse(rawPurchaseOrder) as PurchaseOrderSnapshot : null);
         } catch { setPurchaseOrder(null); }
         setSourceVersion(typeof restored.resultHash === "string" ? restored.resultHash : "");
+        setSelectedCandidateShortage(restored.selectedCandidateShortage === true);
         sessionStorage.removeItem(QUOTATION_RESTORE_KEY);
         setStorageLoaded(true);
         return;
@@ -363,6 +366,7 @@ export default function PrintableQuotationPage() {
       const draft = parseQuotationDraft(JSON.parse(raw ?? "null"));
       setChecklistUrl(sessionStorage.getItem(LAST_CHECKLIST_URL_KEY) ?? "");
       if (draft) {
+        setSelectedCandidateShortage(draft.selectedCandidateShortage === true);
         setForm((old) => ({
           ...old,
           productName: draft.productSummary,
@@ -1086,6 +1090,11 @@ export default function PrintableQuotationPage() {
           {quoteDraftStale ? (
             <p className="warning" role="alert" data-testid="stale-quote-warning">
               この見積書は古くなっています。シミュレーターの条件が変わったため、今は保存・PDF出力・チェックリスト操作ができません。シミュレーターに戻り、「サーバーで再計算する」を実行してから、これらの操作を行ってください。
+            </p>
+          ) : null}
+          {selectedCandidateShortage ? (
+            <p className="warning" role="alert" data-testid="shortage-quote-warning">
+              数量調整プランが選択されています。この見積書は選択後の製造計画数量基準です。元の発注数が必要な場合はシミュレーターに戻り、「元の数量へ戻る」を実行してください。
             </p>
           ) : null}
         </div>

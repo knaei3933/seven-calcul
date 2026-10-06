@@ -52,6 +52,34 @@ describe("quotation page stale draft", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it("keeps adjusted-plan quotation output available while showing its basis", async () => {
+    sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
+      productSummary: "不足参考プラン",
+      sizeSummary: "60×120mm / 2連",
+      quantity: "49000",
+      targetMargin: "0.4",
+      fillingCostPerPiece: "5",
+      filmCostPerPiece: "10",
+      filmMeterPrice: "280",
+      filmOrderLengthM: "3500",
+      totalCostPerPiece: "16.7",
+      calculationVersion: "simulator-linked",
+      resultHash: "shortage-reference",
+      calculationFilmTotal: "495096",
+      originalQuantity: "50000",
+      selectedCandidateShortage: true,
+    }));
+    render(<QuotePage />);
+
+    await waitFor(() => expect(screen.getByTestId("shortage-quote-warning")).toBeVisible());
+    expect(screen.getByTestId("shortage-quote-warning")).toHaveTextContent("数量調整プラン");
+    expect(screen.getByTestId("shortage-quote-warning")).toHaveTextContent("選択後の製造計画数量基準");
+    expect(screen.getByTestId("shortage-quote-warning")).toHaveTextContent("元の数量へ戻る");
+    expect(screen.getByTestId("save-history")).toBeEnabled();
+    expect(screen.getByTestId("print-pdf")).toBeEnabled();
+    expect(screen.getByTestId("open-checklist")).toBeEnabled();
+  });
+
 	  it("does not expose purchase and selling price guidance", async () => {
 	    render(<QuotePage />);
 

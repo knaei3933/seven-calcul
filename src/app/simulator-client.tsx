@@ -681,7 +681,7 @@ function RecommendationModal({
             まず下の表で「すべて合算した原価」を比べてください。フィルム差額はフィルム代だけの差です。銅版・加工費を足すと不利になることがあります。
           </HoverInfo>
           <HoverInfo label="選択ルール" testId="selection-rule-guide">
-            候補を選ぶと調達・製造計画のみ切り替わります。左側の顧客発注数は固定され、「元の数量へ戻る」で入力値計算へ復元します。
+            候補を選ぶと調達・製造計画とともに、選択した製造計画数量を左側の発注数・SKU数へ反映します。「元の数量へ戻る」で元の入力値計算へ復元できます。
           </HoverInfo>
         </div>
 
@@ -1260,14 +1260,13 @@ export default function QuotationPage() {
     const { quantity: _quantity, ...nonQuantityRest } = rest;
     return JSON.stringify({ spec: nonQuantitySpec, ...nonQuantityRest });
   }, [calculationInput]);
-  // Candidate selection changes procurement/production planning only. The
-  // left-side customer quantity remains authoritative; changing it must mark
-  // the selected candidate stale, while the planned surplus must not.
+  // Selecting a candidate makes its manufacturable plan the new input basis.
+  // The original quantity remains available for the "return to original input"
+  // card, but the left-side form follows the selected plan quantity.
   const selectedQuantitiesMatchForm = !selectedRecommendationForStale || (
-    D(form.quantity).eq(D(serverResult?.originalQuantity ?? serverResult?.originalResult.quantity ?? "0"))
+    D(form.quantity).eq(D(selectedRecommendationForStale.adjustedQuantity))
     && form.skus.every((sku, index) => (
-      !serverResult?.originalSkuQuantities?.[index]
-      || D(sku.quantity).eq(serverResult.originalSkuQuantities[index])
+      D(sku.quantity).eq(D(selectedRecommendationForStale.adjustedSkuQuantities[index] ?? selectedRecommendationForStale.adjustedQuantity))
     ))
   );
   const staleResult = serverResult !== null && (
@@ -1355,8 +1354,11 @@ export default function QuotationPage() {
       // Candidate IDs are generated from the original calculation basis. Sending
       // the currently selected route would regenerate a different candidate set
       // and make return-route selections resolve to the original result again.
+      // After a candidate is selected, the form follows that candidate's plan
+      // quantity. Candidate IDs are still generated from the original request,
+      // so route switching must continue to send that original basis.
       const basisCalculationInput = {
-        ...calculationInput,
+        ...(serverResult.originalCalculationRequest ?? calculationInput),
         printingMethod: originalPrintingMethod,
         targetMargins: basisTargetMargins,
       };
@@ -1427,8 +1429,8 @@ export default function QuotationPage() {
         inputJson: JSON.stringify(basisCalculationInput),
         requestNonQuantityJson: candidateNonQuantityJson,
         selectedCandidateId: candidate.id,
-        originalQuantity: form.quantity,
-        originalSkuQuantities: form.skus.map((sku) => sku.quantity),
+        originalQuantity: serverResult.originalQuantity ?? form.quantity,
+        originalSkuQuantities: serverResult.originalSkuQuantities ?? form.skus.map((sku) => sku.quantity),
         originalInputJson: serverResult.originalInputJson ?? serverResult.inputJson,
         originalRequestNonQuantityJson: serverResult.originalRequestNonQuantityJson ?? serverResult.requestNonQuantityJson,
         originalPrintingMethod,
@@ -1439,8 +1441,13 @@ export default function QuotationPage() {
       });
       setForm((old) => ({
         ...old,
+        quantity: expectedAdjustedQuantity.toString(),
         targetMargin: candidateTargetMarginMode === "custom" ? "custom" : candidateTargetMargin,
         customMargin: candidateTargetMarginMode === "custom" ? candidateTargetMargin : old.customMargin,
+        skus: old.skus.map((sku, index) => ({
+          ...sku,
+          quantity: candidate.adjustedSkuQuantities[index] ?? expectedAdjustedQuantity.toString(),
+        })),
       }));
       const adjustedQuantities = candidate.adjustedSkuQuantities;
       const totalAdjustedQuantity = adjustedQuantities.reduce<Decimal>(
@@ -1449,7 +1456,7 @@ export default function QuotationPage() {
       );
       writeChecklistSnapshot(activeResult, form.skus.map((sku, index) => {
         const quantity = D(adjustedQuantities[index] ?? activeResult.quantity);
-        const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate);
+        const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate, Number(form.connected));
         const orderLengthM = candidate.route === "D" || candidate.route === "K" || candidate.route === "Y"
           ? D(candidateSkuOrderLengthM(candidate, index, activeResult.film.orderLengthM))
           : totalAdjustedQuantity.gt(0)
@@ -1707,7 +1714,7 @@ export default function QuotationPage() {
     if (!serverResult || !quotationDraftResult || !customerDraft) return;
     const draftSkus = form.skus.map((sku, index) => {
       const quantity = D(selectedRecommendation?.adjustedSkuQuantities[index] ?? sku.quantity);
-      const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate);
+      const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate, Number(form.connected));
       const orderLengthM = selectedRecommendation
         && (selectedRecommendation.route === "D" || selectedRecommendation.route === "K" || selectedRecommendation.route === "Y")
         ? D(candidateSkuOrderLengthM(
@@ -1759,6 +1766,8 @@ export default function QuotationPage() {
           skus: draftSkus,
           gravureParameters: normalizedGravureParameters,
           calculationRequest: serverResult.calculationRequest,
+          originalQuantity: serverResult.originalResult.quantity,
+          selectedCandidateShortage: selectedShortageReference,
         })),
       );
       sessionStorage.removeItem(SIMULATOR_STALE_STATUS_KEY);
@@ -1903,7 +1912,11 @@ export default function QuotationPage() {
     // Print the same simulator layout on every machine. Print media itself is
     // only 210mm wide, so normalize desktop/mobile to canonical CSS widths and
     // scale the complete UI to A4 paper.
+    let sectionsToRestoreAfterPrint: HTMLDetailsElement[] = [];
     const prepareUiPrint = () => {
+      // Chromium's Page.pdf API can emit beforeprint again after the manual
+      // event used by tests. Keep the first captured collapse state in that case.
+      if (document.body.dataset.simulatorPrint === "ui") return;
       // Use canonical print widths instead of each developer's browser window
       // size. Every desktop therefore prints the same three-column layout and
       // every mobile prints the same one-column layout.
@@ -1915,6 +1928,12 @@ export default function QuotationPage() {
       document.body.dataset.simulatorPrintWidth = String(viewportWidth);
       document.body.style.width = `${viewportWidth}px`;
       document.body.style.zoom = String(a4WidthPx / viewportWidth);
+      // Collapsed cards omit their calculation basis from the printed UI.
+      // Expand every simulator card for print, then restore the user's on-screen
+      // collapse state after the browser finishes generating the PDF.
+      const sections = Array.from(document.querySelectorAll<HTMLDetailsElement>(".app-shell details"));
+      sectionsToRestoreAfterPrint = sections.filter((section) => !section.open);
+      for (const section of sections) section.open = true;
     };
     const resetUiPrint = () => {
       delete document.body.dataset.simulatorPrint;
@@ -1922,6 +1941,10 @@ export default function QuotationPage() {
       delete document.body.dataset.simulatorPrintWidth;
       document.body.style.width = "";
       document.body.style.zoom = "";
+      for (const section of sectionsToRestoreAfterPrint) {
+        if (section.isConnected) section.open = false;
+      }
+      sectionsToRestoreAfterPrint = [];
     };
     window.addEventListener("beforeprint", prepareUiPrint);
     window.addEventListener("afterprint", resetUiPrint);
@@ -2249,15 +2272,20 @@ export default function QuotationPage() {
               <>
                 <p className="total-label">
                   {serverResult?.selectedCandidateId
-                    ? <>顧客発注 {formatNumber(serverResult.originalResult.quantity)} 枚 ／ 製造計画 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>
+                    ? <>元入力 {formatNumber(serverResult.originalResult.quantity)} 枚 ／ 選択後発注 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>
                     : <>発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>}
                 </p>
+                {selectedShortageReference ? (
+                  <p className="quote-gate" role="alert" data-testid="shortage-candidate-warning">
+                    数量調整プランです。元入力 {formatNumber(serverResult!.originalResult.quantity)} 枚に対して選択後発注 {formatNumber(resultShown.quantity)} 枚を左側入力へ反映しました。以後の原価・見積は {formatNumber(resultShown.quantity)} 枚基準で計算します。
+                  </p>
+                ) : null}
 	                {serverResult?.selectedCandidateId ? (
 	                  <HoverInfo
 	                    label="選択候補"
 	                    testId="active-candidate-note"
 	                  >
-	                    選択候補（{resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}）基準で表示しています。左側の顧客発注 {formatNumber(serverResult.originalResult.quantity)} 枚は固定です。右側の原価・総原価は選択候補の製造計画 {formatNumber(resultShown.quantity)} 枚で試算しています。
+	                    選択候補（{resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}）基準で表示しています。選択後の発注数量 {formatNumber(resultShown.quantity)} 枚を左側入力へ反映しました。元の入力は {formatNumber(serverResult.originalResult.quantity)} 枚です。「元の数量へ戻る」で復元できます。
 	                  </HoverInfo>
 	                ) : null}
 	                <p className="total">
@@ -2438,11 +2466,11 @@ export default function QuotationPage() {
                               )
                             ) : (
                               <>
-                                <p>① 必要な生産長さは合計 {formatNumber(f.requiredLengthM)}m です。計算式は「発注枚数 ÷ (1−ロス率) × ピッチ ÷ 生産列数」です。</p>
+                                <p>① 必要な生産長さは合計 {formatNumber(f.requiredLengthM)}m です。計算式は「発注枚数 ÷ (1−ロス率) × ピッチ × 連結数 ÷ 1000 ÷ 生産列数」です。</p>
                                 <p>② SKUごとに 100m単位へ切り上げます。切り上げ後の合計は {formatNumber(String(sumRounded))}m です。</p>
                                 <p>③ 最低発注ルールを適用します。各SKUは {formatNumber(parameters.digitalFilmMinSkuM)}m 以上、合計は {formatNumber(parameters.digitalFilmMinTotalM)}m 以上のため、発注長さは {formatNumber(f.orderLengthM)}m{Number(f.orderLengthM) > sumRounded ? " になります（最低値を満たすまで切り上げました）" : " です（切り上げ後の長さがそのまま使えます）"}。</p>
                                 <p>④ フィルムのロス {formatNumber(f.lossM)}m を差し引きます。ロスは{f.skuCosts.some((sku) => sku.multiplier === 2) ? "生産検討長さ（発注×2倍）" : "発注長さ"}の {formatNumber(Number(parameters.lossRate) * 100, 3)}% で、最低 {formatNumber(parameters.lossMinM)}m を保証します。差し引いたあとの有効長は {formatNumber(f.effectiveLengthM)}m です。</p>
-                                <p>⑤ 参考として、有効なフィルム長から作れる枚数は {formatNumber(f.actualQuantity)}枚 です。計算は「有効 {formatNumber(f.effectiveLengthM)}m × 1000 ÷ ピッチ(mm) × 列数」で、価格計算は500枚単位の {formatNumber(f.pricingQuantity)}枚 を使います。</p>
+                                <p>⑤ 参考として、有効なフィルム長から作れる枚数は {formatNumber(f.actualQuantity)}枚 です。計算は「有効 {formatNumber(f.effectiveLengthM)}m × 1000 ÷ ピッチ(mm) × 列数 ÷ 連結数」で、価格計算は500枚単位の {formatNumber(f.pricingQuantity)}枚 を使います。</p>
                               </>
                             )}
                           </>
@@ -2577,8 +2605,8 @@ export default function QuotationPage() {
                           <tr><th scope="row">国内・海外配送</th><td>{formatCurrency(displayAmount(parameters.domesticShippingPerTrip))} ＋ {formatCurrency(displayAmount(parameters.overseasShippingPerTrip))} /回</td><td>配送単位（{shippingUnitLabel(effectiveSize.webWidthMm, parameters)}m/回）ごとに回数を切り上げて、費用に含めます。</td></tr>
                           <tr><th scope="row">通関料</th><td>{formatCurrency(displayAmount(parameters.customsPerTrip))} /回</td><td>フィルム費が{formatCurrency(displayAmount(parameters.customsThreshold))}を超える場合は、回数に関係なく一括{formatCurrency(displayAmount(parameters.customsHighCharge))}を適用します。</td></tr>
                         </tbody></table>
-                        <p>必要生産長さ＝発注枚数÷(1−{formatNumber(Number(parameters.lossRate) * 100, 3)}%)×({form.lengthMm}＋{formatNumber(effectiveSize.pitchAddMm)}mm)÷1000÷{effectiveSize.lanes}列</p>
-                        <p>SKU別必要長さ＝各SKUの発注枚数÷(1−{formatNumber(Number(parameters.lossRate) * 100, 3)}%)×ピッチ÷1000÷{effectiveSize.lanes}列。SKU別に100m切上げ、各SKU≥{formatNumber(parameters.digitalFilmMinSkuM)}m・合計≥{formatNumber(parameters.digitalFilmMinTotalM)}m</p>
+                        <p>必要生産長さ＝発注枚数÷(1−{formatNumber(Number(parameters.lossRate) * 100, 3)}%)×({form.lengthMm}＋{formatNumber(effectiveSize.pitchAddMm)}mm)×{form.connected}連÷1000÷{effectiveSize.lanes}列</p>
+                        <p>SKU別必要長さ＝各SKUの発注枚数÷(1−{formatNumber(Number(parameters.lossRate) * 100, 3)}%)×ピッチ×{form.connected}連÷1000÷{effectiveSize.lanes}列。SKU別に100m切上げ、各SKU≥{formatNumber(parameters.digitalFilmMinSkuM)}m・合計≥{formatNumber(parameters.digitalFilmMinTotalM)}m</p>
                         <p>SKU別フィルム費＝発注長さ×対応価格帯のm単価</p>
                         <p>配送回数＝ceil(発注長さ合計×{effectiveSize.prodMultiplier}÷{shippingUnitLabel(effectiveSize.webWidthMm, parameters)}m)</p>
                         <p>フィルム総額＝SKUフィルム費合計＋国内配送＋海外配送＋通関料</p>
@@ -2595,6 +2623,11 @@ export default function QuotationPage() {
             <div className={staleResult ? "quote-sheet provisional-quote stale-result" : "quote-sheet provisional-quote"}>
               <h3>お見積書（プレビュー）</h3>
               <p className="help">宛先・発行日・有効期限はSeven書式確定後に設定します。</p>
+              {selectedShortageReference ? (
+                <p className="quote-gate" role="alert" data-testid="shortage-quote-reference-warning">
+                  数量調整プラン中です。左側発注数量とこの予告票は {formatNumber(resultShown?.quantity ?? form.quantity)} 枚基準です。元の数量が必要な場合は「元の数量へ戻る」を使用してください。
+                </p>
+              ) : null}
               <dl>
                 <div>
                   <dt>品名</dt><dd>パウチ製品</dd>
