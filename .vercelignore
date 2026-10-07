@@ -1,0 +1,15 @@
+.omx
+.omx-state-locks
+.codex-test
+.data
+.verification
+test-results
+playwright-report
+tests
+e2e
+docs
+node_modules
+.next
+.git
+pouch-quotation-system-design.md
+tsconfig.tsbuildinfo
