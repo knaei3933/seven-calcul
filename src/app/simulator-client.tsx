@@ -2138,10 +2138,12 @@ export default function QuotationPage() {
                           id={`sku-fill-${index}`}
                           data-testid={`sku-fill-${index}`}
                           inputMode="decimal"
+                          disabled={chamberConfigActive}
                           aria-invalid={!isPositiveDecimalInput(sku.fillMl)}
                           value={sku.fillMl}
                           onChange={(event) => setForm((old) => ({ ...old, skus: old.skus.map((value, i) => (i === index ? { ...value, fillMl: event.target.value } : value)) }))}
                         />
+                        {chamberConfigActive ? <p className="help">室ごとの液体設定を使用中のため、充填量は各室の行で入力します。</p> : null}
                       </Field>
                       <Field label="印刷色数" htmlFor={`sku-color-${index}`}>
                         <input
@@ -2175,7 +2177,7 @@ export default function QuotationPage() {
               {totalChambers !== null && bulkUsagePreview !== null ? (
                 <p className="help" data-testid="connected-preview">総室数＝{formatNumber(form.quantity)}枚×{form.connected}＝{formatNumber(totalChambers)} 室 ／ バルク使用量（概算）＝{formatNumber(bulkUsagePreview)} ml ／ 実効生産速度＝{formatNumber(effectiveProductionSpeedPerMinute)} 枚/分（{formatNumber(effectiveProductionSpeed)} 枚/h）</p>
               ) : null}
-              {Number(form.bulkPrice) === 0 ? <p className="help">※バルク単価が0円のため、連結数を変えても金額は変化しません（使用量のみ変化）。金額に反映するには「バルク単価 (円/ml)」を入力してください。</p> : null}
+              {!chamberConfigActive && Number(form.bulkPrice) === 0 ? <p className="help">※バルク単価が0円のため、連結数を変えても金額は変化しません（使用量のみ変化）。金額に反映するには「バルク単価 (円/ml)」を入力してください。</p> : null}
               {Number(form.connected) >= 2 ? (
                 <label className="chamber-toggle">
                   <input
@@ -2286,7 +2288,9 @@ export default function QuotationPage() {
                 <p className="help">1回に作れる製品数は1連=4個／2連=2個／3連・4連=1個です。3列でも4列でも1回に1個しか出来ないため、3連と4連の速度は同じ（基準速度の1/4）になります。</p>
               </div>
             </div>
-            <Field label="バルク単価 (円/ml)" htmlFor="bulk"><input id="bulk" inputMode="decimal" value={form.bulkPrice} onChange={(e) => set("bulkPrice", e.target.value)} /></Field>
+            {chamberConfigActive
+              ? <p className="help" data-testid="bulk-price-note">バルク単価は室ごとの液体設定の各行で入力します（ここでは入力しません）。</p>
+              : <Field label="バルク単価 (円/ml)" htmlFor="bulk"><input id="bulk" inputMode="decimal" value={form.bulkPrice} onChange={(e) => set("bulkPrice", e.target.value)} /></Field>}
             <details className="parameters" data-testid="parameters">
               <summary>計算パラメータ調整</summary>
                   {parameterGroups.map((group) => (

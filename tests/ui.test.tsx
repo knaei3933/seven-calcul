@@ -25,6 +25,10 @@ describe("quotation UI", () => {
     await user.click(screen.getByRole("checkbox", { name: /室ごとに異なる液体を設定/ }));
     const editor = await screen.findByTestId("chamber-editor");
     expect(editor).toBeVisible();
+    // 실별 설정 사용 중에는 SKU 충전량·하단 バルク단가는 비활성/비표시로 중복 입력을 막는다.
+    expect(screen.getByLabelText("充填量 (ml/室)")).toBeDisabled();
+    expect(screen.queryByLabelText("バルク単価 (円/ml)")).not.toBeInTheDocument();
+    expect(screen.getByTestId("bulk-price-note")).toBeVisible();
     expect(screen.getByLabelText("1室の液体名")).toBeVisible();
     expect(screen.getByLabelText("2室の液体名")).toBeVisible();
     await user.clear(screen.getByLabelText("1室の充填量 ml"));
