@@ -37,6 +37,7 @@ export const ceilTo = (value: DecimalValueInput, unit: DecimalValueInput): Decim
 };
 
 export const roundTo2 = (value: DecimalValueInput): string => D(value).toDecimalPlaces(2, Decimal.ROUND_UP).toString();
+export const roundUp1 = (value: DecimalValueInput): Decimal => D(value).toDecimalPlaces(1, Decimal.ROUND_UP);
 
 export const maxD = (...values: DecimalValueInput[]): Decimal => values.reduce<Decimal>((a, b) => Decimal.max(a, D(b)), D(0));
 export const eq = (a: DecimalValueInput, b: DecimalValueInput): boolean => D(a).eq(D(b));

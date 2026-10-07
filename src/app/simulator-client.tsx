@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CalculationInput, CostResult } from "@/lib/calculation";
-import { defaultParameters, defaultProductionSpeedForFillMl, machineChargeBasis, sizeMaster } from "@/lib/constants";
+import { CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForFillMl, machineChargeBasis, sizeMaster } from "@/lib/constants";
 import { displayAmount } from "@/lib/calculation";
 import { D, Decimal, sum } from "@/lib/decimal";
 import { CURRENT_CHECKLIST_SNAPSHOT_KEY, buildCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
@@ -16,6 +16,13 @@ import { activeMaterialWidthMm } from "@/lib/purchase-order";
 import { isCalculationRequest } from "@/lib/calculation-provenance";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
 import { SIMULATOR_STALE_STATUS_KEY, type CustomerMaster, type CustomerMasterInput } from "@/lib/quotation-shared";
+import {
+  loadLiquidMaster,
+  newLiquidMasterId,
+  removeLiquidMaster,
+  upsertLiquidMaster,
+  type LiquidMasterItem,
+} from "@/lib/liquid-store";
 import { candidateSkuOrderLengthM, type PrintCandidate } from "@/lib/print-recommendation";
 import type { GravureRollCostResult } from "@/lib/gravure-roll";
 import type { SascheCandidate } from "@/lib/sasche-gravure";
@@ -936,6 +943,7 @@ export default function QuotationPage() {
     targetMargin: "0.4" as TargetMargin,
     customMargin: "0.45",
     bulkPrice: "0",
+    chambers: [] as { name: string; fill: string; price: string }[],
     skuCount: "1",
     skus: [
       { name: "", quantity: "10000", fillMl: "3", colorCount: "4" },
@@ -958,6 +966,8 @@ export default function QuotationPage() {
   type CustomerDraft = Pick<typeof form, 'customerName' | 'customerCode' | 'customerPostalCode' | 'customerAddress' | 'customerContact' | 'customerTelephone' | 'customerEmail'>;
   const [customerDraft, setCustomerDraft] = useState<CustomerDraft | null>(null);
   const [customerListOpen, setCustomerListOpen] = useState(false);
+  const [liquidMaster, setLiquidMaster] = useState<LiquidMasterItem[]>([]);
+  const [liquidDraft, setLiquidDraft] = useState({ name: "", unitPriceYen: "", memo: "" });
   const [customerList, setCustomerList] = useState<CustomerMaster[]>([]);
   const [customerListQuery, setCustomerListQuery] = useState("");
   const [customerListLoading, setCustomerListLoading] = useState(false);
@@ -1139,6 +1149,7 @@ export default function QuotationPage() {
       } catch {
         // 저장 상태가 손상된 경우 기본값을 유지한다.
       } finally {
+        setLiquidMaster(loadLiquidMaster());
         setSimulatorStateLoaded(true);
       }
     });
@@ -1172,7 +1183,18 @@ export default function QuotationPage() {
   const weightedAvgFill = skuQuantitySum > 0
     ? form.skus.reduce((total, sku) => total + (isNumericInput(sku.quantity) && isNumericInput(sku.fillMl) ? Number(sku.quantity) * Number(sku.fillMl) : 0), 0) / skuQuantitySum
     : 0;
-  const recommendedProductionSpeed = defaultProductionSpeedForFillMl(weightedAvgFill > 0 ? weightedAvgFill : 3);
+  const connectedCount = Number(form.connected) || 1;
+  const chamberConfigActive = connectedCount >= 2 && form.chambers.length === connectedCount;
+  const chamberFillsValid = chamberConfigActive
+    && form.chambers.every((chamber) => isPositiveDecimalInput(chamber.fill) && isNonNegativeDecimalInput(chamber.price));
+  const chamberFillNumbers = chamberConfigActive ? form.chambers.map((chamber) => Number(chamber.fill) || 0) : [];
+  const chamberTotalFill = chamberFillNumbers.reduce((total, fill) => total + fill, 0);
+  const chamberMaxFill = chamberFillNumbers.length ? Math.max(...chamberFillNumbers) : 0;
+  const chamberAvgFill = chamberFillNumbers.length ? chamberTotalFill / chamberFillNumbers.length : 0;
+  // 실 구성 사용 시 생산속도는 최대 충전량(병목) 기준.
+  const recommendedProductionSpeed = defaultProductionSpeedForFillMl(
+    chamberConfigActive ? (chamberMaxFill > 0 ? chamberMaxFill : 3) : (weightedAvgFill > 0 ? weightedAvgFill : 3),
+  );
   const effectiveProductionSpeedInput = productionSpeedManual
     ? parameters.productionSpeedPerMinute
     : formatNumber(recommendedProductionSpeed, 0);
@@ -1186,6 +1208,7 @@ export default function QuotationPage() {
     && isPositiveDecimalInput(form.quantity)
     && isPositiveDecimalInput(form.lanes)
     && isNonNegativeDecimalInput(form.bulkPrice)
+    && (!chamberConfigActive || chamberFillsValid)
     && positiveParameters(effectiveParameters)
     && (form.printingMethod !== "gravure" || positiveGravureParameters(normalizedGravureParameters))
     && skuQuantitiesValid;
@@ -1195,19 +1218,30 @@ export default function QuotationPage() {
     sizeKey: form.sizeKey,
     customWidthMm: form.widthMm,
     customLengthMm: form.lengthMm,
-    fillMlPerChamber: weightedAvgFill > 0 ? weightedAvgFill.toString() : "3",
+    fillMlPerChamber: chamberConfigActive
+      ? (chamberAvgFill > 0 ? chamberAvgFill.toString() : "3")
+      : (weightedAvgFill > 0 ? weightedAvgFill.toString() : "3"),
     connectedChambers: Number(form.connected) as 1 | 2 | 3 | 4,
     fillingMethod: form.method,
     fillingLanes: Number(form.lanes),
     isCustom: form.custom,
     colorCount: Number(form.skus[0]?.colorCount ?? 0),
-    bulkUnitPrice: form.bulkPrice,
+    bulkUnitPrice: chamberConfigActive && form.chambers[0] && isNonNegativeDecimalInput(form.chambers[0].price)
+      ? form.chambers[0].price
+      : form.bulkPrice,
+    ...(chamberConfigActive && chamberFillsValid ? {
+      chambers: form.chambers.map((chamber) => ({
+        liquidName: chamber.name,
+        fillMl: chamber.fill,
+        bulkUnitPrice: chamber.price,
+      })),
+    } : {}),
     skuCount,
     skuQuantities: form.skus.map((sku) => sku.quantity),
     skuNames: form.skus.map((sku) => sku.name),
     skuFillMlPerChamber: form.skus.map((sku) => sku.fillMl),
     skuColorCounts: form.skus.map((sku) => sku.colorCount),
-  }), [form, skuCount, weightedAvgFill]);
+  }), [form, skuCount, weightedAvgFill, chamberConfigActive, chamberFillsValid, chamberAvgFill]);
   const copperPlateColorTotal = form.skus.reduce(
     (total, sku) => total + (isNonNegativeDecimalInput(sku.colorCount) ? Math.ceil(Number(sku.colorCount)) : 0),
     0,
@@ -1955,9 +1989,8 @@ export default function QuotationPage() {
     };
   }, []);
 
-  const lanesPerCycle = Number(form.lanes) > 0 ? Math.max(1, Math.floor(Number(form.lanes) / Number(form.connected))) : 1;
-  const effectiveProductionSpeedPerMinute = Number(form.lanes) > 0
-    ? Number(effectiveParameters.productionSpeedPerMinute) * lanesPerCycle / Number(form.lanes)
+  const effectiveProductionSpeedPerMinute = Number(form.connected) > 0
+    ? Number(effectiveParameters.productionSpeedPerMinute) * Number(CONNECTED_PRODUCTION_SPEED_FACTOR[Number(form.connected) as 1 | 2 | 3 | 4] ?? 1)
     : Number(effectiveParameters.productionSpeedPerMinute);
   const effectiveProductionSpeed = effectiveProductionSpeedPerMinute * 60;
   const totalChambers = isNumericInput(form.quantity) && Number(form.quantity) > 0
@@ -1965,6 +1998,26 @@ export default function QuotationPage() {
     : null;
   const bulkUsagePreview = (() => {
     if (!(isNumericInput(form.quantity) && Number(form.quantity) > 0) || !Number.isInteger(Number(form.connected)) || Number(form.connected) <= 0) return null;
+    if (chamberConfigActive && chamberFillsValid) {
+      // 액체별: 본체(매수×그 액체 실 합계×1.1) + 초기투입 1회 + 테스트(500×열수×최대실충전량).
+      const quantity = Number(form.quantity);
+      const loss = Number(parameters.bulkLossRate) || 0;
+      const initial = Number(form.method === "hopper" ? parameters.hopperInitialChargeMl : parameters.pressureInitialChargeMl) || 0;
+      const groups = new Map<string, number[]>();
+      for (const chamber of form.chambers) {
+        const key = `${chamber.name}	${chamber.price}`;
+        const fills = groups.get(key);
+        if (fills) fills.push(Number(chamber.fill));
+        else groups.set(key, [Number(chamber.fill)]);
+      }
+      let usage = 0;
+      for (const fills of groups.values()) {
+        const sumF = fills.reduce((total, fill) => total + fill, 0);
+        const maxF = Math.max(...fills);
+        usage += quantity * sumF * (1 + loss) + initial + Number(parameters.fillTestRuns) * Number(form.lanes) * maxF;
+      }
+      return usage;
+    }
     let filledVolume = 0;
     let totalQuantity = 0;
     for (const sku of form.skus) {
@@ -2105,18 +2158,84 @@ export default function QuotationPage() {
               <p className="help">SKUごとに製品名・発注枚数・充填量・色数を設定できます。発注枚数の合計が発注数量（{formatNumber(form.quantity)}枚）と一致する必要があります。SKU数を変更すると均等割りします（製品名 未入力時は 充填物1, 2, 3…）。</p>
               {!skuQuantitiesValid ? <p className="error" role="alert" data-testid="sku-sum-error">SKU合計 {formatNumber(skuQuantitySum)} 枚 ≠ 発注数量 {formatNumber(form.quantity)} 枚。各SKUの発注枚数を調整してください。</p> : null}
             </div>
-            <fieldset className="field" id="connected"><legend>連結形式</legend><div className="radio-cards">{(["1", "2", "3", "4"] as const).map((value) => <label key={value}><input type="radio" name="connected" value={value} checked={form.connected === value} onChange={() => set("connected", value)} aria-label={`${value}連`} />{value}連</label>)}</div>
-              <p className="help" data-testid="total-fill">1枚あたり総充填量（平均）＝{formatNumber(weightedAvgFill)}ml × {form.connected}＝{formatNumber(weightedAvgFill * Number(form.connected), 3)} ml</p>
+            <fieldset className="field" id="connected"><legend>連結形式</legend><div className="radio-cards">{(["1", "2", "3", "4"] as const).map((value) => <label key={value}><input type="radio" name="connected" value={value} checked={form.connected === value} onChange={() => setForm((old) => {
+              const count = Number(value) || 1;
+              const chambers = Array.from({ length: count }, (_, index) => old.chambers[index] ?? {
+                name: old.chambers[0]?.name ?? "",
+                fill: old.chambers[0]?.fill ?? old.skus[0]?.fillMl ?? "3",
+                price: old.chambers[0]?.price ?? old.bulkPrice,
+              });
+              return { ...old, connected: value, chambers };
+            })} aria-label={`${value}連`} />{value}連</label>)}</div>
+              <p className="help" data-testid="total-fill">{chamberConfigActive
+                ? `1枚あたり総充填量＝${form.chambers.map((chamber, index) => `${index + 1}室 ${formatNumber(Number(chamber.fill) || 0)}ml`).join("＋")}＝${formatNumber(chamberTotalFill, 3)} ml`
+                : `1枚あたり総充填量（平均）＝${formatNumber(weightedAvgFill)}ml × ${form.connected}＝${formatNumber(weightedAvgFill * Number(form.connected), 3)} ml`}</p>
               {totalChambers !== null && bulkUsagePreview !== null ? (
                 <p className="help" data-testid="connected-preview">総室数＝{formatNumber(form.quantity)}枚×{form.connected}＝{formatNumber(totalChambers)} 室 ／ バルク使用量（概算）＝{formatNumber(bulkUsagePreview)} ml ／ 実効生産速度＝{formatNumber(effectiveProductionSpeedPerMinute)} 枚/分（{formatNumber(effectiveProductionSpeed)} 枚/h）</p>
               ) : null}
               {Number(form.bulkPrice) === 0 ? <p className="help">※バルク単価が0円のため、連結数を変えても金額は変化しません（使用量のみ変化）。金額に反映するには「バルク単価 (円/ml)」を入力してください。</p> : null}
+              {Number(form.connected) >= 2 ? (
+                <div className="chamber-editor" data-testid="chamber-editor">
+                  <p className="help">室ごとに異なる液体を設定できます。液体の種類ごとに初期投入・テスト充填が発生し、生産速度は最も多い室の充填量（ボトルネック）を基準にします。</p>
+                  {form.chambers.map((chamber, index) => (
+                    <div className="chamber-row" key={index}>
+                      <span className="chamber-index">{index + 1}室</span>
+                      <select
+                        aria-label={`${index + 1}室の液体を液体マスタから選択`}
+                        value=""
+                        onChange={(event) => {
+                          const liquid = liquidMaster.find((item) => item.id === event.target.value);
+                          if (!liquid) return;
+                          setForm((old) => ({ ...old, chambers: old.chambers.map((item, i) => i === index ? { ...item, name: liquid.name, price: liquid.unitPriceYen } : item) }));
+                        }}
+                      >
+                        <option value="">液体マスタから選択</option>
+                        {liquidMaster.map((liquid) => <option key={liquid.id} value={liquid.id}>{liquid.name}（{formatNumber(liquid.unitPriceYen)}円/ml）</option>)}
+                      </select>
+                      <input aria-label={`${index + 1}室の液体名`} placeholder={`液体${index + 1}`} value={chamber.name} onChange={(event) => setForm((old) => ({ ...old, chambers: old.chambers.map((item, i) => i === index ? { ...item, name: event.target.value } : item) }))} />
+                      <input aria-label={`${index + 1}室の充填量 ml`} inputMode="decimal" value={chamber.fill} onChange={(event) => setForm((old) => ({ ...old, chambers: old.chambers.map((item, i) => i === index ? { ...item, fill: event.target.value } : item) }))} />
+                      <span className="unit">ml/室</span>
+                      <input aria-label={`${index + 1}室のバルク単価 円/ml`} inputMode="decimal" value={chamber.price} onChange={(event) => setForm((old) => ({ ...old, chambers: old.chambers.map((item, i) => i === index ? { ...item, price: event.target.value } : item) }))} />
+                      <span className="unit">円/ml</span>
+                    </div>
+                  ))}
+                  {!chamberFillsValid ? <p className="error" role="alert" data-testid="chamber-fill-error">室ごとの充填量は0より大きい数値、バルク単価は0以上の数値で入力してください。</p> : null}
+                  <details className="liquid-master">
+                    <summary>液体マスタ管理</summary>
+                    <div className="liquid-master-form">
+                      <label>液体名<input value={liquidDraft.name} onChange={(event) => setLiquidDraft((old) => ({ ...old, name: event.target.value }))} /></label>
+                      <label>バルク単価（円/ml）<input inputMode="decimal" value={liquidDraft.unitPriceYen} onChange={(event) => setLiquidDraft((old) => ({ ...old, unitPriceYen: event.target.value }))} /></label>
+                      <label className="wide">メモ<input value={liquidDraft.memo} onChange={(event) => setLiquidDraft((old) => ({ ...old, memo: event.target.value }))} /></label>
+                      <button
+                        type="button"
+                        className="button secondary small"
+                        onClick={() => {
+                          const name = liquidDraft.name.trim();
+                          if (!name || !/^\d+(?:\.\d+)?$/.test(liquidDraft.unitPriceYen)) return;
+                          setLiquidMaster(upsertLiquidMaster({ id: newLiquidMasterId(), name, unitPriceYen: liquidDraft.unitPriceYen, memo: liquidDraft.memo.trim() }));
+                          setLiquidDraft({ name: "", unitPriceYen: "", memo: "" });
+                        }}
+                      >
+                        登録
+                      </button>
+                    </div>
+                    <ul className="liquid-master-list">
+                      {liquidMaster.map((liquid) => (
+                        <li key={liquid.id}>
+                          <span>{liquid.name}（{formatNumber(liquid.unitPriceYen)}円/ml）{liquid.memo ? ` ／ ${liquid.memo}` : ""}</span>
+                          <button type="button" className="button secondary small" onClick={() => setLiquidMaster(removeLiquidMaster(liquid.id))}>削除</button>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                </div>
+              ) : null}
             </fieldset>
             <Field label="充填方式" htmlFor="method"><select id="method" value={form.method} onChange={(e) => set("method", e.target.value as "hopper" | "pressure")}><option value="hopper">ホッパ充填（初期2,000ml）</option><option value="pressure">加圧充填（初期8,000ml）</option></select></Field>
             <div className="field-row">
               <Field label="1回の充填列数 (列)" htmlFor="lanes">
                 <input id="lanes" inputMode="numeric" aria-describedby="lanes-help" value={form.lanes} onChange={(e) => set("lanes", e.target.value)} />
-                <p className="help" id="lanes-help">テスト充填は500回 × 列数 × 充填量としてバルク使用量に加算します。</p>
+                <p className="help" id="lanes-help">テスト充填は500回 × 列数 × 充填量としてバルク使用量に加算します。{Number(form.connected) === 3 && Number(form.lanes) === 4 ? "3連を3列で生産するときは充填列数を3にしてください（テスト充填量の計算に使います。実効速度は3連・4連とも基準速度の1/4で同じです）。" : null}</p>
               </Field>
             </div>
             <div className="field-row">
@@ -2140,7 +2259,7 @@ export default function QuotationPage() {
               <div className="field">
                 <span>実効生産速度（{form.connected}連）</span>
                 <p className="effective-speed" data-testid="effective-speed">{formatNumber(effectiveProductionSpeedPerMinute)} 枚/分（{formatNumber(effectiveProductionSpeed)} 枚/h）</p>
-                <p className="help">{form.connected}連は1回に{lanesPerCycle}枚（{form.lanes}列÷{form.connected}連）なので、速度も比例して変わります。</p>
+                <p className="help">1回に作れる製品数は1連=4個／2連=2個／3連・4連=1個です。3列でも4列でも1回に1個しか出来ないため、3連と4連の速度は同じ（基準速度の1/4）になります。</p>
               </div>
             </div>
             <Field label="バルク単価 (円/ml)" htmlFor="bulk"><input id="bulk" inputMode="decimal" value={form.bulkPrice} onChange={(e) => set("bulkPrice", e.target.value)} /></Field>
@@ -2336,12 +2455,13 @@ export default function QuotationPage() {
                       <thead><tr><th scope="col">項目</th><th scope="col">単価</th><th scope="col">1枚あたり</th><th scope="col">金額</th></tr></thead>
                       <tbody>
                         <tr><td>生産人件費</td><td>{formatCurrency(displayAmount(parameters.laborPerHour))} /h</td><td>生産 {formatNumber(resultShown.productionHours)}h</td><td>{formatCurrency(displayAmount(D(parameters.laborPerHour).times(resultShown.productionHours).toString()))}</td></tr>
-                        <tr><td>検品人件費</td><td>{formatCurrency(displayAmount(parameters.laborPerHour))} /h</td><td>検品 {formatNumber(resultShown.inspectionHours)}h（稼働生産数 {formatNumber(resultShown.productionRunQuantity)}枚 ÷ {formatNumber(parameters.inspectionSpeed)}枚/h）</td><td>{formatCurrency(displayAmount(D(parameters.laborPerHour).times(resultShown.inspectionHours).toString()))}</td></tr>
+                        <tr><td>検品人件費</td><td>{formatCurrency(displayAmount(parameters.laborPerHour))} /h</td><td>検品 {formatNumber(resultShown.inspectionHours)}h（稼働生産数 {formatNumber(resultShown.productionRunQuantity)}枚 × {form.connected}連 ÷ {formatNumber(parameters.inspectionSpeed)}枚/h・1室ずつ検品）</td><td>{formatCurrency(displayAmount(D(parameters.laborPerHour).times(resultShown.inspectionHours).toString()))}</td></tr>
                         <tr><td>機械費（減価償却＋電気代・稼働分）</td><td>{formatCurrency(displayAmount(parameters.machineChargePerHour))} /h</td><td>生産 {formatNumber(resultShown.productionHours)}h</td><td>{formatCurrency(displayAmount(D(parameters.machineChargePerHour).times(resultShown.productionHours).toString()))}</td></tr>
                       </tbody>
                     </table>
-                    <p className="chain">実効生産速度＝基準 {formatNumber(resultShown.baseProductionSpeedPerMinute)}枚/分 × 60 ＝ {formatNumber(Number(resultShown.baseProductionSpeedPerMinute) * 60)}枚/h（1連基準）× {resultShown.lanesPerCycle}／{form.lanes}列 ＝ {formatNumber(resultShown.effectiveProductionSpeed)} 枚/h（{formatNumber(Number(resultShown.effectiveProductionSpeed) / 60)} 枚/分・{form.connected}連は1回に{resultShown.lanesPerCycle}枚）</p>
+                    <p className="chain">実効生産速度＝基準 {formatNumber(resultShown.baseProductionSpeedPerMinute)}枚/分 × 60 ＝ {formatNumber(Number(resultShown.baseProductionSpeedPerMinute) * 60)}枚/h（1連基準）× {formatNumber(Number(CONNECTED_PRODUCTION_SPEED_FACTOR[Number(form.connected) as 1 | 2 | 3 | 4]), 2)}（{form.connected}連） ＝ {formatNumber(resultShown.effectiveProductionSpeed)} 枚/h（{formatNumber(Number(resultShown.effectiveProductionSpeed) / 60)} 枚/分）。1回に作れる製品数は1連=4個／2連=2個／3連・4連=1個のため、3連と4連は同じ速度です。</p>
                     <p className="chain">生産時間＝稼働生産数 ÷ 実効速度 ＝ {formatNumber(resultShown.productionRunQuantity)}枚 ÷ {formatNumber(resultShown.effectiveProductionSpeed)}枚/h ＝ {formatNumber(resultShown.productionHours)}h。稼働生産数は発注 {formatNumber(resultShown.quantity)}枚 ÷ (1−ロス{formatNumber(Number(parameters.lossRate) * 100, 3)}%)＝ロス分のパウチも実際に機械へ流すための数です。</p>
+                    <p className="chain">検品時間＝稼働生産数 × 連結数 ÷ 検品速度 ＝ {formatNumber(resultShown.productionRunQuantity)}枚 × {form.connected}連 ÷ {formatNumber(parameters.inspectionSpeed)}枚/h ＝ {formatNumber(resultShown.inspectionHours)}h。検品は1室（各列）ずつ行うため、{form.connected}連は検品対象が{form.connected}倍になります。</p>
                   </details>
                   <details className="cost-block" data-testid="cost-fixed">
                     <summary><h3>② 段取り・清掃費（ロット1回ごとの固定費）</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.fixedLot))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.fixedLot))} /枚）</small></span></summary>
@@ -2558,7 +2678,7 @@ export default function QuotationPage() {
                       <tr><th scope="row">機械チャージ</th><td>{formatCurrency(displayAmount(parameters.machineChargePerHour))} /時間</td><td>充填機を1時間動かすための単価です。年間の減価償却費と電気代を年間稼働時間で割って計算します。生産時間に応じた1枚あたりの費用と、段取り・清掃時間の固定費の両方に使います。</td></tr>
                       <tr><th scope="row">生産速度</th><td>{formatNumber(effectiveParameters.productionSpeedPerMinute)} 枚/分（1連基準・時給換算 {formatNumber(Number(effectiveParameters.productionSpeedPerMinute) * 60)} 枚/h）</td><td>1分あたりに作れる1連パウチの枚数です。充填量基準の初期値は、1ml台=140、2ml台=120、3〜7ml=100、8ml以上=80です。手動入力でいつでも上書きできます。</td></tr>
                       <tr><th scope="row">稼働生産数</th><td>{resultShown ? formatNumber(resultShown.productionRunQuantity) : "-"} 枚</td><td>「発注枚数 ÷ (1−ロス率)」で計算します。ロス分のパウチも実際には機械へ流すため、生産時間はこの数で計算します。</td></tr>
-                      <tr><th scope="row">実効生産速度</th><td>{resultShown ? `${formatNumber(Number(resultShown.effectiveProductionSpeed) / 60)} 枚/分（${formatNumber(resultShown.effectiveProductionSpeed)} 枚/h）` : "-"}</td><td>{form.lanes}列÷{form.connected}連＝1回に{lanesPerCycle}枚作れるため、「基準速度×{lanesPerCycle}／{form.lanes}」で計算します。{form.connected}連は、1個を充填するために必要な室数ぶん列を占有します。</td></tr>
+                      <tr><th scope="row">実効生産速度</th><td>{resultShown ? `${formatNumber(Number(resultShown.effectiveProductionSpeed) / 60)} 枚/分（${formatNumber(resultShown.effectiveProductionSpeed)} 枚/h）` : "-"}</td><td>「基準速度×60×連結別係数」で計算します（1連=×1／2連=×1/2／3連・4連=×1/4）。機械は3列でも4列でも1回に1個の製品しか作れないため、3連と4連の実効速度は同じです。</td></tr>
                       <tr><th scope="row">検品速度</th><td>{formatNumber(parameters.inspectionSpeed)} 枚/h</td><td>検品にかかる人件費を1枚あたりに割り当てるときの分母です。</td></tr>
                       <tr><th scope="row">段取り・清掃時間</th><td>{formatNumber(parameters.setupTime)}h ＋ {formatNumber(parameters.cleanupTime)}h</td><td>ロット開始前の準備と、終了後の清掃にかかる時間です。発注数量に関係なく、ロットごとに固定で発生します。</td></tr>
                       <tr><th scope="row">カスタム費用</th><td>{formatCurrency(displayAmount(parameters.customPouchCharge))}</td><td>カスタム区分を選択したときに、ロット1回だけ加算する費用です。</td></tr>
@@ -2570,13 +2690,13 @@ export default function QuotationPage() {
                     <p>② 年間電気代＝年間使用電力量×電力単価＝{formatNumber(machineBreakdown.annualElectricityKwh)}kWh×{formatNumber(machineBreakdown.electricityUnitPriceYen)}円/kWh＝{annualElectricity ? formatCurrency(displayAmount(annualElectricity.toString())) : "-"} /年（月{annualElectricity ? formatCurrency(displayAmount(annualElectricity.div(12).toString())) : "-"}）</p>
                     <p>機械チャージ＝(①＋②)÷年間稼働時間＝({annualDepreciation ? formatCurrency(displayAmount(annualDepreciation.toString())) : "-"}＋{annualElectricity ? formatCurrency(displayAmount(annualElectricity.toString())) : "-"})÷{formatNumber(machineBreakdown.annualOperatingHours)}h/年＝<strong>{formatCurrency(displayAmount(parameters.machineChargePerHour))} /時間</strong></p>
                     <p>初期値は「設備取得価額2,500万円・耐用年数7年・年間使用電力量10,800kWh×電力単価32円・年間稼働時間1,800時間」です。月額賃借料74,100円/月はこの計算には含めません。金額は「計算パラメータ調整＞加工・固定費＞機械チャージ内訳」で変更でき、変更すると機械チャージと原価へ自動的に反映されます。</p>
-                    <p>生産時間＝稼働生産数÷実効速度＝{resultShown ? formatNumber(resultShown.productionRunQuantity) : "-"}枚÷{formatNumber(resultShown ? Number(resultShown.effectiveProductionSpeed) : 0)}枚/h＝{resultShown ? formatNumber(resultShown.productionHours) : "-"}h（検品時間＝稼働生産数{formatNumber(resultShown ? resultShown.productionRunQuantity : "-")}枚÷{formatNumber(parameters.inspectionSpeed)}枚/h＝{resultShown ? formatNumber(resultShown.inspectionHours) : "-"}h）</p>
+                    <p>生産時間＝稼働生産数÷実効速度＝{resultShown ? formatNumber(resultShown.productionRunQuantity) : "-"}枚÷{formatNumber(resultShown ? Number(resultShown.effectiveProductionSpeed) : 0)}枚/h＝{resultShown ? formatNumber(resultShown.productionHours) : "-"}h（検品時間＝稼働生産数{formatNumber(resultShown ? resultShown.productionRunQuantity : "-")}枚×{form.connected}連÷{formatNumber(parameters.inspectionSpeed)}枚/h＝{resultShown ? formatNumber(resultShown.inspectionHours) : "-"}h・1室ずつ検品）</p>
                     <p>変動加工費＝人件費×(生産時間＋検品時間)＋機械チャージ×生産時間＝{formatNumber(parameters.laborPerHour)}×({resultShown ? formatNumber(resultShown.productionHours) : "-"}＋{resultShown ? formatNumber(resultShown.inspectionHours) : "-"})h＋{formatNumber(parameters.machineChargePerHour)}×{resultShown ? formatNumber(resultShown.productionHours) : "-"}h</p>
                     <p>ロット固定＝({formatNumber(parameters.setupTime)}＋{formatNumber(parameters.cleanupTime)})h×({formatNumber(parameters.laborPerHour)}＋{formatNumber(parameters.machineChargePerHour)})円/h</p>
                     <p>カスタム費用＝{form.custom ? formatCurrency(displayAmount(parameters.customPouchCharge)) : "0"}（カスタム区分時のみ）</p>
                     <p>総原価＝フィルム＋バルク＋変動加工＋ロット固定＋カスタム＋銅版</p>
                     <p>参考販売単価（原価シミュレーター表）＝総原価/枚÷(1−利益率)</p>
-                    <p>見積書単価＝充填・加工＋フィルム＋金型は各原価/枚÷(1−利益率)、銅版費は各原価/枚÷(1−10%)</p>
+                    <p>見積書単価＝フィルム＋金型は各原価/枚÷(1−利益率)、充填・加工は「1連基準の加工原価×連結室数×(1＋連結加算率)」÷(1−利益率)（連結加算率：2連20%・3連/4連80%）、バルクは当社販売時のみ「バルク原価/枚÷(1−利益率)」を別ラインで表示（客給時は非表示）、銅版費は各原価/枚÷(1−10%)</p>
                   </div>
                   <div className="formula-group">
                     <h4>フィルム費用</h4>
@@ -2646,6 +2766,11 @@ export default function QuotationPage() {
                   </dd>
                 </div>
               </dl>
+              {quotationPreview && resultShown ? (
+                <p className="help" data-testid="connected-filling-surcharge">
+                  充填・加工単価（バルク除く）：1連基準加工原価 {formatCurrency(resultShown.singleConnectedProcessingCostPerPiece, 2)} /枚 × {form.connected}連（室数）＝基本額 {formatCurrency(D(resultShown.singleConnectedProcessingCostPerPiece).times(D(form.connected)).toString(), 2)} /枚、さらに連結加算 {formatNumber(Number(resultShown.connectedFillingSurchargeRate) * 100, 0)}% を乗じて ÷ (1−利益率) ＝ 見積基準 {formatCurrency(D(resultShown.singleConnectedProcessingCostPerPiece).times(D(form.connected)).times(D(1).plus(D(resultShown.connectedFillingSurchargeRate))).div(D(1).minus(effectiveMargin)).toString(), 2)} /枚。{D(resultShown.costPerPieceComponents.bulk).gt(0) ? `バルクは別ライン：原価 ${formatCurrency(resultShown.costPerPieceComponents.bulk, 2)} /枚 ÷ (1−利益率) ＝ ${formatCurrency(quotationPreview.display.bulkUnit, 1)} /枚` : "バルク単価が0円（貴社支給）のためバルクラインは表示しません"}。{resultPrintingMethod === "digital" ? "デジタルはフィルムm単価（380〜480円/mの帯）を先に確定し、目標合計からの残額を充填・加工へ配分します" : "グラビアはフィルムm単価を90〜220円/mの帯に制限し、帯による差額を充填・加工へ配分します"}。適用単価 {formatCurrency(quotationPreview.display.fillingUnit, 1)} /枚（小数第1位へ切り上げ）
+                </p>
+              ) : null}
               <div className="quote-total"><span>参考税抜金額</span><span data-testid="customer-total">{quotationPreview ? formatCurrency(quotationPreview.subtotal.toString(), 0) : "-"}</span></div>
               <div className="field target-margin-preview">
                 <span id="margin-label">目標利益率（参考値）</span>

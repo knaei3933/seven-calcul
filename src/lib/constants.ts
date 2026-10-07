@@ -1,7 +1,31 @@
 import type { CostParameters, SizeMaster, SizeKey } from "./types";
 import { D } from "./decimal";
 
-export const CALCULATION_VERSION = "2026-09.1";
+export const CALCULATION_VERSION = "2026-10.1";
+
+/**
+ * 連結形式別の充填・加工単価加算率（1連を基準した見積単価への加算）。
+ * 基本額は「1連単価 × 連結室数」（2連なら6+6=12円）とし、その基本額に加算率を乗じる。
+ * 例: 1連で6円なら 2連=(6+6)×1.2=14.4円、3連=(6×3)×1.8=32.4円、4連=(6×4)×1.8=43.2円。
+ */
+export const CONNECTED_FILLING_SURCHARGE: Record<1 | 2 | 3 | 4, string> = {
+  1: "0",
+  2: "0.2",
+  3: "0.8",
+  4: "0.8",
+};
+
+/**
+ * 連結形式別の実効生産速度係数（1連基準速度に対する倍率）。
+ * 1回のサイクルで作れる製品数は 1連=4個（4列）／2連=2個／3連=1個／4連=1個。
+ * 3列でも4列でも1回に1個しか出来ないため、3連と4連の速度は同じ（1/4）。
+ */
+export const CONNECTED_PRODUCTION_SPEED_FACTOR: Record<1 | 2 | 3 | 4, string> = {
+  1: "1",
+  2: "0.5",
+  3: "0.25",
+  4: "0.25",
+};
 
 /**
  * 機械チャージの算定基準（設計ドキュメント 6.3 機械関連）。

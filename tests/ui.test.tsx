@@ -14,6 +14,27 @@ describe("quotation UI", () => {
   beforeEach(() => sessionStorage.clear());
   afterEach(cleanup);
 
+  it("supports per-chamber liquids for connected pouches", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })));
+    render(<QuotationPage />);
+    await user.click(screen.getByRole("radio", { name: "2連" }));
+    const editor = await screen.findByTestId("chamber-editor");
+    expect(editor).toBeVisible();
+    expect(screen.getByLabelText("1室の液体名")).toBeVisible();
+    expect(screen.getByLabelText("2室の液体名")).toBeVisible();
+    await user.clear(screen.getByLabelText("1室の充填量 ml"));
+    await user.type(screen.getByLabelText("1室の充填量 ml"), "10");
+    await user.clear(screen.getByLabelText("2室の充填量 ml"));
+    await user.type(screen.getByLabelText("2室の充填量 ml"), "5");
+    await user.type(screen.getByLabelText("1室の液体名"), "エッセンスA");
+    await user.type(screen.getByLabelText("2室の液体名"), "ミストB");
+    expect(screen.getByTestId("total-fill")).toHaveTextContent("1枚あたり総充填量＝1室 10ml＋2室 5ml＝15 ml");
+    // 1室のみに戻すと室構成UIを閉じる（従来互換）。
+    await user.click(screen.getByRole("radio", { name: "1連" }));
+    expect(screen.queryByTestId("chamber-editor")).not.toBeInTheDocument();
+  });
+
   function candidateTestInput(quantity = "50000") {
     return {
       spec: {
@@ -302,7 +323,7 @@ describe("quotation UI", () => {
     render(<QuotationPage />);
     expect(screen.getByTestId("connected-preview")).toHaveTextContent("総室数＝10,000枚×1＝10,000 室");
     await user.click(screen.getByLabelText("2連"));
-    expect(screen.getByTestId("total-fill")).toHaveTextContent("1枚あたり総充填量（平均）＝3ml × 2＝6 ml");
+    expect(screen.getByTestId("total-fill")).toHaveTextContent("1枚あたり総充填量＝1室 3ml＋2室 3ml＝6 ml");
     expect(screen.getByTestId("connected-preview")).toHaveTextContent("総室数＝10,000枚×2＝20,000 室");
     expect(screen.getByTestId("connected-preview")).toHaveTextContent("バルク使用量（概算）＝74,000 ml");
   });
@@ -557,7 +578,7 @@ describe("quotation UI", () => {
     expect(screen.getByTestId("candidate-Y-copper")).toHaveTextContent("銅版費 +￥120,960");
     expect(screen.getByTestId("candidate-Y-all-in-delta")).toHaveTextContent("-￥23,024");
     expect(screen.getByTestId("comparison-K")).toHaveTextContent("50,000枚");
-    expect(screen.getByTestId("comparison-K")).toHaveTextContent("￥856,513");
+    expect(screen.getByTestId("comparison-K")).toHaveTextContent("￥856,514");
     expect(screen.getByTestId("comparison-K")).toHaveTextContent("製作可能数は顧客発注の4.1倍／在庫リスク");
     expect(screen.getByTestId("candidate-K-risk")).toHaveTextContent("製作可能数は顧客発注の4.1倍／在庫リスク");
   });

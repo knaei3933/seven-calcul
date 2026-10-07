@@ -50,6 +50,68 @@ describe("bulk calculation", () => {
     expect(result.initialChargeMl).toBe("8000");
     expect(result.bulkUsageMl).toBe("728000");
   });
+
+  it("calculates bulk per liquid with per-liquid initial charge and test fill", () => {
+    const result = calculatePouchCost({
+      spec: {
+        ...baseSpec,
+        connectedChambers: 2,
+        chambers: [
+          { liquidName: "エッセンスA", fillMl: "10", bulkUnitPrice: "0.37" },
+          { liquidName: "ミストB", fillMl: "5", bulkUnitPrice: "0.8" },
+        ],
+      },
+      quantity: "10000",
+      printingMethod: "digital",
+    });
+    // A: 10,000×10×1.1 ＋ 初期2,000 ＋ テスト500×4×10 ＝ 132,000ml × 0.37 ＝ 48,840円
+    // B: 10,000×5×1.1 ＋ 初期2,000 ＋ テスト500×4×5 ＝ 67,000ml × 0.80 ＝ 53,600円
+    expect(result.liquidCount).toBe(2);
+    expect(result.liquids[0].liquidName).toBe("エッセンスA");
+    expect(result.liquids[0].usageMl).toBe("132000");
+    expect(result.liquids[0].costYen).toBe("48840");
+    expect(result.liquids[1].liquidName).toBe("ミストB");
+    expect(result.liquids[1].usageMl).toBe("67000");
+    expect(result.liquids[1].costYen).toBe("53600");
+    expect(result.bulkUsageMl).toBe("199000");
+    expect(result.bulkCost).toBe("102440");
+    expect(result.totalFillMlPerPouch).toBe("15");
+    expect(result.chambers).toHaveLength(2);
+    // 생산속도는 최대 실 충전량(병목 10ml) 기준: 80枚/分 → 2연 2,400枚/h
+    expect(result.baseProductionSpeedPerMinute).toBe("80");
+    expect(result.effectiveProductionSpeed).toBe("2400");
+  });
+
+  it("charges one initial charge per liquid when a liquid spans multiple chambers", () => {
+    const result = calculatePouchCost({
+      spec: {
+        ...baseSpec,
+        connectedChambers: 4,
+        chambers: [
+          { liquidName: "A液", fillMl: "10", bulkUnitPrice: "0.37" },
+          { liquidName: "A液", fillMl: "8", bulkUnitPrice: "0.37" },
+          { liquidName: "B液", fillMl: "5", bulkUnitPrice: "0.8" },
+          { liquidName: "B液", fillMl: "5", bulkUnitPrice: "0.8" },
+        ],
+      },
+      quantity: "10000",
+      printingMethod: "digital",
+    });
+    expect(result.liquidCount).toBe(2);
+    // A液: 10,000×(10+8)×1.1 ＋ 2,000 ＋ 500×4×10 ＝ 220,000ml
+    // B液: 10,000×(5+5)×1.1 ＋ 2,000 ＋ 500×4×5 ＝ 122,000ml
+    expect(result.liquids[0].usageMl).toBe("220000");
+    expect(result.liquids[1].usageMl).toBe("122000");
+    expect(result.totalFillMlPerPouch).toBe("28");
+  });
+
+  it("rejects a chamber composition whose length differs from the connected chambers", () => {
+    expect(() => calculatePouchCost({
+      spec: { ...baseSpec, connectedChambers: 2, chambers: [{ liquidName: "A", fillMl: "3" }] },
+      quantity: "10000",
+      printingMethod: "digital",
+    })).toThrow();
+  });
 });
 
 describe("digital film", () => {
@@ -64,14 +126,21 @@ describe("digital film", () => {
     expect(defaultProductionSpeedForFillMl(8)).toBe(80);
   });
 
-  it("scales effective production speed by connected chambers (lanes÷連結)", () => {
+  it("scales effective production speed by connected chambers regardless of filling lanes", () => {
     const single = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 1 }, quantity: "10000", printingMethod: "digital" });
     const twin = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 2 }, quantity: "10000", printingMethod: "digital" });
+    const tripleThreeLanes = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 3, fillingLanes: 3 }, quantity: "10000", printingMethod: "digital" });
+    const tripleFourLanes = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 3, fillingLanes: 4 }, quantity: "10000", printingMethod: "digital" });
     const quad = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 4 }, quantity: "10000", printingMethod: "digital" });
     expect(single.baseProductionSpeedPerMinute).toBe("80");
     expect(single.effectiveProductionSpeed).toBe("4800");
     expect(twin.effectiveProductionSpeed).toBe("2400");
+    // 機械は3列でも4列でも1回に1個の製品しか作れないため、3連と4連の速度は同じ。
+    expect(tripleThreeLanes.effectiveProductionSpeed).toBe("1200");
+    expect(tripleFourLanes.effectiveProductionSpeed).toBe("1200");
+    expect(tripleThreeLanes.effectiveProductionSpeed).toBe(tripleFourLanes.effectiveProductionSpeed);
     expect(quad.effectiveProductionSpeed).toBe("1200");
+    expect(tripleFourLanes.effectiveProductionSpeed).toBe(quad.effectiveProductionSpeed);
     expect(Number(twin.variableProcessingPerPiece)).toBeGreaterThan(Number(single.variableProcessingPerPiece));
     expect(Number(quad.variableProcessingPerPiece)).toBeGreaterThan(Number(twin.variableProcessingPerPiece));
   });
@@ -81,6 +150,33 @@ describe("digital film", () => {
     expect(Number(result.productionRunQuantity)).toBeCloseTo(10000 / 0.9, 6);
     expect(Number(result.productionHours)).toBeCloseTo(10000 / 0.9 / 4800, 6);
     expect(Number(result.inspectionHours)).toBeCloseTo(10000 / 0.9 / 1500, 6);
+  });
+
+  it("inspects every chamber so inspection time scales with connected chambers", () => {
+    const single = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 1 }, quantity: "10000", printingMethod: "digital" });
+    const twin = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 2 }, quantity: "10000", printingMethod: "digital" });
+    const triple = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 3, fillingLanes: 3 }, quantity: "10000", printingMethod: "digital" });
+    expect(Number(single.inspectionHours)).toBeCloseTo(10000 / 0.9 / 1500, 6);
+    expect(Number(twin.inspectionHours)).toBeCloseTo((10000 / 0.9) * 2 / 1500, 6);
+    expect(Number(triple.inspectionHours)).toBeCloseTo((10000 / 0.9) * 3 / 1500, 6);
+  });
+
+  it("exposes a 1連 filling-cost basis and connected surcharge rates for quotation pricing", () => {
+    const single = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 1 }, quantity: "10000", printingMethod: "digital" });
+    const twin = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 2 }, quantity: "10000", printingMethod: "digital" });
+    const triple = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 3, fillingLanes: 3 }, quantity: "10000", printingMethod: "digital" });
+    const quad = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 4 }, quantity: "10000", printingMethod: "digital" });
+    const organicSingleFillingPerPiece = (
+      Number(single.costPerPieceComponents.bulk)
+      + Number(single.costPerPieceComponents.variableProcessing)
+      + Number(single.costPerPieceComponents.fixedLot)
+    );
+    // 구성 요소별 1자리 올림과 1연 기준 원가의 1자리 올림은 최대 0.2엔까지 차이날 수 있다.
+    expect(Math.abs(Number(single.singleConnectedFillingCostPerPiece) - organicSingleFillingPerPiece)).toBeLessThanOrEqual(0.3);
+    expect(single.connectedFillingSurchargeRate).toBe("0");
+    expect(twin.connectedFillingSurchargeRate).toBe("0.2");
+    expect(triple.connectedFillingSurchargeRate).toBe("0.8");
+    expect(quad.connectedFillingSurchargeRate).toBe("0.8");
   });
 
   it("requires parallel SKU count so film length is multiplied by the count", () => {

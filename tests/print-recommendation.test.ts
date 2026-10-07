@@ -134,17 +134,26 @@ describe("print recommendation engine", () => {
     expect(boundaryShortage?.priceBreak).toBe(true);
   });
 
-  it("recommends exact customer quantity candidates first", () => {
+  it("recommends the cheapest practical candidate within the quantity tolerance", () => {
     const candidates = buildPrintCandidates(context());
     const recommended = candidates.find((candidate) => candidate.recommended)!;
     expect(recommended.route).toBe("Y");
     expect(recommended.orderLengthM).toBe("3400");
     expect(recommended.capacityQuantity).toBe("142325");
-    expect(recommended.isExactQuantity).toBe(true);
-    expect(recommended.adjustedQuantity).toBe("133000");
-    expect(recommended.capacityPlanningDifference).toBe("9325");
+    // 数量差が小さい（余剰15%以内）候補の中で最も安い原価を最初に推奨する。
+    // 完全一致候補（D=535,800円／K=550,316円）よりY=385,370円が安いためYを推奨。
+    expect(recommended.isExactQuantity).toBe(false);
+    expect(recommended.adjustedQuantity).toBe("142000");
+    expect(recommended.capacityPlanningDifference).toBe("325");
     expect(D(recommended.filmTotalYen).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toString()).toBe("385370");
     expect(D(recommended.surplusRatio).lte(D("15"))).toBe(true);
+    const cheaperThanAlternatives = candidates
+      .filter((candidate) => candidate.isFulfilling && candidate.isPractical)
+      .every((candidate) => (
+        D(recommended.filmTotalYen).lte(D(candidate.filmTotalYen))
+        || candidate.id === recommended.id
+      ));
+    expect(cheaperThanAlternatives).toBe(true);
 
     const smallerOrder = buildPrintCandidates(context(baseSpec, "20000"));
     const smallestFulfilling = smallerOrder
@@ -259,7 +268,7 @@ describe("print recommendation engine", () => {
     expect(domestic).toBeDefined();
     expect(korea).toBeDefined();
 
-    expect(Number(original.costTotal)).toBeCloseTo(572670.7, 3);
+    expect(Number(original.costTotal)).toBeCloseTo(572670.8, 3);
     expect(digital!.copperPlateTotalYen).toBe("0");
     expect(Number(digital!.allInDeltaYen)).toBeCloseTo(
       Number(digital!.allInTotalCostYen) - Number(original.costTotal),
@@ -267,9 +276,9 @@ describe("print recommendation engine", () => {
     );
     expect(domestic!.filmTotalYen).toBe("269416");
     expect(domestic!.copperPlateTotalYen).toBe("120960");
-    expect(Number(domestic!.allInTotalCostYen)).toBeCloseTo(549646.7, 3);
+    expect(Number(domestic!.allInTotalCostYen)).toBeCloseTo(549646.8, 3);
     expect(Number(domestic!.allInDeltaYen)).toBeCloseTo(-23024, 8);
-    expect(Number(korea!.allInTotalCostYen)).toBeCloseTo(856512.7, 1);
+    expect(Number(korea!.allInTotalCostYen)).toBeCloseTo(856513.8, 1);
     expect(korea!.adjustedQuantity).toBe("50000");
     expect(korea!.capacityQuantity).toBe("206249");
 

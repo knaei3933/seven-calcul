@@ -721,10 +721,10 @@ header .version-badge { display: none; }
 .price-highlight { display: grid; grid-template-columns: 1.15fr .72fr .9fr; gap: 3mm; align-items: end; margin: 4mm 0 3.5mm; padding: 3.2mm 4mm; background: #f6f8fb; border: 1px solid #d8dfe9; border-left: 1.2mm solid #1f3a5f; }
 .quote-spec { margin: 3.5mm 0 0; padding: 2.4mm 3.2mm 2.2mm; background: #f8fafc; border: 1px solid #d8dfe9; border-radius: 1.2mm; }
 .quote-spec h3 { margin: 0 0 1.4mm; color: #1f3a5f; font-size: 9.4pt; font-weight: 800; letter-spacing: .08em; }
-.quote-spec dl { display: grid; grid-template-columns: 1.25fr 1fr .8fr; gap: .8mm 4mm; margin: 0; }
-.quote-spec dl > div { display: flex; align-items: baseline; gap: 2mm; padding: .7mm 0; border-bottom: 1px dotted #cbd5e1; font-size: 8.8pt; min-width: 0; }
-.quote-spec dl > div.wide { grid-column: 1 / -1; }
-.quote-spec dt { flex: none; min-width: 16mm; color: #4b5563; font-weight: 700; }
+.quote-spec dl { display: grid; grid-template-columns: 1fr; gap: 0; margin: 0; }
+.quote-spec dl > div { display: grid; grid-template-columns: 24mm 1fr; align-items: baseline; gap: 3mm; padding: 1.1mm 0; border-bottom: 1px dotted #cbd5e1; font-size: 9.2pt; min-width: 0; }
+.quote-spec dl > div:last-child { border-bottom: 0; }
+.quote-spec dt { color: #4b5563; font-weight: 700; }
 .quote-spec dd { margin: 0; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
 .quote-spec .sheet-editable { white-space: pre-wrap; }
 .film-printing { display: block; font-weight: 700; }

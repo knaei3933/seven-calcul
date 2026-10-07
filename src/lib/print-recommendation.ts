@@ -244,9 +244,8 @@ function compareCandidates(left: PrintCandidate, right: PrintCandidate, original
   // Feasibility comes before money. A candidate cannot become "recommended"
   // merely because its per-piece price improves after dropping demand.
   if (left.isFulfilling !== right.isFulfilling) return left.isFulfilling ? -1 : 1;
-  // An exact match to the customer's transaction quantity is the safest plan.
-  // Capacity-break candidates remain visible after it.
-  if (left.isExactQuantity !== right.isExactQuantity) return left.isExactQuantity ? -1 : 1;
+  // 数量が大きく変わらない範囲（余剰15%以内）では、最も安い原価を最優先で推薦する。
+  // 発注数完全一致よりも安い原価を優先し、数量差は許容範囲内に限定する。
   if (left.isPractical !== right.isPractical) return left.isPractical ? -1 : 1;
 
   // When no practical option exists, the shortest covering order is the safest
@@ -264,6 +263,9 @@ function compareCandidates(left: PrintCandidate, right: PrintCandidate, original
   const leftPerPiece = D(left.filmCostPerPieceYen).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
   const rightPerPiece = D(right.filmCostPerPieceYen).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
   if (!leftPerPiece.eq(rightPerPiece)) return leftPerPiece.lt(rightPerPiece) ? -1 : 1;
+
+  // 原価が同じ場合は、発注数に一致する計画を安全側として優先する。
+  if (left.isExactQuantity !== right.isExactQuantity) return left.isExactQuantity ? -1 : 1;
 
   const leftLength = D(left.orderLengthM);
   const rightLength = D(right.orderLengthM);

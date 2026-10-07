@@ -1,4 +1,5 @@
 import { D } from "./decimal";
+import { CONNECTED_FILLING_SURCHARGE } from "./constants";
 import type { CalculationInput, CostResult } from "./calculation";
 import type { CostParameters } from "./types";
 import type { GravureRollParameters } from "./gravure-roll";
@@ -24,6 +25,8 @@ export interface QuotationDraft {
   quantity: string;
   targetMargin: string;
   fillingCostPerPiece: string;
+  bulkCostPerPiece?: string;
+  pricingFillingCostPerPiece?: string;
   customLotCost: string;
   customQuantity: string;
   filmCostPerPiece: string;
@@ -102,10 +105,15 @@ export function buildQuotationDraft(
     selectedCandidateShortage?: boolean;
   },
 ): QuotationDraft {
-  const fillingCost = D(result.costPerPieceComponents.bulk)
-    .plus(result.costPerPieceComponents.variableProcessing)
-    .plus(result.costPerPieceComponents.fixedLot)
-    .plus(result.costPerPieceComponents.custom);
+  // 見積単価の基準は「1連相当の加工原価×連結加算率」。バルクは別ラインで計上する。
+  const connectedFillingSurcharge = D(CONNECTED_FILLING_SURCHARGE[result.connectedChambers] ?? "0");
+  // 加算率の倍率を厳密に保つため中間基準値は丸めない（最終単価で小数第1位へ切り上げ）。
+  // 基本額は 1連基準 × 連結室数（2連なら6+6=12円）、その基本額に加算率を乗じる。
+  const pricingFillingCost = result.singleConnectedProcessingCostPerPiece
+    ? D(result.singleConnectedProcessingCostPerPiece)
+      .times(D(result.connectedChambers))
+      .times(D(1).plus(connectedFillingSurcharge))
+    : D(result.costPerPieceComponents.variableProcessing).plus(result.costPerPieceComponents.fixedLot);
   const productSummary = context.skuNames.filter(Boolean).join(" / ") || "パウチ製品";
   const activeWidthMm = activeMaterialWidthMm(result);
 
@@ -147,7 +155,12 @@ export function buildQuotationDraft(
     targetMargin: context.targetMargin,
     customLotCost: result.customCharge,
     customQuantity: "1",
-    fillingCostPerPiece: fillingCost.minus(result.costPerPieceComponents.custom).toString(),
+    // 見積書の充填・加工はバルクを除いた加工のみ。バルクは bulkCostPerPiece で別管理。
+    fillingCostPerPiece: D(result.costPerPieceComponents.variableProcessing)
+      .plus(result.costPerPieceComponents.fixedLot)
+      .toString(),
+    bulkCostPerPiece: result.costPerPieceComponents.bulk,
+    pricingFillingCostPerPiece: pricingFillingCost.toString(),
     filmCostPerPiece: result.costPerPieceComponents.film,
     filmMeterPrice: result.film.unitPrice,
     filmOrderLengthM: result.film.orderLengthM,

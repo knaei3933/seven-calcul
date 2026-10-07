@@ -49,6 +49,8 @@ type QuoteForm = {
   fillingItemDescription: string;
   fillingUnitDisplay: string;
   fillingAmountDisplay: string;
+  bulkItemName: string;
+  bulkItemDescription: string;
   customItemName: string;
   customItemDescription: string;
   customLotCost: string;
@@ -86,6 +88,9 @@ type QuoteForm = {
   grandTotalDisplay: string;
   quantity: string;
   fillingCostPerPiece: string;
+  bulkCostPerPiece: string;
+  bulkUnitDisplay: string;
+  bulkAmountDisplay: string;
   pricingFillingCostPerPiece: string;
   filmCostPerPiece: string;
   filmMeterPrice: string;
@@ -129,6 +134,8 @@ const defaultQuote: QuoteForm = {
   fillingItemDescription: "バルク充填および加工に必要な一式",
   fillingUnitDisplay: "",
   fillingAmountDisplay: "",
+  bulkItemName: "バルク費用",
+  bulkItemDescription: "充填液体材料（貴社支給の場合は金額表示なし）",
   customItemName: "金型費用",
   customItemDescription: "カスタム金型制作一式（ロット1回）",
   customLotCost: "0",
@@ -166,6 +173,9 @@ const defaultQuote: QuoteForm = {
   grandTotalDisplay: "",
   quantity: "10000",
   fillingCostPerPiece: "0",
+  bulkCostPerPiece: "0",
+  bulkUnitDisplay: "",
+  bulkAmountDisplay: "",
   pricingFillingCostPerPiece: "",
   filmCostPerPiece: "0",
   filmMeterPrice: "0",
@@ -421,6 +431,9 @@ export default function PrintableQuotationPage() {
           customLotCost: draft.customLotCost ?? "0",
           customQuantity: draft.customQuantity ?? "1",
           fillingCostPerPiece: draft.fillingCostPerPiece,
+          bulkCostPerPiece: draft.bulkCostPerPiece ?? "0",
+          bulkUnitDisplay: "",
+          bulkAmountDisplay: "",
           pricingFillingCostPerPiece: draft.pricingFillingCostPerPiece ?? "",
           printingMethod: draft.printingMethod ?? "digital",
           copperPlateCostPerPiece: draft.copperPlateCostPerPiece ?? "0",
@@ -465,6 +478,8 @@ export default function PrintableQuotationPage() {
     targetMargin: value,
     // 利益率変更後の手動表示値は古いため、自動計算へ戻す。
     fillingUnitDisplay: "",
+    bulkUnitDisplay: "",
+    bulkAmountDisplay: "",
     fillingAmountDisplay: "",
     filmUnitDisplay: "",
     filmPouchUnitDisplay: "",
@@ -495,7 +510,7 @@ export default function PrintableQuotationPage() {
         }
         : purchaseOrder;
       const customQuantity = D(form.customQuantity || "1");
-      const costUnit = D(form.fillingCostPerPiece).plus(form.filmCostPerPiece).plus(form.copperPlateCostPerPiece).plus(D(form.customLotCost).div(customQuantity));
+      const costUnit = D(form.fillingCostPerPiece).plus(D(form.bulkCostPerPiece || "0")).plus(form.filmCostPerPiece).plus(form.copperPlateCostPerPiece).plus(D(form.customLotCost).div(customQuantity));
       const sellingUnit = totals.quantity.gt(0)
         ? D(shownTotals.subtotal).div(totals.quantity)
         : D(shownTotals.pricePerPiece);
@@ -612,6 +627,8 @@ export default function PrintableQuotationPage() {
   const parsedFillingCost = parseDecimal(form.fillingCostPerPiece);
   // 시뮬레이터 연결 견적은 1연 기준 충전 원가 × 연결 가산률을 가격 기준으로 사용.
   const parsedPricingFillingCost = parseDecimal(form.pricingFillingCostPerPiece) ?? parsedFillingCost;
+  // 벌크 원가(지급 시 0＝견적 라인 없음).
+  const parsedBulkCost = parseDecimal(form.bulkCostPerPiece) ?? D(0);
   const parsedFilmCost = parseDecimal(form.filmCostPerPiece);
   const parsedCopperCost = parseDecimal(form.copperPlateCostPerPiece);
   const parsedCustomLotCost = parseDecimal(form.customLotCost);
@@ -635,6 +652,7 @@ export default function PrintableQuotationPage() {
     const margin = parsedTargetMargin;
     const taxRate = parsedTaxRatePercent.div(100);
     const fillingSellingUnit = (parsedPricingFillingCost ?? parsedFillingCost).div(D(1).minus(parsedTargetMargin ?? D(0)));
+    const bulkSellingUnit = parsedBulkCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
     const copperSellingUnit = parsedCopperCost.div(D(1).minus(COPPER_TARGET_MARGIN));
     const filmSellingUnit = parsedFilmCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
     const customLotSaleBase = parsedCustomLotCost
@@ -645,7 +663,7 @@ export default function PrintableQuotationPage() {
     const customSalePerPiece = customSaleTotal.div(quantity);
     const filmMeterDisplayUnit = parsedFilmMeterPrice;
     // 目標総額にフィルム販売額を含めないと、充填・加工の残額計算が不正になる。
-    const pricePerPiece = fillingSellingUnit.plus(copperSellingUnit).plus(filmSellingUnit).plus(customSalePerPiece);
+    const pricePerPiece = fillingSellingUnit.plus(bulkSellingUnit).plus(copperSellingUnit).plus(filmSellingUnit).plus(customSalePerPiece);
     const subtotalBeforeAdjustment = pricePerPiece.times(quantity);
     const subtotal = subtotalBeforeAdjustment.floor();
     const roundingAdjustment = subtotal.minus(subtotalBeforeAdjustment);
@@ -663,6 +681,7 @@ export default function PrintableQuotationPage() {
       roundingAdjustment,
       pricePerPiece,
       fillingAmount: fillingSellingUnit.times(quantity),
+      bulkSellingUnit,
       copperAmount: copperSellingUnit.times(quantity),
       subtotal,
       tax,
@@ -696,6 +715,9 @@ export default function PrintableQuotationPage() {
     const isGravure = form.printingMethod === "gravure";
     let fillingUnit: Decimal;
     let filmMeterUnit: Decimal;
+    // バルク販売単価＝バルク原価÷(1−利益率)。原価0（客給）なら0でライン非表示。
+    const bulkUnit = parseDecimal(form.bulkUnitDisplay) ?? roundUnit(totals.bulkSellingUnit);
+    const bulkAmount = parseDecimal(form.bulkAmountDisplay) ?? bulkUnit.times(totals.quantity);
     if (isGravure) {
       // グラビアの客提示フィルムm単価は90〜220円の帯に制限する。
       // 帯によって生じた差額は充填・加工単価で補う。
@@ -703,7 +725,7 @@ export default function PrintableQuotationPage() {
         .div(D(1).minus(parsedTargetMargin ?? D(0)));
       const provisionalFillingAmount = provisionalFillingUnit.times(totals.quantity);
       const residualFilmAmount = Decimal.max(
-        targetTotal.minus(provisionalFillingAmount).minus(copperAmount),
+        targetTotal.minus(provisionalFillingAmount).minus(bulkAmount).minus(copperAmount),
         0,
       );
       const residualMeterUnit = totals.filmOrderLength.gt(0)
@@ -714,14 +736,14 @@ export default function PrintableQuotationPage() {
       const bandedFilmAmount = filmMeterUnit.times(totals.filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
       fillingUnit = parseDecimal(form.fillingUnitDisplay)
         ?? (totals.quantity.gt(0)
-          ? roundUnit(Decimal.max(targetTotal.minus(bandedFilmAmount).minus(copperAmount), 0).div(totals.quantity))
+          ? roundUnit(Decimal.max(targetTotal.minus(bandedFilmAmount).minus(bulkAmount).minus(copperAmount), 0).div(totals.quantity))
           : D(0));
     } else {
       const requestedFilmMeterUnit = parseDecimal(form.filmUnitDisplay)
         ?? recommendedFilmMeterUnit(form.filmOrderLengthM);
       filmMeterUnit = clampFilmMeterUnit(requestedFilmMeterUnit);
       const filmAmount = filmMeterUnit.times(totals.filmOrderLength);
-      const remainingFillingAmount = Decimal.max(targetTotal.minus(filmAmount).minus(copperAmount), 0);
+      const remainingFillingAmount = Decimal.max(targetTotal.minus(filmAmount).minus(bulkAmount).minus(copperAmount), 0);
       fillingUnit = parseDecimal(form.fillingUnitDisplay)
         ?? (totals.quantity.gt(0)
           ? roundUnit(remainingFillingAmount.div(totals.quantity))
@@ -729,10 +751,12 @@ export default function PrintableQuotationPage() {
     }
     // フィルム金額は円単位で確定する（円未満は四捨五入）。m単価は小数第1位の切り上げ値を表示する。
     const filmAmount = filmMeterUnit.times(totals.filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    const bulkUnitFinal = bulkUnit;
+    const bulkAmountFinal = bulkAmount;
     const fillingAmount = parseDecimal(form.fillingAmountDisplay) ?? fillingUnit.times(totals.quantity);
     const customAmount = parseDecimal(form.customAmountDisplay) ?? customUnit.times(customQuantity);
     const filmPouchUnit = totals.quantity.gt(0) ? filmAmount.div(totals.quantity) : D(0);
-    const lineTotal = fillingAmount.plus(filmAmount).plus(copperAmount).plus(customAmount);
+    const lineTotal = fillingAmount.plus(bulkAmountFinal).plus(filmAmount).plus(copperAmount).plus(customAmount);
     const adjustment = form.adjustmentDisplay.trim() === "" ? "-" : form.adjustmentDisplay;
     const adjustmentAmount = adjustment === "-" ? D(0) : D(adjustment);
     const subtotal = parseDecimal(form.subtotalDisplay) ?? lineTotal.plus(adjustmentAmount);
@@ -743,6 +767,8 @@ export default function PrintableQuotationPage() {
       pricePerPiece: (totals.quantity.gt(0) ? lineTotal.div(totals.quantity) : D(0)).toString(),
       fillingUnit: fillingUnit.toString(),
       fillingAmount: fillingAmount.toString(),
+      bulkUnit: bulkUnitFinal.toString(),
+      bulkAmount: bulkAmountFinal.toString(),
       copperUnit: copperUnit.toString(),
       copperAmount: copperAmount.toString(),
       copperColorCount: copperColorCount.toString(),
@@ -833,6 +859,8 @@ export default function PrintableQuotationPage() {
       copperColorCount: String(candidate.colorCount),
       fillingCostPerPiece,
       fillingUnitDisplay: "",
+      bulkUnitDisplay: "",
+      bulkAmountDisplay: "",
       fillingAmountDisplay: "",
       filmUnitDisplay: "",
       filmPouchUnitDisplay: "",
@@ -858,13 +886,14 @@ export default function PrintableQuotationPage() {
     }
     const fillingUnit = D(shownTotals!.fillingUnit);
     const fillingAmount = fillingUnit.times(quantity);
+    const bulkAmount = D(shownTotals!.bulkAmount);
     const copperAmount = D(shownTotals!.copperAmount);
     const customAmount = D(shownTotals!.customAmount);
-    const filmAmount = Decimal.max(price.times(quantity).minus(fillingAmount).minus(copperAmount).minus(customAmount), 0);
-    applyLineTotals(fillingUnit, filmAmount, copperAmount, customAmount);
+    const filmAmount = Decimal.max(price.times(quantity).minus(fillingAmount).minus(bulkAmount).minus(copperAmount).minus(customAmount), 0);
+    applyLineTotals(fillingUnit, filmAmount, copperAmount, customAmount, bulkAmount);
   };
 
-  const applyLineTotals = (fillingUnit: Decimal, filmAmount: Decimal, copperAmount: Decimal, customAmount: Decimal): Decimal | null => {
+  const applyLineTotals = (fillingUnit: Decimal, filmAmount: Decimal, copperAmount: Decimal, customAmount: Decimal, bulkAmount?: Decimal): Decimal | null => {
     const quantity = parseDecimal(form.quantity);
     const customQuantity = parseDecimal(form.customQuantity) ?? D(1);
     const orderLength = parseDecimal(form.filmOrderLengthM);
@@ -879,7 +908,8 @@ export default function PrintableQuotationPage() {
     const filmPouchUnit = clampedFilmAmount.div(quantity);
     const copperUnit = copperAmount.div(quantity);
     const customUnit = customQuantity.gt(0) ? customAmount.div(customQuantity) : D(0);
-    const lineTotal = fillingAmount.plus(clampedFilmAmount).plus(copperAmount).plus(customAmount);
+    const bulkUnit = quantity.gt(0) ? (bulkAmount ?? D(0)).div(quantity) : D(0);
+    const lineTotal = fillingAmount.plus(bulkAmount ?? D(0)).plus(clampedFilmAmount).plus(copperAmount).plus(customAmount);
     const price = lineTotal.div(quantity);
     const subtotal = lineTotal;
     const tax = subtotal.times(D(form.taxRatePercent).div(100)).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
@@ -887,6 +917,8 @@ export default function PrintableQuotationPage() {
       pricePerPieceDisplay: price.toString(),
       fillingUnitDisplay: fillingUnit.toString(),
       fillingAmountDisplay: fillingAmount.toString(),
+      bulkUnitDisplay: bulkUnit.toString(),
+      bulkAmountDisplay: (bulkAmount ?? D(0)).toString(),
       filmUnitDisplay: displayFilmMeterUnit.toString(),
       filmPouchUnitDisplay: filmPouchUnit.toString(),
       filmAmountDisplay: clampedFilmAmount.toString(),
@@ -908,7 +940,7 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.fillingUnit ?? "0", undefined, 2));
       return;
     }
-    applyLineTotals(unit, D(shownTotals.filmAmount), D(shownTotals.copperAmount), D(shownTotals.customAmount));
+    applyLineTotals(unit, D(shownTotals.filmAmount), D(shownTotals.copperAmount), D(shownTotals.customAmount), D(shownTotals.bulkAmount));
   };
 
   const commitFillingAmount = (raw: string, node: HTMLElement) => {
@@ -921,6 +953,25 @@ export default function PrintableQuotationPage() {
     commitFillingUnit(amount.div(quantity).toString(), node);
   };
 
+  const commitBulkUnit = (raw: string, node: HTMLElement) => {
+    const quantity = parseDecimal(form.quantity);
+    const unit = parseDisplayedNumber(raw);
+    if (!shownTotals || !quantity || !quantity.gt(0) || unit === null || unit.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.bulkUnit ?? "0", undefined, 2));
+      return;
+    }
+    applyLineTotals(D(shownTotals.fillingUnit), D(shownTotals.filmAmount), D(shownTotals.copperAmount), D(shownTotals.customAmount), unit.times(quantity));
+  };
+
+  const commitBulkAmount = (raw: string, node: HTMLElement) => {
+    const amount = parseDisplayedNumber(raw);
+    if (!shownTotals || amount === null || amount.lt(0)) {
+      rejectInvalidNumber(node, moneyDisplay(shownTotals?.bulkAmount ?? "0"));
+      return;
+    }
+    applyLineTotals(D(shownTotals.fillingUnit), D(shownTotals.filmAmount), D(shownTotals.copperAmount), D(shownTotals.customAmount), amount);
+  };
+
   const commitFilmMeterUnit = (raw: string, node: HTMLElement) => {
     const orderLength = parseDecimal(form.filmOrderLengthM);
     const meterUnit = parseDisplayedNumber(raw);
@@ -928,7 +979,7 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmUnit ?? "0"));
       return;
     }
-    applyLineTotals(D(shownTotals.fillingUnit), meterUnit.times(orderLength), D(shownTotals.copperAmount), D(shownTotals.customAmount));
+    applyLineTotals(D(shownTotals.fillingUnit), meterUnit.times(orderLength), D(shownTotals.copperAmount), D(shownTotals.customAmount), D(shownTotals.bulkAmount));
   };
 
   const commitFilmPouchUnit = (raw: string, node: HTMLElement) => {
@@ -938,7 +989,7 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmPouchUnit ?? "0", undefined, 2));
       return;
     }
-    applyLineTotals(D(shownTotals.fillingUnit), pouchUnit.times(quantity), D(shownTotals.copperAmount), D(shownTotals.customAmount));
+    applyLineTotals(D(shownTotals.fillingUnit), pouchUnit.times(quantity), D(shownTotals.copperAmount), D(shownTotals.customAmount), D(shownTotals.bulkAmount));
   };
 
   const commitFilmAmount = (raw: string, node: HTMLElement) => {
@@ -947,7 +998,7 @@ export default function PrintableQuotationPage() {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmAmount ?? "0"));
       return;
     }
-    applyLineTotals(D(shownTotals.fillingUnit), amount, D(shownTotals.copperAmount), D(shownTotals.customAmount));
+    applyLineTotals(D(shownTotals.fillingUnit), amount, D(shownTotals.copperAmount), D(shownTotals.customAmount), D(shownTotals.bulkAmount));
   };
 
   const commitCopperUnit = (raw: string, node: HTMLElement) => {
@@ -958,7 +1009,7 @@ export default function PrintableQuotationPage() {
       return;
     }
     const copperAmount = unit.times(quantity);
-    applyLineTotals(D(shownTotals.fillingUnit), D(shownTotals.filmAmount), copperAmount, D(shownTotals.customAmount));
+    applyLineTotals(D(shownTotals.fillingUnit), D(shownTotals.filmAmount), copperAmount, D(shownTotals.customAmount), D(shownTotals.bulkAmount));
   };
 
   const commitCopperAmount = (raw: string, node: HTMLElement) => {
@@ -982,6 +1033,8 @@ export default function PrintableQuotationPage() {
       copperUnitDisplay: "",
       copperAmountDisplay: "",
       fillingUnitDisplay: "",
+      bulkUnitDisplay: "",
+      bulkAmountDisplay: "",
       fillingAmountDisplay: "",
       filmUnitDisplay: "",
       filmPouchUnitDisplay: "",
@@ -1001,7 +1054,7 @@ export default function PrintableQuotationPage() {
       return;
     }
     const customAmount = unit.times(quantity);
-    applyLineTotals(D(shownTotals.fillingUnit), D(shownTotals.filmAmount), D(shownTotals.copperAmount), customAmount);
+    applyLineTotals(D(shownTotals.fillingUnit), D(shownTotals.filmAmount), D(shownTotals.copperAmount), customAmount, D(shownTotals.bulkAmount));
   };
 
   const commitCustomAmount = (raw: string, node: HTMLElement) => {
@@ -1025,6 +1078,8 @@ export default function PrintableQuotationPage() {
       customUnitDisplay: "",
       customAmountDisplay: "",
       fillingUnitDisplay: "",
+      bulkUnitDisplay: "",
+      bulkAmountDisplay: "",
       fillingAmountDisplay: "",
       filmUnitDisplay: "",
       filmPouchUnitDisplay: "",
@@ -1047,7 +1102,8 @@ export default function PrintableQuotationPage() {
     }
     const copperAmount = D(shownTotals.copperAmount);
     const customAmount = D(shownTotals.customAmount);
-    const fixedTotal = copperAmount.plus(customAmount);
+    const bulkAmount = D(shownTotals.bulkAmount);
+    const fixedTotal = copperAmount.plus(customAmount).plus(bulkAmount);
     const variableTarget = Decimal.max(subtotal.minus(fixedTotal), D(0));
     const oldVariableTotal = D(shownTotals.fillingAmount).plus(shownTotals.filmAmount);
     const fillingShare = oldVariableTotal.gt(0) ? D(shownTotals.fillingAmount).div(oldVariableTotal) : D(1);
@@ -1059,6 +1115,7 @@ export default function PrintableQuotationPage() {
       filmAmount,
       copperAmount,
       customAmount,
+      bulkAmount,
     );
     if (!lineTotal) return;
     const adjustment = subtotal.minus(lineTotal);
@@ -1113,6 +1170,8 @@ export default function PrintableQuotationPage() {
     applyPatch({
       quantity: quantity.toString(),
       fillingUnitDisplay: "",
+      bulkUnitDisplay: "",
+      bulkAmountDisplay: "",
       fillingAmountDisplay: "",
       filmUnitDisplay: "",
       filmPouchUnitDisplay: "",
@@ -1243,14 +1302,14 @@ export default function PrintableQuotationPage() {
               <div><dt>品名</dt><dd><EditableText value={form.productName} label="見積品名" onCommit={(next) => update("productName", next.trim())} /></dd></div>
               <div><dt>パウチ仕様</dt><dd><EditableText value={form.sizeSummary} label="パウチ仕様" onCommit={(next) => update("sizeSummary", next.trim())} /></dd></div>
               <div><dt>数量</dt><dd><EditableText value={numberDisplay(form.quantity)} label="見積数量" className="money" onCommit={commitQuantity} /> 枚</dd></div>
-              <div className="wide"><dt>充填仕様</dt><dd>{calculationChecklistSnapshot
+              <div><dt>充填仕様</dt><dd>{calculationChecklistSnapshot
                 ? (calculationChecklistSnapshot.chambers && calculationChecklistSnapshot.chambers.length > 1
                   ? `${calculationChecklistSnapshot.chambers.map((chamber) => `${chamber.position}室:${chamber.liquidName} ${formatNumber(chamber.fillMl)}ml`).join("／")} ＝ ${formatNumber(calculationChecklistSnapshot.totalFillMlPerPouch)}ml/枚（${calculationChecklistSnapshot.fillingMethod === "pressure" ? "加圧充填" : "ホッパ充填"}）`
                   : `${formatNumber(calculationChecklistSnapshot.fillMlPerChamber)}ml/室 × ${calculationChecklistSnapshot.connectedChambers}室 ＝ ${formatNumber(calculationChecklistSnapshot.totalFillMlPerPouch)}ml/枚（${calculationChecklistSnapshot.fillingMethod === "pressure" ? "加圧充填" : "ホッパ充填"}）`)
                 : "-"}</dd></div>
               <div><dt>フィルム構成</dt><dd><EditableText value={form.filmComposition || DEFAULT_FILM_COMPOSITION} label="フィルム構成" onCommit={(next) => update("filmComposition", next.trim())} /></dd></div>
               {calculationChecklistSnapshot?.skus?.length ? (
-                <div className="wide"><dt>SKU</dt><dd>{calculationChecklistSnapshot.skus.map((sku) => `${sku.name} ／ ${formatNumber(sku.quantity)}枚`).join("　")}</dd></div>
+                <div><dt>SKU</dt><dd>{calculationChecklistSnapshot.skus.map((sku) => `${sku.name} ／ ${formatNumber(sku.quantity)}枚`).join("　")}</dd></div>
               ) : null}
             </dl>
           </section>
@@ -1294,6 +1353,17 @@ export default function PrintableQuotationPage() {
                     <td><EditableText value={numberDisplay(form.quantity)} label="充填・加工数量" className="money" onCommit={commitQuantity} /> 枚</td>
                     <td><EditableText value={moneyDisplay(shownTotals.fillingAmount, form.fillingAmountDisplay)} label="充填・加工金額" className="money" onCommit={commitFillingAmount} /></td>
                   </tr>
+                  {D(shownTotals.bulkAmount).gt(0) ? (
+                    <tr data-testid="bulk-line">
+                      <td>
+                        <strong><EditableText value={form.bulkItemName} label="バルク項目名" onCommit={(next) => update("bulkItemName", next.trim())} /></strong>
+                        <small><EditableText value={form.bulkItemDescription} label="バルク説明" multiline onCommit={(next) => update("bulkItemDescription", next)} /></small>
+                      </td>
+                      <td data-testid="bulk-unit-price"><EditableText value={moneyDisplay(shownTotals.bulkUnit, form.bulkUnitDisplay, 2)} label="バルク販売単価" className="money" onCommit={commitBulkUnit} /> /枚</td>
+                      <td><EditableText value={numberDisplay(form.quantity)} label="バルク数量" className="money" onCommit={commitQuantity} /> 枚</td>
+                      <td><EditableText value={moneyDisplay(shownTotals.bulkAmount, form.bulkAmountDisplay)} label="バルク金額" className="money" onCommit={commitBulkAmount} /></td>
+                    </tr>
+                  ) : null}
                   <tr>
                     <td>
                       <strong><EditableText value={form.filmItemName} label="フィルム項目名" onCommit={(next) => update("filmItemName", next.trim())} /></strong>
@@ -1322,6 +1392,8 @@ export default function PrintableQuotationPage() {
                       applyPatch({
                         filmOrderLengthM: length.toString(),
                         fillingUnitDisplay: "",
+                        bulkUnitDisplay: "",
+                        bulkAmountDisplay: "",
                         fillingAmountDisplay: "",
                         filmUnitDisplay: "",
                         filmPouchUnitDisplay: "",
@@ -1500,6 +1572,21 @@ export default function PrintableQuotationPage() {
           <label className="wide">充填・加工 説明<textarea rows={2} value={form.fillingItemDescription} onChange={(event) => update("fillingItemDescription", event.target.value)} /></label>
           <label>充填・加工 単価（空欄=自動）<input inputMode="decimal" value={form.fillingUnitDisplay} onChange={(event) => update("fillingUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>充填・加工 金額（空欄=自動）<input inputMode="decimal" value={form.fillingAmountDisplay} onChange={(event) => update("fillingAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
+          <label>バルク 原価 / 枚（0＝貴社支給）<input inputMode="decimal" value={form.bulkCostPerPiece} onChange={(event) => applyPatch({
+            bulkCostPerPiece: event.target.value,
+            bulkUnitDisplay: "",
+            bulkAmountDisplay: "",
+            fillingUnitDisplay: "",
+            fillingAmountDisplay: "",
+            filmUnitDisplay: "",
+            filmPouchUnitDisplay: "",
+            filmAmountDisplay: "",
+            subtotalDisplay: "",
+            taxDisplay: "",
+            grandTotalDisplay: "",
+          })} /></label>
+          <label>バルク 販売単価（空欄=自動・非表示可）<input inputMode="decimal" value={form.bulkUnitDisplay} onChange={(event) => update("bulkUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
+          <label>バルク 金額（空欄=自動）<input inputMode="decimal" value={form.bulkAmountDisplay} onChange={(event) => update("bulkAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
           <label>金型 原価（ロット合計）<input inputMode="decimal" value={form.customLotCost} onChange={(event) => update("customLotCost", event.target.value)} /></label>
           <label>金型 数量（式）<input inputMode="decimal" value={form.customQuantity} onChange={(event) => update("customQuantity", event.target.value)} /></label>
           <label>金型 単価（空欄=自動）<input inputMode="decimal" value={form.customUnitDisplay} onChange={(event) => update("customUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
@@ -1551,6 +1638,8 @@ export default function PrintableQuotationPage() {
           <label>見積単価 / 枚（空欄=自動）<input inputMode="decimal" value={form.pricePerPieceDisplay} onChange={(event) => applyPatch({
             pricePerPieceDisplay: event.target.value,
             fillingUnitDisplay: "",
+            bulkUnitDisplay: "",
+            bulkAmountDisplay: "",
             fillingAmountDisplay: "",
             filmUnitDisplay: "",
             filmPouchUnitDisplay: "",

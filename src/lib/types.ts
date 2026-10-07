@@ -50,6 +50,8 @@ export interface PouchSpec {
   isCustom: boolean;
   colorCount: number;
   bulkUnitPrice: DecimalValue;
+  /** 連結室ごとの液体構成。未指定時は全室で fillMlPerChamber＋bulkUnitPrice を使用（従来互換）。 */
+  chambers?: ChamberFill[];
   skuCount: number;
   skuQuantities?: DecimalValue[];
   skuNames?: string[];
@@ -85,4 +87,11 @@ export interface CostParameters {
 }
 
 export type DecimalValue = string;
+
+/** 連結パウチの1室ごとの充填構成（液体ごとに量・単価を設定できる）。 */
+export interface ChamberFill {
+  liquidName?: string;
+  fillMl: DecimalValue;
+  bulkUnitPrice?: DecimalValue;
+}
 export type QuotationStatus = "draft" | "sent" | "approved" | "rejected" | "expired";

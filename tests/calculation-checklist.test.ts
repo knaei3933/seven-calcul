@@ -1,8 +1,49 @@
 import { describe, expect, it } from "vitest";
 import { calculatePouchCost } from "@/lib/calculation";
+import { D } from "@/lib/decimal";
 import { buildCalculationChecklistSnapshot, buildChecklistItems, readCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 
 describe("calculation checklist snapshot", () => {
+  it("stores a volume-weighted bulk unit price for multi-liquid chamber compositions", () => {
+    const result = calculatePouchCost({
+      spec: {
+        sizeKey: "tube-35x80",
+        fillMlPerChamber: "7.5",
+        connectedChambers: 2,
+        chambers: [
+          { liquidName: "A", fillMl: "10", bulkUnitPrice: "0.37" },
+          { liquidName: "B", fillMl: "5", bulkUnitPrice: "0.8" },
+        ],
+        fillingMethod: "hopper",
+        fillingLanes: 4,
+        isCustom: false,
+        colorCount: 2,
+        bulkUnitPrice: "0",
+        skuCount: 1,
+      },
+      quantity: "10000",
+      printingMethod: "digital",
+    });
+    const snapshot = buildCalculationChecklistSnapshot(result, {
+      quotationNumber: "保存前",
+      printingMethod: "digital",
+      sourceHash: "source",
+      resultHash: "result",
+      filmComposition: "PET12+AL7+PET12+LLDPE50",
+      widthMm: "35",
+      lengthMm: "80",
+      pitchMm: "88",
+      pitchAddMm: "8",
+      webWidthMm: 356,
+      bulkUnitPrice: "0",
+      skus: [{ name: "テスト", quantity: "10000", fillMl: "7.5", colorCount: "2" }],
+    });
+    // 단가×사용량＝비용이 성립하도록 가중평균 단가 저장: 102,440엔 ÷ 199,000ml.
+    expect(snapshot.liquids).toHaveLength(2);
+    expect(D(snapshot.bulkUnitPrice).times(snapshot.bulkUsageMl).toDecimalPlaces(0, 4).toString()).toBe(snapshot.bulkCost);
+    expect(D(snapshot.bulkUnitPrice).gt("0.51")).toBe(true);
+  });
+
   it("keeps pouch dimensions, web width, and pitch separate", () => {
     const result = calculatePouchCost({
       spec: {

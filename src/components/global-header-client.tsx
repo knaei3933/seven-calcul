@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { PublicUser } from "@/lib/auth-store";
+import { CALCULATION_VERSION } from "@/lib/constants";
 
 const menuItems = [
   { href: "/", label: "原価シミュレーター" },
@@ -44,7 +45,7 @@ export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
       </nav>
 
       <div className="global-user-area">
-        <span className="version-badge">Decimal計算コア 2026-09.1</span>
+        <span className="version-badge">Decimal計算コア {CALCULATION_VERSION}</span>
         {user ? (
           <>
             <span className="current-user" data-testid="current-user">

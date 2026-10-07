@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { CALCULATION_VERSION, defaultParameters, defaultProductionSpeedForFillMl, sizeMaster } from "./constants";
-import { D, Decimal, ceilTo, eq, maxD, roundTo2, sum } from "./decimal";
+import { CALCULATION_VERSION, CONNECTED_FILLING_SURCHARGE, CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForFillMl, sizeMaster } from "./constants";
+import { D, Decimal, ceilTo, eq, maxD, roundTo2, roundUp1, sum } from "./decimal";
 import { normalizeDigitalFilmOrder, QuotationValidationError, type FilmOrderAdjustment, type FilmSkuOrder } from "./digital-film";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
 import { calculateGravureRollCost, defaultGravureRollParameters, type GravureRollParameters } from "./gravure-roll";
@@ -25,6 +25,12 @@ export interface CostResult {
   productionRunQuantity: string;
   productionHours: string;
   inspectionHours: string;
+  singleConnectedFillingCostPerPiece: string;
+  singleConnectedProcessingCostPerPiece: string;
+  connectedFillingSurchargeRate: string;
+  liquidCount: number;
+  liquids: LiquidCostResult[];
+  chambers: ChamberCostResult[];
   bulkLossRate: string;
   initialChargeMl: string;
   testFillMl: string;
@@ -86,6 +92,22 @@ export interface CostResult {
     unresolvedInputFlags: WarningCode[];
     componentReconciliationDifference: string;
   };
+}
+
+export interface LiquidCostResult {
+  liquidName: string;
+  bulkUnitPriceYen: string;
+  usageMl: string;
+  testFillMl: string;
+  initialChargeMl: string;
+  costYen: string;
+}
+
+export interface ChamberCostResult {
+  position: number;
+  liquidName: string;
+  fillMl: string;
+  bulkUnitPriceYen: string;
 }
 
 export type WarningCode =
@@ -174,11 +196,16 @@ function calculatePouchCostCore(
 ): CostResult {
   const quantityD = D(quantity);
   if (quantityD.lte(0) || D(spec.fillMlPerChamber).lte(0) || spec.fillingLanes <= 0) throw validationError("invalid_positive_input");
+  // 室ごとに異なる液体を充填できる。未指定時は全室同一（従来互換）。
+  const chamberFills = resolveChamberFills(spec);
+  const maxChamberFill = chamberFills.reduce((max, chamber) => Decimal.max(max, D(chamber.fillMl)), D(0));
+  const avgChamberFill = sum(chamberFills.map((chamber) => D(chamber.fillMl))).div(spec.connectedChambers);
   const params = {
     ...defaultParameters,
     ...parameters,
     productionSpeedPerMinute: parameters?.productionSpeedPerMinute
-      ?? String(defaultProductionSpeedForFillMl(spec.fillMlPerChamber)),
+      // 充填量が実ごとに異なる場合は、最も多い室（ボトルネック）を速度基準にする。
+      ?? String(defaultProductionSpeedForFillMl(maxChamberFill.toString())),
   } as CostParameters;
   const margins = resolveTargetMargins(targetMargins);
 
@@ -296,37 +323,115 @@ function calculatePouchCostCore(
     fillMlPerChamber: skuFills[index].toString(),
     colorCount: (spec.skuColorCounts?.[index] ?? spec.colorCount).toString(),
   }));
-  const filmWithSkus: FilmCostResult = { ...film, skuCosts };
-  const initialCharge = initialChargeMl(spec, params);
+  // 原価の金額はすべて小数第1位で切り上げる。
+  const filmPartsRounded = {
+    filmBaseCost: roundUp1(film.filmBaseCost),
+    domesticShipping: roundUp1(film.domesticShipping),
+    overseasShipping: roundUp1(film.overseasShipping),
+    customs: roundUp1(film.customs),
+  };
+  const filmTotalRounded = gravureRoll
+    ? roundUp1(film.filmTotal)
+    : filmPartsRounded.filmBaseCost
+      .plus(filmPartsRounded.domesticShipping)
+      .plus(filmPartsRounded.overseasShipping)
+      .plus(filmPartsRounded.customs);
+  const filmWithSkus: FilmCostResult = {
+    ...film,
+    filmBaseCost: filmPartsRounded.filmBaseCost.toString(),
+    domesticShipping: filmPartsRounded.domesticShipping.toString(),
+    overseasShipping: filmPartsRounded.overseasShipping.toString(),
+    customs: filmPartsRounded.customs.toString(),
+    filmTotal: filmTotalRounded.toString(),
+    filmCostPerPiece: roundUp1(filmTotalRounded.div(quantityD)).toString(),
+    skuCosts: skuCosts.map((skuCost) => ({ ...skuCost, filmCost: roundUp1(skuCost.filmCost).toString() })),
+  };
+  const initialChargePerLiquid = initialChargeMl(spec, params);
+  // 室ごとに異なる液体を充填できる。同一液体（名称＋単価が同じ室）は1つの液体として扱う。
+  const liquidGroups = groupChambersByLiquid(chamberFills);
+  const initialCharge = initialChargePerLiquid.times(liquidGroups.length);
   const chamberCount = quantityD.times(spec.connectedChambers);
   const weightedAvgFill = sum(skuQuantitiesList.map((skuQuantity, index) => skuQuantity.times(skuFills[index]))).div(sum(skuQuantitiesList));
-  const testFill = D(params.fillTestRuns).times(spec.fillingLanes).times(weightedAvgFill);
-  const bulkUsage = chamberCount.times(weightedAvgFill).times(D(1).plus(params.bulkLossRate)).plus(initialCharge).plus(testFill);
-  const bulkCost = bulkUsage.times(spec.bulkUnitPrice);
-  const bulkPerPiece = bulkCost.div(quantityD);
+  const effectiveFillPerChamber = spec.chambers?.length === spec.connectedChambers ? avgChamberFill : weightedAvgFill;
+  const liquidCostResults = liquidGroups.map((group) => {
+    // 液体ごと：本体充填（その液体を入れる室の合計）＋初期投入1回＋テスト充填。
+    const baseFill = quantityD.times(sum(group.fills));
+    const base = baseFill.times(D(1).plus(params.bulkLossRate));
+    const test = D(params.fillTestRuns).times(spec.fillingLanes).times(group.maxFill);
+    const usage = base.plus(initialChargePerLiquid).plus(test);
+    return {
+      liquidName: group.name,
+      bulkUnitPriceYen: group.unitPrice,
+      usageMl: usage.toString(),
+      testFillMl: test.toString(),
+      initialChargeMl: initialChargePerLiquid.toString(),
+      costYen: roundUp1(usage.times(D(group.unitPrice))).toString(),
+    };
+  });
+  const testFill = sum(liquidCostResults.map((liquid) => D(liquid.testFillMl)));
+  const bulkUsage = sum(liquidCostResults.map((liquid) => D(liquid.usageMl)));
+  const bulkCost = sum(liquidCostResults.map((liquid) => D(liquid.costYen)));
+  const bulkPerPiece = roundUp1(bulkCost.div(quantityD));
 
   const lanesPerCycle = Math.max(1, Math.floor(spec.fillingLanes / spec.connectedChambers));
-  const effectiveProductionSpeed = D(params.productionSpeedPerMinute).times(60).times(lanesPerCycle).div(spec.fillingLanes);
+  // 1回のサイクルで作れる製品数は 1連=4個／2連=2個／3連=1個／4連=1個。
+  // 3列でも4列でも1回に1個しか出来ないため、3連と4連の実効速度は同じ。
+  const effectiveProductionSpeed = D(params.productionSpeedPerMinute)
+    .times(60)
+    .times(CONNECTED_PRODUCTION_SPEED_FACTOR[spec.connectedChambers]);
   const productionRunQuantity = quantityD.div(D(1).minus(params.lossRate));
   const productionHours = productionRunQuantity.div(effectiveProductionSpeed);
-  const inspectionHours = productionRunQuantity.div(params.inspectionSpeed);
+  // 検品は連結後パウチではなく1室（各列）ずつ確認するため、検品対象は稼働生産数×連結数。
+  const inspectionRunQuantity = productionRunQuantity.times(spec.connectedChambers);
+  const inspectionHours = inspectionRunQuantity.div(params.inspectionSpeed);
   const variableLabor = D(params.laborPerHour).times(productionHours).plus(D(params.laborPerHour).times(inspectionHours));
   const machineVariable = D(params.machineChargePerHour).times(productionHours);
-  const variableProcessing = variableLabor.plus(machineVariable);
+  const variableProcessing = roundUp1(variableLabor.plus(machineVariable));
   const variableTotal = variableProcessing;
-  const variableLaborPerPiece = variableLabor.div(quantityD);
-  const machineVariablePerPiece = machineVariable.div(quantityD);
-  const variableProcessingPerPiece = variableProcessing.div(quantityD);
-  const fixedLot = D(params.setupTime).plus(params.cleanupTime).times(D(params.laborPerHour).plus(params.machineChargePerHour));
-  const fixedPerPiece = fixedLot.div(quantityD);
+  const variableLaborPerPiece = roundUp1(variableLabor.div(quantityD));
+  const machineVariablePerPiece = roundUp1(machineVariable.div(quantityD));
+  const variableProcessingPerPiece = roundUp1(variableProcessing.div(quantityD));
+  const fixedLot = roundUp1(D(params.setupTime).plus(params.cleanupTime).times(D(params.laborPerHour).plus(params.machineChargePerHour)));
+  const fixedPerPiece = roundUp1(fixedLot.div(quantityD));
   const customCharge = spec.isCustom ? D(params.customPouchCharge) : D(0);
 
-  const copperPlateCost = gravureRoll?.copperPlateCostYen ?? "0";
-  const copperPlateCostPerPiece = D(copperPlateCost).div(quantityD).toString();
+  // 見積用の充填・加工単価は「1連相当で計算した基準単価」に連結加算率
+  // （2連+20%、3連/4連+80%）を適用する。コスト計上とは別に1連相当原価を求める。
+  const singleConnectedProductionHours = productionRunQuantity.div(D(params.productionSpeedPerMinute).times(60));
+  const singleConnectedInspectionHours = productionRunQuantity.div(params.inspectionSpeed);
+  const singleConnectedVariableLabor = D(params.laborPerHour)
+    .times(singleConnectedProductionHours.plus(singleConnectedInspectionHours));
+  const singleConnectedMachineVariable = D(params.machineChargePerHour).times(singleConnectedProductionHours);
+  // 1連基準のバルク原価は「室別原価の平均」（×N すると室別合計と一致する）。
+  const perPouchBulkVariable = sum(chamberFills.map((chamber) => (
+    D(chamber.fillMl).times(D(1).plus(params.bulkLossRate)).times(D(chamber.bulkUnitPrice))
+  )));
+  // 初期投入・テスト充填も液体ごとの単価で評価する。
+  const lotBulkCost = sum(liquidCostResults.map((liquid) => (
+    D(liquid.initialChargeMl).plus(D(liquid.testFillMl)).times(D(liquid.bulkUnitPriceYen))
+  )));
+  const singleConnectedBulkCost = perPouchBulkVariable
+    .div(spec.connectedChambers)
+    .times(quantityD)
+    .plus(lotBulkCost);
+  const singleConnectedFillingCost = singleConnectedBulkCost
+    .plus(singleConnectedVariableLabor)
+    .plus(singleConnectedMachineVariable)
+    .plus(fixedLot);
+  const singleConnectedFillingCostPerPiece = roundUp1(singleConnectedFillingCost.div(quantityD));
+  // 견적에서 벌크를 별도 라인으로 분리하기 위한「가공 전용(벌크 제외) 1연 기준원가」.
+  const singleConnectedProcessingCost = singleConnectedVariableLabor
+    .plus(singleConnectedMachineVariable)
+    .plus(fixedLot);
+  const singleConnectedProcessingCostPerPiece = roundUp1(singleConnectedProcessingCost.div(quantityD));
+  const connectedFillingSurchargeRate = CONNECTED_FILLING_SURCHARGE[spec.connectedChambers];
+
+  const copperPlateCost = roundUp1(gravureRoll?.copperPlateCostYen ?? "0").toString();
+  const copperPlateCostPerPiece = roundUp1(D(copperPlateCost).div(quantityD)).toString();
   // デジタルのフィルム単価は仕入価格に供給調整済みのため追加調整しない。
   const appliesSellerProfit = printingMethod === "gravure" && !sascheCandidate;
   const sellerProfitBaseCost = appliesSellerProfit ? D(filmWithSkus.filmTotal) : D(0);
-  const sellerProfitCost = sellerProfitBaseCost.times(params.sellerProfitRate);
+  const sellerProfitCost = roundUp1(sellerProfitBaseCost.times(params.sellerProfitRate));
   const filmCostWithSellerProfitRaw = D(filmWithSkus.filmTotal).plus(sellerProfitCost);
   // フィルム費用は見積・発注書の金額単位に合わせて円未満を四捨五入する。
   const filmCostWithSellerProfit = appliesSellerProfit || sascheCandidate
@@ -337,7 +442,7 @@ function calculatePouchCostCore(
     filmBaseCost: filmWithSkus.filmBaseCost,
     unitPrice: (appliesSellerProfit || sascheCandidate) && filmWithSkus.orderLengthM ? filmCostWithSellerProfit.div(filmWithSkus.orderLengthM).toString() : filmWithSkus.unitPrice,
     filmTotal: filmCostWithSellerProfit.toString(),
-    filmCostPerPiece: filmCostWithSellerProfit.div(quantityD).toString(),
+    filmCostPerPiece: roundUp1(filmCostWithSellerProfit.div(quantityD)).toString(),
   };
   const costComponents = {
     film: filmCostWithSellerProfit,
@@ -348,12 +453,12 @@ function calculatePouchCostCore(
     custom: customCharge,
   };
   const costTotal = sum(Object.values(costComponents));
-  const totalPerPiece = D(costTotal).div(quantityD);
+  const totalPerPiece = roundUp1(D(costTotal).div(quantityD));
   const reconciliation = costTotal.minus(sum(Object.values(costComponents)));
 
   const sellingPrices = margins.map((margin) => {
-    const price = totalPerPiece.div(D(1).minus(margin));
-    return { margin, pricePerPiece: price.toString(), totalSales: price.times(quantityD).toString(), profit: price.minus(totalPerPiece).times(quantityD).toString() };
+    const price = roundUp1(totalPerPiece.div(D(1).minus(margin)));
+    return { margin, pricePerPiece: price.toString(), totalSales: price.times(quantityD).toString(), profit: roundUp1(price.minus(totalPerPiece).times(quantityD)).toString() };
   });
 
   const warnings = unresolvedWarnings(spec, size, params);
@@ -366,8 +471,8 @@ function calculatePouchCostCore(
     quantity: quantityD.toString(),
     connectedChambers: spec.connectedChambers,
     chamberCount: chamberCount.toString(),
-    fillMlPerChamber: weightedAvgFill.toString(),
-    totalFillMlPerPouch: weightedAvgFill.times(spec.connectedChambers).toString(),
+    fillMlPerChamber: effectiveFillPerChamber.toString(),
+    totalFillMlPerPouch: effectiveFillPerChamber.times(spec.connectedChambers).toString(),
     fillingMethod: spec.fillingMethod,
     fillingLanes: spec.fillingLanes,
     baseProductionSpeedPerMinute: params.productionSpeedPerMinute,
@@ -376,6 +481,17 @@ function calculatePouchCostCore(
     productionRunQuantity: productionRunQuantity.toString(),
     productionHours: productionHours.toString(),
     inspectionHours: inspectionHours.toString(),
+    singleConnectedFillingCostPerPiece: singleConnectedFillingCostPerPiece.toString(),
+    singleConnectedProcessingCostPerPiece: singleConnectedProcessingCostPerPiece.toString(),
+    connectedFillingSurchargeRate,
+    liquidCount: liquidGroups.length,
+    liquids: liquidCostResults,
+    chambers: chamberFills.map((chamber, index) => ({
+      position: index + 1,
+      liquidName: chamber.liquidName,
+      fillMl: chamber.fillMl,
+      bulkUnitPriceYen: chamber.bulkUnitPrice,
+    })),
     bulkLossRate: params.bulkLossRate,
     initialChargeMl: initialCharge.toString(),
     testFillMl: testFill.toString(),
@@ -399,7 +515,7 @@ function calculatePouchCostCore(
     totalCostPerPiece: totalPerPiece.toString(),
     costTotal: costTotal.toString(),
     costComponents: mapValues(costComponents, String),
-    costPerPieceComponents: mapValues(costComponents, (value) => D(value).div(quantityD).toString()),
+    costPerPieceComponents: mapValues(costComponents, (value) => roundUp1(D(value).div(quantityD)).toString()),
     sellingPrices,
     film: filmWithSellerProfit,
     copperPlateCost,
@@ -677,6 +793,51 @@ function filmUnitPrice(band: SizeMaster["priceBand"], orderLength: Decimal, para
 
 function initialChargeMl(spec: PouchSpec, params: CostParameters): Decimal {
   return D(spec.fillingMethod === "pressure" ? params.pressureInitialChargeMl : params.hopperInitialChargeMl);
+}
+
+interface ResolvedChamberFill {
+  liquidName: string;
+  fillMl: string;
+  bulkUnitPrice: string;
+}
+
+function resolveChamberFills(spec: PouchSpec): ResolvedChamberFill[] {
+  if (spec.chambers) {
+    if (spec.chambers.length !== spec.connectedChambers) throw validationError("invalid_chamber_fills");
+    return spec.chambers.map((chamber, index) => {
+      if (D(chamber.fillMl).lte(0)) throw validationError("invalid_chamber_fills");
+      return {
+        liquidName: chamber.liquidName?.trim() || `液体${index + 1}`,
+        fillMl: chamber.fillMl,
+        bulkUnitPrice: chamber.bulkUnitPrice ?? spec.bulkUnitPrice,
+      };
+    });
+  }
+  return Array.from({ length: spec.connectedChambers }, () => ({
+    liquidName: "バルク",
+    fillMl: spec.fillMlPerChamber,
+    bulkUnitPrice: spec.bulkUnitPrice,
+  }));
+}
+
+function groupChambersByLiquid(chambers: ResolvedChamberFill[]) {
+  const groups = new Map<string, { name: string; unitPrice: string; fills: string[]; maxFill: Decimal }>();
+  for (const chamber of chambers) {
+    const key = `${chamber.liquidName} ${chamber.bulkUnitPrice}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.fills.push(chamber.fillMl);
+      existing.maxFill = Decimal.max(existing.maxFill, D(chamber.fillMl));
+    } else {
+      groups.set(key, {
+        name: chamber.liquidName,
+        unitPrice: chamber.bulkUnitPrice,
+        fills: [chamber.fillMl],
+        maxFill: D(chamber.fillMl),
+      });
+    }
+  }
+  return [...groups.values()];
 }
 
 function unresolvedWarnings(spec: PouchSpec, size: SizeMaster, params: CostParameters): WarningCode[] {

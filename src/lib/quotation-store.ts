@@ -437,6 +437,8 @@ async function selectRecordByNumber(db: SqlClient, quotationNumber: string): Pro
 export async function deleteQuotation(id: number): Promise<boolean> {
   const db = await getDatabase();
   if (!Number.isInteger(id) || id <= 0) return false;
+  // 견적 삭제 시 체크리스트 행이 외래키 제약으로 남아 있으면 삭제가 실패한다. 먼저 정리한다.
+  await db.run("DELETE FROM quotation_checklists WHERE quotation_id = ?", [id]);
   const result = await db.run("DELETE FROM quotations WHERE id = ?", [id]);
   return Number(result.changes) > 0;
 }

@@ -59,11 +59,11 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
   const production = "生産条件";
   add("production.base-speed", production, "基準生産速度", "1連基準の分毎生産速度です。", `入力速度 = ${number(p.productionSpeedPerMinute)} 枚/分`, "入力値または充填量ルール", `入力 = ${number(p.productionSpeedPerMinute)}`, number(snapshot.baseProductionSpeedPerMinute), "枚/分");
   add("production.lanes", production, "同時充填列数", "充填機の同時処理列数です。", `充填列数 = ${snapshot.fillingLanes}列`, "入力値をそのまま使用します。", `入力 = ${snapshot.fillingLanes}`, String(snapshot.fillingLanes), "列");
-  add("production.effective-speed", production, "実効生産速度", "連結形式を反映した1時間あたり速度です。", `基準速度 = ${number(snapshot.baseProductionSpeedPerMinute)}枚/分／1回充填列数 = ${snapshot.lanesPerCycle}／総列数 = ${snapshot.fillingLanes}`, "基準速度 × 60 × (1回充填列数 ÷ 総列数)", `${number(snapshot.baseProductionSpeedPerMinute)} × 60 × (${snapshot.lanesPerCycle} ÷ ${snapshot.fillingLanes})`, number(snapshot.effectiveProductionSpeed), "枚/h");
+  add("production.effective-speed", production, "実効生産速度", "連結形式を反映した1時間あたり速度です。機械は3列でも4列でも1回に1個の製品しか作れないため、3連と4連の速度は同じです。", `基準速度 = ${number(snapshot.baseProductionSpeedPerMinute)}枚/分／連結係数 = 1連:1／2連:1/2／3連・4連:1/4`, "基準速度 × 60 × 連結係数", `${number(snapshot.baseProductionSpeedPerMinute)} × 60 × ${snapshot.connectedChambers === 1 ? "1" : snapshot.connectedChambers === 2 ? "1/2" : "1/4"}`, number(snapshot.effectiveProductionSpeed), "枚/h");
   const lossRate = percent(p.lossRate);
   add("production.run-quantity", production, "稼働生産数量", "フィルムロス分を含めて製造する数量です。", `発注数量 = ${number(snapshot.quantity)}枚／フィルムロス率 = ${lossRate}`, "発注数量 ÷ (1 − ロス率)", `${number(snapshot.quantity)} ÷ (1 − ${p.lossRate})`, number(snapshot.productionRunQuantity), "枚");
   add("production.production-hours", production, "生産時間", "稼働生産数量の製造に必要な時間です。", `稼働生産数量 = ${number(snapshot.productionRunQuantity)}枚／実効速度 = ${number(snapshot.effectiveProductionSpeed)}枚/h`, "稼働生産数量 ÷ 実効生産速度", `${number(snapshot.productionRunQuantity)} ÷ ${number(snapshot.effectiveProductionSpeed)}`, number(snapshot.productionHours), "h");
-  add("production.inspection-hours", production, "検品時間", "稼働生産数量を検品する時間です。", `稼働生産数量 = ${number(snapshot.productionRunQuantity)}枚／検品速度 = ${number(p.inspectionSpeed)}枚/h`, "稼働生産数量 ÷ 検品速度", `${number(snapshot.productionRunQuantity)} ÷ ${number(p.inspectionSpeed)}`, number(snapshot.inspectionHours), "h");
+  add("production.inspection-hours", production, "検品時間", "連結室を1室（各列）ずつ検品する時間です。", `稼働生産数量 = ${number(snapshot.productionRunQuantity)}枚／連結数 = ${snapshot.connectedChambers}／検品速度 = ${number(p.inspectionSpeed)}枚/h`, "稼働生産数量 × 連結数 ÷ 検品速度", `${number(snapshot.productionRunQuantity)} × ${snapshot.connectedChambers} ÷ ${number(p.inspectionSpeed)}`, number(snapshot.inspectionHours), "h");
 
   const processing = "充填・加工費";
   const productionLabor = D(p.laborPerHour).times(snapshot.productionHours);
@@ -75,6 +75,11 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
   add("processing.variable-total", processing, "変動加工費", "生産人件費・検品人件費・機械変動費の合計です。", `生産人件費 = ${number(productionLabor)}円／検品人件費 = ${number(inspectionLabor)}円／機械費 = ${number(machineVariable)}円`, "生産人件費 + 検品人件費 + 機械費", `${number(productionLabor)} + ${number(inspectionLabor)} + ${number(machineVariable)}`, number(snapshot.variableProcessingTotal), "円");
   add("processing.fixed-lot", processing, "段取り・清掃費", "ロット1回の段取りと清掃に必要な固定費です。", `段取り = ${number(p.setupTime)}h／清掃 = ${number(p.cleanupTime)}h／人件費 = ${number(p.laborPerHour)}円/h／機械チャージ = ${number(p.machineChargePerHour)}円/h`, "(段取り + 清掃) × (人件費 + 機械チャージ)", `(${number(p.setupTime)} + ${number(p.cleanupTime)}) × (${number(p.laborPerHour)} + ${number(p.machineChargePerHour)})`, number(snapshot.fixedLotCost), "円");
   add("processing.custom", processing, "カスタム費用", "カスタムサイズ・金型などの追加ロット費用です。", `カスタム単価設定 = ${number(p.customPouchCharge)}円`, "カスタム適用時は設定額、標準時は0円", snapshot.customCharge === "0" ? "標準サイズのため0円" : `適用 = ${number(p.customPouchCharge)}円`, number(snapshot.customCharge), "円");
+  const connectedFillingSurchargeRate = snapshot.connectedFillingSurchargeRate ?? "0";
+  const singleConnectedFillingCostPerPiece = snapshot.singleConnectedFillingCostPerPiece ?? D(snapshot.totalCostPerPiece).toString();
+  add("processing.single-connected-filling", processing, "1連基準充填原価", "同じ条件を1連で生産した場合の充填・加工原価です。", `発注数量 = ${number(snapshot.quantity)}枚／連結数 = ${snapshot.connectedChambers}`, "バルク＋変動加工＋ロット固定を1連相当で計算し発注数量で割る", `1連相当充填原価 ÷ ${number(snapshot.quantity)}`, number(singleConnectedFillingCostPerPiece), "円/枚");
+  add("processing.connected-surcharge", processing, "連結加算率", "見積の充填・加工単価に適用する連結形式別の加算率です。基本額（1連基準原価×連結室数）に乗じます。", `連結数 = ${snapshot.connectedChambers}連`, "1連=0%／2連=20%／3連・4連=80%", `${snapshot.connectedChambers}連 = ${percent(connectedFillingSurchargeRate)}`, percent(connectedFillingSurchargeRate), "%");
+  add("processing.connected-pricing-basis", processing, "連結適用充填原価", "1連基準充填原価に連結室数と連結加算を適用した見積単価の基準値です。", `1連基準充填原価 = ${number(singleConnectedFillingCostPerPiece)}円/枚／連結数 = ${snapshot.connectedChambers}／連結加算率 = ${percent(connectedFillingSurchargeRate)}`, "1連基準充填原価 × 連結数 × (1 + 連結加算率)", `${number(singleConnectedFillingCostPerPiece)} × ${snapshot.connectedChambers} × (1 + ${connectedFillingSurchargeRate})`, number(D(singleConnectedFillingCostPerPiece).times(D(snapshot.connectedChambers)).times(D(1).plus(D(connectedFillingSurchargeRate))).toString()), "円/枚");
 
   const bulk = "バルク費用";
   const bulkChamberCount = D(snapshot.chamberCount ?? D(snapshot.quantity).times(snapshot.connectedChambers));
@@ -89,6 +94,12 @@ export function buildJapaneseChecklistItems(snapshot: CalculationChecklistSnapsh
   add("bulk.test-fill", bulk, "テスト充填量", "量産前のテスト充填で使用する液量です。", `テスト回数 = ${number(p.fillTestRuns)}回／充填列数 = ${snapshot.fillingLanes}列／充填量 = ${number(snapshot.fillMlPerChamber)}ml`, "テスト回数 × 充填列数 × 充填量", `${number(p.fillTestRuns)} × ${snapshot.fillingLanes} × ${number(snapshot.fillMlPerChamber)} = ${number(bulkTestAmount)}`, number(bulkTestAmount), "ml");
   add("bulk.usage", bulk, "バルク使用量", "本体充填・ロス・初期投入・テスト充填を含む使用量です。", `本体充填 = ${number(bulkBaseFill)}ml／バルクロス = ${number(bulkLossAmount)}ml／初期投入 = ${number(bulkInitialAmount)}ml／テスト充填 = ${number(bulkTestAmount)}ml`, "本体充填量 + バルクロス量 + 初期投入量 + テスト充填量", `${number(bulkBaseFill)} + ${number(bulkLossAmount)} + ${number(bulkInitialAmount)} + ${number(bulkTestAmount)} = ${number(snapshot.bulkUsageMl)}`, number(snapshot.bulkUsageMl), "ml");
   add("bulk.cost", bulk, "バルク費用", "バルク使用量に対する費用です。", `使用量 = ${number(snapshot.bulkUsageMl)}ml／単価 = ${number(snapshot.bulkUnitPrice)}円/ml`, "使用量 × バルク単価", `${number(snapshot.bulkUsageMl)} × ${number(snapshot.bulkUnitPrice)}`, number(snapshot.bulkCost), "円");
+  if (snapshot.liquids?.length && snapshot.chambers?.length) {
+    add("bulk.chamber-structure", bulk, "室別液体構成", "連結室ごとに入れる液体の構成です。", snapshot.chambers.map((chamber) => `${chamber.position}室=${chamber.liquidName} ${number(chamber.fillMl)}ml`).join("／"), "室構成の入力値を確認します。", `${snapshot.chambers.length}室構成`, String(snapshot.chambers.length), "室");
+    for (const [index, liquid] of snapshot.liquids.entries()) {
+      add(`bulk.liquid.${index + 1}`, bulk, `液体別費用 ${index + 1}（${liquid.liquidName}）`, "液体ごとの使用量と費用です。初期投入・テスト充填も液体ごとに発生します。", `単価 = ${number(liquid.bulkUnitPriceYen)}円/ml／初期投入 = ${number(liquid.initialChargeMl)}ml／テスト = ${number(liquid.testFillMl)}ml`, "（発注数×その液体の室の充填量×(1+ロス) ＋ 初期投入 ＋ テスト）× 液体単価", `使用量 ${number(liquid.usageMl)}ml × ${number(liquid.bulkUnitPriceYen)}円/ml`, number(liquid.costYen), "円");
+    }
+  }
 
   const film = "フィルム費用";
   const requiredLengthTerms = skus.length ? skus.map((sku) => number(sku.requiredLengthM)) : [];

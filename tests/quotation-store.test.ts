@@ -12,7 +12,7 @@ import type { QuotationRecordInput } from "@/lib/quotation-shared";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-store-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
-const { createChecklistsForQuotation, createLegacyChecklistsForQuotation, getChecklistsForQuotation, getQuotation, saveQuotation, updateChecklistItem } = await import("@/lib/quotation-store");
+const { createChecklistsForQuotation, createLegacyChecklistsForQuotation, deleteQuotation, getChecklistsForQuotation, getQuotation, saveQuotation, updateChecklistItem } = await import("@/lib/quotation-store");
 const { createUser } = await import("@/lib/auth-store");
 
 process.env.ADMIN_EMAIL = "admin@quotation-store.test";
@@ -296,6 +296,43 @@ describe("quotation persistence with a manually edited selling price", () => {
     expect(draft.purchaseOrder?.printingMethod).toBe("gravure");
     expect(draft.purchaseOrder?.skuColorCounts).toEqual(["2", "4"]);
     expect(draft.purchaseOrder?.skuOrderDetails.map((sku) => Number(sku.quantity))).toEqual(candidate!.adjustedSkuQuantities.map(Number));
+  });
+
+  it("deletes a quotation together with its checklists", async () => {
+    const input: QuotationRecordInput = {
+      quotationNumber: "S7-TEST-DELETE-90",
+      status: "draft",
+      issueDate: "2026-10-07",
+      validUntil: "2026-11-07",
+      customerName: "削除確認株式会社",
+      customerContact: "担当者様",
+      productName: "削除テストパウチ",
+      sizeSummary: "60×80mm / 1連",
+      quantity: "10000",
+      fillingCostPerPiece: "53.8",
+      filmCostPerPiece: "20.1",
+      filmMeterPrice: "402",
+      filmOrderLengthM: "500",
+      targetMargin: "0.4",
+      taxRatePercent: "10",
+      pricePerPiece: "112.5",
+      subtotal: "1125000",
+      tax: "112500",
+      grandTotal: "1237500",
+      deliveryDate: "",
+      paymentTerms: "",
+      notes: "",
+      calculationVersion: "simulator-linked",
+      resultHash: "delete-checklist-test",
+      payload: {},
+    };
+    const saved = await saveQuotation(input, actor.id);
+    await createLegacyChecklistsForQuotation(saved, "digital");
+    expect((await getChecklistsForQuotation(saved.id)).length).toBeGreaterThan(0);
+    // 체크리스트가 있어도 외래키 제약 없이 견적 삭제가 성공해야 한다.
+    expect(await deleteQuotation(saved.id)).toBe(true);
+    expect(await getQuotation(saved.id)).toBeNull();
+    expect(await getChecklistsForQuotation(saved.id)).toHaveLength(0);
   });
 
   it("uses the selected gravure material width for purchase-order and nested checklist SKU rows", () => {

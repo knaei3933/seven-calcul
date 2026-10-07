@@ -1,8 +1,13 @@
 import type { CostResult } from "./calculation";
+import { CONNECTED_FILLING_SURCHARGE } from "./constants";
 import { ceilTo, D, Decimal } from "./decimal";
 
 const FILM_METER_PRICE_MIN = D(380);
 const FILM_METER_PRICE_MAX = D(480);
+// グラビアの客提示フィルムm単価は90〜220円の帯に制限し、
+// 帯によって生じる差額は充填・加工単価で補う。
+export const GRAVURE_FILM_METER_PRICE_MIN = D(90);
+export const GRAVURE_FILM_METER_PRICE_MAX = D(220);
 export const COPPER_TARGET_MARGIN = D("0.10");
 
 function recommendedFilmMeterUnit(orderLength: Decimal) {
@@ -16,11 +21,17 @@ function clampFilmMeterUnit(value: Decimal) {
   return Decimal.min(FILM_METER_PRICE_MAX, Decimal.max(FILM_METER_PRICE_MIN, value));
 }
 
+export function clampGravureFilmMeterUnit(value: Decimal) {
+  return Decimal.min(GRAVURE_FILM_METER_PRICE_MAX, Decimal.max(GRAVURE_FILM_METER_PRICE_MIN, value));
+}
+
 export type AutomaticQuotationTotals = {
   quantity: Decimal;
   margin: Decimal;
   taxRate: Decimal;
   fillingCostPerPiece: Decimal;
+  processingCostPerPiece: Decimal;
+  bulkCostPerPiece: Decimal;
   copperCostPerPiece: Decimal;
   filmCostPerPiece: Decimal;
   customLotCost: Decimal;
@@ -30,6 +41,7 @@ export type AutomaticQuotationTotals = {
   totalCostPerPiece: Decimal;
   copperColorCount: Decimal;
   fillingSellingUnit: Decimal;
+  bulkSellingUnit: Decimal;
   copperSellingUnit: Decimal;
   filmSellingUnit: Decimal;
   customUnit: Decimal;
@@ -38,6 +50,7 @@ export type AutomaticQuotationTotals = {
   filmMeterPrice: Decimal;
   roundingAdjustment: Decimal;
   fillingAmount: Decimal;
+  bulkAmount: Decimal;
   copperAmount: Decimal;
   subtotal: Decimal;
   tax: Decimal;
@@ -46,6 +59,8 @@ export type AutomaticQuotationTotals = {
     pricePerPiece: string;
     fillingUnit: string;
     fillingAmount: string;
+    bulkUnit: string;
+    bulkAmount: string;
     copperUnit: string;
     copperAmount: string;
     copperColorCount: string;
@@ -78,6 +93,22 @@ export function calculateAutomaticQuotation(
   const fillingCostPerPiece = D(result.costPerPieceComponents.bulk)
     .plus(result.costPerPieceComponents.variableProcessing)
     .plus(result.costPerPieceComponents.fixedLot);
+  const processingCostPerPiece = D(result.costPerPieceComponents.variableProcessing)
+    .plus(result.costPerPieceComponents.fixedLot);
+  const bulkCostPerPiece = D(result.costPerPieceComponents.bulk);
+  // 見積の充填・加工単価は「1連相当の充填原価」に連結加算率（2連+20%、3連/4連+80%）を
+  // 適用した値を基準に計算する。検品の連結室ぶんは原価側（fillingCostPerPiece）に反映する。
+  const connectedFillingSurcharge = D(CONNECTED_FILLING_SURCHARGE[result.connectedChambers] ?? "0");
+  // 加算率（2連+20%／3連/4連+80%）の倍率を厳密に保つため、
+  // 中間基準値は丸めず最終表示単価（小数第1位切り上げ）で丸める。
+  // 基本額は 1連基準 × 連結室数（2連なら6+6=12円）、その基本額に加算率を乗じる。
+  // 充填・加工はバルクを除いた「1連基準の加工原価 × 連結室数」に加算率を乗じる。
+  // バルクは当社販売時のみ別ラインで計上する（客給時は原価0＝ラインなし）。
+  const pricingFillingCostPerPiece = result.singleConnectedProcessingCostPerPiece
+    ? D(result.singleConnectedProcessingCostPerPiece)
+      .times(D(result.connectedChambers))
+      .times(D(1).plus(connectedFillingSurcharge))
+    : processingCostPerPiece;
   const customLotCost = D(result.customCharge);
   const copperCostPerPiece = D(result.copperPlateCostPerPiece);
   const filmCostPerPiece = D(result.costPerPieceComponents.film);
@@ -85,7 +116,8 @@ export function calculateAutomaticQuotation(
   const filmOrderLength = D(result.film.orderLengthM);
   const copperColorCount = D(result.gravure?.copperPlateCount ?? 1);
 
-  const fillingSellingUnit = fillingCostPerPiece.div(D(1).minus(margin));
+  const fillingSellingUnit = pricingFillingCostPerPiece.div(D(1).minus(margin));
+  const bulkSellingUnit = bulkCostPerPiece.div(D(1).minus(margin));
   const copperSellingUnit = copperCostPerPiece.div(D(1).minus(COPPER_TARGET_MARGIN));
   const filmSellingUnit = filmCostPerPiece.div(D(1).minus(margin));
   const customSaleBase = customLotCost.div(customQuantity).div(D(1).minus(margin));
@@ -94,6 +126,7 @@ export function calculateAutomaticQuotation(
   const customSalePerPiece = customSaleTotal.div(quantity);
 
   const pricePerPiece = fillingSellingUnit
+    .plus(bulkSellingUnit)
     .plus(copperSellingUnit)
     .plus(filmSellingUnit)
     .plus(customSalePerPiece);
@@ -103,7 +136,8 @@ export function calculateAutomaticQuotation(
   const tax = idealSubtotal.times(taxRate).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
   const grandTotal = idealSubtotal.plus(tax);
 
-  const roundUnit = (value: Decimal) => value.toDecimalPlaces(2, Decimal.ROUND_UP);
+  // 見積単価（充填・加工／フィルムm単価）は小数第1位で切り上げる。
+  const roundUnit = (value: Decimal) => value.toDecimalPlaces(1, Decimal.ROUND_UP);
   const targetTotal = pricePerPiece.times(quantity);
   const copperColorUnit = copperColorCount.gt(0)
     ? copperSellingUnit.times(quantity).div(copperColorCount).toDecimalPlaces(0, Decimal.ROUND_CEIL)
@@ -113,20 +147,29 @@ export function calculateAutomaticQuotation(
 
   let fillingUnit: Decimal;
   let filmMeterUnit: Decimal;
+  // バルク販売単価＝バルク原価÷(1−利益率)。原価0（客給）なら0のまま表示しない。
+  const bulkUnit = roundUnit(bulkSellingUnit);
+  const bulkAmount = bulkUnit.times(quantity);
   if (isGravure) {
-    fillingUnit = roundUnit(fillingCostPerPiece.div(D(1).minus(margin)));
-    const residualFilmAmount = Decimal.max(
-      targetTotal.minus(fillingUnit.times(quantity)).minus(copperAmount),
+    const provisionalFillingUnit = pricingFillingCostPerPiece.div(D(1).minus(margin));
+    const provisionalFilmAmount = Decimal.max(
+      targetTotal.minus(provisionalFillingUnit.times(quantity)).minus(bulkAmount).minus(copperAmount),
       0,
     );
-    filmMeterUnit = filmOrderLength.gt(0)
-      ? residualFilmAmount.div(filmOrderLength).toDecimalPlaces(2, Decimal.ROUND_UP)
+    const residualMeterUnit = filmOrderLength.gt(0)
+      ? provisionalFilmAmount.div(filmOrderLength)
+      : D(0);
+    filmMeterUnit = clampGravureFilmMeterUnit(residualMeterUnit).toDecimalPlaces(1, Decimal.ROUND_UP);
+    const bandedFilmAmount = filmMeterUnit.times(filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    // フィルムm単価を90〜220円の帯へ制限したことで生じた差額は充填・加工で補う。
+    fillingUnit = quantity.gt(0)
+      ? roundUnit(Decimal.max(targetTotal.minus(bandedFilmAmount).minus(bulkAmount).minus(copperAmount), 0).div(quantity))
       : D(0);
   } else {
     filmMeterUnit = clampFilmMeterUnit(recommendedFilmMeterUnit(filmOrderLength));
     const filmBaseAmount = filmMeterUnit.times(filmOrderLength);
     const remainingFillingAmount = Decimal.max(
-      targetTotal.minus(filmBaseAmount).minus(copperAmount),
+      targetTotal.minus(filmBaseAmount).minus(bulkAmount).minus(copperAmount),
       0,
     );
     fillingUnit = quantity.gt(0)
@@ -135,11 +178,10 @@ export function calculateAutomaticQuotation(
   }
 
   const filmAmount = filmMeterUnit.times(filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-  if (filmOrderLength.gt(0)) filmMeterUnit = filmAmount.div(filmOrderLength);
   const fillingAmount = fillingUnit.times(quantity);
   const customAmount = customUnit.times(customQuantity);
   const filmPouchUnit = quantity.gt(0) ? filmAmount.div(quantity) : D(0);
-  const lineTotal = fillingAmount.plus(filmAmount).plus(copperAmount).plus(customAmount);
+  const lineTotal = fillingAmount.plus(bulkAmount).plus(filmAmount).plus(copperAmount).plus(customAmount);
   const displayedTax = lineTotal.times(taxRate).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
   const displayedGrandTotal = lineTotal.plus(displayedTax);
   const displayedPricePerPiece = quantity.gt(0) ? lineTotal.div(quantity) : D(0);
@@ -158,6 +200,9 @@ export function calculateAutomaticQuotation(
     totalCostPerPiece,
     copperColorCount,
     fillingSellingUnit,
+    bulkSellingUnit,
+    processingCostPerPiece,
+    bulkCostPerPiece,
     copperSellingUnit,
     filmSellingUnit,
     customUnit,
@@ -166,6 +211,7 @@ export function calculateAutomaticQuotation(
     filmMeterPrice: D(result.film.unitPrice),
     roundingAdjustment: lineTotal.minus(subtotalBeforeAdjustment),
     fillingAmount,
+    bulkAmount,
     copperAmount,
     subtotal: lineTotal,
     tax: displayedTax,
@@ -174,6 +220,8 @@ export function calculateAutomaticQuotation(
       pricePerPiece: displayedPricePerPiece.toString(),
       fillingUnit: fillingUnit.toString(),
       fillingAmount: fillingAmount.toString(),
+      bulkUnit: bulkUnit.toString(),
+      bulkAmount: bulkAmount.toString(),
       copperUnit: quantity.gt(0) ? copperAmount.div(quantity).toString() : "0",
       copperAmount: copperAmount.toString(),
       copperColorCount: copperColorCount.toString(),

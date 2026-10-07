@@ -1,4 +1,4 @@
-import { D, Decimal, parseDecimal } from "./decimal";
+import { D, Decimal, parseDecimal, roundUp1 } from "./decimal";
 import { DEFAULT_FILM_COMPOSITION } from "./quotation-shared";
 import { COPPER_TARGET_MARGIN } from "./quotation-pricing";
 import type { QuotationRecord } from "./quotation-shared";
@@ -46,17 +46,48 @@ export function analyzeQuotation(record: QuotationRecord) {
   const payload = record.payload;
   const quantity = storedNumber(payload.quantity ?? record.quantity);
   const fillingCostUnit = storedNumber(payload.fillingCostPerPiece ?? record.fillingCostPerPiece);
+  // 충진·가공 원가를「파우치 가공비（変動＋固定）」와「バルク費用」으로 분해한다.
+  // 계산 체크리스트 스냅샷에 구성요소가 저장되어 있을 때만 분해하고, 구 레코드는 통합값을 유지한다.
+  const checklistCostBreakdown = (() => {
+    const snapshot = payload.calculationChecklistSnapshot;
+    if (!snapshot || typeof snapshot !== "object") return null;
+    const costs = snapshot as { bulkCost?: unknown; variableProcessingTotal?: unknown; fixedLotCost?: unknown };
+    const bulk = editedNumber(costs.bulkCost);
+    const variable = editedNumber(costs.variableProcessingTotal);
+    const fixed = editedNumber(costs.fixedLotCost);
+    if (!bulk || !variable || !fixed || !quantity.gt(0)) return null;
+    return { bulk, processing: { variable, fixed } };
+  })();
+  // 신규 형식: 견적서에서 バルクを別ライン로 분리(payload.bulkCostPerPiece 보유).
+  const payloadBulkCost = editedNumber(payload.bulkCostPerPiece);
+  const separatedBulkCostUnit = payloadBulkCost && quantity.gt(0) ? payloadBulkCost.div(quantity) : null;
+  // 견적 초안과 동일하게 매수당 소수 1자리 올림 후 합산해 분해합계＝통합원가가 되게 한다.
+  const snapshotProcessingCostUnit = checklistCostBreakdown
+    ? roundUp1(checklistCostBreakdown.processing.variable.div(quantity))
+      .plus(roundUp1(checklistCostBreakdown.processing.fixed.div(quantity)))
+    : D(0);
+  const snapshotBulkCostUnit = checklistCostBreakdown ? roundUp1(checklistCostBreakdown.bulk.div(quantity)) : D(0);
+  const hasSeparatedBulkLine = separatedBulkCostUnit !== null;
+  const processingCostUnit = hasSeparatedBulkLine ? fillingCostUnit : snapshotProcessingCostUnit;
+  const bulkCostUnit = separatedBulkCostUnit ?? snapshotBulkCostUnit;
   const filmCostUnit = storedNumber(payload.filmCostPerPiece ?? record.filmCostPerPiece);
   const copperCostUnit = storedNumber(payload.copperPlateCostPerPiece);
   const customLotCost = storedNumber(payload.customLotCost);
   const customQuantity = positiveNumber(payload.customQuantity) ?? D(1);
   const customCostUnit = customLotCost.div(quantity);
-  const costUnit = fillingCostUnit.plus(filmCostUnit).plus(copperCostUnit).plus(customCostUnit);
+  const costUnit = fillingCostUnit
+    .plus(separatedBulkCostUnit ?? D(0))
+    .plus(filmCostUnit)
+    .plus(copperCostUnit)
+    .plus(customCostUnit);
 
   const targetMargin = positiveNumber(payload.targetMargin ?? record.targetMargin) ?? D(0);
   const marginDivider = D(1).minus(targetMargin.lt(1) ? targetMargin : D(0));
   const copperMarginDivider = D(1).minus(COPPER_TARGET_MARGIN);
-  const targetFillingUnit = fillingCostUnit.div(marginDivider);
+  // 신규 견적은「1연 기준 원가×연결수×(1+가산율)」을 가격 기준으로 저장한다.
+  // pricingFillingCostPerPiece가 있으면 그것을 우선 사용해 이력 분석이 견적 페이지와 일치하게 한다.
+  const pricingFillingCostUnit = editedNumber(payload.pricingFillingCostPerPiece);
+  const targetFillingUnit = (pricingFillingCostUnit ?? fillingCostUnit).div(marginDivider);
   const targetFilmUnit = filmCostUnit.div(marginDivider);
   const targetCopperUnit = copperCostUnit.div(copperMarginDivider);
   const targetCustomSaleTotal = Decimal.max(
@@ -84,6 +115,10 @@ export function analyzeQuotation(record: QuotationRecord) {
 
   const fillingUnit = editedNumber(payload.fillingUnitDisplay)
     ?? (legacyFillingAmount && quantity.gt(0) ? legacyFillingAmount.div(quantity) : targetFillingUnit);
+  // 신규 형식의 バルク販売 ラ인（客給 시 0＝비표시）。
+  const bulkUnit = editedNumber(payload.bulkUnitDisplay)
+    ?? (separatedBulkCostUnit ? separatedBulkCostUnit.div(marginDivider) : D(0));
+  const bulkAmount = editedNumber(payload.bulkAmountDisplay) ?? bulkUnit.times(quantity);
   const filmUnit = editedNumber(payload.filmPouchUnitDisplay)
     ?? (legacyFilmAmount && quantity.gt(0) ? legacyFilmAmount.div(quantity) : targetFilmUnit);
   const copperColorCount = positiveNumber(payload.copperColorCount);
@@ -145,6 +180,10 @@ export function analyzeQuotation(record: QuotationRecord) {
   return {
     quantity,
     fillingCostUnit,
+    hasFillingCostBreakdown: checklistCostBreakdown !== null || hasSeparatedBulkLine,
+    hasSeparatedBulkLine,
+    processingCostUnit,
+    bulkCostUnit,
     filmCostUnit,
     copperCostUnit,
     customCostUnit,
@@ -163,6 +202,8 @@ export function analyzeQuotation(record: QuotationRecord) {
     targetCustomUnit,
     targetCustomSalePerPiece,
     fillingUnit,
+    bulkUnit,
+    bulkAmount,
     filmUnit,
     copperUnit,
     copperColorUnit: copperColorUnit ?? D(0),

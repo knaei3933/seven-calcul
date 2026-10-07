@@ -71,6 +71,8 @@ export type CalculationChecklistSnapshot = {
   totalFillMlPerPouch: string;
   fillingMethod: string;
   fillingLanes: number;
+  chambers?: { position: number; liquidName: string; fillMl: string; bulkUnitPriceYen: string }[];
+  liquids?: { liquidName: string; bulkUnitPriceYen: string; usageMl: string; testFillMl: string; initialChargeMl: string; costYen: string }[];
   productionLanes?: number;
   bulkUnitPrice: string;
   bulkLossRate: string;
@@ -85,6 +87,8 @@ export type CalculationChecklistSnapshot = {
   productionRunQuantity: string;
   productionHours: string;
   inspectionHours: string;
+  singleConnectedFillingCostPerPiece?: string;
+  connectedFillingSurchargeRate?: string;
   inspectionSpeed: string;
   laborPerHour: string;
   machineChargePerHour: string;
@@ -202,8 +206,14 @@ export function buildCalculationChecklistSnapshot(
     totalFillMlPerPouch: result.totalFillMlPerPouch,
     fillingMethod: result.fillingMethod,
     fillingLanes: result.fillingLanes,
+    chambers: result.chambers,
+    liquids: result.liquids,
     productionLanes: context.lanes,
-    bulkUnitPrice: context.bulkUnitPrice ?? "0",
+    // 실별 액체 구성 사용 시는 사용량 가중평균 단가를 스냅샷에 남겨
+    // 단가×사용량＝비용이 체크리스트·레거시 복원에서도 일치하게 한다.
+    bulkUnitPrice: result.liquids?.length && D(result.bulkUsageMl).gt(0)
+      ? D(result.bulkCost).div(D(result.bulkUsageMl)).toString()
+      : context.bulkUnitPrice ?? "0",
     bulkLossRate: context.parameters?.bulkLossRate ?? result.bulkLossRate,
     bulkUsageMl: result.bulkUsageMl,
     bulkCost: result.bulkCost,
@@ -216,6 +226,8 @@ export function buildCalculationChecklistSnapshot(
     productionRunQuantity: result.productionRunQuantity,
     productionHours: result.productionHours,
     inspectionHours: result.inspectionHours,
+    singleConnectedFillingCostPerPiece: result.singleConnectedFillingCostPerPiece,
+    connectedFillingSurchargeRate: result.connectedFillingSurchargeRate,
     inspectionSpeed: context.parameters?.inspectionSpeed ?? "",
     laborPerHour: context.parameters?.laborPerHour ?? "",
     machineChargePerHour: context.parameters?.machineChargePerHour ?? "",
