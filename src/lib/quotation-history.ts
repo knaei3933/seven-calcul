@@ -60,7 +60,8 @@ export function analyzeQuotation(record: QuotationRecord) {
   })();
   // 신규 형식: 견적서에서 バルクを別ライン로 분리(payload.bulkCostPerPiece 보유).
   const payloadBulkCost = editedNumber(payload.bulkCostPerPiece);
-  const separatedBulkCostUnit = payloadBulkCost && quantity.gt(0) ? payloadBulkCost.div(quantity) : null;
+  // bulkCostPerPiece는 이미 1매당 원가이므로 수량으로 나누지 않는다.
+  const separatedBulkCostUnit = payloadBulkCost ?? null;
   // 견적 초안과 동일하게 매수당 소수 1자리 올림 후 합산해 분해합계＝통합원가가 되게 한다.
   const snapshotProcessingCostUnit = checklistCostBreakdown
     ? roundUp1(checklistCostBreakdown.processing.variable.div(quantity))
