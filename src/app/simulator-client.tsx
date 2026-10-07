@@ -944,6 +944,7 @@ export default function QuotationPage() {
     customMargin: "0.45",
     bulkPrice: "0",
     chambers: [] as { name: string; fill: string; price: string }[],
+    chamberLiquidsEnabled: false,
     skuCount: "1",
     skus: [
       { name: "", quantity: "10000", fillMl: "3", colorCount: "4" },
@@ -1184,7 +1185,8 @@ export default function QuotationPage() {
     ? form.skus.reduce((total, sku) => total + (isNumericInput(sku.quantity) && isNumericInput(sku.fillMl) ? Number(sku.quantity) * Number(sku.fillMl) : 0), 0) / skuQuantitySum
     : 0;
   const connectedCount = Number(form.connected) || 1;
-  const chamberConfigActive = connectedCount >= 2 && form.chambers.length === connectedCount;
+  // 실별 상이 액체는 옵트인. OFF면 SKU 충진량 하나로 전 실 동일 입력(이중 입력 방지).
+  const chamberConfigActive = connectedCount >= 2 && form.chamberLiquidsEnabled && form.chambers.length === connectedCount;
   const chamberFillsValid = chamberConfigActive
     && form.chambers.every((chamber) => isPositiveDecimalInput(chamber.fill) && isNonNegativeDecimalInput(chamber.price));
   const chamberFillNumbers = chamberConfigActive ? form.chambers.map((chamber) => Number(chamber.fill) || 0) : [];
@@ -2175,6 +2177,28 @@ export default function QuotationPage() {
               ) : null}
               {Number(form.bulkPrice) === 0 ? <p className="help">※バルク単価が0円のため、連結数を変えても金額は変化しません（使用量のみ変化）。金額に反映するには「バルク単価 (円/ml)」を入力してください。</p> : null}
               {Number(form.connected) >= 2 ? (
+                <label className="chamber-toggle">
+                  <input
+                    type="checkbox"
+                    checked={form.chamberLiquidsEnabled}
+                    onChange={(event) => {
+                      const enabled = event.target.checked;
+                      setForm((old) => {
+                        if (!enabled) return { ...old, chamberLiquidsEnabled: false };
+                        const count = Number(old.connected) || 1;
+                        const chambers = Array.from({ length: count }, (_, index) => old.chambers[index] ?? {
+                          name: old.chambers[0]?.name ?? "",
+                          fill: old.chambers[0]?.fill ?? old.skus[0]?.fillMl ?? "3",
+                          price: old.chambers[0]?.price ?? old.bulkPrice,
+                        });
+                        return { ...old, chamberLiquidsEnabled: true, chambers };
+                      });
+                    }}
+                  />
+                  室ごとに異なる液体を設定（チェックしない場合はSKU充填量を全室へ適用）
+                </label>
+              ) : null}
+              {chamberConfigActive ? (
                 <div className="chamber-editor" data-testid="chamber-editor">
                   <p className="help">室ごとに異なる液体を設定できます。液体の種類ごとに初期投入・テスト充填が発生し、生産速度は最も多い室の充填量（ボトルネック）を基準にします。</p>
                   {form.chambers.map((chamber, index) => (

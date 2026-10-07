@@ -19,6 +19,10 @@ describe("quotation UI", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })));
     render(<QuotationPage />);
     await user.click(screen.getByRole("radio", { name: "2連" }));
+    // 기본은 OFF: SKU 충진량을 전 실에 적용(실 편집기 미표시).
+    expect(screen.queryByTestId("chamber-editor")).not.toBeInTheDocument();
+    expect(screen.getByTestId("total-fill")).toHaveTextContent("1枚あたり総充填量（平均）＝3ml × 2＝6 ml");
+    await user.click(screen.getByRole("checkbox", { name: /室ごとに異なる液体を設定/ }));
     const editor = await screen.findByTestId("chamber-editor");
     expect(editor).toBeVisible();
     expect(screen.getByLabelText("1室の液体名")).toBeVisible();
@@ -323,7 +327,8 @@ describe("quotation UI", () => {
     render(<QuotationPage />);
     expect(screen.getByTestId("connected-preview")).toHaveTextContent("総室数＝10,000枚×1＝10,000 室");
     await user.click(screen.getByLabelText("2連"));
-    expect(screen.getByTestId("total-fill")).toHaveTextContent("1枚あたり総充填量＝1室 3ml＋2室 3ml＝6 ml");
+    // 실별 액체 OFF → SKU 충진량(3ml)을 전 실에 적용.
+    expect(screen.getByTestId("total-fill")).toHaveTextContent("1枚あたり総充填量（平均）＝3ml × 2＝6 ml");
     expect(screen.getByTestId("connected-preview")).toHaveTextContent("総室数＝10,000枚×2＝20,000 室");
     expect(screen.getByTestId("connected-preview")).toHaveTextContent("バルク使用量（概算）＝74,000 ml");
   });

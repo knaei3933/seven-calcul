@@ -728,20 +728,24 @@ header .version-badge { display: none; }
 .quote-spec dd { margin: 0; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
 .quote-spec .sheet-editable { white-space: pre-wrap; }
 .film-printing { display: block; font-weight: 700; }
-.chamber-editor { display: grid; gap: 6px; margin-top: 8px; padding: 10px; border: 1px solid #d8dfe9; border-radius: 8px; background: #f8fafc; }
-.chamber-row { display: grid; grid-template-columns: auto minmax(120px, 1.2fr) minmax(140px, 1.6fr) 70px auto 70px auto; gap: 6px; align-items: center; }
-.chamber-row .chamber-index { font-weight: 800; color: var(--primary); white-space: nowrap; }
-.chamber-row input, .chamber-row select { min-width: 0; }
-.chamber-row .unit { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.chamber-toggle { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 13px; font-weight: 700; color: var(--primary); cursor: pointer; }
+.chamber-editor { display: grid; gap: 6px; margin-top: 8px; padding: 10px; border: 1px solid #d8dfe9; border-radius: 8px; background: #f8fafc; max-width: 100%; box-sizing: border-box; }
+.chamber-row { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; max-width: 100%; }
+.chamber-row .chamber-index { flex: none; font-weight: 800; color: var(--primary); white-space: nowrap; }
+.chamber-row select { flex: 1 1 130px; min-width: 0; }
+.chamber-row input { flex: 1 1 84px; min-width: 0; }
+.chamber-row .unit { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .liquid-master { border-top: 1px dashed #cbd5e1; padding-top: 8px; }
 .liquid-master summary { cursor: pointer; font-weight: 700; color: var(--primary); }
-.liquid-master-form { display: grid; grid-template-columns: 1.4fr 1fr 1.6fr auto; gap: 6px; align-items: end; margin: 8px 0; }
-.liquid-master-form label { display: grid; gap: 2px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.liquid-master-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: end; margin: 8px 0; }
+.liquid-master-form label { flex: 1 1 140px; display: grid; gap: 2px; font-size: 12px; font-weight: 700; color: var(--muted); min-width: 0; }
+.liquid-master-form label input { width: 100%; box-sizing: border-box; min-width: 0; }
+.liquid-master-form button { flex: none; }
 .liquid-master-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .liquid-master-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid #e2e8f0; border-radius: 6px; background: white; font-size: 13px; }
 @media (max-width: 900px) {
-  .chamber-row { grid-template-columns: auto 1fr; }
-  .liquid-master-form { grid-template-columns: 1fr; }
+  .chamber-row select { flex-basis: 100%; }
+  .liquid-master-form label { flex-basis: 100%; }
 }
 .price-highlight span { display: block; color: #64748b; font-size: 8.2pt; font-weight: 700; }
 .price-highlight > div { display: grid; align-content: end; min-width: 0; }
