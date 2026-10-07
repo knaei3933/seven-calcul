@@ -15,7 +15,7 @@ import {
   QUOTATION_RESTORE_KEY,
   SIMULATOR_STALE_STATUS_KEY,
 } from "@/lib/quotation-shared";
-import { COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
+import { clampGravureFilmMeterUnit, COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
 
 const LAST_CHECKLIST_URL_KEY = "pouch-last-checklist-url-v1";
 import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
@@ -86,6 +86,7 @@ type QuoteForm = {
   grandTotalDisplay: string;
   quantity: string;
   fillingCostPerPiece: string;
+  pricingFillingCostPerPiece: string;
   filmCostPerPiece: string;
   filmMeterPrice: string;
   filmOrderLengthM: string;
@@ -165,6 +166,7 @@ const defaultQuote: QuoteForm = {
   grandTotalDisplay: "",
   quantity: "10000",
   fillingCostPerPiece: "0",
+  pricingFillingCostPerPiece: "",
   filmCostPerPiece: "0",
   filmMeterPrice: "0",
   filmOrderLengthM: "0",
@@ -173,7 +175,17 @@ const defaultQuote: QuoteForm = {
   taxRatePercent: "10",
   deliveryDate: "ご注文後の別途ご相談",
   paymentTerms: "御見積時にお相談いたします",
-  notes: "上記金額には充填・加工費・フィルム費用および該当する初期費用（銅版・金型）を含みます。仕様変更時は再度お見積りいたします。",
+  notes: [
+    "上記金額には充填・加工費・フィルム費用および該当する初期費用（銅版・金型）を含みます。仕様変更時は再度お見積りいたします。",
+    "ご入金およびデータ入稿後に正式受注処理となります。",
+    "バルク支給時の容器処分費用が発生する場合は実費を請求いたします。",
+    "お振込手数料は御社負担にてお願い申し上げます。",
+    "金型・版は受注より1年間保管いたします。",
+    "【出来高について】",
+    "1. 製造工程の特性上、最終的な出来高はご注文数量に対し±10%程度の過不足が生じる場合があります。",
+    "2. 過不足が10%以内の場合は、実際の出来高数量にて納品し、ご注文数量にて請求いたします（過不足に対する返金・追加請求は行いません）。",
+    "3. 過不足が10%を超えた場合のみ、超過分×充填単価にて不足分は返金、過剰分は追加請求いたします。",
+  ].join("\n"),
   sealText: "検討済",
   footerNote: "本お見積りに関するご不明点は、下記連絡先までお気軽にお問い合わせください。",
   purchaseOrderJson: "",
@@ -277,14 +289,41 @@ export default function PrintableQuotationPage() {
   const [calculationChecklistSnapshot, setCalculationChecklistSnapshot] = useState<CalculationChecklistSnapshot | null>(null);
 
   useEffect(() => {
+    const MM_TO_PX = 96 / 25.4;
+    const PRINT_SHEET_HEIGHT_MM = 296;
+    const ensureMeasureHost = () => {
+      let host = document.querySelector<HTMLElement>("#quote-print-measure-host");
+      if (!host) {
+        host = document.createElement("div");
+        host.id = "quote-print-measure-host";
+        host.setAttribute("aria-hidden", "true");
+        document.body.appendChild(host);
+      }
+      return host;
+    };
     const fitForPrint = () => {
       const content = quoteFitRef.current;
-      if (!content) return;
+      const sheet = content?.closest<HTMLElement>(".a4-sheet");
+      if (!content || !sheet) return;
       content.style.removeProperty("--quote-a4-fit-scale");
-      const scale = content.scrollHeight > content.clientHeight && content.clientHeight > 0
-        ? content.clientHeight / content.scrollHeight
-        : 1;
+      // 인쇄 CSS 적용 시점이 브라우저마다 달라도 같은 결과가 나오도록,
+      // 실제 인쇄 폭(209mm)으로 클론을 렌더링해 높이를 측정한다.
+      const host = ensureMeasureHost();
+      document.body.dataset.quotePrintMeasure = "1";
+      const clone = sheet.cloneNode(true) as HTMLElement;
+      clone.removeAttribute("id");
+      clone.style.removeProperty("--quote-a4-fit-scale");
+      host.replaceChildren(clone);
+      const cloneFit = clone.querySelector<HTMLElement>(".quote-a4-fit");
+      const cloneStyle = getComputedStyle(clone);
+      const reserved = (["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"] as const)
+        .reduce((total, key) => total + (Number.parseFloat(cloneStyle[key]) || 0), 0);
+      const budgetPx = PRINT_SHEET_HEIGHT_MM * MM_TO_PX - reserved;
+      const measuredPx = cloneFit ? Math.max(cloneFit.scrollHeight, cloneFit.offsetHeight) : 0;
+      const scale = measuredPx > budgetPx && budgetPx > 0 ? budgetPx / measuredPx : 1;
       content.style.setProperty("--quote-a4-fit-scale", scale.toFixed(5));
+      host.replaceChildren();
+      delete document.body.dataset.quotePrintMeasure;
     };
     const resetFit = () => quoteFitRef.current?.style.removeProperty("--quote-a4-fit-scale");
     window.addEventListener("beforeprint", fitForPrint);
@@ -382,6 +421,7 @@ export default function PrintableQuotationPage() {
           customLotCost: draft.customLotCost ?? "0",
           customQuantity: draft.customQuantity ?? "1",
           fillingCostPerPiece: draft.fillingCostPerPiece,
+          pricingFillingCostPerPiece: draft.pricingFillingCostPerPiece ?? "",
           printingMethod: draft.printingMethod ?? "digital",
           copperPlateCostPerPiece: draft.copperPlateCostPerPiece ?? "0",
           sascheCandidateId: draft.sascheCandidate?.id ?? "",
@@ -557,6 +597,12 @@ export default function PrintableQuotationPage() {
   const printPdf = async () => {
     // テスト環境では履歴DBが一時的な場合があるため、PDF出力は保存結果に依存させない。
     void saveToHistory();
+    // フォント置換による折り返し変化を避け、印刷フィット測定を正確にする。
+    try {
+      await document.fonts.ready;
+    } catch {
+      // fonts API 未対応環境ではそのまま印刷する。
+    }
     window.print();
   };
 
@@ -564,6 +610,8 @@ export default function PrintableQuotationPage() {
   const parsedTargetMargin = parseDecimal(form.targetMargin);
   const parsedTaxRatePercent = parseDecimal(form.taxRatePercent);
   const parsedFillingCost = parseDecimal(form.fillingCostPerPiece);
+  // 시뮬레이터 연결 견적은 1연 기준 충전 원가 × 연결 가산률을 가격 기준으로 사용.
+  const parsedPricingFillingCost = parseDecimal(form.pricingFillingCostPerPiece) ?? parsedFillingCost;
   const parsedFilmCost = parseDecimal(form.filmCostPerPiece);
   const parsedCopperCost = parseDecimal(form.copperPlateCostPerPiece);
   const parsedCustomLotCost = parseDecimal(form.customLotCost);
@@ -586,7 +634,7 @@ export default function PrintableQuotationPage() {
     const quantity = parsedQuantity;
     const margin = parsedTargetMargin;
     const taxRate = parsedTaxRatePercent.div(100);
-    const fillingSellingUnit = parsedFillingCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
+    const fillingSellingUnit = (parsedPricingFillingCost ?? parsedFillingCost).div(D(1).minus(parsedTargetMargin ?? D(0)));
     const copperSellingUnit = parsedCopperCost.div(D(1).minus(COPPER_TARGET_MARGIN));
     const filmSellingUnit = parsedFilmCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
     const customLotSaleBase = parsedCustomLotCost
@@ -625,7 +673,8 @@ export default function PrintableQuotationPage() {
 
   const shownTotals = (() => {
     if (!totals) return null;
-    const roundUnit = (value: typeof totals.pricePerPiece) => value.toDecimalPlaces(2, Decimal.ROUND_UP);
+    // 見積単価（充填・加工／フィルムm単価）は小数第1位で切り上げる。
+    const roundUnit = (value: typeof totals.pricePerPiece) => value.toDecimalPlaces(1, Decimal.ROUND_UP);
     const totalPriceInput = parseDecimal(form.pricePerPieceDisplay) ?? totals.pricePerPiece;
     const targetTotal = totalPriceInput.times(totals.quantity);
     const parsedCopperColorCount = parseDecimal(form.copperColorCount);
@@ -648,20 +697,24 @@ export default function PrintableQuotationPage() {
     let fillingUnit: Decimal;
     let filmMeterUnit: Decimal;
     if (isGravure) {
-      // 그라비아는 길이가 5,500m 단위라 디지털용 380~480엔/m 밴드를 적용하지 않는다.
-      // 충전·가공 판매금액을 먼저 확보하고, 잔액을 m당 판매단가로 환산한다.
-      fillingUnit = parseDecimal(form.fillingUnitDisplay)
-        ?? (totals.quantity.gt(0)
-          ? roundUnit((parsedFillingCost ?? D(0)).div(D(1).minus(parsedTargetMargin ?? D(0))))
-          : D(0));
-      const provisionalFillingAmount = fillingUnit.times(totals.quantity);
+      // グラビアの客提示フィルムm単価は90〜220円の帯に制限する。
+      // 帯によって生じた差額は充填・加工単価で補う。
+      const provisionalFillingUnit = (parsedPricingFillingCost ?? parsedFillingCost ?? D(0))
+        .div(D(1).minus(parsedTargetMargin ?? D(0)));
+      const provisionalFillingAmount = provisionalFillingUnit.times(totals.quantity);
       const residualFilmAmount = Decimal.max(
         targetTotal.minus(provisionalFillingAmount).minus(copperAmount),
         0,
       );
+      const residualMeterUnit = totals.filmOrderLength.gt(0)
+        ? residualFilmAmount.div(totals.filmOrderLength)
+        : D(0);
       filmMeterUnit = parseDecimal(form.filmUnitDisplay)
-        ?? (totals.filmOrderLength.gt(0)
-          ? residualFilmAmount.div(totals.filmOrderLength).toDecimalPlaces(2, Decimal.ROUND_UP)
+        ?? clampGravureFilmMeterUnit(residualMeterUnit).toDecimalPlaces(1, Decimal.ROUND_UP);
+      const bandedFilmAmount = filmMeterUnit.times(totals.filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+      fillingUnit = parseDecimal(form.fillingUnitDisplay)
+        ?? (totals.quantity.gt(0)
+          ? roundUnit(Decimal.max(targetTotal.minus(bandedFilmAmount).minus(copperAmount), 0).div(totals.quantity))
           : D(0));
     } else {
       const requestedFilmMeterUnit = parseDecimal(form.filmUnitDisplay)
@@ -674,11 +727,8 @@ export default function PrintableQuotationPage() {
           ? roundUnit(remainingFillingAmount.div(totals.quantity))
           : D(0));
     }
-    // フィルム金額は円単位で確定する。円未満は四捨五入し、単価は換算値を表示する。
+    // フィルム金額は円単位で確定する（円未満は四捨五入）。m単価は小数第1位の切り上げ値を表示する。
     const filmAmount = filmMeterUnit.times(totals.filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-    if (totals.filmOrderLength.gt(0)) {
-      filmMeterUnit = filmAmount.div(totals.filmOrderLength);
-    }
     const fillingAmount = parseDecimal(form.fillingAmountDisplay) ?? fillingUnit.times(totals.quantity);
     const customAmount = parseDecimal(form.customAmountDisplay) ?? customUnit.times(customQuantity);
     const filmPouchUnit = totals.quantity.gt(0) ? filmAmount.div(totals.quantity) : D(0);
@@ -1171,9 +1221,6 @@ export default function PrintableQuotationPage() {
             <div className="document-title">
               <p className="english"><EditableText value={form.documentEnglish} label="文書英字タイトル" onCommit={(next) => update("documentEnglish", next.trim())} /></p>
               <h2><EditableText value={form.documentHeading} label="文書タイトル" onCommit={(next) => update("documentHeading", next.trim())} /></h2>
-              <p className="quote-printing-method" data-testid="quote-printing-method">
-                印刷方式：{form.printingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}
-              </p>
               <dl>
                 <div><dt>見積番号</dt><dd>{form.quotationNumber || "-"}</dd></div>
                 <div><dt>発行日</dt><dd>{form.issueDate || "-"}</dd></div>
@@ -1188,6 +1235,24 @@ export default function PrintableQuotationPage() {
             <p><EditableText value={`${form.customerContact ? `${form.customerContact} 御中` : "御中"}`} label="得意先担当者" onCommit={(next) => update("customerContact", next.replace(/御中$/, "").trim())} /></p>
             <p className="help">顧客コード: {form.customerCode || "-"} ／ メール: {form.customerEmail || "-"}</p>
             <p className="greeting"><EditableText value={form.greeting} label="宛先文言" multiline onCommit={(next) => update("greeting", next)} /></p>
+          </section>
+
+          <section className="quote-spec" aria-labelledby="quote-spec-title" data-testid="quote-spec">
+            <h3 id="quote-spec-title">お見積製品仕様</h3>
+            <dl>
+              <div><dt>品名</dt><dd><EditableText value={form.productName} label="見積品名" onCommit={(next) => update("productName", next.trim())} /></dd></div>
+              <div><dt>パウチ仕様</dt><dd><EditableText value={form.sizeSummary} label="パウチ仕様" onCommit={(next) => update("sizeSummary", next.trim())} /></dd></div>
+              <div><dt>数量</dt><dd><EditableText value={numberDisplay(form.quantity)} label="見積数量" className="money" onCommit={commitQuantity} /> 枚</dd></div>
+              <div className="wide"><dt>充填仕様</dt><dd>{calculationChecklistSnapshot
+                ? (calculationChecklistSnapshot.chambers && calculationChecklistSnapshot.chambers.length > 1
+                  ? `${calculationChecklistSnapshot.chambers.map((chamber) => `${chamber.position}室:${chamber.liquidName} ${formatNumber(chamber.fillMl)}ml`).join("／")} ＝ ${formatNumber(calculationChecklistSnapshot.totalFillMlPerPouch)}ml/枚（${calculationChecklistSnapshot.fillingMethod === "pressure" ? "加圧充填" : "ホッパ充填"}）`
+                  : `${formatNumber(calculationChecklistSnapshot.fillMlPerChamber)}ml/室 × ${calculationChecklistSnapshot.connectedChambers}室 ＝ ${formatNumber(calculationChecklistSnapshot.totalFillMlPerPouch)}ml/枚（${calculationChecklistSnapshot.fillingMethod === "pressure" ? "加圧充填" : "ホッパ充填"}）`)
+                : "-"}</dd></div>
+              <div><dt>フィルム構成</dt><dd><EditableText value={form.filmComposition || DEFAULT_FILM_COMPOSITION} label="フィルム構成" onCommit={(next) => update("filmComposition", next.trim())} /></dd></div>
+              {calculationChecklistSnapshot?.skus?.length ? (
+                <div className="wide"><dt>SKU</dt><dd>{calculationChecklistSnapshot.skus.map((sku) => `${sku.name} ／ ${formatNumber(sku.quantity)}枚`).join("　")}</dd></div>
+              ) : null}
+            </dl>
           </section>
 
           {shownTotals ? (
@@ -1233,6 +1298,7 @@ export default function PrintableQuotationPage() {
                     <td>
                       <strong><EditableText value={form.filmItemName} label="フィルム項目名" onCommit={(next) => update("filmItemName", next.trim())} /></strong>
                       <small><EditableText value={form.filmItemDescription} label="フィルム説明" multiline onCommit={(next) => update("filmItemDescription", next)} /></small>
+                      <small className="film-printing" data-testid="film-printing-method">印刷方式：{form.printingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}</small>
                       <small className="film-composition" data-testid="film-composition">構成：<EditableText value={form.filmComposition || DEFAULT_FILM_COMPOSITION} label="フィルム構成" onCommit={(next) => update("filmComposition", next.trim())} /></small>
                       <small>フィルム金額は円未満を四捨五入します。</small>
                       {calculationChecklistSnapshot?.sascheCandidate ? (
