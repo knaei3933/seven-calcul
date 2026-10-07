@@ -8,6 +8,7 @@ import {
 import { CHECKLIST_VERSION, readCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 import { printingMethodOf } from "@/lib/quotation-history";
 import { requirePageUser } from "@/lib/page-auth";
+import { canViewInternalChecklist } from "@/lib/checklist-access";
 import { CalculationChecklistClient } from "./checklist-client";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ type PageProps = {
 
 export default async function ChecklistPage({ params }: PageProps) {
   const { quotationId } = await params;
-  await requirePageUser(`/checklists/${quotationId}`);
+  const user = await requirePageUser(`/checklists/${quotationId}`);
   const id = Number(quotationId);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
@@ -43,6 +44,10 @@ export default async function ChecklistPage({ params }: PageProps) {
       ? await createChecklistsForQuotation(quotation, payloadSnapshot)
       : await createLegacyChecklistsForQuotation(quotation, printingMethodOf(quotation))
     : savedChecklists;
+  // 社内QA（カネイ貿易）チェックリストはカネイ貿易アカウントにのみ表示する。
+  const visibleChecklists = canViewInternalChecklist(user.email)
+    ? checklists
+    : checklists.filter((record) => record.audience !== "INTERNAL_QA");
 
   return (
     <main className="checklist-page current-checklist">
@@ -55,7 +60,7 @@ export default async function ChecklistPage({ params }: PageProps) {
           quotationId={id}
           quotationNumber={quotation.quotationNumber}
           customerName={quotation.customerName}
-          records={checklists}
+          records={visibleChecklists}
           isLegacy={checklists[0]?.checklistVersion.startsWith("legacy-")}
         />
       )}

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getChecklistsForQuotation, updateChecklistItem } from "@/lib/quotation-store";
 import { checklistAudiences, type ChecklistAudience } from "@/lib/quotation-shared";
 import { getSessionUser } from "@/lib/api-auth";
+import { canViewInternalChecklist } from "@/lib/checklist-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,12 +17,18 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
   const { id } = await context.params;
   const user = await getSessionUser(request);
   if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
+  const internalAllowed = canViewInternalChecklist(user.email);
   const quotationId = Number(id);
   if (!Number.isInteger(quotationId) || quotationId <= 0) {
     return NextResponse.json({ error: "invalid_quotation_id" }, { status: 400 });
   }
   try {
-    return NextResponse.json({ checklists: await getChecklistsForQuotation(quotationId) });
+    const checklists = await getChecklistsForQuotation(quotationId);
+    return NextResponse.json({
+      checklists: internalAllowed
+        ? checklists
+        : checklists.filter((record) => record.audience !== "INTERNAL_QA"),
+    });
   } catch {
     return NextResponse.json({ error: "checklist_get_failed" }, { status: 500 });
   }
@@ -45,6 +52,9 @@ export async function PATCH(request: Request, context: Context): Promise<NextRes
     }
     if (typeof body.itemId !== "string" || !body.itemId.trim() || typeof body.accepted !== "boolean") {
       return NextResponse.json({ error: "invalid_checklist_update" }, { status: 400 });
+    }
+    if (audience === "INTERNAL_QA" && !canViewInternalChecklist(user.email)) {
+      return NextResponse.json({ error: "internal_checklist_forbidden" }, { status: 403 });
     }
     const checkedBy = user.name.slice(0, 200);
     const record = await updateChecklistItem(

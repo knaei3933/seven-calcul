@@ -36,7 +36,7 @@ const audienceLabels: Record<ChecklistAudience, string> = {
   INTERNAL_QA: "社内QA確認用",
 };
 
-export default function CurrentChecklistPage() {
+export default function CurrentChecklistPage({ canViewInternal = false }: { canViewInternal?: boolean } = {}) {
   const [snapshot, setSnapshot] = useState<CalculationChecklistSnapshot | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [missing, setMissing] = useState(false);
@@ -47,6 +47,11 @@ export default function CurrentChecklistPage() {
   });
   const [reviewerName, setReviewerName] = useState("");
   const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
+
+  // 社内QA（カネイ貿易）タブはカネイ貿易アカウントにのみ表示する。
+  const visibleAudiences = (["CUSTOMER", "INTERNAL_QA"] as ChecklistAudience[])
+    .filter((audience) => audience === "CUSTOMER" || canViewInternal);
+  const effectiveAudience = visibleAudiences.includes(activeAudience) ? activeAudience : "CUSTOMER";
 
   function readFirstRawValue(keys: string[]): string | null {
     for (const key of keys) {
@@ -187,9 +192,9 @@ export default function CurrentChecklistPage() {
   const activeItems = useMemo(
     () => items.map((item) => ({
       ...item,
-      ...(confirmations[activeAudience]?.[item.id] ?? { accepted: false, checkedAt: null, checkedBy: null }),
+      ...(confirmations[effectiveAudience]?.[item.id] ?? { accepted: false, checkedAt: null, checkedBy: null }),
     })),
-    [confirmations, activeAudience, items],
+    [confirmations, effectiveAudience, items],
   );
 
   const grouped = useMemo(() => {
@@ -221,14 +226,14 @@ export default function CurrentChecklistPage() {
     setUpdatingItemId(itemId);
     const checkedAt = nextAccepted ? new Date().toISOString() : null;
     const reviewer = nextAccepted
-      ? reviewerName.trim() || (activeAudience === "CUSTOMER" ? "顧客" : "金井貿易株式会社 社内QA")
+      ? reviewerName.trim() || (effectiveAudience === "CUSTOMER" ? "顧客" : "金井貿易株式会社 社内QA")
       : null;
 
     setConfirmations((old) => ({
       CUSTOMER: { ...(old.CUSTOMER ?? {}) },
       INTERNAL_QA: { ...(old.INTERNAL_QA ?? {}) },
-      [activeAudience]: {
-        ...(old[activeAudience] ?? {}),
+      [effectiveAudience]: {
+        ...(old[effectiveAudience] ?? {}),
         [itemId]: { accepted: nextAccepted, checkedAt, checkedBy: reviewer },
       },
     }));
@@ -236,8 +241,8 @@ export default function CurrentChecklistPage() {
       {
         CUSTOMER: { ...(confirmations.CUSTOMER ?? {}) },
         INTERNAL_QA: { ...(confirmations.INTERNAL_QA ?? {}) },
-        [activeAudience]: {
-          ...(confirmations[activeAudience] ?? {}),
+        [effectiveAudience]: {
+          ...(confirmations[effectiveAudience] ?? {}),
           [itemId]: { accepted: nextAccepted, checkedAt, checkedBy: reviewer },
         },
       },
@@ -285,13 +290,13 @@ export default function CurrentChecklistPage() {
 
         <div className="current-controls">
           <div className="checklist-tabs" role="tablist">
-            {(["CUSTOMER", "INTERNAL_QA"] as ChecklistAudience[]).map((audience) => (
+            {visibleAudiences.map((audience) => (
               <button
                 key={audience}
                 type="button"
                 role="tab"
-                aria-selected={activeAudience === audience}
-                className={activeAudience === audience ? "button" : "button secondary"}
+                aria-selected={effectiveAudience === audience}
+                className={effectiveAudience === audience ? "button" : "button secondary"}
                 onClick={() => setActiveAudience(audience)}
               >
                 {audienceLabels[audience]}
@@ -300,7 +305,7 @@ export default function CurrentChecklistPage() {
           </div>
           <label className="current-reviewer">
             確認者
-            <input value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} placeholder={activeAudience === "CUSTOMER" ? "顧客" : "金井貿易株式会社 社内QA"} />
+            <input value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} placeholder={effectiveAudience === "CUSTOMER" ? "顧客" : "金井貿易株式会社 社内QA"} />
           </label>
         </div>
 
@@ -338,7 +343,7 @@ export default function CurrentChecklistPage() {
 
             <div className="current-items">
               {checklistItems.map((item) => {
-                const state = confirmations[activeAudience]?.[item.id];
+                const state = confirmations[effectiveAudience]?.[item.id];
                 const accepted = state?.accepted ?? false;
                 return (
                   <article key={item.id} className={accepted ? "current-item accepted" : "current-item"}>
