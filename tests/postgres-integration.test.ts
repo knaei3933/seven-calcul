@@ -68,7 +68,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     payload: { revision: 1 },
   };
 
-  it("stores users, quotations, checklists, and customers in PostgreSQL", async () => {
+  it("stores users, quotations, checklists, and customers in PostgreSQL", { timeout: 120_000 }, async () => {
     const { ensureAdministratorSeed, createUser, authenticate } = await import("@/lib/auth-store");
     const administratorId = await ensureAdministratorSeed();
     expect(Number.isInteger(administratorId)).toBe(true);

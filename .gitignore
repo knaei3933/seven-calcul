@@ -7,3 +7,4 @@ playwright-report
 *.tsbuildinfo
 next-env.d.ts
 .vercel
+.omx-state-locks
