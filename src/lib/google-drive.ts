@@ -29,7 +29,21 @@ function serviceAccount(): ServiceAccount | null {
 }
 
 export function driveConfigured(): boolean {
-  return serviceAccount() != null;
+  return serviceAccount() != null || Boolean(oauthCredentials());
+}
+
+interface OAuthCredentials {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+}
+
+function oauthCredentials(): OAuthCredentials | null {
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim();
+  const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim();
+  if (clientId && clientSecret && refreshToken) return { clientId, clientSecret, refreshToken };
+  return null;
 }
 
 export function receivingFolderId(): string {
@@ -47,6 +61,24 @@ function base64url(input: string | Buffer): string {
 }
 
 async function getAccessToken(): Promise<string> {
+  const oauth = oauthCredentials();
+  if (oauth) {
+    if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.token;
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: oauth.clientId,
+        client_secret: oauth.clientSecret,
+        refresh_token: oauth.refreshToken,
+        grant_type: "refresh_token",
+      }),
+    });
+    if (!response.ok) throw new Error(`drive_token_failed:${response.status}`);
+    const payload = await response.json() as { access_token: string; expires_in: number };
+    cachedToken = { token: payload.access_token, expiresAt: Date.now() + payload.expires_in * 1000 };
+    return cachedToken.token;
+  }
   const account = serviceAccount();
   if (!account) throw new Error("drive_not_configured");
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.token;
