@@ -14,7 +14,7 @@ export type FilmOrderStatus = typeof FILM_ORDER_STATUSES[number];
 export const filmOrderStatusLabels: Record<FilmOrderStatus, string> = {
   pending: "成約・発注待ち",
   ordered: "発注書送信済み",
-  receiving_registered: "入荷データ登録済み",
+  receiving_registered: "入稿済み",
   proof_registered: "校正待ち",
   re_proof_requested: "再校正依頼中",
   final_approved: "最終承認済み",
@@ -63,6 +63,13 @@ export interface FilmOrderRow {
   pouch_quantity: string;
   supplier_name: string;
   supplier_email: string;
+  seven_contact_email: string;
+  po_sent_at: string | null;
+  eta_token: string | null;
+  eta_expires_at: string | null;
+  eta_date: string | null;
+  eta_note: string | null;
+  eta_updated_at: string | null;
   status: FilmOrderStatus;
   re_proof_count: number;
   ordered_at: string | null;
@@ -101,7 +108,7 @@ export function buildFilmOrderFileName(
 ): string {
   const date = new Date();
   const datePart = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
-  const label = category === "receiving" ? "入荷" : category === "proof" ? "校正" : "最終";
+  const label = category === "receiving" ? "入稿" : category === "proof" ? "校正" : "最終";
   const versionPart = category === "proof" && version > 1 ? `_v${version}` : "";
   return `${sanitizeFileNamePart(order.product_name)}_${order.order_number}_${label}_${datePart}${versionPart}`;
 }

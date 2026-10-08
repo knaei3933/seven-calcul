@@ -16,9 +16,11 @@ const { ensureAdministratorSeed } = await import("@/lib/auth-store");
 const {
   buildFilmOrderFileName,
   getFilmOrder,
+  getFilmOrderForEta,
   listFilmOrders,
   runFilmOrderAction,
   syncFilmOrdersFromQuotations,
+  updateEtaFromToken,
 } = await import("@/lib/film-orders");
 
 afterAll(async () => {
@@ -93,7 +95,8 @@ describe("film order store", () => {
     expect(orders[0]!.status).toBe("pending");
     expect(orders[0]!.order_number).toMatch(/^F-\d{6}-001$/u);
     expect(orders[0]!.purchaseOrder?.procurementRoute).toBe("Y");
-    expect(orders[0]!.supplier_email).toBe("arwg22@gmail.com");
+    expect(orders[0]!.supplier_email).toBe("");
+    expect(orders[0]!.seven_contact_email).toBe("seven@727.co.jp");
     expect(orders[0]!.events.some((event) => event.type === "created")).toBe(true);
   });
 
@@ -145,11 +148,58 @@ describe("film order store", () => {
 
     const final = await getFilmOrder(orderId);
     expect(final?.events.filter((event) => event.type === "email").length).toBeGreaterThanOrEqual(6);
+
+    const po = await runFilmOrderAction(orderId, "send-po", { origin: "http://localhost:3000" }, "kanei@kanei-trade.co.jp");
+    expect(po.order.po_sent_at).toBeTruthy();
+    expect(po.order.eta_token).toBeTruthy();
+    expect(po.mails?.map((mail) => mail.to)).toContain("supplier@example.co.kr");
+
+    const etaToken = po.order.eta_token!;
+    const etaView = await getFilmOrderForEta(etaToken);
+    expect(etaView?.quotation_number).toBe("S7-FILM-STORE-001");
+    const updatedEta = await updateEtaFromToken(etaToken, "2026-10-31", "銅版込み");
+    expect(updatedEta?.eta_date).toBe("2026-10-31");
+    expect(updatedEta?.eta_note).toBe("銅版込み");
+    await expect(updateEtaFromToken(etaToken, "2026/10/31", "")).rejects.toThrow("invalid_eta_date");
+    await expect(updateEtaFromToken("1.123.bad", "2026-10-31", "")).rejects.toThrow("invalid_eta_token");
+    const afterEta = await getFilmOrder(orderId);
+    expect(afterEta?.events.some((event) => event.type === "eta")).toBe(true);
+    expect(final?.events.filter((event) => event.type === "email").length ?? 0).toBeGreaterThanOrEqual(1);
+  });
+
+  it("routes proof requests by procurement route and skips unconfigured Y suppliers", async () => {
+    delete process.env.FILM_SUPPLIER_B_EMAIL;
+    const kQuotation = await saveQuotation({
+      ...input,
+      quotationNumber: "S7-FILM-STORE-002",
+      status: "approved",
+      payload: { purchaseOrder: { ...purchaseOrder, procurementRoute: "K" as const } },
+    }, 1, "admin");
+    const yQuotation = await saveQuotation({
+      ...input,
+      quotationNumber: "S7-FILM-STORE-003",
+      status: "approved",
+      payload: { purchaseOrder: { ...purchaseOrder, procurementRoute: "Y" as const } },
+    }, 1, "admin");
+    void kQuotation; void yQuotation;
+    await syncFilmOrdersFromQuotations("seven@727.co.jp");
+    const orders = await listFilmOrders();
+    const kOrder = orders.find((order) => order.quotation_number === "S7-FILM-STORE-002")!;
+    const yOrder = orders.find((order) => order.quotation_number === "S7-FILM-STORE-003")!;
+    await runFilmOrderAction(kOrder.id, "mark-ordered", {}, "seven@727.co.jp");
+    await runFilmOrderAction(yOrder.id, "mark-ordered", {}, "seven@727.co.jp");
+
+    const kResult = await runFilmOrderAction(kOrder.id, "register-receiving", { aiFileName: "K用.ai" }, "seven@727.co.jp");
+    expect(kResult.mails?.map((mail) => mail.to)).toContain("arwg22@gmail.com");
+
+    const yResult = await runFilmOrderAction(yOrder.id, "register-receiving", { aiFileName: "Y用.ai" }, "seven@727.co.jp");
+    expect(yResult.mails?.map((mail) => mail.to)).toEqual(["design@package-lab.com"]);
+    expect((await getFilmOrder(yOrder.id))?.events.some((event) => event.detail.includes("校正データ返却のお願い"))).toBe(false);
   });
 
   it("builds human-readable file names containing the order number", () => {
     const order = { product_name: "あかちゃんバーム 50ml", order_number: "F-202610-001" };
-    expect(buildFilmOrderFileName(order, "receiving", 1)).toMatch(/^あかちゃんバーム_50ml_F-202610-001_入荷_\d{8}$/u);
+    expect(buildFilmOrderFileName(order, "receiving", 1)).toMatch(/^あかちゃんバーム_50ml_F-202610-001_入稿_\d{8}$/u);
     expect(buildFilmOrderFileName(order, "proof", 2)).toMatch(/_校正_\d{8}_v2$/u);
     expect(buildFilmOrderFileName({ product_name: "a/b\\c:d", order_number: "F-1" }, "final", 1)).not.toMatch(/[\\/]/u);
   });

@@ -22,6 +22,7 @@ const actions = new Set<FilmOrderAction>([
   "register-proof",
   "approve",
   "request-re-proof",
+  "send-po",
 ]);
 
 function actionAllowed(action: FilmOrderAction, email: string): boolean {
@@ -37,6 +38,8 @@ function actionAllowed(action: FilmOrderAction, email: string): boolean {
     case "approve":
     case "request-re-proof":
       return canApproveFilmOrderProof(email);
+    case "send-po":
+      return canManageFilmOrderProof(email);
   }
 }
 
@@ -65,7 +68,16 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     if (!actionAllowed(action, user.email)) {
       return NextResponse.json({ error: "film_order_action_forbidden" }, { status: 403 });
     }
-    const result = await runFilmOrderAction(orderId, action, body as Parameters<typeof runFilmOrderAction>[2], user.email);
+    let origin = new URL(request.url).origin;
+    const forwardedHost = request.headers.get("x-forwarded-host");
+    const forwardedProto = request.headers.get("x-forwarded-proto");
+    if (forwardedHost) origin = `${forwardedProto ?? "https"}://${forwardedHost}`;
+    const result = await runFilmOrderAction(
+      orderId,
+      action,
+      { ...(body as Parameters<typeof runFilmOrderAction>[2]), origin },
+      user.email,
+    );
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "film_order_action_failed";

@@ -21,18 +21,20 @@ interface MailResult {
   error?: string;
 }
 
-const STEP_DEFS: Array<{ key: FilmOrderStatus; label: string }> = [
+const STEP_DEFS: Array<{ key: string; label: string }> = [
   { key: "pending", label: "発注待ち" },
   { key: "ordered", label: "発注送信" },
-  { key: "receiving_registered", label: "入荷" },
+  { key: "receiving_registered", label: "入稿" },
   { key: "proof_registered", label: "校正" },
   { key: "final_approved", label: "承認" },
+  { key: "po_sent", label: "発注" },
+  { key: "eta", label: "納期" },
 ];
 
 const STATUS_HINTS: Record<FilmOrderStatus, string> = {
   pending: "セブン化学が発注書をメール送付し、「発注書送信済み」にします。",
-  ordered: "フィルム製作を開始するため、セブン化学が製作データ（AI必須・PDF任意）を入荷登録します。",
-  receiving_registered: "カネイ貿易が校正データを登録します。",
+  ordered: "フィルム製作を開始するため、セブン化学が製作データ（AI必須・PDF任意）を入稿登録します。",
+  receiving_registered: "メーカー校正データの返却待ちです。返却後にカネイ貿易が登録します。",
   proof_registered: "セブン化学が校正を承認、または再校正を依頼します。",
   re_proof_requested: "カネイ貿易が再校正データを登録します。",
   final_approved: "ワークフロー完了です。",
@@ -58,7 +60,7 @@ function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: boolean):
       return { kind: "run", label: "発注書送信済みにする", body: { action: "mark-ordered" }, ok: "発注書送信済みにしました。" };
     case "ordered":
       return isSeven
-        ? { kind: "form", label: "入荷データを登録", form: "receiving" }
+        ? { kind: "form", label: "入稿データを登録", form: "receiving" }
         : { kind: "none", label: "セブン化学の入荷登録待ち" };
     case "receiving_registered":
       return isKanei
@@ -174,14 +176,14 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
           <ol>
             <li>見積履歴で見積を「成約」にすると、ここに発注が自動作成されます。</li>
             <li>発注内容を確認し、発注書をメールでカネイ貿易へ送付したら「発注書送信済みにする」を押します。</li>
-            <li>フィルム製作用データを「入荷データを登録」します（AI必須・PDF任意。design@ へ自動連絡）。</li>
+            <li>フィルム製作用データを「入稿データを登録」します（AI必須・PDF任意。design@ へ自動連絡）。</li>
             <li>校正データが登録されたら「校正を承認」または「再校正を依頼」します。</li>
           </ol>
         ) : (
           <ol>
             <li>成約後の発注は自動的にここに表示されます（発注番号 F-…）。</li>
             <li>仕入先・校正データ送付先を設定します。</li>
-            <li>セブン化学の入荷登録後、「校正データを登録」します。</li>
+            <li>メーカーから校正データが返却されたら「校正データを登録」します（セブン化学へ自動連絡）。</li>
             <li>再校正依頼が来たら再校正データを登録します。</li>
           </ol>
         )}
@@ -318,7 +320,13 @@ function OrderCard({
         </div>
       </div>
 
-      <OrderSteps status={order.status} reProofCount={order.re_proof_count} />
+      <OrderSteps status={order.status} reProofCount={order.re_proof_count} poSent={Boolean(order.po_sent_at)} etaDate={order.eta_date} />
+      {order.eta_date ? (
+        <div className="film-order-eta-row">
+          <span className="film-order-eta-badge">納期見込み {order.eta_date}</span>
+          {order.eta_note ? <small>{order.eta_note}</small> : null}
+        </div>
+      ) : null}
 
       {expanded ? (
         <div className="film-order-detail">
@@ -350,7 +358,7 @@ function OrderCard({
           </div>
 
           <section className="film-order-section">
-            <h3>入荷・校正データ履歴</h3>
+            <h3>入稿・校正データ履歴</h3>
             {order.files.length === 0 ? <p>まだ登録されていません。</p> : (
               <div className="table-scroll">
                 <table className="film-order-files">
@@ -358,7 +366,7 @@ function OrderCard({
                   <tbody>
                     {order.files.map((file) => (
                       <tr key={file.id}>
-                        <td><span className={`film-order-file-badge ${file.category}`}>{file.category === "receiving" ? "入荷" : file.category === "proof" ? "校正" : "最終"}</span></td>
+                        <td><span className={`film-order-file-badge ${file.category}`}>{file.category === "receiving" ? "入稿" : file.category === "proof" ? "校正" : "最終"}</span></td>
                         <td>{file.file_name}</td>
                         <td>{file.url ? <a href={file.url} target="_blank" rel="noreferrer">開く</a> : "-"}</td>
                         <td>{file.version}</td>
@@ -390,10 +398,21 @@ function OrderCard({
   );
 }
 
-function OrderSteps({ status, reProofCount }: { status: FilmOrderStatus; reProofCount: number }) {
+function OrderSteps({
+  status,
+  reProofCount,
+  poSent,
+  etaDate,
+}: {
+  status: FilmOrderStatus;
+  reProofCount: number;
+  poSent: boolean;
+  etaDate: string | null;
+}) {
+  const effective = poSent ? "po_sent" : etaDate ? "eta" : status;
   const activeIndex = status === "re_proof_requested"
     ? STEP_DEFS.findIndex((step) => step.key === "proof_registered")
-    : STEP_DEFS.findIndex((step) => step.key === status);
+    : STEP_DEFS.findIndex((step) => step.key === effective);
   const nextRole = STATUS_STEP_ROLE[status];
   return (
     <div className="film-order-steps" aria-label="進捗">
@@ -437,7 +456,7 @@ function NextStepPanel({
         <div className="next-step-wait">
           <p>{next.label}</p>
           <button className="button small" type="button" disabled title="担当部署のみ操作できます">
-            {STATUS_STEP_ROLE[order.status] === "seven" ? "入荷・承認操作（セブン化学）" : "校正データ操作（カネイ貿易）"}
+            {STATUS_STEP_ROLE[order.status] === "seven" ? "入稿・承認操作（セブン化学）" : "校正データ操作（カネイ貿易）"}
           </button>
         </div>
       ) : null}
@@ -452,7 +471,7 @@ function NextStepPanel({
           autofocus={focused === "receiving"}
           busy={busy}
           onSubmit={(aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note) =>
-            void onRun({ action: "register-receiving", aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note }, "入荷データを登録し、デザイン宛てに連絡しました。")}
+            void onRun({ action: "register-receiving", aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note }, "入稿データを登録し、デザイン宛てに連絡しました。")}
         />
       ) : null}
       {next.kind === "form" && next.form === "proof" ? (
@@ -490,7 +509,16 @@ function NextStepPanel({
           <ReProofForm busy={busy} onSubmit={(comment) => void onRun({ action: "request-re-proof", comment }, "再校正を依頼しました。")} />
         </div>
       ) : null}
-      {order.status === "final_approved" ? <p className="film-order-final">最終承認済み。最終データは別途管理します。</p> : null}
+      {order.status === "final_approved" ? (
+        <div className="film-order-inline-actions">
+          <p className="film-order-final">最終承認済み（カネイ貿易の最終受注処理が確定）。{order.po_sent_at ? "発注書は送信済みです。" : "発注書をメーカーへ送信してください。"}</p>
+          {isKanei && !order.po_sent_at ? (
+            <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "send-po" }, "発注書をメーカーへ送信しました。納期入力フォームを案内しました。")}>
+              発注書をメーカーへ送信
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -595,7 +623,7 @@ function ReceivingForm({
   const [note, setNote] = useState("");
   return (
     <div className="film-order-file-form">
-      <strong>入荷データ登録（フィルム製作用）</strong>
+      <strong>入稿データ登録（フィルム製作用）</strong>
       <label>AIファイル（必須）
         <input value={aiFileName} onChange={(event) => setAiFileName(event.target.value)} autoFocus={autofocus} />
       </label>
@@ -623,7 +651,7 @@ function ReceivingForm({
         disabled={busy || !aiFileName.trim().toLowerCase().endsWith(".ai")}
         onClick={() => onSubmit(aiFileName.trim(), aiFileUrl.trim(), withPdf ? pdfFileName.trim() : "", withPdf ? pdfFileUrl.trim() : "", note)}
       >
-        入荷を登録してデザインへ連絡
+        入稿してデザインへ連絡
       </button>
     </div>
   );
