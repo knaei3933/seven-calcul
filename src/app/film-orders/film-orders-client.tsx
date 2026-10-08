@@ -28,8 +28,14 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
   const [created, setCreated] = useState(0);
   const [statusFilter, setStatusFilter] = useState<"all" | FilmOrderStatus>("all");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [focusForm, setFocusForm] = useState<{ id: number; kind: "receiving" | "proof" } | null>(null);
   const isSeven = isSevenChemicalUser(userEmail);
   const isKanei = isKaneiTradeUser(userEmail);
+
+  const expandWithForm = (id: number, kind: "receiving" | "proof") => {
+    setExpandedId(id);
+    setFocusForm({ id, kind });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -87,6 +93,25 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
       {created > 0 ? <p className="film-orders-sync">成約見積 {created} 件を発注管理に反映しました。</p> : null}
       {error ? <p className="film-orders-error">{error}</p> : null}
 
+      <details className="film-order-guide">
+        <summary>{isSeven ? "セブン化学担当者の流れ" : "カネイ貿易担当者の流れ"}</summary>
+        {isSeven ? (
+          <ol>
+            <li>見積履歴で見積を「成約」にすると、ここに発注が自動作成されます。</li>
+            <li>発注内容を確認し、発注書をメールでカネイ貿易へ送付したら「発注書送信済みにする」を押します。</li>
+            <li>フィルムが到着したら「入荷データを登録」します（design@へ自動連絡されます）。</li>
+            <li>校正データが登録されたら「校正を承認」または「再校正を依頼」します。</li>
+          </ol>
+        ) : (
+          <ol>
+            <li>成約後の発注は自動的にここに表示されます（発注番号 F-…）。</li>
+            <li>仕入先・校正データ送付先を設定します。</li>
+            <li>入荷登録後に「校正データを登録」します。</li>
+            <li>再校正依頼が来たら再校正データを登録します。</li>
+          </ol>
+        )}
+      </details>
+
       <nav className="film-orders-tabs" aria-label="発注ステータス">
         <button
           type="button"
@@ -118,6 +143,8 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
             expanded={expandedId === order.id}
             onToggle={() => setExpandedId(expandedId === order.id ? null : order.id)}
             onUpdated={applyResult}
+            onExpandWithForm={expandWithForm}
+            focusForm={focusForm}
             isSeven={isSeven}
             isKanei={isKanei}
           />
@@ -127,11 +154,51 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
   );
 }
 
+type NextAction =
+  | { kind: "run"; label: string; body: Record<string, unknown>; ok: string }
+  | { kind: "form"; label: string; form: "receiving" | "proof" }
+  | { kind: "none"; label: string };
+
+function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: boolean): NextAction {
+  switch (order.status) {
+    case "pending":
+      return { kind: "run", label: "発注書送信済みにする", body: { action: "mark-ordered" }, ok: "発注書送信済みにしました。" };
+    case "ordered":
+      return isSeven
+        ? { kind: "form", label: "入荷データを登録", form: "receiving" }
+        : { kind: "none", label: "セブン化学の入荷登録待ち" };
+    case "receiving_registered":
+      return isKanei
+        ? { kind: "form", label: "校正データを登録", form: "proof" }
+        : { kind: "none", label: "カネイ貿易の校正データ登録待ち" };
+    case "proof_registered":
+      return isSeven
+        ? { kind: "run", label: "校正を承認する", body: { action: "approve" }, ok: "校正を承認しました。" }
+        : { kind: "none", label: "セブン化学の承認待ち" };
+    case "re_proof_requested":
+      return isKanei
+        ? { kind: "form", label: "再校正データを登録", form: "proof" }
+        : { kind: "none", label: "カネイ貿易の再校正データ登録待ち" };
+    case "final_approved":
+      return { kind: "none", label: "完了" };
+  }
+}
+
+const STEP_DEFS: Array<{ key: FilmOrderStatus; label: string }> = [
+  { key: "pending", label: "発注待ち" },
+  { key: "ordered", label: "発注送信" },
+  { key: "receiving_registered", label: "入荷" },
+  { key: "proof_registered", label: "校正" },
+  { key: "final_approved", label: "承認" },
+];
+
 function OrderCard({
   order,
   expanded,
   onToggle,
   onUpdated,
+  onExpandWithForm,
+  focusForm,
   isSeven,
   isKanei,
 }: {
@@ -139,6 +206,8 @@ function OrderCard({
   expanded: boolean;
   onToggle: () => void;
   onUpdated: (id: number, result: { order: FilmOrderView }) => void;
+  onExpandWithForm: (id: number, kind: "receiving" | "proof") => void;
+  focusForm: { id: number; kind: "receiving" | "proof" } | null;
   isSeven: boolean;
   isKanei: boolean;
 }) {
@@ -172,17 +241,39 @@ function OrderCard({
   };
 
   const statusBadgeClass = order.status === "final_approved" ? "final" : order.status === "re_proof_requested" ? "warn" : "";
+  const next = nextActionOf(order, isSeven, isKanei);
 
   return (
     <article className={`film-order-card ${expanded ? "expanded" : ""}`} data-print-target={expanded ? "true" : undefined}>
-      <button className="film-order-summary" type="button" onClick={onToggle} aria-expanded={expanded}>
-        <span className="film-order-number">{order.order_number}</span>
-        <span className="film-order-product">{order.product_name || "-"}</span>
-        <span className="film-order-customer">{order.customer_name || "-"}</span>
-        <span className="film-order-meta">{order.procurement_route ? `調達 ${order.procurement_route}` : "-"}</span>
-        <span className="film-order-meta">{order.order_length_m ? `${Number(order.order_length_m).toLocaleString("ja-JP")}m` : "-"}</span>
-        <span className={`film-order-status ${statusBadgeClass}`}>{filmOrderStatusLabels[order.status]}</span>
-      </button>
+      <div className="film-order-summary" onClick={onToggle} role="button" tabIndex={0}
+        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onToggle(); } }}
+        aria-expanded={expanded}>
+        <div className="film-order-summary-info">
+          <span className="film-order-number">{order.order_number}</span>
+          <span className="film-order-product">{order.product_name || "-"}</span>
+          <span className="film-order-customer">{order.customer_name || "-"}</span>
+          <span className="film-order-meta">{order.procurement_route ? `調達 ${order.procurement_route}` : "-"}</span>
+          <span className="film-order-meta">{order.order_length_m ? `${Number(order.order_length_m).toLocaleString("ja-JP")}m` : "-"}</span>
+          <span className={`film-order-status ${statusBadgeClass}`}>{filmOrderStatusLabels[order.status]}</span>
+        </div>
+        <div className="film-order-summary-actions" onClick={(event) => event.stopPropagation()}>
+          {next.kind === "run" ? (
+            <button className="button small" type="button" disabled={busy} onClick={() => void run(next.body, next.ok)}>
+              {next.label}
+            </button>
+          ) : null}
+          {next.kind === "form" ? (
+            <button className="button small" type="button" onClick={() => onExpandWithForm(order.id, next.form)}>
+              {next.label}
+            </button>
+          ) : null}
+          {next.kind === "none" ? <span className="film-order-next-wait">{next.label}</span> : null}
+          <button className="button secondary small" type="button" onClick={onToggle}>
+            {expanded ? "閉じる" : "詳細"}
+          </button>
+        </div>
+      </div>
+      <OrderSteps status={order.status} reProofCount={order.re_proof_count} />
 
       {expanded ? (
         <div className="film-order-detail">
@@ -212,6 +303,7 @@ function OrderCard({
               <FileActionForm
                 title="入荷データ登録（セブン化学）"
                 defaultFileName={buildFilmOrderFileName(order, "receiving", 1)}
+                autofocus={focusForm?.id === order.id && focusForm.kind === "receiving"}
                 submitLabel="入荷を登録してデザインへ連絡"
                 busy={busy}
                 onSubmit={(fileName, note) => run({ action: "register-receiving", fileName, note }, "入荷データを登録し、デザイン宛てに連絡しました。")}
@@ -225,6 +317,7 @@ function OrderCard({
                 <FileActionForm
                   title="校正データ登録（カネイ貿易）"
                   defaultFileName={buildFilmOrderFileName(order, "proof", (order.files.filter((f) => f.category === "proof").length ?? 0) + 1)}
+                  autofocus={focusForm?.id === order.id && focusForm.kind === "proof"}
                   submitLabel="校正データを登録"
                   busy={busy}
                   onSubmit={(fileName, note) => run({ action: "register-proof", fileName, note }, "校正データを登録しました。セブン化学の承認待ちです。")}
@@ -235,6 +328,7 @@ function OrderCard({
               <FileActionForm
                 title="再校正データ登録（カネイ貿易）"
                 defaultFileName={buildFilmOrderFileName(order, "proof", (order.files.filter((f) => f.category === "proof").length ?? 0) + 1)}
+                autofocus={focusForm?.id === order.id && focusForm.kind === "proof"}
                 submitLabel="再校正データを登録"
                 busy={busy}
                 onSubmit={(fileName, note) => run({ action: "register-proof", fileName, note }, "再校正データを登録しました。")}
@@ -346,6 +440,22 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
   );
 }
 
+function OrderSteps({ status, reProofCount }: { status: FilmOrderStatus; reProofCount: number }) {
+  const activeIndex = status === "re_proof_requested"
+    ? STEP_DEFS.findIndex((step) => step.key === "proof_registered")
+    : STEP_DEFS.findIndex((step) => step.key === status);
+  return (
+    <div className="film-order-steps" aria-label="進捗">
+      {STEP_DEFS.map((step, index) => (
+        <span key={step.key} className={`film-order-step ${index < activeIndex ? "done" : index === activeIndex ? "active" : ""}`}>
+          <em>{index + 1}</em> {step.label}
+        </span>
+      ))}
+      {status === "re_proof_requested" ? <span className="film-order-reproof">再校正 {reProofCount}回目</span> : null}
+    </div>
+  );
+}
+
 function SupplierEditor({ order, busy, onSave }: { order: FilmOrderView; busy: boolean; onSave: (body: Record<string, unknown>) => void }) {
   const [name, setName] = useState(order.supplier_name);
   const [email, setEmail] = useState(order.supplier_email);
@@ -373,12 +483,14 @@ function FileActionForm({
   defaultFileName,
   submitLabel,
   busy,
+  autofocus,
   onSubmit,
 }: {
   title: string;
   defaultFileName: string;
   submitLabel: string;
   busy: boolean;
+  autofocus?: boolean;
   onSubmit: (fileName: string, note: string) => void;
 }) {
   const [fileName, setFileName] = useState(defaultFileName);
@@ -387,7 +499,7 @@ function FileActionForm({
     <div className="film-order-file-form">
       <strong>{title}</strong>
       <label>ファイル名（Driveへアップロードした名前）
-        <input value={fileName} onChange={(event) => setFileName(event.target.value)} />
+        <input value={fileName} onChange={(event) => setFileName(event.target.value)} autoFocus={autofocus} />
       </label>
       <label>メモ<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="任意" /></label>
       <button className="button" type="button" disabled={busy || !fileName.trim()} onClick={() => onSubmit(fileName.trim(), note)}>

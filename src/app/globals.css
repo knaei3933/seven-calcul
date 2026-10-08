@@ -1852,3 +1852,28 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 }
 .film-order-sheet-body dl > div.film-order-total { border-top: 2px solid var(--ink); border-bottom: 0; margin-top: 4px; padding-top: 5px; }
 .film-order-sheet-body dl > div.film-order-total dd { font-size: 1.1em; font-weight: 900; }
+
+/* 発注カード操作改善 */
+.film-order-guide { border: 1px dashed var(--line); border-radius: 10px; background: #f8fafd; padding: 10px 14px; }
+.film-order-guide summary { cursor: pointer; font-weight: 900; font-size: 13px; color: var(--primary); }
+.film-order-guide ol { margin: 8px 0 0; padding-left: 20px; font-size: 13px; line-height: 1.7; }
+.film-order-summary { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; cursor: pointer; }
+.film-order-summary:hover { background: #f8fafd; }
+.film-order-summary-info { display: grid; grid-template-columns: 130px minmax(160px, 1.3fr) minmax(140px, 1fr) 90px 90px 130px; gap: 12px; align-items: center; }
+.film-order-summary-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+.film-order-next-wait { font-size: 12px; font-weight: 800; color: var(--muted); border: 1px dashed var(--line); border-radius: 999px; padding: 4px 10px; }
+.film-order-steps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0 16px 12px; }
+.film-order-step { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 800; color: var(--muted); background: white; }
+.film-order-step em { font-style: normal; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #e2e8f0; font-size: 10px; }
+.film-order-step.done { color: #166534; background: #f0fdf4; }
+.film-order-step.done em { background: #dcfce7; }
+.film-order-step.active { color: #1e3a8a; background: #eef2ff; border-color: #6366f1; }
+.film-order-step.active em { background: #6366f1; color: white; }
+.film-order-reproof { border-radius: 999px; background: #fef3c7; color: #92400e; padding: 3px 10px; font-size: 12px; font-weight: 900; }
+@media (max-width: 1000px) {
+  .film-order-summary-info { grid-template-columns: 1fr 1fr; }
+  .film-order-summary-actions { justify-content: flex-start; }
+}
+@media print {
+  .film-order-guide, .film-order-summary, .film-order-steps { display: none !important; }
+}
