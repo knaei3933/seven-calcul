@@ -460,6 +460,20 @@ function NextStepPanel({
     <section className={`film-order-section next-step ${next.kind === "none" ? "waiting" : "mine"}`}>
       <p className="next-step-kicker">{next.kind === "none" ? "WAITING" : "NEXT STEP"}</p>
       <h3>{STATUS_HINTS[order.status]}</h3>
+      {order.status === "receiving_registered" && isSeven ? (
+        <div className="next-step-submitted">
+          <p>入稿済みデータ:</p>
+          <ul>
+            {order.files.filter((file) => file.category === "receiving").map((file) => (
+              <li key={file.id}>
+                {file.file_name}
+                {file.url ? <a href={file.url} target="_blank" rel="noreferrer">開く</a> : null}
+              </li>
+            ))}
+          </ul>
+          <p className="next-step-note">↑ 修正・追加がある場合は再度「入稿データを登録」で上書きせず追加登録できます。</p>
+        </div>
+      ) : null}
       {next.kind === "none" && order.status !== "final_approved" ? (
         <div className="next-step-wait">
           <p>{next.label}</p>
@@ -482,6 +496,25 @@ function NextStepPanel({
           onSubmit={(aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note) =>
             void onRun({ action: "register-receiving", aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note }, "入稿データを登録し、デザイン宛てに連絡しました。")}
         />
+      ) : null}
+      {order.status === "receiving_registered" && isSeven ? (
+        <details className="film-order-additional">
+          <summary>入稿データを追加する</summary>
+          <FileActionForm
+            title="入稿データ 追加登録"
+            submitLabel="追加登録"
+            defaultFileName={`${buildFilmOrderFileName(order, "receiving", (order.files.filter((f) => f.category === "receiving").length ?? 0) + 1)}`}
+            busy={busy}
+            orderId={order.id}
+            category="receiving"
+            onSubmit={(fileName, note, fileUrl) => {
+              void onRun(
+                { action: "register-receiving-extra", fileName, fileUrl, note },
+                "入稿データを追加登録しました。",
+              );
+            }}
+          />
+        </details>
       ) : null}
       {next.kind === "form" && next.form === "proof" ? (
         <div className="film-order-inline-actions">

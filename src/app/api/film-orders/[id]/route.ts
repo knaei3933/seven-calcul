@@ -23,6 +23,8 @@ const actions = new Set<FilmOrderAction>([
   "approve",
   "request-re-proof",
   "send-po",
+  "resend-receiving-notice",
+  "register-receiving-extra",
 ]);
 
 function actionAllowed(action: FilmOrderAction, email: string): boolean {
@@ -40,6 +42,9 @@ function actionAllowed(action: FilmOrderAction, email: string): boolean {
       return canApproveFilmOrderProof(email);
     case "send-po":
       return canManageFilmOrderProof(email);
+    case "resend-receiving-notice":
+    case "register-receiving-extra":
+      return canRegisterFilmOrderReceiving(email);
   }
 }
 
