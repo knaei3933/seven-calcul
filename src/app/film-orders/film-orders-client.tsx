@@ -799,7 +799,11 @@ function DriveFileField({
       if (!sessionResponse.ok || !session.sessionUri) throw new Error(session.error ?? "session_failed");
       const put = await fetch(session.sessionUri, {
         method: "PUT",
-        headers: { "Content-Type": file.type || "application/octet-stream" },
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+          // 小さなファイルでも最終リクエストとして扱わせるために必須。
+          "Content-Range": `bytes 0-${file.size - 1}/${file.size}`,
+        },
         body: file,
       });
       if (!put.ok) throw new Error(`upload_failed:${put.status}`);
