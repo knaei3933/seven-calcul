@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { PublicUser } from "@/lib/auth-store";
 import { CALCULATION_VERSION } from "@/lib/constants";
+import { canViewFilmOrders } from "@/lib/film-order-access";
 
 const menuItems = [
   { href: "/", label: "原価シミュレーター" },
@@ -40,6 +41,11 @@ export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
         {user?.role === "admin" ? (
           <Link href="/admin/users" aria-current={pathname === "/admin/users" ? "page" : undefined}>
             ユーザー管理
+          </Link>
+        ) : null}
+        {canViewFilmOrders(user?.email) ? (
+          <Link href="/film-orders" aria-current={pathname === "/film-orders" ? "page" : undefined}>
+            フィルム発注
           </Link>
         ) : null}
       </nav>

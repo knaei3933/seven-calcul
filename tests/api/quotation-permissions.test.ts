@@ -118,6 +118,8 @@ describe("quotation ownership permissions", () => {
     const readerDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, readerToken), context);
     expect(readerDelete.status).toBe(403);
     const ownerDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, ownerToken), context);
-    expect(ownerDelete.status).toBe(200);
+    // 成約済みでフィルム発注管理に反映された見積はワークフロー保護のため削除できない。
+    expect(ownerDelete.status).toBe(409);
+    await expect(ownerDelete.json()).resolves.toEqual({ error: "film_order_exists" });
   });
 });

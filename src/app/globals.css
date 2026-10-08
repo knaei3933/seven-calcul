@@ -1775,3 +1775,71 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
     justify-content: flex-start;
   }
 }
+
+/* ===== フィルム発注管理 ===== */
+.film-orders-page { display: flex; flex-direction: column; gap: 14px; }
+.film-orders-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; }
+.film-orders-head h1 { margin: 0; font-size: clamp(22px, 3vw, 30px); }
+.film-orders-head p { margin: 4px 0 0; color: var(--muted); max-width: 720px; }
+.film-orders-eyebrow { margin: 0; color: var(--primary); font-size: 11px; font-weight: 900; letter-spacing: .18em; }
+.film-orders-actions { display: flex; align-items: center; gap: 10px; }
+.film-orders-role { border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 800; background: #f8fafd; }
+.film-orders-sync { border: 1px solid var(--ok); color: var(--ok); background: #f0fdf4; border-radius: 9px; padding: 8px 12px; font-weight: 700; }
+.film-orders-error { border: 1px solid var(--danger); color: var(--danger); background: #fff1f0; border-radius: 9px; padding: 8px 12px; font-weight: 700; }
+.film-orders-empty { color: var(--muted); padding: 20px 0; }
+.film-orders-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.film-orders-list { display: flex; flex-direction: column; gap: 10px; }
+.film-order-card { border: 1px solid var(--line); border-radius: 12px; background: white; overflow: hidden; }
+.film-order-card.expanded { border-color: var(--primary); }
+.film-order-summary { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 130px minmax(160px, 1.3fr) minmax(140px, 1fr) 90px 90px 130px; gap: 12px; align-items: center; width: 100%; padding: 12px 16px; cursor: pointer; }
+.film-order-summary:hover { background: #f8fafd; }
+.film-order-number { font-weight: 900; color: var(--primary); }
+.film-order-product { font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.film-order-customer { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.film-order-meta { color: var(--muted); font-size: 13px; text-align: right; }
+.film-order-status { justify-self: end; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 900; background: #eef2ff; color: #3730a3; white-space: nowrap; }
+.film-order-status.warn { background: #fef3c7; color: #92400e; }
+.film-order-status.final { background: #dcfce7; color: #166534; }
+.film-order-detail { border-top: 1px solid var(--line); padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+.film-order-message { border-radius: 9px; padding: 8px 12px; font-weight: 700; background: #f0fdf4; color: var(--ok); }
+.film-order-mails { margin: 0; padding: 8px 12px 8px 28px; background: #f8fafd; border-radius: 9px; font-size: 13px; }
+.film-order-mails li.error { color: var(--danger); font-weight: 700; }
+.film-order-section { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.film-order-section h3 { margin: 0 0 10px; font-size: 15px; }
+.film-order-folders { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.film-order-inline-actions { display: flex; flex-direction: column; gap: 12px; }
+.film-order-final { color: var(--ok); font-weight: 800; margin: 0; }
+.film-order-files, .film-order-sku { width: 100%; border-collapse: collapse; font-size: 13px; }
+.film-order-files th, .film-order-files td, .film-order-sku th, .film-order-sku td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; }
+.film-order-files th, .film-order-sku th { background: #f8fafd; font-size: 12px; }
+.film-order-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.film-order-events li { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; border-bottom: 1px dotted var(--line); padding-bottom: 5px; }
+.film-order-event-type { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 800; color: var(--muted); }
+.film-order-events small { color: var(--muted); margin-left: auto; }
+.film-order-supplier { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.film-order-supplier label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 800; min-width: 220px; flex: 1; }
+.film-order-supplier input { border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font: inherit; }
+.film-order-file-form { display: flex; flex-direction: column; gap: 8px; border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; }
+.film-order-file-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 800; }
+.film-order-file-form input, .film-order-file-form textarea { border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font: inherit; }
+.film-order-sheet .no-print { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.film-order-sheet-body { margin-top: 10px; display: none; }
+@media print {
+  .film-orders-page { display: block; }
+  .film-orders-head, .film-orders-tabs, .film-orders-list > .film-order-card:not([data-print-target="true"]),
+  .film-order-card:not([data-print-target="true"]), .no-print { display: none !important; }
+  .film-order-card[data-print-target="true"] { border: 0; }
+  .film-order-detail { display: block; }
+  .film-order-detail > *:not(.film-order-sheet) { display: none !important; }
+  .film-order-sheet-body { display: block; font-size: 11pt; }
+  .film-order-sheet-body h2 { margin: 0 0 8px; font-size: 18pt; }
+  .film-order-sheet-body dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 16px; }
+  .film-order-sheet-body dl > div { display: flex; gap: 8px; border-bottom: 1px dotted #999; padding: 2px 0; }
+  .film-order-sheet-body dt { min-width: 80px; font-weight: 700; }
+  .film-order-sheet-body dd { margin: 0; }
+  .film-order-sheet-note { margin-top: 10px; font-size: 9pt; color: #333; }
+}
+@media (max-width: 1000px) {
+  .film-order-summary { grid-template-columns: 1fr 1fr; }
+  .film-order-meta { text-align: left; }
+}
