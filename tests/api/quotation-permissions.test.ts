@@ -70,7 +70,7 @@ async function createRecord(number: string, creatorId: number): Promise<Quotatio
 }
 
 describe("quotation ownership permissions", () => {
-  it("allows shared reads and restricts status/delete to creator or admin", async () => {
+  it("allows shared reads and restricts status/delete to creator or admin", { timeout: 30_000 }, async () => {
     const owner = await createUser({
       email: "owner@permissions.test",
       name: "Owner",

@@ -329,7 +329,11 @@ function proofNoticeText(order: FilmOrder): string {
   ].join("\n");
 }
 
-async function sendReceivingNotice(order: FilmOrder): Promise<MailSendResult[]> {
+async function sendReceivingNotice(
+  order: FilmOrder,
+  aiFileName: string,
+  pdfFileName: string | null,
+): Promise<MailSendResult[]> {
   const designMail = await sendMail({
     to: filmDesignNotificationTo(),
     subject: `【入荷登録】${order.order_number} ${order.product_name}`,
@@ -338,6 +342,7 @@ async function sendReceivingNotice(order: FilmOrder): Promise<MailSendResult[]> 
       "",
       mailBodyBase(order),
       "",
+      `入荷データ（フィルム製作用）: AI = ${aiFileName}${pdfFileName ? ` / PDF = ${pdfFileName}` : " / PDF = なし"}`,
       `入荷データフォルダ: ${FILM_RECEIVING_FOLDER_URL}`,
       `校正データアップロード先: ${FILM_PROOF_FOLDER_URL}`,
       "",
@@ -426,6 +431,10 @@ export async function runFilmOrderAction(
   params: {
     fileName?: unknown;
     fileUrl?: unknown;
+    aiFileName?: unknown;
+    aiFileUrl?: unknown;
+    pdfFileName?: unknown;
+    pdfFileUrl?: unknown;
     note?: unknown;
     comment?: unknown;
     supplierName?: unknown;
@@ -458,18 +467,27 @@ export async function runFilmOrderAction(
     await addEvent(db, id, "status", "成約 → 発注書送信済み（セブン化学からメール送信）", actorEmail);
   } else if (action === "register-receiving") {
     if (order.status !== "ordered") throw new Error("invalid_status_transition");
-    const fileName = validFileName(params.fileName);
-    if (!fileName) throw new Error("invalid_file_name");
-    const fileUrl = validFileUrl(params.fileUrl);
-    await addFile(db, id, "receiving", fileName, fileUrl, trimParam(params.note, 1000), actorEmail);
+    // フィルム製作用データの入荷。AI は必須、PDF は任意。
+    const aiFileName = validFileName(params.aiFileName);
+    if (!aiFileName || !/\.ai$/iu.test(aiFileName)) throw new Error("invalid_ai_file");
+    const pdfFileNameRaw = validFileName(params.pdfFileName);
+    if (pdfFileNameRaw && !/\.pdf$/iu.test(pdfFileNameRaw)) throw new Error("invalid_pdf_file");
+    const aiFileUrl = validFileUrl(params.aiFileUrl);
+    const pdfFileUrl = validFileUrl(params.pdfFileUrl);
+    await addFile(db, id, "receiving", aiFileName, aiFileUrl, trimParam(params.note, 1000), actorEmail);
+    if (pdfFileNameRaw) {
+      await addFile(db, id, "receiving", pdfFileNameRaw, pdfFileUrl, trimParam(params.note, 1000), actorEmail);
+    }
     await db.run(
       "UPDATE film_orders SET status = 'receiving_registered', receiving_registered_at = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
       [now, now, actorEmail, id],
     );
-    await addEvent(db, id, "file", `入荷データ登録: ${fileName}`, actorEmail);
+    await addEvent(db, id, "file", `入荷データ登録: ${aiFileName}${pdfFileNameRaw ? ` / ${pdfFileNameRaw}` : ""}`, actorEmail);
     await addEvent(db, id, "status", "発注書送信済み → 入荷データ登録済み", actorEmail);
     const refreshed = await getFilmOrder(id);
-    const mails = refreshed ? await sendReceivingNotice(refreshed) : [];
+    const mails = refreshed
+      ? await sendReceivingNotice(refreshed, aiFileName, pdfFileNameRaw ?? null)
+      : [];
     await logMailEvents(db, id, mails, "入荷通知メール", actorEmail);
     const result = await getFilmOrder(id);
     if (!result) throw new Error("film_order_update_failed");

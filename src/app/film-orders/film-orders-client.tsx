@@ -31,7 +31,7 @@ const STEP_DEFS: Array<{ key: FilmOrderStatus; label: string }> = [
 
 const STATUS_HINTS: Record<FilmOrderStatus, string> = {
   pending: "セブン化学が発注書をメール送付し、「発注書送信済み」にします。",
-  ordered: "フィルム到着後、セブン化学が入荷データを登録します。",
+  ordered: "フィルム製作を開始するため、セブン化学が製作データ（AI必須・PDF任意）を入荷登録します。",
   receiving_registered: "カネイ貿易が校正データを登録します。",
   proof_registered: "セブン化学が校正を承認、または再校正を依頼します。",
   re_proof_requested: "カネイ貿易が再校正データを登録します。",
@@ -174,14 +174,14 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
           <ol>
             <li>見積履歴で見積を「成約」にすると、ここに発注が自動作成されます。</li>
             <li>発注内容を確認し、発注書をメールでカネイ貿易へ送付したら「発注書送信済みにする」を押します。</li>
-            <li>フィルムが到着したら「入荷データを登録」します（design@ へ自動連絡）。</li>
+            <li>フィルム製作用データを「入荷データを登録」します（AI必須・PDF任意。design@ へ自動連絡）。</li>
             <li>校正データが登録されたら「校正を承認」または「再校正を依頼」します。</li>
           </ol>
         ) : (
           <ol>
             <li>成約後の発注は自動的にここに表示されます（発注番号 F-…）。</li>
             <li>仕入先・校正データ送付先を設定します。</li>
-            <li>入荷登録後に「校正データを登録」します。</li>
+            <li>セブン化学の入荷登録後、「校正データを登録」します。</li>
             <li>再校正依頼が来たら再校正データを登録します。</li>
           </ol>
         )}
@@ -447,12 +447,12 @@ function NextStepPanel({
         </button>
       ) : null}
       {next.kind === "form" && next.form === "receiving" ? (
-        <FileActionForm
-          title="入荷データ登録"
-          defaultFileName={buildFilmOrderFileName(order, "receiving", 1)}
+        <ReceivingForm
+          order={order}
           autofocus={focused === "receiving"}
-          submitLabel="入荷を登録してデザインへ連絡"
-          onSubmit={(fileName, note, fileUrl) => void onRun({ action: "register-receiving", fileName, fileUrl, note }, "入荷データを登録し、デザイン宛てに連絡しました。")}
+          busy={busy}
+          onSubmit={(aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note) =>
+            void onRun({ action: "register-receiving", aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note }, "入荷データを登録し、デザイン宛てに連絡しました。")}
         />
       ) : null}
       {next.kind === "form" && next.form === "proof" ? (
@@ -572,6 +572,60 @@ function SupplierEditor({ order, busy, onSave }: { order: FilmOrderView; busy: b
         </button>
       </div>
     </section>
+  );
+}
+
+function ReceivingForm({
+  order,
+  autofocus,
+  busy,
+  onSubmit,
+}: {
+  order: FilmOrderView;
+  autofocus?: boolean;
+  busy?: boolean;
+  onSubmit: (aiFileName: string, aiFileUrl: string, pdfFileName: string, pdfFileUrl: string, note: string) => void;
+}) {
+  const baseName = buildFilmOrderFileName(order, "receiving", 1);
+  const [aiFileName, setAiFileName] = useState(`${baseName}.ai`);
+  const [aiFileUrl, setAiFileUrl] = useState("");
+  const [pdfFileName, setPdfFileName] = useState(`${baseName}.pdf`);
+  const [pdfFileUrl, setPdfFileUrl] = useState("");
+  const [withPdf, setWithPdf] = useState(true);
+  const [note, setNote] = useState("");
+  return (
+    <div className="film-order-file-form">
+      <strong>入荷データ登録（フィルム製作用）</strong>
+      <label>AIファイル（必須）
+        <input value={aiFileName} onChange={(event) => setAiFileName(event.target.value)} autoFocus={autofocus} />
+      </label>
+      <label>AIファイルURL（Driveの共有リンク・任意）
+        <input value={aiFileUrl} onChange={(event) => setAiFileUrl(event.target.value)} placeholder="https://drive.google.com/..." inputMode="url" />
+      </label>
+      <label className="film-order-pdf-toggle">
+        <input type="checkbox" checked={withPdf} onChange={(event) => setWithPdf(event.target.checked)} />
+        PDFも登録する（任意）
+      </label>
+      {withPdf ? (
+        <>
+          <label>PDFファイル
+            <input value={pdfFileName} onChange={(event) => setPdfFileName(event.target.value)} />
+          </label>
+          <label>PDFファイルURL（任意）
+            <input value={pdfFileUrl} onChange={(event) => setPdfFileUrl(event.target.value)} placeholder="https://drive.google.com/..." inputMode="url" />
+          </label>
+        </>
+      ) : null}
+      <label>メモ<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="任意" /></label>
+      <button
+        className="button"
+        type="button"
+        disabled={busy || !aiFileName.trim().toLowerCase().endsWith(".ai")}
+        onClick={() => onSubmit(aiFileName.trim(), aiFileUrl.trim(), withPdf ? pdfFileName.trim() : "", withPdf ? pdfFileUrl.trim() : "", note)}
+      >
+        入荷を登録してデザインへ連絡
+      </button>
+    </div>
   );
 }
 

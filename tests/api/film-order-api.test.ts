@@ -124,7 +124,7 @@ describe("film order API permissions and workflow", () => {
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "register-receiving", fileName: "入荷.pdf" }),
+        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", pdfFileName: "API検証パウチ.pdf" }),
       }, kaneiToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
@@ -134,7 +134,7 @@ describe("film order API permissions and workflow", () => {
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "register-receiving", fileName: "入荷.pdf" }),
+        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", pdfFileName: "API検証パウチ.pdf" }),
       }, sevenToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );

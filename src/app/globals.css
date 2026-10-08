@@ -1924,3 +1924,5 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .next-step-file strong { color: var(--ink); }
 .film-order-url-missing { font-size: 11.5px; color: #92400e; background: #fef3c7; border-radius: 6px; padding: 2px 8px; }
 .next-step-wait p { margin: 0 0 6px; }
+.film-order-pdf-toggle { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px !important; font-size: 12.5px; }
+.film-order-pdf-toggle input { width: 18px; height: 18px; accent-color: var(--primary); }
