@@ -70,6 +70,8 @@ export interface FilmOrderRow {
   eta_date: string | null;
   eta_note: string | null;
   eta_updated_at: string | null;
+  proof_upload_token: string | null;
+  proof_upload_expires_at: string | null;
   status: FilmOrderStatus;
   re_proof_count: number;
   ordered_at: string | null;
