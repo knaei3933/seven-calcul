@@ -216,7 +216,15 @@ async function getDatabase(): Promise<SqlClient> {
       }
     }
     try {
-      await db.exec("UPDATE film_orders SET buyer_domain = '727.co.jp' WHERE (buyer_domain IS NULL OR buyer_domain = '') AND created_by_email LIKE '%@727.co.jp'");
+      // 空の buyer_domain は元見積の発注者会社から補完する。
+      await db.exec(`
+        UPDATE film_orders f
+        SET buyer_domain = CASE WHEN u.email LIKE '%@727.co.jp' THEN '727.co.jp' ELSE 'kanei-trade.co.jp' END,
+            created_by_email = COALESCE(NULLIF(f.created_by_email, ''), u.email)
+        FROM quotations q
+        JOIN users u ON u.id = q.created_by
+        WHERE f.quotation_id = q.id
+      `);
       await db.exec("UPDATE film_orders SET buyer_domain = 'kanei-trade.co.jp' WHERE buyer_domain IS NULL OR buyer_domain = ''");
     } catch {
       // 無視（初回は空）。
