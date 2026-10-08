@@ -152,6 +152,13 @@ export async function getCustomer(code: string): Promise<CustomerMaster | null> 
   return row ? mapRow(row) : null;
 }
 
+export async function deleteCustomer(code: string): Promise<boolean> {
+  const db = await getDatabase();
+  if (!code.trim()) return false;
+  const result = await db.run("DELETE FROM customers WHERE customer_code = ?", [code.trim()]);
+  return result.changes > 0;
+}
+
 export async function listCustomers(query = "", limit = 100): Promise<CustomerMaster[]> {
   const db = await getDatabase();
   const safeLimit = Math.min(Math.max(Number.isFinite(limit) ? limit : 100, 1), 500);

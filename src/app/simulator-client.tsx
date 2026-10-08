@@ -921,7 +921,7 @@ const parameterGroups = [
   },
 ];
 
-export default function QuotationPage() {
+export default function QuotationPage({ userRole = "user" }: { userRole?: "admin" | "user" } = {}) {
   const initialSize = sizeMaster["round-50x60"];
   const [form, setForm] = useState({
     customerCode: "",
@@ -973,6 +973,7 @@ export default function QuotationPage() {
   const [customerListQuery, setCustomerListQuery] = useState("");
   const [customerListLoading, setCustomerListLoading] = useState(false);
   const [editingCustomerCode, setEditingCustomerCode] = useState<string | null>(null);
+  const [deletingCustomerCode, setDeletingCustomerCode] = useState<string | null>(null);
   const [customerEdit, setCustomerEdit] = useState<CustomerMasterInput | null>(null);
   const [customerEditSaving, setCustomerEditSaving] = useState(false);
   const [customerListMessage, setCustomerListMessage] = useState("");
@@ -1888,6 +1889,28 @@ export default function QuotationPage() {
       setCustomerList([]);
     } finally {
       setCustomerListLoading(false);
+    }
+  };
+
+  const deleteCustomerFromList = async (code: string, name: string) => {
+    if (deletingCustomerCode) return;
+    const confirmed = window.confirm(`顧客コード ${code}（${name || "無名"}）を顧客マスタから削除しますか？\n過去の見積書データは影響を受けません。`);
+    if (!confirmed) return;
+    setDeletingCustomerCode(code);
+    setCustomerListMessage("");
+    try {
+      const response = await fetch(`/api/customers/${encodeURIComponent(code)}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error ?? "delete_failed");
+      setCustomerList((old) => old.filter((customer) => customer.customerCode !== code));
+      setCustomerListMessage(`${code} を削除しました。`);
+      if (form.customerCode === code) {
+        setCustomerStatus((old) => ({ ...old, found: false, message: `顧客コード ${code} は削除されました。` }));
+      }
+    } catch {
+      setCustomerListMessage("顧客情報を削除できませんでした。");
+    } finally {
+      setDeletingCustomerCode(null);
     }
   };
 
@@ -2964,6 +2987,16 @@ export default function QuotationPage() {
                           <td className="customer-edit-actions">
                             <button className="button small" type="button" disabled={editingCustomerCode !== null} onClick={() => startCustomerEdit(customer)}>編集</button>
                             <button className="button secondary small" type="button" disabled={editingCustomerCode !== null} onClick={() => selectCustomerFromList(customer)}>選択</button>
+                            {userRole === "admin" ? (
+                              <button
+                                className="button danger small"
+                                type="button"
+                                disabled={editingCustomerCode !== null || deletingCustomerCode !== null}
+                                onClick={() => void deleteCustomerFromList(customer.customerCode, customer.customerName)}
+                              >
+                                {deletingCustomerCode === customer.customerCode ? "削除中..." : "削除"}
+                              </button>
+                            ) : null}
                           </td>
                         </tr>
                       );

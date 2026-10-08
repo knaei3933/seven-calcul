@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const databaseDirectory = await mkdtemp(join(tmpdir(), "customer-store-test-"));
 process.env.POUCH_CUSTOMER_DB = join(databaseDirectory, "customers.db");
 
-const { getCustomer, listCustomers, saveCustomer, validateCustomerInput } = await import("@/lib/customer-store");
+const { deleteCustomer, getCustomer, listCustomers, saveCustomer, validateCustomerInput } = await import("@/lib/customer-store");
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
@@ -82,5 +82,21 @@ describe("customer master persistence and search", () => {
     expect(await listCustomers("CA%")).toHaveLength(1);
     expect(await listCustomers("퍼센트 도시")).toHaveLength(1);
     expect(await listCustomers("주식회사")).toHaveLength(2);
+  });
+
+  it("deletes by code and reports unknown codes", async () => {
+    await saveCustomer({
+      customerCode: "CA-DEL",
+      customerName: "삭제대상주식회사",
+      customerPostalCode: "",
+      customerAddress: "",
+      customerContact: "",
+      customerTelephone: "",
+      customerEmail: "",
+    });
+    expect(await deleteCustomer("  CA-DEL  ")).toBe(true);
+    expect(await getCustomer("CA-DEL")).toBeNull();
+    expect(await deleteCustomer("CA-DEL")).toBe(false);
+    expect(await deleteCustomer("   ")).toBe(false);
   });
 });
