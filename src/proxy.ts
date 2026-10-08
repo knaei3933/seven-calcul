@@ -3,7 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 const PUBLIC_PATHS = new Set(["/login"]);
 
 function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.has(pathname) || pathname.startsWith("/film-orders/eta/");
+  return PUBLIC_PATHS.has(pathname)
+    || pathname.startsWith("/film-orders/eta/")
+    || pathname === "/oauth/callback";
 }
 
 export function proxy(request: NextRequest) {
