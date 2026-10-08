@@ -1850,3 +1850,5 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
   .film-order-summary { grid-template-columns: 1fr 1fr; }
   .film-order-meta { text-align: left; }
 }
+.film-order-sheet-body dl > div.film-order-total { border-top: 2px solid var(--ink); border-bottom: 0; margin-top: 4px; padding-top: 5px; }
+.film-order-sheet-body dl > div.film-order-total dd { font-size: 1.1em; font-weight: 900; }

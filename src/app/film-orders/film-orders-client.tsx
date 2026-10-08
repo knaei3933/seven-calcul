@@ -12,6 +12,7 @@ import {
   isKaneiTradeUser,
   isSevenChemicalUser,
 } from "@/lib/film-order-access";
+import { D } from "@/lib/decimal";
 
 interface MailResult {
   to: string;
@@ -291,6 +292,11 @@ function OrderCard({
 
 function OrderSheet({ order }: { order: FilmOrderView }) {
   const po = order.purchaseOrder;
+  const filmTotal = D(po?.filmCostYen ?? "0");
+  const copperTotal = po?.copperPlate ? D(po.copperPlate.priceYen) : D(0);
+  const moldTotal = po?.customMold ? D(po.customMold.costYen) : D(0);
+  const orderTotal = filmTotal.plus(copperTotal).plus(moldTotal);
+  const yen = (value: ReturnType<typeof D>) => `￥${Number(value.toFixed(0)).toLocaleString("ja-JP")}`;
   return (
     <section className="film-order-section film-order-sheet" aria-label="発注内容">
       <div className="no-print">
@@ -311,10 +317,12 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
             <div className="wide"><dt>SKU別原反幅</dt><dd>{po.webWidthsMm.map((width) => `${width}mm`).join(" / ")}</dd></div>
           ) : null}
           {order.procurement_route ? <div><dt>調達経路</dt><dd>{order.procurement_route === "Y" ? "国内調達" : "韓国輸入"}</dd></div> : null}
-          {po?.filmCostYen ? <div><dt>フィルム金額</dt><dd>￥{Number(po.filmCostYen).toLocaleString("ja-JP")}</dd></div> : null}
+          {po?.filmCostYen ? <div><dt>フィルム金額</dt><dd>{yen(filmTotal)}</dd></div> : null}
           {po?.copperPlate ? (
-            <div><dt>銅版</dt><dd>{po.copperPlate.quantity}枚 ／ {po.copperPlate.plateWidthMm}mm ／ ￥{Number(po.copperPlate.priceYen).toLocaleString("ja-JP")}</dd></div>
+            <div><dt>銅版</dt><dd>{po.copperPlate.quantity}枚 ／ {po.copperPlate.plateWidthMm}mm ／ {yen(copperTotal)}</dd></div>
           ) : null}
+          {po?.customMold ? <div><dt>カスタム金型</dt><dd>{yen(moldTotal)}</dd></div> : null}
+          <div className="film-order-total wide"><dt>発注金額合計（税抜）</dt><dd>{yen(orderTotal)}</dd></div>
         </dl>
         {po?.skuOrderDetails?.length ? (
           <table className="film-order-sku">
