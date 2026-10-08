@@ -1823,7 +1823,14 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-order-file-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 800; }
 .film-order-file-form input, .film-order-file-form textarea { border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font: inherit; }
 .film-order-sheet .no-print { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-.film-order-sheet-body { margin-top: 10px; display: none; }
+.film-order-sheet-body { margin-top: 10px; display: block; }
+.film-order-sheet-body dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 16px; }
+.film-order-sheet-body dl > div { display: flex; gap: 8px; border-bottom: 1px dotted var(--line); padding: 3px 0; }
+.film-order-sheet-body dl > div.wide { grid-column: 1 / -1; }
+.film-order-sheet-body dt { min-width: 88px; font-weight: 700; color: var(--muted); }
+.film-order-sheet-body dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.film-order-sheet-body h2 { margin: 0 0 8px; font-size: 18px; }
+.film-order-sku { margin-top: 8px; }
 @media print {
   .film-orders-page { display: block; }
   .film-orders-head, .film-orders-tabs, .film-orders-list > .film-order-card:not([data-print-target="true"]),

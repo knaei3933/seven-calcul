@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FILM_ORDER_STATUSES,
-  FILM_PROOF_FOLDER_URL,
-  FILM_RECEIVING_FOLDER_URL,
   buildFilmOrderFileName,
   filmOrderStatusLabels,
   type FilmOrderStatus,
@@ -203,16 +201,6 @@ function OrderCard({
           {isKanei ? <SupplierEditor order={order} busy={busy} onSave={(body) => run(body, "仕入先情報を保存しました。")} /> : null}
 
           <section className="film-order-section">
-            <h3>データフォルダ</h3>
-            <div className="film-order-folders">
-              <a href={FILM_RECEIVING_FOLDER_URL} target="_blank" rel="noreferrer" className="button secondary small">入荷データ フォルダ</a>
-              <a href={FILM_PROOF_FOLDER_URL} target="_blank" rel="noreferrer" className="button secondary small">校正データ フォルダ</a>
-              <CopyButton value={buildFilmOrderFileName(order, "receiving", 1)} label="入荷ファイル名をコピー" />
-              <CopyButton value={buildFilmOrderFileName(order, "proof", (order.files.filter((f) => f.category === "proof").length ?? 0) + 1)} label="校正ファイル名をコピー" />
-            </div>
-          </section>
-
-          <section className="film-order-section">
             <h3>アクション</h3>
             {order.status === "pending" ? (
               <button className="button" type="button" disabled={busy} onClick={() => void run({ action: "mark-ordered" }, "発注書送信済みにしました。")}>
@@ -264,7 +252,7 @@ function OrderCard({
           </section>
 
           <section className="film-order-section">
-            <h3>登録ファイル</h3>
+            <h3>入荷・校正データ履歴</h3>
             {order.files.length === 0 ? <p>まだ登録されていません。</p> : (
               <table className="film-order-files">
                 <thead><tr><th>種別</th><th>ファイル名</th><th>v</th><th>登録者</th><th>日時</th></tr></thead>
@@ -315,12 +303,13 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
           <div><dt>発注番号</dt><dd>{order.order_number}</dd></div>
           <div><dt>見積番号</dt><dd>{order.quotation_number}</dd></div>
           <div><dt>商品名</dt><dd>{order.product_name || "-"}</dd></div>
-          <div><dt>顧客名</dt><dd>{order.customer_name || "-"}</dd></div>
           <div><dt>印刷方式</dt><dd>{order.printing_method === "gravure" ? "グラビア印刷" : order.printing_method === "digital" ? "デジタル印刷" : "-"}</dd></div>
           <div><dt>フィルム構成</dt><dd>{order.film_composition || "-"}</dd></div>
           <div><dt>原反幅</dt><dd>{order.web_width_mm ? `${order.web_width_mm}mm` : "-"}</dd></div>
           <div><dt>発注長</dt><dd>{order.order_length_m ? `${Number(order.order_length_m).toLocaleString("ja-JP")}m` : "-"}</dd></div>
-          <div><dt>発注数量</dt><dd>{Number(order.pouch_quantity || 0).toLocaleString("ja-JP")} 枚</dd></div>
+          {po?.webWidthsMm && po.webWidthsMm.length > 1 ? (
+            <div className="wide"><dt>SKU別原反幅</dt><dd>{po.webWidthsMm.map((width) => `${width}mm`).join(" / ")}</dd></div>
+          ) : null}
           {order.procurement_route ? <div><dt>調達経路</dt><dd>{order.procurement_route === "Y" ? "国内調達" : "韓国輸入"}</dd></div> : null}
           {po?.filmCostYen ? <div><dt>フィルム金額</dt><dd>￥{Number(po.filmCostYen).toLocaleString("ja-JP")}</dd></div> : null}
           {po?.copperPlate ? (
@@ -329,13 +318,11 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
         </dl>
         {po?.skuOrderDetails?.length ? (
           <table className="film-order-sku">
-            <thead><tr><th>SKU</th><th>品名</th><th>数量</th><th>色数</th><th>発注長</th><th>原反幅</th><th>倍率</th></tr></thead>
+            <thead><tr><th>SKU</th><th>色数</th><th>発注長</th><th>原反幅</th><th>倍率</th></tr></thead>
             <tbody>
               {po.skuOrderDetails.map((sku) => (
                 <tr key={sku.skuCode}>
                   <td>{sku.skuCode}</td>
-                  <td>{sku.name}</td>
-                  <td>{Number(sku.quantity).toLocaleString("ja-JP")}</td>
                   <td>{sku.colorCount}</td>
                   <td>{Number(sku.orderLengthM).toLocaleString("ja-JP")}m</td>
                   <td>{sku.webWidthMm}mm</td>
@@ -424,23 +411,3 @@ function ReProofForm({ busy, onSubmit }: { busy: boolean; onSubmit: (comment: st
   );
 }
 
-function CopyButton({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      className="button secondary small"
-      type="button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(value);
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
-        } catch {
-          setCopied(false);
-        }
-      }}
-    >
-      {copied ? "コピーしました" : label}
-    </button>
-  );
-}
