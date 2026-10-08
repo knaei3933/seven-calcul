@@ -828,15 +828,12 @@ export async function runFilmOrderAction(
     await addEvent(db, id, "file", `入稿データ追加: ${fileName}`, actorEmail);
   } else if (action === "resend-receiving-notice") {
     if (order.status !== "receiving_registered") throw new Error("invalid_status_transition");
-    const receiving: FilmOrderFileRecord[] = (order as FilmOrderView).files.filter((file) => file.category === "receiving");
-    const aiFile = receiving.find((file) => /\.ai$/iu.test(file.file_name)) ?? receiving[0];
-    void 0;
-    const pdfFile = receiving.find((file) => /\.pdf$/iu.test(file.file_name));
-    if (!aiFile) throw new Error("invalid_status_transition");
     const refreshed = await getFilmOrder(id);
-    const mails = refreshed
-      ? await sendReceivingNotice(refreshed, aiFile.file_name, aiFile.url, pdfFile?.file_name ?? null, pdfFile?.url ?? "", `${origin}/film-orders/upload/${await ensureProofUploadToken(db, id)}`)
-      : [];
+    const receiving: FilmOrderFileRecord[] = (refreshed?.files ?? []).filter((file) => file.category === "receiving");
+    const aiFile = receiving.find((file) => /\.ai$/iu.test(file.file_name)) ?? receiving[0];
+    const pdfFile = receiving.find((file) => /\.pdf$/iu.test(file.file_name));
+    if (!refreshed || !aiFile) throw new Error("invalid_status_transition");
+    const mails = await sendReceivingNotice(refreshed, aiFile.file_name, aiFile.url, pdfFile?.file_name ?? null, pdfFile?.url ?? "", `${origin}/film-orders/upload/${await ensureProofUploadToken(db, id)}`);
     await logMailEvents(db, id, mails, "入稿通知メール（再送）", actorEmail);
     const result = await getFilmOrder(id);
     if (!result) throw new Error("film_order_update_failed");
