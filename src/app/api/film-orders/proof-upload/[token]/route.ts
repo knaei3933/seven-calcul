@@ -68,6 +68,13 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       if (!fileName.includes(order.order_number)) {
         return NextResponse.json({ error: "file_name_must_include_order_number" }, { status: 400 });
       }
+      if (!/\.(ai|pdf|zip|eps|psd|indd)$/iu.test(fileName)) {
+        return NextResponse.json({ error: "unsupported_file_type" }, { status: 400 });
+      }
+      const size = Number(body.sizeBytes);
+      if (Number.isFinite(size) && size > 2 * 1024 * 1024 * 1024) {
+        return NextResponse.json({ error: "file_too_large" }, { status: 413 });
+      }
       if (!driveConfigured()) return NextResponse.json({ error: "drive_not_configured" }, { status: 503 });
       const sessionUri = await createResumableSession({
         fileName,

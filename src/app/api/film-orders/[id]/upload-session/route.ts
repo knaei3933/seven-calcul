@@ -34,6 +34,10 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     if (!category || !fileName || fileName.length > 200 || fileName.includes("/") || fileName.includes("\\")) {
       return NextResponse.json({ error: "invalid_upload_request" }, { status: 400 });
     }
+    const size = Number(body.sizeBytes);
+    if (Number.isFinite(size) && size > 2 * 1024 * 1024 * 1024) {
+      return NextResponse.json({ error: "file_too_large" }, { status: 413 });
+    }
     if (category === "receiving" && !canRegisterFilmOrderReceiving(user.email)) {
       return NextResponse.json({ error: "film_order_action_forbidden" }, { status: 403 });
     }
