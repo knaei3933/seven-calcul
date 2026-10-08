@@ -368,7 +368,7 @@ function OrderCard({
             {order.files.length === 0 ? <p>まだ登録されていません。</p> : (
               <div className="table-scroll">
                 <table className="film-order-files">
-                  <thead><tr><th>種別</th><th>ファイル名</th><th>リンク</th><th>v</th><th>登録者</th><th>日時</th></tr></thead>
+                  <thead><tr><th>種別</th><th>ファイル名</th><th>リンク</th><th>プレビュー</th><th>v</th><th>登録者</th><th>日時</th></tr></thead>
                   <tbody>
                     {order.files.map((file) => (
                       <tr key={file.id}>
@@ -538,6 +538,28 @@ function NextStepPanel({
       {order.status === "proof_registered" && isSeven ? (
         <div className="film-order-inline-actions">
           {(() => {
+            const proofs = order.files.filter((f) => f.category === "proof").sort((a, b) => b.version - a.version);
+            const latest = proofs[0];
+            if (!latest?.url) return null;
+            const fileId = latest.url.split("/d/")[1]?.split("/")[0];
+            if (!fileId) return null;
+            const isPdf = latest.file_name.toLowerCase().endsWith(".pdf");
+            return (
+              <div className="film-order-proof-preview">
+                <p className="film-order-preview-label">最新校正データ: {latest.file_name} (v{latest.version})</p>
+                {isPdf ? (
+                  <iframe
+                    src={`/api/film-orders/preview?fileId=${encodeURIComponent(fileId)}`}
+                    className="film-order-preview-iframe"
+                    title="校正データプレビュー"
+                  />
+                ) : (
+                  <p className="film-order-preview-note">AI形式はブラウザプレビュー不可。ダウンロードして確認してください。</p>
+                )}
+              </div>
+            );
+          })()}
+          {(() => {
             const latest = [...order.files].filter((file) => file.category === "proof").sort((a, b) => b.version - a.version)[0];
             return latest ? (
               <p className="next-step-file">
@@ -624,6 +646,16 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
       </div>
     </section>
   );
+}
+
+function openPreview(url: string, fileName: string): void {
+  const fileId = url.split("/d/")[1]?.split("/")[0];
+  if (!fileId) return;
+  window.open(`/api/film-orders/preview?fileId=${encodeURIComponent(fileId)}`, "_blank");
+}
+
+function isPreviewable(fileName: string): boolean {
+  return /\.(pdf|png|jpe?g|gif|svg)$/iu.test(fileName);
 }
 
 function SupplierEditor({ order, busy, onSave }: { order: FilmOrderView; busy: boolean; onSave: (body: Record<string, unknown>) => void }) {
