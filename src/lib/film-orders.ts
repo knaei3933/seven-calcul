@@ -205,6 +205,8 @@ async function getDatabase(): Promise<SqlClient> {
       ["film_orders_eta_updated", "ALTER TABLE film_orders ADD COLUMN eta_updated_at TEXT"],
       ["film_orders_proof_token", "ALTER TABLE film_orders ADD COLUMN proof_upload_token TEXT"],
       ["film_orders_proof_expires", "ALTER TABLE film_orders ADD COLUMN proof_upload_expires_at TEXT"],
+      // 既存テーブル（buyer_domain 導入前）向け。新規テーブルでは重複エラーを無視する。
+      ["film_orders_buyer_domain", "ALTER TABLE film_orders ADD COLUMN buyer_domain TEXT NOT NULL DEFAULT ''"],
     ];
     for (const [, sql] of migrations) {
       try {
