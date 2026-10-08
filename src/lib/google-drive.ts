@@ -165,3 +165,12 @@ export async function downloadFile(fileId: string): Promise<Response> {
   if (!response.ok || !response.body) throw new Error(`drive_download_failed:${response.status}`);
   return response;
 }
+
+export async function deleteFile(fileId: string): Promise<string> {
+  const token = await getAccessToken();
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  return response.ok ? "trashed" : `failed:${response.status}`;
+}
