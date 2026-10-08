@@ -151,7 +151,7 @@ describe("film order store", () => {
     const proof1 = await runFilmOrderAction(orderId, "register-proof", { fileName: "校正データ_v2.ai", fileUrl: "https://drive.google.com/file/d/proof1/view" }, "kanei@kanei-trade.co.jp");
     expect(proof1.order.status).toBe("proof_registered");
     expect(proof1.order.files.find((file) => file.category === "proof")?.version).toBe(1);
-    expect(proof1.order.files.find((file) => file.category === "proof")?.url).toContain("proof1");
+    expect(proof1.order.files.filter((file) => file.category === "proof").map((file) => file.url)).toContain("https://drive.google.com/file/d/proof1/view");
 
     const reProof = await runFilmOrderAction(orderId, "request-re-proof", { comment: "ロゴ位置を修正" }, "seven@727.co.jp");
     expect(reProof.order.status).toBe("re_proof_requested");
