@@ -35,7 +35,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       return NextResponse.json({ error: "invalid_upload_request" }, { status: 400 });
     }
     const size = Number(body.sizeBytes);
-    if (Number.isFinite(size) && size > 2 * 1024 * 1024 * 1024) {
+    if (Number.isFinite(size) && size > 15 * 1024 * 1024) {
       return NextResponse.json({ error: "file_too_large" }, { status: 413 });
     }
     if (category === "receiving" && !canRegisterFilmOrderReceiving(user.email)) {

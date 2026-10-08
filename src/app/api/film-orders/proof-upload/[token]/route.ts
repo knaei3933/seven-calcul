@@ -72,7 +72,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
         return NextResponse.json({ error: "unsupported_file_type" }, { status: 400 });
       }
       const size = Number(body.sizeBytes);
-      if (Number.isFinite(size) && size > 2 * 1024 * 1024 * 1024) {
+      if (Number.isFinite(size) && size > 15 * 1024 * 1024) {
         return NextResponse.json({ error: "file_too_large" }, { status: 413 });
       }
       if (!driveConfigured()) return NextResponse.json({ error: "drive_not_configured" }, { status: 503 });

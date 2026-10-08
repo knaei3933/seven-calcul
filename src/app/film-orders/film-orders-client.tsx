@@ -773,6 +773,11 @@ function DriveFileField({
     setFile(selected);
     setUploaded(false);
     setError("");
+    if (selected && selected.size > 15 * 1024 * 1024) {
+      setError(`ファイルサイズが15MBを超えています（${(selected.size / 1024 / 1024).toFixed(1)}MB）。圧縮するか、Driveへ直接アップロードしてURLを登録してください。`);
+      setFile(null);
+      return;
+    }
     if (selected) {
       const dot = fileName.lastIndexOf(".");
       const extension = selected.name.includes(".") ? selected.name.slice(selected.name.lastIndexOf(".")) : "";

@@ -59,6 +59,10 @@ export default function ProofUploadClient({
 
   const submit = async () => {
     if (!file || busy) return;
+    if (file.size > 15 * 1024 * 1024) {
+      setError(`ファイルサイズが15MBを超えています（${(file.size / 1024 / 1024).toFixed(1)}MB）。15MB以下に圧縮してください。`);
+      return;
+    }
     setBusy(true);
     setMessage("");
     setError("");
@@ -130,7 +134,7 @@ export default function ProofUploadClient({
         </div>
       ) : null}
 
-      <label>校正ファイル（AI形式推奨）
+      <label>校正ファイル（AI形式推奨・15MBまで）
         <input type="file" onChange={(event) => {
           const selected = event.target.files?.[0] ?? null;
           setFile(selected);
