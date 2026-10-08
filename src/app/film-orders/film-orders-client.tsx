@@ -61,7 +61,7 @@ function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: boolean):
     case "ordered":
       return isSeven
         ? { kind: "form", label: "入稿データを登録", form: "receiving" }
-        : { kind: "none", label: "セブン化学の入荷登録待ち" };
+        : { kind: "none", label: "セブン化学の入稿登録待ち" };
     case "receiving_registered":
       return isKanei
         ? { kind: "form", label: "校正データを登録", form: "proof" }

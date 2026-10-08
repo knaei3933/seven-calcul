@@ -717,7 +717,7 @@ export async function runFilmOrderAction(
     await addEvent(db, id, "status", "成約 → 発注書送信済み（セブン化学からメール送信）", actorEmail);
   } else if (action === "register-receiving") {
     if (order.status !== "ordered") throw new Error("invalid_status_transition");
-    // フィルム製作用データの入荷。AI は必須、PDF は任意。
+    // フィルム製作用データの入稿。AI は必須、PDF は任意。
     const aiFileName = validFileName(params.aiFileName);
     if (!aiFileName || !/\.ai$/iu.test(aiFileName)) throw new Error("invalid_ai_file");
     const pdfFileNameRaw = validFileName(params.pdfFileName);
@@ -732,14 +732,14 @@ export async function runFilmOrderAction(
       "UPDATE film_orders SET status = 'receiving_registered', receiving_registered_at = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
       [now, now, actorEmail, id],
     );
-    await addEvent(db, id, "file", `入荷データ登録: ${aiFileName}${pdfFileNameRaw ? ` / ${pdfFileNameRaw}` : ""}`, actorEmail);
-    await addEvent(db, id, "status", "発注書送信済み → 入荷データ登録済み", actorEmail);
+    await addEvent(db, id, "file", `入稿データ登録: ${aiFileName}${pdfFileNameRaw ? ` / ${pdfFileNameRaw}` : ""}`, actorEmail);
+    await addEvent(db, id, "status", "発注書送信済み → 入稿済み", actorEmail);
     const refreshed = await getFilmOrder(id);
     const uploadUrl = `${origin}/film-orders/upload/${await ensureProofUploadToken(db, id)}`;
     const mails = refreshed
       ? await sendReceivingNotice(refreshed, aiFileName, aiFileUrl, pdfFileNameRaw ?? null, pdfFileUrl, uploadUrl)
       : [];
-    await logMailEvents(db, id, mails, "入荷通知メール", actorEmail);
+    await logMailEvents(db, id, mails, "入稿通知メール", actorEmail);
     const result = await getFilmOrder(id);
     if (!result) throw new Error("film_order_update_failed");
     return { order: result, mails };
