@@ -39,8 +39,13 @@ export default async function OAuthCallbackPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const code = typeof params.code === "string" ? params.code : "";
   const error = typeof params.error === "string" ? params.error : "";
-  const origin = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3002";
-  const result = code ? await exchangeCode(code, `${origin}/oauth/callback`) : null;
+  const origin = process.env.PUBLIC_ORIGIN
+    ?? (process.env.VERCEL === "1" ? "https://seven-calcul.vercel.app" : "http://localhost:3002");
+  const redirectUri = `${origin}/oauth/callback`;
+  const result = code ? await exchangeCode(code, redirectUri) : null;
+  const consentUrl = process.env.GOOGLE_OAUTH_CLIENT_ID
+    ? `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(process.env.GOOGLE_OAUTH_CLIENT_ID)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/drive")}&access_type=offline&prompt=consent`
+    : null;
 
   return (
     <main className="eta-page">
@@ -55,9 +60,11 @@ export default async function OAuthCallbackPage({ searchParams }: PageProps) {
               診断用 — このページが受け取ったパラメータ:
             </p>
             <textarea className="oauth-code" readOnly rows={3} value={JSON.stringify(params)} />
-            <p className="eta-summary">
-              同意URLから再度アクセスしてください（直接このページを開いた場合はコード付きでリダイレクトされません）。
-            </p>
+            {consentUrl ? (
+              <p style={{ margin: "14px 0 0" }}>
+                <a className="button" href={consentUrl}>Google同意を開始（このボタンを押してください）</a>
+              </p>
+            ) : null}
           </>
         ) : result?.ok ? (
           result.refreshToken ? (
