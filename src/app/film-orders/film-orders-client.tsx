@@ -95,6 +95,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
   const [statusFilter, setStatusFilter] = useState<"all" | FilmOrderStatus>("all");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [focusForm, setFocusForm] = useState<{ id: number; kind: "receiving" | "proof" } | null>(null);
+  const [driveReady, setDriveReady] = useState(false);
   const isSeven = isSevenChemicalUser(userEmail);
   const isKanei = isKaneiTradeUser(userEmail);
 
@@ -107,6 +108,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
       if (!response.ok || !Array.isArray(payload.orders)) throw new Error();
       setOrders(payload.orders as FilmOrderView[]);
       setCreated(Number(payload.created ?? 0));
+      setDriveReady(payload.driveConfigured === true);
     } catch {
       setError("発注データを読み込めませんでした。");
     } finally {
@@ -226,6 +228,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
             focusForm={focusForm}
             isSeven={isSeven}
             isKanei={isKanei}
+            driveReady={driveReady}
           />
         ))}
       </div>
@@ -242,6 +245,7 @@ function OrderCard({
   focusForm,
   isSeven,
   isKanei,
+  driveReady,
 }: {
   order: FilmOrderView;
   expanded: boolean;
@@ -251,6 +255,7 @@ function OrderCard({
   focusForm: { id: number; kind: "receiving" | "proof" } | null;
   isSeven: boolean;
   isKanei: boolean;
+  driveReady: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -352,6 +357,7 @@ function OrderCard({
                 focused={focusForm?.id === order.id ? focusForm.kind : null}
                 onRun={run}
                 onExpandWithForm={onExpandWithForm}
+                driveReady={driveReady}
               />
               {isKanei ? <SupplierEditor order={order} busy={busy} onSave={(body) => run(body, "仕入先情報を保存しました。")} /> : null}
             </div>
@@ -437,6 +443,7 @@ function NextStepPanel({
   focused,
   onRun,
   onExpandWithForm,
+  driveReady,
 }: {
   order: FilmOrderView;
   isSeven: boolean;
@@ -445,6 +452,7 @@ function NextStepPanel({
   focused: "receiving" | "proof" | null;
   onRun: (body: Record<string, unknown>, ok: string) => Promise<void>;
   onExpandWithForm: (id: number, kind: "receiving" | "proof") => void;
+  driveReady: boolean;
 }) {
   const next = nextActionOf(order, isSeven, isKanei);
   const proofVersion = (order.files.filter((file) => file.category === "proof").length ?? 0) + 1;
@@ -470,6 +478,7 @@ function NextStepPanel({
           order={order}
           autofocus={focused === "receiving"}
           busy={busy}
+          driveReady={driveReady}
           onSubmit={(aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note) =>
             void onRun({ action: "register-receiving", aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note }, "入稿データを登録し、デザイン宛てに連絡しました。")}
         />
@@ -485,6 +494,9 @@ function NextStepPanel({
             title={order.status === "re_proof_requested" ? "再校正データ登録" : "校正データ登録"}
             defaultFileName={buildFilmOrderFileName(order, "proof", proofVersion)}
             autofocus={focused === "proof"}
+            driveReady={driveReady}
+            orderId={order.id}
+            category="proof"
             submitLabel={order.status === "re_proof_requested" ? "再校正データを登録" : "校正データを登録"}
             onSubmit={(fileName, note, fileUrl) => void onRun({ action: "register-proof", fileName, fileUrl, note }, "校正データを登録しました。")}
           />
@@ -607,11 +619,13 @@ function ReceivingForm({
   order,
   autofocus,
   busy,
+  driveReady,
   onSubmit,
 }: {
   order: FilmOrderView;
   autofocus?: boolean;
   busy?: boolean;
+  driveReady: boolean;
   onSubmit: (aiFileName: string, aiFileUrl: string, pdfFileName: string, pdfFileUrl: string, note: string) => void;
 }) {
   const baseName = buildFilmOrderFileName(order, "receiving", 1);
@@ -624,25 +638,36 @@ function ReceivingForm({
   return (
     <div className="film-order-file-form">
       <strong>入稿データ登録（フィルム製作用）</strong>
-      <label>AIファイル（必須）
-        <input value={aiFileName} onChange={(event) => setAiFileName(event.target.value)} autoFocus={autofocus} />
-      </label>
-      <label>AIファイルURL（Driveの共有リンク・任意）
-        <input value={aiFileUrl} onChange={(event) => setAiFileUrl(event.target.value)} placeholder="https://drive.google.com/..." inputMode="url" />
-      </label>
+      {!driveReady ? <p className="film-order-upload-hint">直接アップロードは未設定です。Driveへ手動アップロード後、URLを入力してください。</p> : null}
+      <DriveFileField
+        label="AIファイル（必須）"
+        orderId={order.id}
+        category="receiving"
+        fileName={aiFileName}
+        onFileNameChange={setAiFileName}
+        url={aiFileUrl}
+        onUrlChange={setAiFileUrl}
+        accept=".ai"
+        required
+        autofocus={autofocus}
+        driveReady={driveReady}
+      />
       <label className="film-order-pdf-toggle">
         <input type="checkbox" checked={withPdf} onChange={(event) => setWithPdf(event.target.checked)} />
         PDFも登録する（任意）
       </label>
       {withPdf ? (
-        <>
-          <label>PDFファイル
-            <input value={pdfFileName} onChange={(event) => setPdfFileName(event.target.value)} />
-          </label>
-          <label>PDFファイルURL（任意）
-            <input value={pdfFileUrl} onChange={(event) => setPdfFileUrl(event.target.value)} placeholder="https://drive.google.com/..." inputMode="url" />
-          </label>
-        </>
+        <DriveFileField
+          label="PDFファイル"
+          orderId={order.id}
+          category="receiving"
+          fileName={pdfFileName}
+          onFileNameChange={setPdfFileName}
+          url={pdfFileUrl}
+          onUrlChange={setPdfFileUrl}
+          accept=".pdf"
+          driveReady={driveReady}
+        />
       ) : null}
       <label>メモ<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="任意" /></label>
       <button
@@ -663,6 +688,9 @@ function FileActionForm({
   submitLabel,
   busy,
   autofocus,
+  driveReady,
+  orderId,
+  category,
   onSubmit,
 }: {
   title: string;
@@ -670,6 +698,9 @@ function FileActionForm({
   submitLabel: string;
   busy?: boolean;
   autofocus?: boolean;
+  driveReady?: boolean;
+  orderId?: number;
+  category?: "receiving" | "proof";
   onSubmit: (fileName: string, note: string, fileUrl: string) => void;
 }) {
   const [fileName, setFileName] = useState(defaultFileName);
@@ -678,16 +709,134 @@ function FileActionForm({
   return (
     <div className="film-order-file-form">
       <strong>{title}</strong>
-      <label>ファイル名（Driveへアップロードした名前）
-        <input value={fileName} onChange={(event) => setFileName(event.target.value)} autoFocus={autofocus} />
-      </label>
-      <label>ファイルURL（Driveの共有リンク・任意）
-        <input value={fileUrl} onChange={(event) => setFileUrl(event.target.value)} placeholder="https://drive.google.com/..." inputMode="url" />
-      </label>
+      {orderId && category ? (
+        <DriveFileField
+          label="ファイル"
+          orderId={orderId}
+          category={category}
+          fileName={fileName}
+          onFileNameChange={setFileName}
+          url={fileUrl}
+          onUrlChange={setFileUrl}
+          driveReady={driveReady === true}
+          autofocus={autofocus}
+        />
+      ) : (
+        <>
+          <label>ファイル名
+            <input value={fileName} onChange={(event) => setFileName(event.target.value)} autoFocus={autofocus} />
+          </label>
+          <label>ファイルURL（任意）
+            <input value={fileUrl} onChange={(event) => setFileUrl(event.target.value)} placeholder="https://drive.google.com/..." inputMode="url" />
+          </label>
+        </>
+      )}
       <label>メモ<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="任意" /></label>
       <button className="button" type="button" disabled={busy || !fileName.trim()} onClick={() => onSubmit(fileName.trim(), note, fileUrl.trim())}>
         {submitLabel}
       </button>
+    </div>
+  );
+}
+
+function DriveFileField({
+  label,
+  orderId,
+  category,
+  fileName,
+  onFileNameChange,
+  url,
+  onUrlChange,
+  accept,
+  required,
+  autofocus,
+  driveReady,
+}: {
+  label: string;
+  orderId: number;
+  category: "receiving" | "proof";
+  fileName: string;
+  onFileNameChange: (value: string) => void;
+  url: string;
+  onUrlChange: (value: string) => void;
+  accept?: string;
+  required?: boolean;
+  autofocus?: boolean;
+  driveReady: boolean;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploaded, setUploaded] = useState(false);
+  const [error, setError] = useState("");
+
+  const pickFile = (selected: File | null) => {
+    setFile(selected);
+    setUploaded(false);
+    setError("");
+    if (selected) {
+      const dot = fileName.lastIndexOf(".");
+      const extension = selected.name.includes(".") ? selected.name.slice(selected.name.lastIndexOf(".")) : "";
+      onFileNameChange(dot > 0 ? `${fileName.slice(0, dot)}${extension}` : fileName);
+    }
+  };
+
+  const upload = async () => {
+    if (!file || uploading) return;
+    setUploading(true);
+    setError("");
+    try {
+      const sessionResponse = await fetch(`/api/film-orders/${orderId}/upload-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category,
+          fileName: fileName.trim(),
+          sizeBytes: file.size,
+          contentType: file.type || "application/octet-stream",
+        }),
+      });
+      const session = await sessionResponse.json() as { sessionUri?: string; error?: string };
+      if (!sessionResponse.ok || !session.sessionUri) throw new Error(session.error ?? "session_failed");
+      const put = await fetch(session.sessionUri, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      if (!put.ok) throw new Error(`upload_failed:${put.status}`);
+      const completeResponse = await fetch(`/api/film-orders/${orderId}/upload-complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category, fileName: fileName.trim() }),
+      });
+      const complete = await completeResponse.json() as { url?: string; error?: string };
+      if (!completeResponse.ok || !complete.url) throw new Error(complete.error ?? "complete_failed");
+      onUrlChange(complete.url);
+      setUploaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? `アップロード失敗: ${err.message}` : "アップロードに失敗しました。");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="film-order-drive-field">
+      <label>{label}
+        <input value={fileName} onChange={(event) => { onFileNameChange(event.target.value); setUploaded(false); }} autoFocus={autofocus} />
+      </label>
+      <label>ファイル選択
+        <input type="file" accept={accept} onChange={(event) => pickFile(event.target.files?.[0] ?? null)} />
+      </label>
+      {driveReady ? (
+        <button className="button secondary small" type="button" disabled={!file || uploading || uploaded} onClick={() => void upload()}>
+          {uploaded ? "アップロード済み ✓" : uploading ? "アップロード中..." : "Driveへアップロード"}
+        </button>
+      ) : null}
+      {uploaded && url ? <a href={url} target="_blank" rel="noreferrer">アップロード済みファイルを開く</a> : null}
+      <label>URL（手動入力・{required ? "アップロード時は自動設定" : "任意"}）
+        <input value={url} onChange={(event) => onUrlChange(event.target.value)} placeholder="https://drive.google.com/..." inputMode="url" />
+      </label>
+      {error ? <p className="film-order-upload-error">{error}</p> : null}
     </div>
   );
 }

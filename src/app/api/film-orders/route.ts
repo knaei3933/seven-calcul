@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
 import { canViewFilmOrders } from "@/lib/film-order-access";
 import { listFilmOrders, syncFilmOrdersFromQuotations } from "@/lib/film-orders";
+import { driveConfigured } from "@/lib/google-drive";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   try {
     const created = await syncFilmOrdersFromQuotations(user.email);
     const orders = await listFilmOrders();
-    return NextResponse.json({ created, orders });
+    return NextResponse.json({ created, orders, driveConfigured: driveConfigured() });
   } catch {
     return NextResponse.json({ error: "film_order_list_failed" }, { status: 500 });
   }

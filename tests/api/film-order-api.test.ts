@@ -12,6 +12,7 @@ process.env.ADMIN_PASSWORD = "seven-api-password";
 process.env.ADMIN_NAME = "Seven API";
 
 const { GET: listRoute } = await import("@/app/api/film-orders/route");
+const { POST: uploadSession } = await import("@/app/api/film-orders/[id]/upload-session/route");
 const { POST: actionRoute } = await import("@/app/api/film-orders/[id]/route");
 const { POST: login } = await import("@/app/api/auth/login/route");
 const { createUser } = await import("@/lib/auth-store");
@@ -174,6 +175,22 @@ describe("film order API permissions and workflow", () => {
     );
     expect(sevenReProof.status).toBe(200);
     expect(await sevenReProof.json()).toMatchObject({ order: { status: "re_proof_requested" } });
+  });
+
+  it("reports direct upload as unavailable without service account credentials", async () => {
+    delete process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    delete process.env.GOOGLE_SA_CLIENT_EMAIL;
+    delete process.env.GOOGLE_SA_PRIVATE_KEY;
+    const response = await uploadSession(
+      request(`http://localhost/api/film-orders/${orderId}/upload-session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ category: "receiving", fileName: "test.ai" }),
+      }, sevenToken),
+      { params: Promise.resolve({ id: String(orderId) }) } as never,
+    );
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: "drive_not_configured" });
   });
 
   it("maps domain errors to status codes", async () => {
