@@ -1,7 +1,8 @@
 /**
  * フィルム発注ワークフローの権限。
- * - Seven Chemical (@727.co.jp): 発注書送信・入稿データ登録・校正承認/再校正依頼
- * - Kanei Trade (@kanei-trade.co.jp): 仕入先管理・校正データ登録・アップロード案内
+ * 見積を作成した会社（発注側）と、供給側（カネイ貿易 or 外部メーカー）で操作権限が決まる。
+ * - Seven Chemical (@727.co.jp) が発注側: 入稿・承認はセブン化学、校正登録等はカネイ貿易
+ * - Kanei Trade (@kanei-trade.co.jp) が発注側（カネイ自身の営業）: すべてカネイ貿易が操作
  */
 export const SEVEN_CHEMICAL_EMAIL_DOMAIN = "@727.co.jp";
 export const KANEI_TRADE_EMAIL_DOMAIN = "@kanei-trade.co.jp";
@@ -23,18 +24,74 @@ export function canViewFilmOrders(email: string | null | undefined): boolean {
   return isSevenChemicalUser(email) || isKaneiTradeUser(email);
 }
 
-export function canMarkFilmOrderOrdered(email: string | null | undefined): boolean {
-  return canViewFilmOrders(email);
+/** 発注側ドメイン（見積作成者の会社）を返す。 */
+export function buyerDomainOf(createdByEmail: string | null | undefined): "seven" | "kanei" {
+  return isSevenChemicalUser(createdByEmail) ? "seven" : "kanei";
 }
 
-export function canRegisterFilmOrderReceiving(email: string | null | undefined): boolean {
-  return isSevenChemicalUser(email);
+export type FilmOrderActionSide = "buyer" | "kanei";
+
+const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
+  "mark-ordered": "buyer",
+  "register-receiving": "buyer",
+  "register-receiving-extra": "buyer",
+  "resend-receiving-notice": "buyer",
+  approve: "buyer",
+  "request-re-proof": "buyer",
+  "register-proof": "kanei",
+  "send-proof-notice": "kanei",
+  "set-supplier": "kanei",
+  "send-po": "kanei",
+};
+
+/**
+ * 発注側会社のアカウントが buyer 操作を、カネイ貿易が seller 側操作を行う。
+ * カネイ貿易が発注側の場合は seller 操作もカネイ貿易が行う。
+ */
+export function canPerformFilmOrderAction(
+  action: string,
+  actorEmail: string | null | undefined,
+  buyerDomain: string,
+): boolean {
+  const side = ACTION_SIDE[action];
+  if (!side) return false;
+  const buyer = buyerDomain.includes("727") ? "seven" : "kanei";
+  if (side === "buyer") {
+    return buyer === "seven" ? isSevenChemicalUser(actorEmail) : isKaneiTradeUser(actorEmail);
+  }
+  return isKaneiTradeUser(actorEmail);
+}
+
+/** 発注ワークフロー一覧の閲覧範囲。Seven は自社発注のみ、カネイは全件（供給側として関与）。 */
+export function canViewFilmOrderRow(
+  orderBuyerDomain: string,
+  actorEmail: string | null | undefined,
+): boolean {
+  return orderBuyerDomain === "seven" ? isSevenChemicalUser(actorEmail) : isKaneiTradeUser(actorEmail);
+}
+
+// ---- 後方互換用（ページ表示など） ----
+export function canRegisterFilmOrderReceiving(
+  email: string | null | undefined,
+  buyerDomain: string = "seven",
+): boolean {
+  return buyerDomain === "seven" ? isSevenChemicalUser(email) : isKaneiTradeUser(email);
 }
 
 export function canManageFilmOrderProof(email: string | null | undefined): boolean {
   return isKaneiTradeUser(email);
 }
 
-export function canApproveFilmOrderProof(email: string | null | undefined): boolean {
-  return isSevenChemicalUser(email);
+export function canApproveFilmOrderProof(
+  email: string | null | undefined,
+  buyerDomain: string = "seven",
+): boolean {
+  return buyerDomain === "seven" ? isSevenChemicalUser(email) : isKaneiTradeUser(email);
+}
+
+export function canMarkFilmOrderOrdered(
+  email: string | null | undefined,
+  buyerDomain: string = "seven",
+): boolean {
+  return canPerformFilmOrderAction("mark-ordered", email, buyerDomain);
 }

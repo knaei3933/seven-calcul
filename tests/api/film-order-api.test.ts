@@ -113,7 +113,7 @@ describe("film order API permissions and workflow", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "mark-ordered" }),
-      }, kaneiToken),
+      }, sevenToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
     expect(marked.status).toBe(200);

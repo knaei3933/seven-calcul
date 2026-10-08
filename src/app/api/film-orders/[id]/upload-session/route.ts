@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
-import {
-  canManageFilmOrderProof,
-  canRegisterFilmOrderReceiving,
-  canViewFilmOrders,
-} from "@/lib/film-order-access";
+import { canViewFilmOrders, canPerformFilmOrderAction } from "@/lib/film-order-access";
 import { getFilmOrder } from "@/lib/film-orders";
 import {
   createResumableSession,
@@ -38,14 +34,12 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     if (Number.isFinite(size) && size > 15 * 1024 * 1024) {
       return NextResponse.json({ error: "file_too_large" }, { status: 413 });
     }
-    if (category === "receiving" && !canRegisterFilmOrderReceiving(user.email)) {
-      return NextResponse.json({ error: "film_order_action_forbidden" }, { status: 403 });
-    }
-    if (category === "proof" && !canManageFilmOrderProof(user.email)) {
-      return NextResponse.json({ error: "film_order_action_forbidden" }, { status: 403 });
-    }
     const order = await getFilmOrder(orderId);
     if (!order) return NextResponse.json({ error: "film_order_not_found" }, { status: 404 });
+    const uploadAction = category === "receiving" ? "register-receiving" : "register-proof";
+    if (!canPerformFilmOrderAction(uploadAction, user.email, order.buyer_domain)) {
+      return NextResponse.json({ error: "film_order_action_forbidden" }, { status: 403 });
+    }
     if (!driveConfigured()) {
       return NextResponse.json({ error: "drive_not_configured" }, { status: 503 });
     }

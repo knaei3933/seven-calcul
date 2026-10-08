@@ -13,7 +13,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (!canViewFilmOrders(user.email)) return NextResponse.json({ error: "film_order_forbidden" }, { status: 403 });
   try {
     const created = await syncFilmOrdersFromQuotations(user.email);
-    const orders = await listFilmOrders();
+    const orders = await listFilmOrders(user.email);
     return NextResponse.json({ created, orders, driveConfigured: driveConfigured() });
   } catch {
     return NextResponse.json({ error: "film_order_list_failed" }, { status: 500 });

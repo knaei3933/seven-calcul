@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
-import {
-  canApproveFilmOrderProof,
-  canManageFilmOrderProof,
-  canMarkFilmOrderOrdered,
-  canRegisterFilmOrderReceiving,
-  canViewFilmOrders,
-} from "@/lib/film-order-access";
+import { canViewFilmOrders, canPerformFilmOrderAction } from "@/lib/film-order-access";
+import { getFilmOrder } from "@/lib/film-orders";
 import { runFilmOrderAction, type FilmOrderAction } from "@/lib/film-orders";
 
 export const runtime = "nodejs";
@@ -14,39 +9,7 @@ export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ id: string }> };
 
-const actions = new Set<FilmOrderAction>([
-  "mark-ordered",
-  "set-supplier",
-  "register-receiving",
-  "send-proof-notice",
-  "register-proof",
-  "approve",
-  "request-re-proof",
-  "send-po",
-  "resend-receiving-notice",
-  "register-receiving-extra",
-]);
 
-function actionAllowed(action: FilmOrderAction, email: string): boolean {
-  switch (action) {
-    case "mark-ordered":
-      return canMarkFilmOrderOrdered(email);
-    case "register-receiving":
-      return canRegisterFilmOrderReceiving(email);
-    case "set-supplier":
-    case "send-proof-notice":
-    case "register-proof":
-      return canManageFilmOrderProof(email);
-    case "approve":
-    case "request-re-proof":
-      return canApproveFilmOrderProof(email);
-    case "send-po":
-      return canManageFilmOrderProof(email);
-    case "resend-receiving-notice":
-    case "register-receiving-extra":
-      return canRegisterFilmOrderReceiving(email);
-  }
-}
 
 function statusForError(message: string): number {
   if (message === "film_order_not_found") return 404;
@@ -67,10 +30,12 @@ export async function POST(request: Request, context: Context): Promise<NextResp
   try {
     const body = await request.json() as { action?: unknown };
     const action = typeof body.action === "string" ? body.action as FilmOrderAction : null;
-    if (!action || !actions.has(action)) {
+    if (!action) {
       return NextResponse.json({ error: "unknown_action" }, { status: 400 });
     }
-    if (!actionAllowed(action, user.email)) {
+    const order = await getFilmOrder(orderId);
+    if (!order) return NextResponse.json({ error: "film_order_not_found" }, { status: 404 });
+    if (!canPerformFilmOrderAction(action, user.email, order.buyer_domain)) {
       return NextResponse.json({ error: "film_order_action_forbidden" }, { status: 403 });
     }
     let origin = new URL(request.url).origin;

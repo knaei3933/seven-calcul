@@ -2,6 +2,7 @@ import { getSqlClient, type SqlClient } from "./db";
 import { sendMail, type MailSendResult } from "./mailer";
 import type { PurchaseOrderSnapshot } from "./purchase-order";
 import type { QuotationRecord } from "./quotation-shared";
+import { isSevenChemicalUser, isKaneiTradeUser } from "./film-order-access";
 
 export function filmDesignNotificationTo(): string {
   return process.env.FILM_DESIGN_TO ?? "design@package-lab.com";
@@ -52,6 +53,7 @@ interface FilmOrderRow {
   supplier_name: string;
   supplier_email: string;
   seven_contact_email: string;
+  buyer_domain: string;
   po_sent_at: string | null;
   eta_token: string | null;
   eta_expires_at: string | null;
@@ -135,6 +137,7 @@ const BASE_SCHEMA = `
     supplier_name TEXT NOT NULL DEFAULT '',
     supplier_email TEXT NOT NULL DEFAULT '',
     seven_contact_email TEXT NOT NULL DEFAULT '',
+    buyer_domain TEXT NOT NULL DEFAULT '',
     po_sent_at TEXT,
     eta_token TEXT,
     eta_expires_at TEXT,
@@ -210,6 +213,19 @@ async function getDatabase(): Promise<SqlClient> {
         // 既存カラムの場合は無視する。
       }
     }
+    try {
+      await db.exec("UPDATE film_orders SET buyer_domain = '727.co.jp' WHERE (buyer_domain IS NULL OR buyer_domain = '') AND created_by_email LIKE '%@727.co.jp'");
+      await db.exec("UPDATE film_orders SET buyer_domain = 'kanei-trade.co.jp' WHERE buyer_domain IS NULL OR buyer_domain = ''");
+    } catch {
+      // 無視（初回は空）。
+    }
+    for (const [, sql] of migrations) {
+      try {
+        await db.exec(sql);
+      } catch {
+        // 既存カラムの場合は無視する。
+      }
+    }
     return db;
   })();
   return schemaReady;
@@ -271,10 +287,8 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
     const orderNumber = await nextOrderNumber(db);
     await db.run(`
       INSERT INTO film_orders (
-        order_number,quotation_id,quotation_number,product_name,customer_name,printing_method,
-        procurement_route,film_composition,order_length_m,web_width_mm,pouch_quantity,
-        supplier_name,supplier_email,seven_contact_email,status,purchase_order_json,created_at,updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,'',?,?,'pending',?,?,?)
+        order_number, quotation_id, quotation_number, product_name, customer_name, printing_method, procurement_route, film_composition, order_length_m, web_width_mm, pouch_quantity, supplier_name, supplier_email, seven_contact_email, buyer_domain, status, purchase_order_json, created_at, updated_at, created_by_email, updated_by_email
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       orderNumber,
       quotation.id,
@@ -289,9 +303,14 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
       quotation.quantity,
       "",
       quotation.createdBy.email,
+      quotation.createdBy.email,
+      isSevenChemicalUser(quotation.createdBy.email) ? "727.co.jp" : "kanei-trade.co.jp",
+      "pending",
       JSON.stringify(snapshot ?? {}),
       now,
       now,
+      quotation.createdBy.email,
+      quotation.createdBy.email,
     ]);
     const inserted = await db.get<{ id: number }>("SELECT id FROM film_orders WHERE order_number = ?", [orderNumber]);
     if (inserted) {
@@ -305,12 +324,17 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
   return created;
 }
 
-export async function listFilmOrders(): Promise<FilmOrderView[]> {
+export async function listFilmOrders(actorEmail?: string): Promise<FilmOrderView[]> {
   const db = await getDatabase();
   const rows = await db.all<FilmOrderRow>("SELECT * FROM film_orders ORDER BY created_at DESC, id DESC");
+  const visible = rows.filter((row) => {
+    const buyerIsSeven = isSevenChemicalUser(row.created_by_email);
+    if (buyerIsSeven) return true; // セブン発注はカネイ（供給側）も閲覧する。
+    return isKaneiTradeUser(actorEmail); // カネイ発注はカネイのみ。
+  });
   const files = await db.all<FilmOrderFileRecord>("SELECT * FROM film_order_files ORDER BY created_at, id");
   const events = await db.all<FilmOrderEventRecord>("SELECT * FROM film_order_events ORDER BY created_at, id");
-  return rows.map((row) => ({
+  return visible.map((row) => ({
     ...mapOrder(row),
     files: files.filter((file) => file.order_id === row.id),
     events: events.filter((event) => event.order_id === row.id),

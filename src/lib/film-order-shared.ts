@@ -64,6 +64,7 @@ export interface FilmOrderRow {
   supplier_name: string;
   supplier_email: string;
   seven_contact_email: string;
+  buyer_domain: string;
   po_sent_at: string | null;
   eta_token: string | null;
   eta_expires_at: string | null;
