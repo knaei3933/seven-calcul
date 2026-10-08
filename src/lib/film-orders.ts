@@ -58,6 +58,8 @@ interface FilmOrderRow {
   eta_date: string | null;
   eta_note: string | null;
   eta_updated_at: string | null;
+  proof_upload_token: string | null;
+  proof_upload_expires_at: string | null;
   status: FilmOrderStatus;
   re_proof_count: number;
   ordered_at: string | null;
@@ -136,6 +138,8 @@ const BASE_SCHEMA = `
     eta_date TEXT,
     eta_note TEXT,
     eta_updated_at TEXT,
+    proof_upload_token TEXT,
+    proof_upload_expires_at TEXT,
     status TEXT NOT NULL CHECK(status IN ('pending','ordered','receiving_registered','proof_registered','re_proof_requested','final_approved')),
     re_proof_count INTEGER NOT NULL DEFAULT 0,
     ordered_at TEXT,
@@ -193,6 +197,8 @@ async function getDatabase(): Promise<SqlClient> {
       ["film_orders_eta_date", "ALTER TABLE film_orders ADD COLUMN eta_date TEXT"],
       ["film_orders_eta_note", "ALTER TABLE film_orders ADD COLUMN eta_note TEXT"],
       ["film_orders_eta_updated", "ALTER TABLE film_orders ADD COLUMN eta_updated_at TEXT"],
+      ["film_orders_proof_token", "ALTER TABLE film_orders ADD COLUMN proof_upload_token TEXT"],
+      ["film_orders_proof_expires", "ALTER TABLE film_orders ADD COLUMN proof_upload_expires_at TEXT"],
     ];
     for (const [, sql] of migrations) {
       try {
@@ -374,7 +380,7 @@ function fileLinksSection(files: string[]): string {
   return links.length > 0 ? links.join("\n") : "（URL未登録: Driveフォルダのファイル名で確認してください）";
 }
 
-function proofNoticeText(order: FilmOrder, artworkUrls: string[] = []): string {
+function proofNoticeText(order: FilmOrder, artworkUrls: string[] = [], uploadUrl = ""): string {
   const proofName = buildFilmOrderFileName(order, "proof", 1);
   const destination = supplierDestinationFor(order);
   return [
@@ -385,9 +391,9 @@ function proofNoticeText(order: FilmOrder, artworkUrls: string[] = []): string {
     fileLinksSection(artworkUrls),
     "",
     "上記データをフィルム図面に沿って配置し、校正データを作成してください。",
-    "校正データの返却は、必ず下記URLへアップロードしてください（他の手段では受け付けていません）。",
+    "校正データは、必ず下記のアップロードページから返却してください（Googleログイン不要・他の手段では受け付けていません）。",
     "",
-    `返却先: ${FILM_PROOF_FOLDER_URL}`,
+    `アップロードページ: ${uploadUrl}`,
     `ファイル名の形式: ${proofName}_v番号（発注番号を必ず含めてください）`,
     destination.route === "B" ? "宛先種別: Y調達（国内）" : destination.route === "A" ? "宛先種別: A（digital / 韓国輸入）" : "",
   ].filter(Boolean).join("\n");
@@ -399,6 +405,7 @@ async function sendReceivingNotice(
   aiFileUrl: string,
   pdfFileName: string | null,
   pdfFileUrl: string,
+  uploadUrl: string,
 ): Promise<MailSendResult[]> {
   const artworkUrls = [aiFileUrl, pdfFileName ? pdfFileUrl : ""];
   const designMail = await sendMail({
@@ -424,18 +431,18 @@ async function sendReceivingNotice(
     mails.push(await sendMail({
       to: destination.to,
       subject: `【校正データ返却のお願い】${order.order_number} ${order.product_name}`,
-      text: proofNoticeText(order, artworkUrls),
+      text: proofNoticeText(order, artworkUrls, uploadUrl),
     }));
   }
   return mails;
 }
 
-async function sendProofNoticeMail(order: FilmOrder): Promise<MailSendResult> {
+async function sendProofNoticeMail(order: FilmOrder, uploadUrl: string): Promise<MailSendResult> {
   const destination = supplierDestinationFor(order);
   return sendMail({
     to: destination.to ?? filmDesignNotificationTo(),
     subject: `【校正データ返却のお願い】${order.order_number} ${order.product_name}`,
-    text: proofNoticeText(order),
+    text: proofNoticeText(order, [], uploadUrl),
   });
 }
 
@@ -454,7 +461,7 @@ async function sendApprovalMail(order: FilmOrder): Promise<MailSendResult[]> {
   return mails;
 }
 
-async function sendReProofMail(order: FilmOrder, comment: string): Promise<MailSendResult[]> {
+async function sendReProofMail(order: FilmOrder, comment: string, uploadUrl: string): Promise<MailSendResult[]> {
   const subject = `【再校正のお願い】${order.order_number} ${order.product_name}`;
   const text = [
     `${order.order_number}（${order.product_name || "-"}）の校正データについて再校正をお願いいたします。`,
@@ -463,7 +470,7 @@ async function sendReProofMail(order: FilmOrder, comment: string): Promise<MailS
     "",
     `再校正内容: ${comment}（再校正 ${order.re_proof_count + 1} 回目）`,
     "",
-    `返却先（必ずこのURLへアップロード）: ${FILM_PROOF_FOLDER_URL}`,
+    `返却ページ（必ずここからアップロード・Googleログイン不要）: ${uploadUrl}`,
   ].join("\n");
   const destination = supplierDestinationFor(order);
   const mails: MailSendResult[] = [];
@@ -538,6 +545,53 @@ export function verifyEtaToken(token: string): number | null {
   const b = Buffer.from(expected);
   if (a.length !== b.length || !require("node:crypto").timingSafeEqual(a, b)) return null;
   return orderId;
+}
+
+function signProofToken(orderId: number, expiresAt: number): string {
+  const { createHmac } = require("node:crypto") as typeof import("node:crypto");
+  return createHmac("sha256", `${etaSecret()}:proof`).update(`${orderId}.${expiresAt}`).digest("base64url");
+}
+
+async function ensureProofUploadToken(db: SqlClient, orderId: number): Promise<string> {
+  const row = await db.get<{ proof_upload_token: string | null; proof_upload_expires_at: string | null }>(
+    "SELECT proof_upload_token, proof_upload_expires_at FROM film_orders WHERE id = ?",
+    [orderId],
+  );
+  const stillValid = row?.proof_upload_token
+    && row.proof_upload_expires_at
+    && new Date(row.proof_upload_expires_at).getTime() > Date.now() + 24 * 60 * 60 * 1000;
+  if (stillValid && row?.proof_upload_token) return row.proof_upload_token;
+  const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  const token = `${orderId}.${expiresAt}.${signProofToken(orderId, expiresAt)}`;
+  const now = new Date().toISOString();
+  await db.run(
+    "UPDATE film_orders SET proof_upload_token = ?, proof_upload_expires_at = ?, updated_at = ? WHERE id = ?",
+    [token, new Date(expiresAt).toISOString(), now, orderId],
+  );
+  return token;
+}
+
+function verifyProofUploadToken(token: string): number | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const orderId = Number(parts[0]);
+  const expiresAt = Number(parts[1]);
+  const signature = parts[2];
+  if (!Number.isInteger(orderId) || orderId <= 0 || !Number.isFinite(expiresAt)) return null;
+  if (expiresAt <= Date.now()) return null;
+  const expected = signProofToken(orderId, expiresAt);
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !require("node:crypto").timingSafeEqual(a, b)) return null;
+  return orderId;
+}
+
+export async function getFilmOrderForProofUpload(token: string): Promise<FilmOrderView | null> {
+  const orderId = verifyProofUploadToken(token);
+  if (orderId == null) throw new Error("invalid_proof_token");
+  const db = await getDatabase();
+  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ? AND proof_upload_token = ?", [orderId, token]);
+  return row ? getFilmOrder(orderId) : null;
 }
 
 export async function updateEtaFromToken(
@@ -636,6 +690,7 @@ export async function runFilmOrderAction(
 ): Promise<{ order: FilmOrderView; mails?: MailSendResult[] }> {
   const db = await getDatabase();
   const now = new Date().toISOString();
+  const origin = trimParam(params.origin, 200) || "https://seven-calcul.vercel.app";
   const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [id]);
   if (!row) throw new Error("film_order_not_found");
   const order = mapOrder(row);
@@ -677,8 +732,9 @@ export async function runFilmOrderAction(
     await addEvent(db, id, "file", `入荷データ登録: ${aiFileName}${pdfFileNameRaw ? ` / ${pdfFileNameRaw}` : ""}`, actorEmail);
     await addEvent(db, id, "status", "発注書送信済み → 入荷データ登録済み", actorEmail);
     const refreshed = await getFilmOrder(id);
+    const uploadUrl = `${origin}/film-orders/upload/${await ensureProofUploadToken(db, id)}`;
     const mails = refreshed
-      ? await sendReceivingNotice(refreshed, aiFileName, aiFileUrl, pdfFileNameRaw ?? null, pdfFileUrl)
+      ? await sendReceivingNotice(refreshed, aiFileName, aiFileUrl, pdfFileNameRaw ?? null, pdfFileUrl, uploadUrl)
       : [];
     await logMailEvents(db, id, mails, "入荷通知メール", actorEmail);
     const result = await getFilmOrder(id);
@@ -686,7 +742,7 @@ export async function runFilmOrderAction(
     return { order: result, mails };
   } else if (action === "send-proof-notice") {
     if (order.status !== "receiving_registered") throw new Error("invalid_status_transition");
-    const mails = [await sendProofNoticeMail(order)];
+    const mails = [await sendProofNoticeMail(order, `${origin}/film-orders/upload/${await ensureProofUploadToken(db, id)}`)];
     await logMailEvents(db, id, mails, "校正アップロード案内", actorEmail);
     const result = await getFilmOrder(id);
     if (!result) throw new Error("film_order_update_failed");
@@ -736,14 +792,15 @@ export async function runFilmOrderAction(
     );
     await addEvent(db, id, "status", `校正待ち → 再校正依頼中: ${comment}`, actorEmail);
     const refreshed = await getFilmOrder(id);
-    const mails = refreshed ? await sendReProofMail(refreshed, comment) : [];
+    const mails = refreshed
+      ? await sendReProofMail(refreshed, comment, `${origin}/film-orders/upload/${await ensureProofUploadToken(db, id)}`)
+      : [];
     await logMailEvents(db, id, mails, "再校正依頼メール", actorEmail);
     const result = await getFilmOrder(id);
     if (!result) throw new Error("film_order_update_failed");
     return { order: result, mails };
   } else if (action === "send-po") {
     if (order.status !== "final_approved") throw new Error("invalid_status_transition");
-    const origin = trimParam(params.origin, 200) || "https://seven-calcul.vercel.app";
     const { token, expiresAt } = buildEtaToken(id);
     const etaUrl = `${origin}/film-orders/eta/${token}`;
     await db.run(
@@ -770,4 +827,42 @@ export async function filmOrderExistsForQuotation(quotationId: number): Promise<
   const db = await getDatabase();
   const row = await db.get<{ id: number }>("SELECT id FROM film_orders WHERE quotation_id = ?", [quotationId]);
   return Boolean(row);
+}
+
+export async function registerProofFromUploadToken(params: {
+  token: string;
+  fileName: string;
+  fileUrl: string;
+  uploader?: string;
+  note?: string;
+}): Promise<FilmOrderView> {
+  const orderId = verifyProofUploadToken(params.token);
+  if (orderId == null) throw new Error("invalid_proof_token");
+  const db = await getDatabase();
+  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ? AND proof_upload_token = ?", [orderId, params.token]);
+  if (!row) throw new Error("invalid_proof_token");
+  if (row.status !== "receiving_registered" && row.status !== "re_proof_requested") {
+    throw new Error("invalid_status_transition");
+  }
+  const fileName = validFileName(params.fileName);
+  if (!fileName || !fileName.includes(row.order_number)) throw new Error("invalid_file_name");
+  const fileUrl = validFileUrl(params.fileUrl);
+  const order = mapOrder(row);
+  const actor = params.uploader?.slice(0, 200) || "supplier";
+  const file = await addFile(db, orderId, "proof", fileName, fileUrl, params.note?.slice(0, 1000) ?? "", actor);
+  const now = new Date().toISOString();
+  await db.run(
+    "UPDATE film_orders SET status = 'proof_registered', proof_registered_at = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
+    [now, now, actor, orderId],
+  );
+  await addEvent(db, orderId, "file", `校正データ登録（メーカーアップロード）: ${fileName} (v${file.version})`, actor);
+  await addEvent(db, orderId, "status", `${order.status} → 校正待ち`, actor);
+  const refreshed = await getFilmOrder(orderId);
+  if (refreshed) {
+    const mails = await sendProofReceivedMail(refreshed, fileName, fileUrl);
+    await logMailEvents(db, orderId, mails, "校正受領通知", actor);
+  }
+  const result = await getFilmOrder(orderId);
+  if (!result) throw new Error("film_order_update_failed");
+  return result;
 }

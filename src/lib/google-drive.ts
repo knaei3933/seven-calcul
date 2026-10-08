@@ -155,3 +155,13 @@ export async function findFileUrl(params: {
   const fileId = payload.files?.[0]?.id;
   return fileId ? `https://drive.google.com/file/d/${fileId}/view` : null;
 }
+
+export async function downloadFile(fileId: string): Promise<Response> {
+  const token = await getAccessToken();
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!response.ok || !response.body) throw new Error(`drive_download_failed:${response.status}`);
+  return response;
+}

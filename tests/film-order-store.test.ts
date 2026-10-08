@@ -17,6 +17,8 @@ const {
   buildFilmOrderFileName,
   getFilmOrder,
   getFilmOrderForEta,
+  getFilmOrderForProofUpload,
+  registerProofFromUploadToken,
   listFilmOrders,
   runFilmOrderAction,
   syncFilmOrdersFromQuotations,
@@ -125,17 +127,35 @@ describe("film order store", () => {
     await expect(runFilmOrderAction(orderId, "register-receiving", { aiFileName: "再度.ai" }, "seven@727.co.jp"))
       .rejects.toThrow("invalid_status_transition");
 
-    const notice = await runFilmOrderAction(orderId, "send-proof-notice", {}, "kanei@kanei-trade.co.jp");
+    const notice = await runFilmOrderAction(orderId, "send-proof-notice", { origin: "http://localhost:3000" }, "kanei@kanei-trade.co.jp");
     expect(notice.mails?.[0]?.to).toBe("supplier@example.co.kr");
 
-    const proof1 = await runFilmOrderAction(orderId, "register-proof", { fileName: "校正データ_v1.ai", fileUrl: "https://drive.google.com/file/d/proof1/view" }, "kanei@kanei-trade.co.jp");
+    const receivingOrder = await getFilmOrder(orderId);
+    expect(receivingOrder?.proof_upload_token).toBeTruthy();
+    const supplierUpload = await registerProofFromUploadToken({
+      token: receivingOrder!.proof_upload_token!,
+      fileName: `発注検証パウチ_${receivingOrder!.order_number}_校正_20261008.ai`,
+      fileUrl: "https://drive.google.com/file/d/supplier1/view",
+      uploader: "韓国メーカー担当",
+    });
+    expect(supplierUpload.status).toBe("proof_registered");
+    expect(supplierUpload.files.some((file) => file.file_name.includes("韓国") === false && file.file_name.includes(orderNumberSafe(supplierUpload)))).toBe(true);
+    await expect(registerProofFromUploadToken({
+      token: receivingOrder!.proof_upload_token!,
+      fileName: `x_${receivingOrder!.order_number}.ai`,
+      fileUrl: "https://drive.google.com/file/d/supplier2/view",
+    })).rejects.toThrow("invalid_status_transition");
+    await expect(getFilmOrderForProofUpload("1.123.bad")).rejects.toThrow("invalid_proof_token");
+
+    await runFilmOrderAction(orderId, "request-re-proof", { comment: "メーカー初回分の再校正" }, "seven@727.co.jp");
+    const proof1 = await runFilmOrderAction(orderId, "register-proof", { fileName: "校正データ_v2.ai", fileUrl: "https://drive.google.com/file/d/proof1/view" }, "kanei@kanei-trade.co.jp");
     expect(proof1.order.status).toBe("proof_registered");
     expect(proof1.order.files.find((file) => file.category === "proof")?.version).toBe(1);
     expect(proof1.order.files.find((file) => file.category === "proof")?.url).toContain("proof1");
 
     const reProof = await runFilmOrderAction(orderId, "request-re-proof", { comment: "ロゴ位置を修正" }, "seven@727.co.jp");
     expect(reProof.order.status).toBe("re_proof_requested");
-    expect(reProof.order.re_proof_count).toBe(1);
+    expect(reProof.order.re_proof_count).toBe(2);
 
     const proof2 = await runFilmOrderAction(orderId, "register-proof", { fileName: "校正データ_v2.ai" }, "kanei@kanei-trade.co.jp");
     expect(proof2.order.status).toBe("proof_registered");
@@ -204,3 +224,7 @@ describe("film order store", () => {
     expect(buildFilmOrderFileName({ product_name: "a/b\\c:d", order_number: "F-1" }, "final", 1)).not.toMatch(/[\\/]/u);
   });
 });
+
+function orderNumberSafe(order: { order_number: string }): string {
+  return order.order_number;
+}

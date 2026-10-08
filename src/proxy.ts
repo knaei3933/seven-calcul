@@ -6,7 +6,8 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.has(pathname)
     || pathname.startsWith("/film-orders/eta/")
     || pathname === "/oauth/callback"
-    || pathname === "/privacy";
+    || pathname === "/privacy"
+    || pathname.startsWith("/film-orders/upload/");
 }
 
 export function proxy(request: NextRequest) {
