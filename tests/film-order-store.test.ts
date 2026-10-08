@@ -157,9 +157,9 @@ describe("film order store", () => {
     expect(reProof.order.status).toBe("re_proof_requested");
     expect(reProof.order.re_proof_count).toBe(2);
 
-    const proof2 = await runFilmOrderAction(orderId, "register-proof", { fileName: "校正データ_v2.ai" }, "kanei@kanei-trade.co.jp");
+    const proof2 = await runFilmOrderAction(orderId, "register-proof", { fileName: "校正データ_v3.ai" }, "kanei@kanei-trade.co.jp");
     expect(proof2.order.status).toBe("proof_registered");
-    expect(proof2.order.files.filter((file) => file.category === "proof")).toHaveLength(2);
+    expect(proof2.order.files.filter((file) => file.category === "proof")).toHaveLength(3);
 
     const approved = await runFilmOrderAction(orderId, "approve", { fileName: "最終承認データ.pdf" }, "seven@727.co.jp");
     expect(approved.order.status).toBe("final_approved");
