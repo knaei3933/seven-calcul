@@ -354,12 +354,13 @@ function OrderCard({
             {order.files.length === 0 ? <p>まだ登録されていません。</p> : (
               <div className="table-scroll">
                 <table className="film-order-files">
-                  <thead><tr><th>種別</th><th>ファイル名</th><th>v</th><th>登録者</th><th>日時</th></tr></thead>
+                  <thead><tr><th>種別</th><th>ファイル名</th><th>リンク</th><th>v</th><th>登録者</th><th>日時</th></tr></thead>
                   <tbody>
                     {order.files.map((file) => (
                       <tr key={file.id}>
                         <td><span className={`film-order-file-badge ${file.category}`}>{file.category === "receiving" ? "入荷" : file.category === "proof" ? "校正" : "最終"}</span></td>
                         <td>{file.file_name}</td>
+                        <td>{file.url ? <a href={file.url} target="_blank" rel="noreferrer">開く</a> : "-"}</td>
                         <td>{file.version}</td>
                         <td>{file.uploaded_by_email}</td>
                         <td>{new Date(file.created_at).toLocaleString("ja-JP")}</td>
@@ -432,7 +433,14 @@ function NextStepPanel({
     <section className={`film-order-section next-step ${next.kind === "none" ? "waiting" : "mine"}`}>
       <p className="next-step-kicker">{next.kind === "none" ? "WAITING" : "NEXT STEP"}</p>
       <h3>{STATUS_HINTS[order.status]}</h3>
-      {next.kind === "none" ? <p className="next-step-wait">{next.label}</p> : null}
+      {next.kind === "none" && order.status !== "final_approved" ? (
+        <div className="next-step-wait">
+          <p>{next.label}</p>
+          <button className="button small" type="button" disabled title="担当部署のみ操作できます">
+            {STATUS_STEP_ROLE[order.status] === "seven" ? "入荷・承認操作（セブン化学）" : "校正データ操作（カネイ貿易）"}
+          </button>
+        </div>
+      ) : null}
       {next.kind === "run" ? (
         <button className="button" type="button" disabled={busy} onClick={() => void onRun(next.body, next.ok)}>
           {next.label}
@@ -444,7 +452,7 @@ function NextStepPanel({
           defaultFileName={buildFilmOrderFileName(order, "receiving", 1)}
           autofocus={focused === "receiving"}
           submitLabel="入荷を登録してデザインへ連絡"
-          onSubmit={(fileName, note) => void onRun({ action: "register-receiving", fileName, note }, "入荷データを登録し、デザイン宛てに連絡しました。")}
+          onSubmit={(fileName, note, fileUrl) => void onRun({ action: "register-receiving", fileName, fileUrl, note }, "入荷データを登録し、デザイン宛てに連絡しました。")}
         />
       ) : null}
       {next.kind === "form" && next.form === "proof" ? (
@@ -459,12 +467,23 @@ function NextStepPanel({
             defaultFileName={buildFilmOrderFileName(order, "proof", proofVersion)}
             autofocus={focused === "proof"}
             submitLabel={order.status === "re_proof_requested" ? "再校正データを登録" : "校正データを登録"}
-            onSubmit={(fileName, note) => void onRun({ action: "register-proof", fileName, note }, "校正データを登録しました。")}
+            onSubmit={(fileName, note, fileUrl) => void onRun({ action: "register-proof", fileName, fileUrl, note }, "校正データを登録しました。")}
           />
         </div>
       ) : null}
       {order.status === "proof_registered" && isSeven ? (
         <div className="film-order-inline-actions">
+          {(() => {
+            const latest = [...order.files].filter((file) => file.category === "proof").sort((a, b) => b.version - a.version)[0];
+            return latest ? (
+              <p className="next-step-file">
+                最新校正: <strong>{latest.file_name}</strong>（v{latest.version}）
+                {latest.url ? (
+                  <a className="button secondary small" href={latest.url} target="_blank" rel="noreferrer">校正ファイルを開く</a>
+                ) : <span className="film-order-url-missing">URL未登録（データ履歴のファイル名でDriveを確認）</span>}
+              </p>
+            ) : null;
+          })()}
           <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "approve" }, "校正を承認しました。")}>
             校正を承認する
           </button>
@@ -569,9 +588,10 @@ function FileActionForm({
   submitLabel: string;
   busy?: boolean;
   autofocus?: boolean;
-  onSubmit: (fileName: string, note: string) => void;
+  onSubmit: (fileName: string, note: string, fileUrl: string) => void;
 }) {
   const [fileName, setFileName] = useState(defaultFileName);
+  const [fileUrl, setFileUrl] = useState("");
   const [note, setNote] = useState("");
   return (
     <div className="film-order-file-form">
@@ -579,8 +599,11 @@ function FileActionForm({
       <label>ファイル名（Driveへアップロードした名前）
         <input value={fileName} onChange={(event) => setFileName(event.target.value)} autoFocus={autofocus} />
       </label>
+      <label>ファイルURL（Driveの共有リンク・任意）
+        <input value={fileUrl} onChange={(event) => setFileUrl(event.target.value)} placeholder="https://drive.google.com/..." inputMode="url" />
+      </label>
       <label>メモ<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="任意" /></label>
-      <button className="button" type="button" disabled={busy || !fileName.trim()} onClick={() => onSubmit(fileName.trim(), note)}>
+      <button className="button" type="button" disabled={busy || !fileName.trim()} onClick={() => onSubmit(fileName.trim(), note, fileUrl.trim())}>
         {submitLabel}
       </button>
     </div>

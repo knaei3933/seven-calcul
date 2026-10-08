@@ -104,18 +104,22 @@ describe("film order store", () => {
       .rejects.toThrow("invalid_status_transition");
 
     await runFilmOrderAction(orderId, "set-supplier", { supplierName: "韓国メーカー", supplierEmail: "supplier@example.co.kr" }, "kanei@kanei-trade.co.jp");
-    const receiving = await runFilmOrderAction(orderId, "register-receiving", { fileName: "入荷データ.pdf", note: "1回目" }, "seven@727.co.jp");
+    const receiving = await runFilmOrderAction(orderId, "register-receiving", { fileName: "入荷データ.pdf", fileUrl: "https://drive.google.com/file/d/xxx/view", note: "1回目" }, "seven@727.co.jp");
     expect(receiving.order.status).toBe("receiving_registered");
     expect(receiving.mails?.map((mail) => mail.to)).toEqual(["design@package-lab.com", "supplier@example.co.kr"]);
     expect(receiving.mails?.every((mail) => mail.dryRun)).toBe(true);
     expect(receiving.order.files).toHaveLength(1);
+    expect(receiving.order.files[0]!.url).toBe("https://drive.google.com/file/d/xxx/view");
+    await expect(runFilmOrderAction(orderId, "register-proof", { fileName: "bad.ai", fileUrl: "ftp://example.com/a.ai" }, "kanei@kanei-trade.co.jp"))
+      .rejects.toThrow("invalid_file_url");
 
     const notice = await runFilmOrderAction(orderId, "send-proof-notice", {}, "kanei@kanei-trade.co.jp");
     expect(notice.mails?.[0]?.to).toBe("supplier@example.co.kr");
 
-    const proof1 = await runFilmOrderAction(orderId, "register-proof", { fileName: "校正データ_v1.ai" }, "kanei@kanei-trade.co.jp");
+    const proof1 = await runFilmOrderAction(orderId, "register-proof", { fileName: "校正データ_v1.ai", fileUrl: "https://drive.google.com/file/d/proof1/view" }, "kanei@kanei-trade.co.jp");
     expect(proof1.order.status).toBe("proof_registered");
     expect(proof1.order.files.find((file) => file.category === "proof")?.version).toBe(1);
+    expect(proof1.order.files.find((file) => file.category === "proof")?.url).toContain("proof1");
 
     const reProof = await runFilmOrderAction(orderId, "request-re-proof", { comment: "ロゴ位置を修正" }, "seven@727.co.jp");
     expect(reProof.order.status).toBe("re_proof_requested");

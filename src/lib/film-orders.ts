@@ -117,6 +117,7 @@ const BASE_SCHEMA = `
     order_id INTEGER NOT NULL REFERENCES film_orders(id) ON DELETE CASCADE,
     category TEXT NOT NULL CHECK(category IN ('receiving','proof','final')),
     file_name TEXT NOT NULL,
+    url TEXT NOT NULL DEFAULT '',
     version INTEGER NOT NULL DEFAULT 1,
     note TEXT NOT NULL DEFAULT '',
     uploaded_by_email TEXT NOT NULL DEFAULT '',
@@ -143,6 +144,11 @@ async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
     const db = await getSqlClient("quotations");
     await db.exec(db.dialect === "postgres" ? POSTGRES_SCHEMA : BASE_SCHEMA);
+    try {
+      await db.exec("ALTER TABLE film_order_files ADD COLUMN url TEXT NOT NULL DEFAULT ''");
+    } catch {
+      // 既存DBに url カラムがある場合は無視する。
+    }
     return db;
   })();
   return schemaReady;
@@ -288,6 +294,7 @@ async function addFile(
   orderId: number,
   category: FilmOrderFileCategory,
   fileName: string,
+  url: string,
   note: string,
   actorEmail: string,
 ): Promise<FilmOrderFileRecord> {
@@ -298,8 +305,8 @@ async function addFile(
   const version = Number(count?.n ?? 0) + 1;
   const now = new Date().toISOString();
   await db.run(
-    "INSERT INTO film_order_files (order_id,category,file_name,version,note,uploaded_by_email,created_at) VALUES (?,?,?,?,?,?,?)",
-    [orderId, category, fileName, version, note, actorEmail, now],
+    "INSERT INTO film_order_files (order_id,category,file_name,url,version,note,uploaded_by_email,created_at) VALUES (?,?,?,?,?,?,?,?)",
+    [orderId, category, fileName, url, version, note, actorEmail, now],
   );
   const row = await db.get<FilmOrderFileRecord>(
     "SELECT * FROM film_order_files WHERE order_id = ? AND category = ? ORDER BY id DESC LIMIT 1",
@@ -381,6 +388,14 @@ async function sendReProofMail(order: FilmOrder, comment: string): Promise<MailS
   return [supplier, design];
 }
 
+function validFileUrl(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (trimmed.length > 2048 || !/^https?:\/\//i.test(trimmed)) throw new Error("invalid_file_url");
+  return trimmed;
+}
+
 function validFileName(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -410,6 +425,7 @@ export async function runFilmOrderAction(
   action: FilmOrderAction,
   params: {
     fileName?: unknown;
+    fileUrl?: unknown;
     note?: unknown;
     comment?: unknown;
     supplierName?: unknown;
@@ -444,7 +460,8 @@ export async function runFilmOrderAction(
     if (order.status !== "ordered") throw new Error("invalid_status_transition");
     const fileName = validFileName(params.fileName);
     if (!fileName) throw new Error("invalid_file_name");
-    await addFile(db, id, "receiving", fileName, trimParam(params.note, 1000), actorEmail);
+    const fileUrl = validFileUrl(params.fileUrl);
+    await addFile(db, id, "receiving", fileName, fileUrl, trimParam(params.note, 1000), actorEmail);
     await db.run(
       "UPDATE film_orders SET status = 'receiving_registered', receiving_registered_at = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
       [now, now, actorEmail, id],
@@ -468,7 +485,8 @@ export async function runFilmOrderAction(
     if (order.status !== "receiving_registered" && order.status !== "re_proof_requested") throw new Error("invalid_status_transition");
     const fileName = validFileName(params.fileName);
     if (!fileName) throw new Error("invalid_file_name");
-    const file = await addFile(db, id, "proof", fileName, trimParam(params.note, 1000), actorEmail);
+    const fileUrl = validFileUrl(params.fileUrl);
+    const file = await addFile(db, id, "proof", fileName, fileUrl, trimParam(params.note, 1000), actorEmail);
     await db.run(
       "UPDATE film_orders SET status = 'proof_registered', proof_registered_at = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
       [now, now, actorEmail, id],
@@ -479,7 +497,7 @@ export async function runFilmOrderAction(
     if (order.status !== "proof_registered") throw new Error("invalid_status_transition");
     const fileName = validFileName(params.fileName);
     if (fileName) {
-      await addFile(db, id, "final", fileName, trimParam(params.note, 1000), actorEmail);
+      await addFile(db, id, "final", fileName, validFileUrl(params.fileUrl), trimParam(params.note, 1000), actorEmail);
       await addEvent(db, id, "file", `最終承認データ登録: ${fileName}`, actorEmail);
     }
     await db.run(

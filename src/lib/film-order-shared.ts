@@ -32,6 +32,7 @@ export interface FilmOrderFileRecord {
   order_id: number;
   category: FilmOrderFileCategory;
   file_name: string;
+  url: string;
   version: number;
   note: string;
   uploaded_by_email: string;
