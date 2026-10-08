@@ -63,20 +63,51 @@ async function getDatabase(): Promise<SqlClient> {
 
 const text = (value: unknown, fallback = "") => typeof value === "string" ? value : fallback;
 
+const CUSTOMER_FIELD_LIMITS = {
+  customerCode: 64,
+  customerName: 200,
+  customerPostalCode: 32,
+  customerAddress: 500,
+  customerContact: 100,
+  customerTelephone: 100,
+  customerEmail: 254,
+} as const;
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** LIKE/ILIKE 와일드카드를 문자 그대로 검색하기 위해 이스케이프한다. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
 export function validateCustomerInput(value: unknown): CustomerMasterInput | null {
   if (!value || typeof value !== "object") return null;
   const input = value as Record<string, unknown>;
   const customerCode = text(input.customerCode).trim();
   const customerName = text(input.customerName).trim();
   if (!customerCode || !customerName) return null;
+  if (customerCode.length > CUSTOMER_FIELD_LIMITS.customerCode
+    || customerName.length > CUSTOMER_FIELD_LIMITS.customerName) return null;
+  const optional = (raw: unknown, key: keyof typeof CUSTOMER_FIELD_LIMITS): string | null => {
+    const trimmed = text(raw).trim();
+    return trimmed.length > CUSTOMER_FIELD_LIMITS[key] ? null : trimmed;
+  };
+  const customerPostalCode = optional(input.customerPostalCode, "customerPostalCode");
+  const customerAddress = optional(input.customerAddress, "customerAddress");
+  const customerContact = optional(input.customerContact, "customerContact");
+  const customerTelephone = optional(input.customerTelephone, "customerTelephone");
+  const customerEmail = optional(input.customerEmail, "customerEmail");
+  if (customerPostalCode === null || customerAddress === null || customerContact === null
+    || customerTelephone === null || customerEmail === null) return null;
+  if (customerEmail && !EMAIL_PATTERN.test(customerEmail)) return null;
   return {
     customerCode,
-    customerName: text(input.customerName),
-    customerPostalCode: text(input.customerPostalCode),
-    customerAddress: text(input.customerAddress),
-    customerContact: text(input.customerContact),
-    customerTelephone: text(input.customerTelephone),
-    customerEmail: text(input.customerEmail),
+    customerName,
+    customerPostalCode,
+    customerAddress,
+    customerContact,
+    customerTelephone,
+    customerEmail,
   };
 }
 
@@ -124,10 +155,10 @@ export async function getCustomer(code: string): Promise<CustomerMaster | null> 
 export async function listCustomers(query = "", limit = 100): Promise<CustomerMaster[]> {
   const db = await getDatabase();
   const safeLimit = Math.min(Math.max(Number.isFinite(limit) ? limit : 100, 1), 500);
-  const search = `%${query.trim()}%`;
+  const search = `%${escapeLikePattern(query.trim())}%`;
   const rows = await db.all<CustomerRow>(`
     SELECT * FROM customers
-    WHERE customer_code LIKE ? OR customer_name LIKE ? OR address LIKE ? OR email LIKE ?
+    WHERE customer_code LIKE ? ESCAPE '\\' OR customer_name LIKE ? ESCAPE '\\' OR address LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\'
     ORDER BY updated_at DESC LIMIT ?
   `, [search, search, search, search, safeLimit]);
   return rows.map(mapRow);
