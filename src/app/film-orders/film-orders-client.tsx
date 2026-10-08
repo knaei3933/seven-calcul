@@ -21,6 +21,70 @@ interface MailResult {
   error?: string;
 }
 
+const STEP_DEFS: Array<{ key: FilmOrderStatus; label: string }> = [
+  { key: "pending", label: "発注待ち" },
+  { key: "ordered", label: "発注送信" },
+  { key: "receiving_registered", label: "入荷" },
+  { key: "proof_registered", label: "校正" },
+  { key: "final_approved", label: "承認" },
+];
+
+const STATUS_HINTS: Record<FilmOrderStatus, string> = {
+  pending: "セブン化学が発注書をメール送付し、「発注書送信済み」にします。",
+  ordered: "フィルム到着後、セブン化学が入荷データを登録します。",
+  receiving_registered: "カネイ貿易が校正データを登録します。",
+  proof_registered: "セブン化学が校正を承認、または再校正を依頼します。",
+  re_proof_requested: "カネイ貿易が再校正データを登録します。",
+  final_approved: "ワークフロー完了です。",
+};
+
+const STATUS_STEP_ROLE: Record<FilmOrderStatus, "seven" | "kanei" | "none"> = {
+  pending: "seven",
+  ordered: "seven",
+  receiving_registered: "kanei",
+  proof_registered: "seven",
+  re_proof_requested: "kanei",
+  final_approved: "none",
+};
+
+type NextAction =
+  | { kind: "run"; label: string; body: Record<string, unknown>; ok: string }
+  | { kind: "form"; label: string; form: "receiving" | "proof" }
+  | { kind: "none"; label: string };
+
+function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: boolean): NextAction {
+  switch (order.status) {
+    case "pending":
+      return { kind: "run", label: "発注書送信済みにする", body: { action: "mark-ordered" }, ok: "発注書送信済みにしました。" };
+    case "ordered":
+      return isSeven
+        ? { kind: "form", label: "入荷データを登録", form: "receiving" }
+        : { kind: "none", label: "セブン化学の入荷登録待ち" };
+    case "receiving_registered":
+      return isKanei
+        ? { kind: "form", label: "校正データを登録", form: "proof" }
+        : { kind: "none", label: "カネイ貿易の校正データ登録待ち" };
+    case "proof_registered":
+      return isSeven
+        ? { kind: "run", label: "校正を承認する", body: { action: "approve" }, ok: "校正を承認しました。" }
+        : { kind: "none", label: "セブン化学の承認待ち" };
+    case "re_proof_requested":
+      return isKanei
+        ? { kind: "form", label: "再校正データを登録", form: "proof" }
+        : { kind: "none", label: "カネイ貿易の再校正データ登録待ち" };
+    case "final_approved":
+      return { kind: "none", label: "完了" };
+  }
+}
+
+function orderTotalText(order: FilmOrderView): string {
+  const po = order.purchaseOrder;
+  const total = D(po?.filmCostYen ?? "0")
+    .plus(po?.copperPlate ? D(po.copperPlate.priceYen) : D(0))
+    .plus(po?.customMold ? D(po.customMold.costYen) : D(0));
+  return `￥${Number(total.toFixed(0)).toLocaleString("ja-JP")}`;
+}
+
 export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
   const [orders, setOrders] = useState<FilmOrderView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,11 +95,6 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
   const [focusForm, setFocusForm] = useState<{ id: number; kind: "receiving" | "proof" } | null>(null);
   const isSeven = isSevenChemicalUser(userEmail);
   const isKanei = isKaneiTradeUser(userEmail);
-
-  const expandWithForm = (id: number, kind: "receiving" | "proof") => {
-    setExpandedId(id);
-    setFocusForm({ id, kind });
-  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -69,9 +128,18 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
     }
     return map;
   }, [orders]);
+  const myTurnCount = useMemo(() => orders.filter((order) => {
+    const next = nextActionOf(order, isSeven, isKanei);
+    return next.kind !== "none";
+  }).length, [orders, isSeven, isKanei]);
 
   const applyResult = (id: number, result: { order: FilmOrderView }) => {
     setOrders((old) => old.map((order) => order.id === id ? result.order : order));
+  };
+
+  const expandWithForm = (id: number, kind: "receiving" | "proof") => {
+    setExpandedId(id);
+    setFocusForm({ id, kind });
   };
 
   return (
@@ -80,18 +148,25 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
         <div>
           <p className="film-orders-eyebrow">FILM PROCUREMENT WORKFLOW</p>
           <h1>フィルム発注管理</h1>
-          <p>成約見積から自動作成された発注を管理します。発注書確認 → 入荷登録 → 校正 → 承認の流れで進めます。</p>
         </div>
-        <div className="film-orders-actions">
-          <span className="film-orders-role">{isSeven ? "セブン化学" : isKanei ? "カネイ貿易" : "-"}</span>
+        <div className="film-orders-toolbar">
+          <span className={`film-orders-role ${isSeven ? "seven" : "kanei"}`}>
+            {isSeven ? "セブン化学" : "カネイ貿易"}
+          </span>
+          <span className="film-orders-myturn" role="status" aria-live="polite">
+            あなたの操作待ち <strong>{myTurnCount}</strong> 件
+          </span>
           <button className="button secondary small" type="button" onClick={() => void load()}>
             {loading ? "読み込み中..." : "更新"}
           </button>
         </div>
       </header>
+      <p className="film-orders-lead">成約見積から自動作成された発注を、ステップに沿って管理します。</p>
 
-      {created > 0 ? <p className="film-orders-sync">成約見積 {created} 件を発注管理に反映しました。</p> : null}
-      {error ? <p className="film-orders-error">{error}</p> : null}
+      <div className="film-orders-alerts">
+        {created > 0 ? <p className="film-orders-sync">成約見積 {created} 件を発注管理に反映しました。</p> : null}
+        {error ? <p className="film-orders-error">{error}</p> : null}
+      </div>
 
       <details className="film-order-guide">
         <summary>{isSeven ? "セブン化学担当者の流れ" : "カネイ貿易担当者の流れ"}</summary>
@@ -99,7 +174,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
           <ol>
             <li>見積履歴で見積を「成約」にすると、ここに発注が自動作成されます。</li>
             <li>発注内容を確認し、発注書をメールでカネイ貿易へ送付したら「発注書送信済みにする」を押します。</li>
-            <li>フィルムが到着したら「入荷データを登録」します（design@へ自動連絡されます）。</li>
+            <li>フィルムが到着したら「入荷データを登録」します（design@ へ自動連絡）。</li>
             <li>校正データが登録されたら「校正を承認」または「再校正を依頼」します。</li>
           </ol>
         ) : (
@@ -112,22 +187,24 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
         )}
       </details>
 
-      <nav className="film-orders-tabs" aria-label="発注ステータス">
+      <nav className="film-orders-tabs" aria-label="発注ステータスで絞り込む">
         <button
           type="button"
-          className={statusFilter === "all" ? "button small" : "button secondary small"}
+          aria-pressed={statusFilter === "all"}
+          className={statusFilter === "all" ? "active" : ""}
           onClick={() => setStatusFilter("all")}
         >
-          全件 ({counts.get("all") ?? 0})
+          全件 <b>{counts.get("all") ?? 0}</b>
         </button>
         {FILM_ORDER_STATUSES.map((status) => (
           <button
             key={status}
             type="button"
-            className={statusFilter === status ? "button small" : "button secondary small"}
+            aria-pressed={statusFilter === status}
+            className={statusFilter === status ? "active" : ""}
             onClick={() => setStatusFilter(status)}
           >
-            {filmOrderStatusLabels[status]} ({counts.get(status) ?? 0})
+            {filmOrderStatusLabels[status]} <b>{counts.get(status) ?? 0}</b>
           </button>
         ))}
       </nav>
@@ -154,44 +231,6 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
   );
 }
 
-type NextAction =
-  | { kind: "run"; label: string; body: Record<string, unknown>; ok: string }
-  | { kind: "form"; label: string; form: "receiving" | "proof" }
-  | { kind: "none"; label: string };
-
-function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: boolean): NextAction {
-  switch (order.status) {
-    case "pending":
-      return { kind: "run", label: "発注書送信済みにする", body: { action: "mark-ordered" }, ok: "発注書送信済みにしました。" };
-    case "ordered":
-      return isSeven
-        ? { kind: "form", label: "入荷データを登録", form: "receiving" }
-        : { kind: "none", label: "セブン化学の入荷登録待ち" };
-    case "receiving_registered":
-      return isKanei
-        ? { kind: "form", label: "校正データを登録", form: "proof" }
-        : { kind: "none", label: "カネイ貿易の校正データ登録待ち" };
-    case "proof_registered":
-      return isSeven
-        ? { kind: "run", label: "校正を承認する", body: { action: "approve" }, ok: "校正を承認しました。" }
-        : { kind: "none", label: "セブン化学の承認待ち" };
-    case "re_proof_requested":
-      return isKanei
-        ? { kind: "form", label: "再校正データを登録", form: "proof" }
-        : { kind: "none", label: "カネイ貿易の再校正データ登録待ち" };
-    case "final_approved":
-      return { kind: "none", label: "完了" };
-  }
-}
-
-const STEP_DEFS: Array<{ key: FilmOrderStatus; label: string }> = [
-  { key: "pending", label: "発注待ち" },
-  { key: "ordered", label: "発注送信" },
-  { key: "receiving_registered", label: "入荷" },
-  { key: "proof_registered", label: "校正" },
-  { key: "final_approved", label: "承認" },
-];
-
 function OrderCard({
   order,
   expanded,
@@ -206,7 +245,7 @@ function OrderCard({
   expanded: boolean;
   onToggle: () => void;
   onUpdated: (id: number, result: { order: FilmOrderView }) => void;
-  onExpandWithForm: (id: number, kind: "receiving" | "proof") => void;
+  onExpandWithForm: (id: number, kind: "receiving" | "proof" ) => void;
   focusForm: { id: number; kind: "receiving" | "proof" } | null;
   isSeven: boolean;
   isKanei: boolean;
@@ -214,6 +253,8 @@ function OrderCard({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [mails, setMails] = useState<MailResult[]>([]);
+  const next = nextActionOf(order, isSeven, isKanei);
+  const statusBadgeClass = order.status === "final_approved" ? "final" : order.status === "re_proof_requested" ? "warn" : "";
 
   const run = async (body: Record<string, unknown>, okMessage: string) => {
     if (busy) return;
@@ -240,21 +281,24 @@ function OrderCard({
     }
   };
 
-  const statusBadgeClass = order.status === "final_approved" ? "final" : order.status === "re_proof_requested" ? "warn" : "";
-  const next = nextActionOf(order, isSeven, isKanei);
-
   return (
     <article className={`film-order-card ${expanded ? "expanded" : ""}`} data-print-target={expanded ? "true" : undefined}>
       <div className="film-order-summary" onClick={onToggle} role="button" tabIndex={0}
         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onToggle(); } }}
         aria-expanded={expanded}>
-        <div className="film-order-summary-info">
-          <span className="film-order-number">{order.order_number}</span>
-          <span className="film-order-product">{order.product_name || "-"}</span>
-          <span className="film-order-customer">{order.customer_name || "-"}</span>
-          <span className="film-order-meta">{order.procurement_route ? `調達 ${order.procurement_route}` : "-"}</span>
-          <span className="film-order-meta">{order.order_length_m ? `${Number(order.order_length_m).toLocaleString("ja-JP")}m` : "-"}</span>
-          <span className={`film-order-status ${statusBadgeClass}`}>{filmOrderStatusLabels[order.status]}</span>
+        <div className="film-order-summary-main">
+          <div className="film-order-titleline">
+            <span className="film-order-number">{order.order_number}</span>
+            <span className="film-order-product">{order.product_name || "-"}</span>
+            <span className={`film-order-status ${statusBadgeClass}`}>{filmOrderStatusLabels[order.status]}</span>
+          </div>
+          <div className="film-order-metaline">
+            <span className="film-order-chip">{order.customer_name || "顧客未設定"}</span>
+            {order.procurement_route ? <span className="film-order-chip">調達 {order.procurement_route}</span> : null}
+            {order.web_width_mm ? <span className="film-order-chip">{order.web_width_mm}mm</span> : null}
+            {order.order_length_m ? <span className="film-order-chip">{Number(order.order_length_m).toLocaleString("ja-JP")}m</span> : null}
+            <span className="film-order-chip total">{orderTotalText(order)}</span>
+          </div>
         </div>
         <div className="film-order-summary-actions" onClick={(event) => event.stopPropagation()}>
           {next.kind === "run" ? (
@@ -268,11 +312,12 @@ function OrderCard({
             </button>
           ) : null}
           {next.kind === "none" ? <span className="film-order-next-wait">{next.label}</span> : null}
-          <button className="button secondary small" type="button" onClick={onToggle}>
-            {expanded ? "閉じる" : "詳細"}
+          <button className="film-order-toggle" type="button" onClick={onToggle} aria-label={expanded ? "詳細を閉じる" : "詳細を開く"}>
+            {expanded ? "▲" : "▼"}
           </button>
         </div>
       </div>
+
       <OrderSteps status={order.status} reProofCount={order.re_proof_count} />
 
       {expanded ? (
@@ -288,81 +333,41 @@ function OrderCard({
             </ul>
           ) : null}
 
-          <OrderSheet order={order} />
-
-          {isKanei ? <SupplierEditor order={order} busy={busy} onSave={(body) => run(body, "仕入先情報を保存しました。")} /> : null}
-
-          <section className="film-order-section">
-            <h3>アクション</h3>
-            {order.status === "pending" ? (
-              <button className="button" type="button" disabled={busy} onClick={() => void run({ action: "mark-ordered" }, "発注書送信済みにしました。")}>
-                発注書送信済みにする
-              </button>
-            ) : null}
-            {order.status === "ordered" && isSeven ? (
-              <FileActionForm
-                title="入荷データ登録（セブン化学）"
-                defaultFileName={buildFilmOrderFileName(order, "receiving", 1)}
-                autofocus={focusForm?.id === order.id && focusForm.kind === "receiving"}
-                submitLabel="入荷を登録してデザインへ連絡"
+          <div className="film-order-columns">
+            <OrderSheet order={order} />
+            <div className="film-order-side">
+              <NextStepPanel
+                order={order}
+                isSeven={isSeven}
+                isKanei={isKanei}
                 busy={busy}
-                onSubmit={(fileName, note) => run({ action: "register-receiving", fileName, note }, "入荷データを登録し、デザイン宛てに連絡しました。")}
+                focused={focusForm?.id === order.id ? focusForm.kind : null}
+                onRun={run}
+                onExpandWithForm={onExpandWithForm}
               />
-            ) : null}
-            {order.status === "receiving_registered" && isKanei ? (
-              <div className="film-order-inline-actions">
-                <button className="button secondary" type="button" disabled={busy} onClick={() => void run({ action: "send-proof-notice" }, "校正アップロード案内を送信しました。")}>
-                  校正アップロード案内を送信
-                </button>
-                <FileActionForm
-                  title="校正データ登録（カネイ貿易）"
-                  defaultFileName={buildFilmOrderFileName(order, "proof", (order.files.filter((f) => f.category === "proof").length ?? 0) + 1)}
-                  autofocus={focusForm?.id === order.id && focusForm.kind === "proof"}
-                  submitLabel="校正データを登録"
-                  busy={busy}
-                  onSubmit={(fileName, note) => run({ action: "register-proof", fileName, note }, "校正データを登録しました。セブン化学の承認待ちです。")}
-                />
-              </div>
-            ) : null}
-            {order.status === "re_proof_requested" && isKanei ? (
-              <FileActionForm
-                title="再校正データ登録（カネイ貿易）"
-                defaultFileName={buildFilmOrderFileName(order, "proof", (order.files.filter((f) => f.category === "proof").length ?? 0) + 1)}
-                autofocus={focusForm?.id === order.id && focusForm.kind === "proof"}
-                submitLabel="再校正データを登録"
-                busy={busy}
-                onSubmit={(fileName, note) => run({ action: "register-proof", fileName, note }, "再校正データを登録しました。")}
-              />
-            ) : null}
-            {order.status === "proof_registered" && isSeven ? (
-              <div className="film-order-inline-actions">
-                <button className="button" type="button" disabled={busy} onClick={() => void run({ action: "approve" }, "校正を承認しました。")}>
-                  校正を承認する
-                </button>
-                <ReProofForm busy={busy} onSubmit={(comment) => run({ action: "request-re-proof", comment }, "再校正を依頼しました。")} />
-              </div>
-            ) : null}
-            {order.status === "final_approved" ? <p className="film-order-final">最終承認済み。最終データは別途管理します。</p> : null}
-            {!isSeven && !isKanei ? <p className="film-order-message">このアカウントには発注ワークフローの権限がありません。</p> : null}
-          </section>
+              {isKanei ? <SupplierEditor order={order} busy={busy} onSave={(body) => run(body, "仕入先情報を保存しました。")} /> : null}
+            </div>
+          </div>
 
           <section className="film-order-section">
             <h3>入荷・校正データ履歴</h3>
             {order.files.length === 0 ? <p>まだ登録されていません。</p> : (
-              <table className="film-order-files">
-                <thead><tr><th>種別</th><th>ファイル名</th><th>v</th><th>登録者</th><th>日時</th></tr></thead>
-                <tbody>
-                  {order.files.map((file) => (
-                    <tr key={file.id}>
-                      <td>{file.category === "receiving" ? "入荷" : file.category === "proof" ? "校正" : "最終"}</td>
-                      <td>{file.file_name}</td>
-                      <td>{file.version}</td>
-                      <td>{file.uploaded_by_email}</td>
-                      <td>{new Date(file.created_at).toLocaleString("ja-JP")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="table-scroll">
+                <table className="film-order-files">
+                  <thead><tr><th>種別</th><th>ファイル名</th><th>v</th><th>登録者</th><th>日時</th></tr></thead>
+                  <tbody>
+                    {order.files.map((file) => (
+                      <tr key={file.id}>
+                        <td><span className={`film-order-file-badge ${file.category}`}>{file.category === "receiving" ? "入荷" : file.category === "proof" ? "校正" : "最終"}</span></td>
+                        <td>{file.file_name}</td>
+                        <td>{file.version}</td>
+                        <td>{file.uploaded_by_email}</td>
+                        <td>{new Date(file.created_at).toLocaleString("ja-JP")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
 
@@ -371,7 +376,7 @@ function OrderCard({
             <ul className="film-order-events">
               {order.events.map((event) => (
                 <li key={event.id}>
-                  <span className="film-order-event-type">{event.type}</span>
+                  <span className={`film-order-event-type ${event.type}`}>{event.type}</span>
                   <span>{event.detail}</span>
                   <small>{event.actor_email} / {new Date(event.created_at).toLocaleString("ja-JP")}</small>
                 </li>
@@ -384,6 +389,93 @@ function OrderCard({
   );
 }
 
+function OrderSteps({ status, reProofCount }: { status: FilmOrderStatus; reProofCount: number }) {
+  const activeIndex = status === "re_proof_requested"
+    ? STEP_DEFS.findIndex((step) => step.key === "proof_registered")
+    : STEP_DEFS.findIndex((step) => step.key === status);
+  const nextRole = STATUS_STEP_ROLE[status];
+  return (
+    <div className="film-order-steps" aria-label="進捗">
+      {STEP_DEFS.map((step, index) => (
+        <span key={step.key} className={`film-order-step ${index < activeIndex ? "done" : index === activeIndex ? "active" : ""}`}>
+          <em>{index + 1}</em>{step.label}
+        </span>
+      ))}
+      {status === "re_proof_requested" ? <span className="film-order-reproof">再校正 {reProofCount}回目</span> : null}
+      {status !== "final_approved" && nextRole !== "none" ? (
+        <span className={`film-order-step-role ${nextRole}`}>{nextRole === "seven" ? "次の操作: セブン化学" : "次の操作: カネイ貿易"}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function NextStepPanel({
+  order,
+  isSeven,
+  isKanei,
+  busy,
+  focused,
+  onRun,
+  onExpandWithForm,
+}: {
+  order: FilmOrderView;
+  isSeven: boolean;
+  isKanei: boolean;
+  busy: boolean;
+  focused: "receiving" | "proof" | null;
+  onRun: (body: Record<string, unknown>, ok: string) => Promise<void>;
+  onExpandWithForm: (id: number, kind: "receiving" | "proof") => void;
+}) {
+  const next = nextActionOf(order, isSeven, isKanei);
+  const proofVersion = (order.files.filter((file) => file.category === "proof").length ?? 0) + 1;
+  return (
+    <section className={`film-order-section next-step ${next.kind === "none" ? "waiting" : "mine"}`}>
+      <p className="next-step-kicker">{next.kind === "none" ? "WAITING" : "NEXT STEP"}</p>
+      <h3>{STATUS_HINTS[order.status]}</h3>
+      {next.kind === "none" ? <p className="next-step-wait">{next.label}</p> : null}
+      {next.kind === "run" ? (
+        <button className="button" type="button" disabled={busy} onClick={() => void onRun(next.body, next.ok)}>
+          {next.label}
+        </button>
+      ) : null}
+      {next.kind === "form" && next.form === "receiving" ? (
+        <FileActionForm
+          title="入荷データ登録"
+          defaultFileName={buildFilmOrderFileName(order, "receiving", 1)}
+          autofocus={focused === "receiving"}
+          submitLabel="入荷を登録してデザインへ連絡"
+          onSubmit={(fileName, note) => void onRun({ action: "register-receiving", fileName, note }, "入荷データを登録し、デザイン宛てに連絡しました。")}
+        />
+      ) : null}
+      {next.kind === "form" && next.form === "proof" ? (
+        <div className="film-order-inline-actions">
+          {order.status === "receiving_registered" ? (
+            <button className="button secondary" type="button" disabled={busy} onClick={() => void onRun({ action: "send-proof-notice" }, "校正アップロード案内を送信しました。")}>
+              校正アップロード案内を送信
+            </button>
+          ) : null}
+          <FileActionForm
+            title={order.status === "re_proof_requested" ? "再校正データ登録" : "校正データ登録"}
+            defaultFileName={buildFilmOrderFileName(order, "proof", proofVersion)}
+            autofocus={focused === "proof"}
+            submitLabel={order.status === "re_proof_requested" ? "再校正データを登録" : "校正データを登録"}
+            onSubmit={(fileName, note) => void onRun({ action: "register-proof", fileName, note }, "校正データを登録しました。")}
+          />
+        </div>
+      ) : null}
+      {order.status === "proof_registered" && isSeven ? (
+        <div className="film-order-inline-actions">
+          <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "approve" }, "校正を承認しました。")}>
+            校正を承認する
+          </button>
+          <ReProofForm busy={busy} onSubmit={(comment) => void onRun({ action: "request-re-proof", comment }, "再校正を依頼しました。")} />
+        </div>
+      ) : null}
+      {order.status === "final_approved" ? <p className="film-order-final">最終承認済み。最終データは別途管理します。</p> : null}
+    </section>
+  );
+}
+
 function OrderSheet({ order }: { order: FilmOrderView }) {
   const po = order.purchaseOrder;
   const filmTotal = D(po?.filmCostYen ?? "0");
@@ -393,8 +485,8 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
   const yen = (value: ReturnType<typeof D>) => `￥${Number(value.toFixed(0)).toLocaleString("ja-JP")}`;
   return (
     <section className="film-order-section film-order-sheet" aria-label="発注内容">
-      <div className="no-print">
-        <h3>発注内容（セブン化学 → カネイ貿易）</h3>
+      <div className="no-print film-order-sheet-head">
+        <h3>発注内容（フィルム仕様）</h3>
         <button className="button secondary small" type="button" onClick={() => window.print()}>発注書を印刷</button>
       </div>
       <div className="film-order-sheet-body">
@@ -419,40 +511,26 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
           <div className="film-order-total wide"><dt>発注金額合計（税抜）</dt><dd>{yen(orderTotal)}</dd></div>
         </dl>
         {po?.skuOrderDetails?.length ? (
-          <table className="film-order-sku">
-            <thead><tr><th>SKU</th><th>色数</th><th>発注長</th><th>原反幅</th><th>倍率</th></tr></thead>
-            <tbody>
-              {po.skuOrderDetails.map((sku) => (
-                <tr key={sku.skuCode}>
-                  <td>{sku.skuCode}</td>
-                  <td>{sku.colorCount}</td>
-                  <td>{Number(sku.orderLengthM).toLocaleString("ja-JP")}m</td>
-                  <td>{sku.webWidthMm}mm</td>
-                  <td>×{sku.multiplier}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="film-order-sku">
+              <thead><tr><th>SKU</th><th>色数</th><th>発注長</th><th>原反幅</th><th>倍率</th></tr></thead>
+              <tbody>
+                {po.skuOrderDetails.map((sku) => (
+                  <tr key={sku.skuCode}>
+                    <td>{sku.skuCode}</td>
+                    <td>{sku.colorCount}</td>
+                    <td>{Number(sku.orderLengthM).toLocaleString("ja-JP")}m</td>
+                    <td>{sku.webWidthMm}mm</td>
+                    <td>×{sku.multiplier}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : null}
         <p className="film-order-sheet-note">発注書はセブン化学からカネイ貿易へメールで送付してください。送信後に「発注書送信済みにする」でステータスを進めます。</p>
       </div>
     </section>
-  );
-}
-
-function OrderSteps({ status, reProofCount }: { status: FilmOrderStatus; reProofCount: number }) {
-  const activeIndex = status === "re_proof_requested"
-    ? STEP_DEFS.findIndex((step) => step.key === "proof_registered")
-    : STEP_DEFS.findIndex((step) => step.key === status);
-  return (
-    <div className="film-order-steps" aria-label="進捗">
-      {STEP_DEFS.map((step, index) => (
-        <span key={step.key} className={`film-order-step ${index < activeIndex ? "done" : index === activeIndex ? "active" : ""}`}>
-          <em>{index + 1}</em> {step.label}
-        </span>
-      ))}
-      {status === "re_proof_requested" ? <span className="film-order-reproof">再校正 {reProofCount}回目</span> : null}
-    </div>
   );
 }
 
@@ -461,7 +539,7 @@ function SupplierEditor({ order, busy, onSave }: { order: FilmOrderView; busy: b
   const [email, setEmail] = useState(order.supplier_email);
   return (
     <section className="film-order-section">
-      <h3>仕入先・校正担当（カネイ貿易）</h3>
+      <h3>仕入先・校正担当</h3>
       <div className="film-order-supplier">
         <label>仕入先名<input value={name} onChange={(event) => setName(event.target.value)} /></label>
         <label>校正データ送付先メール<input value={email} onChange={(event) => setEmail(event.target.value)} /></label>
@@ -489,7 +567,7 @@ function FileActionForm({
   title: string;
   defaultFileName: string;
   submitLabel: string;
-  busy: boolean;
+  busy?: boolean;
   autofocus?: boolean;
   onSubmit: (fileName: string, note: string) => void;
 }) {
@@ -519,7 +597,7 @@ function ReProofForm({ busy, onSubmit }: { busy: boolean; onSubmit: (comment: st
   }
   return (
     <div className="film-order-file-form">
-      <strong>再校正依頼（セブン化学）</strong>
+      <strong>再校正依頼</strong>
       <label>再校正内容
         <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="修正内容を記入してください" />
       </label>
@@ -530,4 +608,3 @@ function ReProofForm({ busy, onSubmit }: { busy: boolean; onSubmit: (comment: st
     </div>
   );
 }
-
