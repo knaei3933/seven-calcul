@@ -2023,14 +2023,14 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .calc-table .per-m td { background: #f8fafc; color: #1f3a5f; font-weight: 700; }
 
 /* ── Required Fields Banner (発行に必要な情報) ── */
-.issue-required-fields { margin: 0 auto 16px; max-width: 1100px; padding: 16px 20px; border: 2px solid #f59e0b; border-radius: 10px; background: #fffbeb; }
-.issue-required-fields h2 { margin: 0 0 12px; font-size: 15px; color: #92400e; }
-.issue-fields-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 14px; }
-.issue-fields-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
-.issue-fields-grid label.wide { grid-column: 1 / -1; }
+.issue-required-fields { margin: 0 auto 12px; max-width: 1100px; padding: 10px 16px; border: 2px solid #f59e0b; border-radius: 8px; background: #fffbeb; }
+.issue-required-fields h2 { margin: 0 0 8px; font-size: 13px; color: #92400e; }
+.issue-fields-grid { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+.issue-fields-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 700; flex: 1 1 180px; min-width: 150px; max-width: 260px; }
+.issue-fields-grid label.wide { flex: 2 1 320px; max-width: 480px; }
 .issue-fields-grid label.required { color: #b45309; }
 .issue-fields-grid label.filled { color: #059669; }
-.issue-fields-grid input { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+.issue-fields-grid input { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 5px; font-size: 13px; }
 .issue-fields-grid label.required input { border-color: #f59e0b; background: white; }
 .issue-fields-grid label.filled input { border-color: #10b981; background: #f0fdf4; }
-.issue-required-fields .help { margin: 10px 0 0; font-size: 12px; color: #92400e; }
+.issue-required-fields .help { margin: 6px 0 0; font-size: 11px; color: #92400e; }
