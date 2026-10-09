@@ -293,6 +293,7 @@ export default function PrintableQuotationPage() {
   const [checklistOpening, setChecklistOpening] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [issueSuccessMessage, setIssueSuccessMessage] = useState("");
+  const [issuedFilmQuotation, setIssuedFilmQuotation] = useState<{ quotationNumber: string; items: { description: string; orderLengthM: string; unitPriceYenPerM: string; amountYen: string }[]; subtotal: string; tax: string; grandTotal: string; validUntil: string } | null>(null);
   const [quoteDraftStale, setQuoteDraftStale] = useState(false);
   const [selectedCandidateShortage, setSelectedCandidateShortage] = useState(false);
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrderSnapshot | null>(null);
@@ -636,6 +637,11 @@ export default function PrintableQuotationPage() {
       sessionStorage.setItem(LAST_CHECKLIST_URL_KEY, checklistUrl);
       setSavedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
       const filmQuoteNum = payload.record.payload?.filmQuotation?.quotationNumber;
+      if (payload.record.payload?.filmQuotation) {
+        setIssuedFilmQuotation(payload.record.payload.filmQuotation);
+      } else {
+        setIssuedFilmQuotation(null);
+      }
       setIssueSuccessMessage(
         `見積書を発行しました（${form.quotationNumber || payload.record.quotationNumber}）` +
         (filmQuoteNum ? `。フィルム見積書 ${filmQuoteNum} も自動発行されました。` : "。") +
@@ -1384,6 +1390,38 @@ export default function PrintableQuotationPage() {
               ) : null}
             </dl>
           </section>
+
+          {issuedFilmQuotation ? (
+            <section className="film-quote-preview" data-testid="film-quote-preview">
+              <h3 id="film-quote-title">フィルム見積書（金井貿易 → セブン化学）</h3>
+              <div className="film-quote-meta">
+                <span>見積番号：<strong>{issuedFilmQuotation.quotationNumber}</strong></span>
+                <span>有効期限：<strong>{issuedFilmQuotation.validUntil}</strong></span>
+              </div>
+              <table className="film-quote-lines">
+                <thead>
+                  <tr><th>品目</th><th>原反幅</th><th>発注長</th><th>単価</th><th>金額</th></tr>
+                </thead>
+                <tbody>
+                  {issuedFilmQuotation.items.map((item, i) => (
+                    <tr key={i}>
+                      <td>{item.description}</td>
+                      <td>{item.webWidthMm}mm</td>
+                      <td>{Number(item.orderLengthM).toLocaleString("ja-JP")}m</td>
+                      <td>{Number(item.unitPriceYenPerM).toLocaleString("ja-JP")} 円/m</td>
+                      <td className="num">{Number(item.amountYen).toLocaleString("ja-JP")} 円</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr><td colSpan={4}>小計</td><td>{Number(issuedFilmQuotation.subtotal).toLocaleString("ja-JP")}円</td></tr>
+                  <tr><td colSpan={4}>消費税</td><td>{Number(issuedFilmQuotation.tax).toLocaleString("ja-JP")}円</td></tr>
+                  <tr className="grand"><td colSpan={4}>合計（税込）</td><td>{Number(issuedFilmQuotation.grandTotal).toLocaleString("ja-JP")}円</td></tr>
+                </tfoot>
+              </table>
+              <p className="note">※ カネイ貿易発行のフィルム見積書（1ヶ月有効）</p>
+            </section>
+          ) : null}
 
           {shownTotals ? (
             <>
