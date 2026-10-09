@@ -280,7 +280,9 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
 function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onSendEmail, sendingEmail }: { record: QuotationRecord; onClose: () => void; onPurchase: (record: QuotationRecord) => void; onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void; onSendEmail: (record: QuotationRecord) => void; sendingEmail: boolean }) {
   const [detailTab, setDetailTab] = useState<"document" | "film" | "data">("document");
   const analysis = analyzeQuotation(record);
-  const filmQuotation = buildFilmQuotationFromRecord(record);
+  // 발행 시 자동 생성된 필름 견적서(payload 저장분)를 우선 사용, 없으면 조회 시 생성
+  const storedFilmQuotation = record.payload.filmQuotation as import("@/lib/film-quotation").FilmQuotationData | undefined;
+  const filmQuotation = storedFilmQuotation ?? buildFilmQuotationFromRecord(record);
   const snapshotCalculationVersion = typeof record.payload.calculationChecklistSnapshot === "object"
     && record.payload.calculationChecklistSnapshot !== null
     && typeof (record.payload.calculationChecklistSnapshot as { calculationVersion?: unknown }).calculationVersion === "string"

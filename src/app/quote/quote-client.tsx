@@ -635,7 +635,12 @@ export default function PrintableQuotationPage() {
       setChecklistUrl(checklistUrl);
       sessionStorage.setItem(LAST_CHECKLIST_URL_KEY, checklistUrl);
       setSavedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
-      setIssueSuccessMessage(`見積書を発行しました（${form.quotationNumber || payload.record.quotationNumber}）。履歴からPDF出力・メール作成ができます。`);
+      const filmQuoteNum = payload.record.payload?.filmQuotation?.quotationNumber;
+      setIssueSuccessMessage(
+        `見積書を発行しました（${form.quotationNumber || payload.record.quotationNumber}）` +
+        (filmQuoteNum ? `。フィルム見積書 ${filmQuoteNum} も自動発行されました。` : "。") +
+        " 履歴からPDF出力・メール作成ができます。"
+      );
       return checklistUrl;
     } catch {
       setSaveError("履歴DBに保存できませんでした。テスト環境ではデータが保持されない場合があります。");

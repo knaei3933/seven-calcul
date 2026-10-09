@@ -18,6 +18,7 @@ import type { QuotationRecordInput } from "@/lib/quotation-shared";
 import { getSessionUser } from "@/lib/api-auth";
 import { getQuotationByNumber } from "@/lib/quotation-store";
 import type { AuthenticatedUser } from "@/lib/auth-store";
+import { buildFilmQuotationFromRecord } from "@/lib/film-quotation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -267,6 +268,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     ].filter(Boolean) as string[];
     if (missingIssueFields.length > 0) {
       return NextResponse.json({ error: "issue_fields_required", missing: missingIssueFields }, { status: 400 });
+    }
+    // 발행 시 金井貿易→セブン化學 필름 견적서를 자동 생성해 payload에 포함
+    const filmQuotation = buildFilmQuotationFromRecord({
+      quotationNumber: input.quotationNumber,
+      issueDate: input.issueDate,
+      validUntil: input.validUntil,
+      productName: input.productName,
+      quantity: input.quantity,
+      payload: input.payload,
+    });
+    if (filmQuotation) {
+      input.payload = { ...input.payload, filmQuotation };
     }
     const record = await saveQuotation(input, user.id, user.role);
     const snapshot = readCalculationChecklistSnapshot(input.payload.calculationChecklistSnapshot);
