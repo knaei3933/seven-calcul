@@ -872,6 +872,15 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
   .printable-detail .history-detail-overlay,
   .printable-detail .history-detail-header,
   .printable-detail .detail-tabbar { display: none !important; }
+  .film-quote-a4 {
+    width: 209mm !important; height: 296mm !important; min-height: 296mm !important;
+    margin: 0 auto !important; border: 0 !important;
+    border-top: 2.2mm solid #1f3a5f !important; box-shadow: none !important;
+    overflow: hidden !important; print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+  .film-quote-a4 .film-quote-table th { background: #1f3a5f !important; color: white !important; print-color-adjust: exact !important; -webkit-print-color-adjust: exact !important; }
+  .film-quote-a4 .film-quote-table tfoot .grand td { background: #1f3a5f !important; color: white !important; print-color-adjust: exact !important; -webkit-print-color-adjust: exact !important; }
   .printable-detail .history-detail-panel {
     display: block !important;
     grid-column: auto !important;
@@ -2052,49 +2061,94 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 
 
 
-/* ── Film Quotation A4 ── */
-.film-quote-a4 { display: flex; flex-direction: column; padding: 14mm 16mm 12mm; }
+
+/* ── Film Quotation A4 (포멀 비즈니스 서식) ── */
+.film-quote-a4 {
+  width: 100%;
+  min-height: 297mm;
+  padding: 15mm 18mm 12mm;
+  font-family: var(--font-noto-serif-jp), "Hiragino Mincho ProN", "Yu Mincho", serif;
+  font-size: 10pt;
+  line-height: 1.5;
+  color: #1e293b;
+  display: flex;
+  flex-direction: column;
+}
 .film-quote-content { flex: 1; display: flex; flex-direction: column; }
-.film-quote-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10mm; border-bottom: 2.5px solid #1f3a5f; padding-bottom: 4mm; margin-bottom: 4mm; }
-.film-quote-header::after { content: ""; }
-.film-quote-issuer { font-size: 8.5pt; line-height: 1.55; }
-.film-quote-issuer strong { font-size: 13pt; color: #1f3a5f; letter-spacing: .05em; display: block; }
-.film-quote-issuer small { display: block; color: #64748b; font-size: 7pt; margin: .5mm 0 1.5mm; letter-spacing: .08em; }
+
+/* Header */
+.film-quote-header {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12mm;
+  border-bottom: 2.5px solid #1f3a5f; padding-bottom: 4mm; margin-bottom: 5mm;
+}
+.film-quote-issuer { font-size: 8.5pt; line-height: 1.6; }
+.film-quote-issuer strong { font-size: 14pt; color: #1f3a5f; letter-spacing: .08em; display: block; margin-bottom: 1mm; }
+.film-quote-issuer small { display: block; color: #94a3b8; font-size: 7pt; margin: .5mm 0 2mm; letter-spacing: .12em; text-transform: uppercase; }
 .film-quote-issuer address { font-style: normal; color: #374151; font-size: 7.5pt; }
 .film-quote-title { text-align: right; }
-.film-quote-title .english { font-size: 7pt; letter-spacing: .25em; color: #94a3b8; margin: 0; text-transform: uppercase; }
-.film-quote-title h2 { margin: 1mm 0 3mm; font-size: 19pt; color: #1f3a5f; letter-spacing: .15em; font-weight: 900; }
-.film-quote-title dl { display: flex; gap: 5mm; font-size: 8pt; }
-.film-quote-title dl > div { display: flex; flex-direction: column; gap: .5mm; }
-.film-quote-title dt { color: #94a3b8; font-size: 7pt; font-weight: 600; }
-.film-quote-title dd { margin: 0; font-weight: 700; color: #1e293b; }
-.film-quote-recipient { margin-bottom: 4mm; padding-bottom: 3mm; border-bottom: 1px solid #e2e8f0; }
-.film-quote-recipient .to { font-size: 13pt; font-weight: 800; margin: 0 0 1.5mm; color: #1e293b; }
-.film-quote-recipient .subject { font-size: 9.5pt; color: #374151; margin: 0; }
-.film-quote-summary { margin-bottom: 4mm; padding: 3mm 4mm; background: #f8fafc; border-radius: 2mm; }
-.film-quote-summary dl { display: flex; gap: 6mm; flex-wrap: wrap; margin: 0; }
-.film-quote-summary dl > div { display: flex; align-items: baseline; gap: 2mm; }
-.film-quote-summary dt { font-size: 8pt; color: #64748b; font-weight: 700; }
-.film-quote-summary dd { margin: 0; font-size: 9.5pt; font-weight: 700; color: #1e293b; }
-.film-quote-table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
-.film-quote-table th { padding: 2.5mm 3mm; background: #1f3a5f; color: white; font-size: 8.5pt; text-align: center; font-weight: 700; }
-.film-quote-table th:first-child { text-align: left; }
-.film-quote-table td { padding: 2.8mm 3mm; border-bottom: 1px solid #e2e8f0; font-size: 9.5pt; color: #1e293b; }
-.film-quote-table td.desc { font-weight: 600; }
-.film-quote-table td.num { text-align: right; }
-.film-quote-table td.amt { font-weight: 800; }
-.film-quote-table tfoot td { padding: 2mm 3mm; font-size: 9.5pt; font-weight: 600; border-bottom: 1px solid #cbd5e1; text-align: right; color: #374151; }
-.film-quote-table tfoot td:first-child { text-align: left; }
-.film-quote-table tfoot .grand td { background: #1f3a5f; color: white; font-size: 11.5pt; font-weight: 800; border: none; padding: 3mm; }
-.film-quote-notes { margin-bottom: auto; }
-.film-quote-notes h3 { font-size: 9pt; color: #1f3a5f; margin: 0 0 2mm; padding-left: 2.5mm; border-left: 3px solid #1f3a5f; }
-.film-quote-notes ul { padding-left: 5mm; font-size: 8pt; color: #475569; line-height: 1.75; margin: 0; }
-.film-quote-footer { display: flex; justify-content: space-between; align-items: flex-end; border-top: 1.5px solid #1f3a5f; padding-top: 4mm; margin-top: 4mm; }
-.film-quote-footer .greeting p { font-size: 9pt; color: #374151; margin: 0; line-height: 1.6; }
-.film-quote-footer .issuer-seal { text-align: center; min-width: 35mm; padding: 4mm 6mm; border: 1.5px solid #94a3b8; border-radius: 1.5mm; }
-.film-quote-footer .issuer-seal strong { display: block; font-size: 9.5pt; color: #1f3a5f; letter-spacing: .03em; }
-.film-quote-footer .issuer-seal small { display: block; font-size: 8pt; color: #64748b; margin-top: 1.5mm; }
+.film-quote-title .english { font-size: 7pt; letter-spacing: .3em; color: #94a3b8; margin: 0 0 1mm; text-transform: uppercase; }
+.film-quote-title h2 { margin: 0 0 3mm; font-size: 20pt; color: #1f3a5f; letter-spacing: .2em; font-weight: 900; border-bottom: 2px solid #1f3a5f; padding-bottom: 2mm; display: inline-block; }
+.film-quote-title dl { display: flex; gap: 5mm; font-size: 8pt; margin: 2mm 0 0; justify-content: flex-end; }
+.film-quote-title dl > div { display: flex; flex-direction: column; align-items: flex-end; gap: .3mm; }
+.film-quote-title dt { color: #94a3b8; font-size: 6.5pt; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.film-quote-title dd { margin: 0; font-weight: 800; color: #1e293b; font-size: 9pt; }
 
+/* Recipient */
+.film-quote-recipient { margin-bottom: 5mm; padding-bottom: 3mm; border-bottom: 1px solid #e2e8f0; }
+.film-quote-recipient .to { font-size: 13pt; font-weight: 800; margin: 0 0 1.5mm; color: #1e293b; letter-spacing: .05em; }
+.film-quote-recipient .subject { font-size: 9.5pt; color: #475569; margin: 0; }
+
+/* Summary */
+.film-quote-summary { margin-bottom: 5mm; padding: 3mm 4mm; background: #f0f4f8; border-radius: 1.5mm; border-left: 3px solid #1f3a5f; }
+.film-quote-summary dl { display: flex; gap: 8mm; flex-wrap: wrap; margin: 0; }
+.film-quote-summary dl > div { display: flex; align-items: baseline; gap: 2.5mm; }
+.film-quote-summary dt { font-size: 8pt; color: #64748b; font-weight: 600; }
+.film-quote-summary dd { margin: 0; font-size: 9.5pt; font-weight: 700; color: #1e293b; }
+
+/* Table */
+.film-quote-table { width: 100%; border-collapse: collapse; margin-bottom: 6mm; border: 1.5px solid #1f3a5f; }
+.film-quote-table thead th {
+  padding: 2.5mm 3mm; background: #1f3a5f; color: white; font-size: 8.5pt;
+  text-align: center; font-weight: 700; border: .5px solid #1f3a5f;
+}
+.film-quote-table thead th:first-child { text-align: left; }
+.film-quote-table tbody td {
+  padding: 2.8mm 3mm; border-bottom: .5px solid #cbd5e1;
+  font-size: 9.5pt; color: #1e293b; border-left: .5px solid #e2e8f0; border-right: .5px solid #e2e8f0;
+}
+.film-quote-table tbody td:first-child { border-left: none; }
+.film-quote-table tbody td:last-child { border-right: none; text-align: right; font-weight: 700; }
+.film-quote-table tbody td.num { text-align: right; }
+.film-quote-table tbody td.desc { font-weight: 600; }
+.film-quote-table tbody td.amt { font-weight: 800; }
+.film-quote-table tfoot td {
+  padding: 2mm 3mm; font-size: 9.5pt; font-weight: 600;
+  border-bottom: 1px solid #cbd5e1; text-align: right; color: #374151;
+  border-left: .5px solid #e2e8f0; border-right: .5px solid #e2e8f0;
+}
+.film-quote-table tfoot td:first-child { text-align: left; border-left: none; }
+.film-quote-table tfoot .grand td {
+  background: #1f3a5f; color: white; font-size: 11.5pt; font-weight: 800;
+  border: none; padding: 3mm;
+}
+
+/* Notes */
+.film-quote-notes { margin-bottom: auto; }
+.film-quote-notes h3 {
+  font-size: 9pt; color: #1f3a5f; margin: 0 0 2mm;
+  padding-left: 2.5mm; border-left: 3px solid #1f3a5f; font-weight: 800;
+}
+.film-quote-notes ul { padding-left: 5mm; font-size: 8pt; color: #475569; line-height: 1.8; margin: 0; list-style-type: disc; }
+
+/* Footer */
+.film-quote-footer {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  border-top: 2px solid #1f3a5f; padding-top: 4mm; margin-top: 4mm;
+}
+.film-quote-footer .greeting p { font-size: 9pt; color: #374151; margin: 0; line-height: 1.7; }
+.film-quote-footer .issuer-seal { text-align: center; min-width: 38mm; padding: 5mm 8mm; border: 1.5px solid #1f3a5f; border-radius: 1.5mm; }
+.film-quote-footer .issuer-seal strong { display: block; font-size: 10pt; color: #1f3a5f; letter-spacing: .05em; margin-bottom: 2mm; }
+.film-quote-footer .issuer-seal small { display: block; font-size: 8pt; color: #64748b; margin-top: 1mm; }
 
 /* ── Film Quote Preview on Quote Page ── */
 .film-quote-preview { margin: 0 auto 14px; max-width: 1100px; padding: 12px 18px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; }

@@ -456,7 +456,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
 
           {detailTab === "film" && filmQuotation ? (
             <article className="a4-sheet history-a4 film-quote-a4" aria-label="フィルム見積書A4">
-              <div className="film-quote-content">
+              <div className="history-a4-fit">
                 <header className="film-quote-header">
                   <div className="film-quote-issuer">
                     <strong>{kaneiTrade.name}</strong>
@@ -481,7 +481,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
 
                 <section className="film-quote-recipient">
                   <p className="to">株式会社セブン化学 御中</p>
-                  <p className="subject">下記の通りお見積り申し上げます。</p>
+                  <p className="subject">下記の通りフィルムのお見積りを申し上げます。</p>
                 </section>
 
                 <section className="film-quote-summary">
