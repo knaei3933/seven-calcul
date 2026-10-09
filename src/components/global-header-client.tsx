@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { PublicUser } from "@/lib/auth-store";
 import { CALCULATION_VERSION } from "@/lib/constants";
+import { isKaneiTradeUser } from "@/lib/film-order-access";
 import { canViewFilmOrders } from "@/lib/film-order-access";
 
 const menuItems = [
@@ -43,7 +44,7 @@ export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
             ユーザー管理
           </Link>
         ) : null}
-        {user?.role === "admin" ? (
+        {user?.role === "admin" && isKaneiTradeUser(user.email) ? (
           <Link href="/admin/film-prices" aria-current={pathname === "/admin/film-prices" ? "page" : undefined}>
             フィルム単価
           </Link>
