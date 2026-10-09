@@ -44,7 +44,7 @@ export default async function ChecklistPage({ params }: PageProps) {
       ? await createChecklistsForQuotation(quotation, payloadSnapshot)
       : await createLegacyChecklistsForQuotation(quotation, printingMethodOf(quotation))
     : savedChecklists;
-  // 社内QA（カネイ貿易）チェックリストはカネイ貿易アカウントにのみ表示する。
+  // 社内QA（金井貿易）チェックリストは金井貿易アカウントにのみ表示する。
   const visibleChecklists = canViewInternalChecklist(user.email)
     ? checklists
     : checklists.filter((record) => record.audience !== "INTERNAL_QA");

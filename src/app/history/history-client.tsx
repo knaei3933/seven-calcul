@@ -462,7 +462,8 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                     <address>
                       {kaneiTrade.postalCode}<br />
                       {kaneiTrade.address}<br />
-                      {kaneiTrade.telephone} ／ {kaneiTrade.fax}
+                      {kaneiTrade.telephone}<br />
+                      {kaneiTrade.email}
                     </address>
                   </div>
                   <div className="film-quote-title">
@@ -478,6 +479,15 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
 
                 <section className="film-quote-recipient">
                   <p className="to">株式会社セブン化学 御中</p>
+                  <p className="subject">下記の通りお見積り申し上げます。</p>
+                </section>
+
+                <section className="film-quote-summary">
+                  <dl>
+                    <div><dt>対象製品</dt><dd>{filmQuotation.productName}</dd></div>
+                    <div><dt>パウチ数量</dt><dd>{Number(filmQuotation.quantity).toLocaleString("ja-JP")} 枚</dd></div>
+                    <div><dt>パウチ見積番号</dt><dd>{filmQuotation.pouchQuotationNumber}</dd></div>
+                  </dl>
                 </section>
 
                 <table className="film-quote-table">
@@ -493,18 +503,18 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                   <tbody>
                     {filmQuotation.items.map((item, i) => (
                       <tr key={i}>
-                        <td>{item.description}</td>
-                        <td>{item.webWidthMm}mm</td>
-                        <td>{Number(item.orderLengthM).toLocaleString("ja-JP")} m</td>
-                        <td>{Number(item.unitPriceYenPerM).toLocaleString("ja-JP")} 円/m</td>
-                        <td>{Number(item.amountYen).toLocaleString("ja-JP")} 円</td>
+                        <td className="desc">{item.description}</td>
+                        <td className="num">{item.webWidthMm}mm</td>
+                        <td className="num">{Number(item.orderLengthM).toLocaleString("ja-JP")} m</td>
+                        <td className="num">{Number(item.unitPriceYenPerM).toLocaleString("ja-JP")} 円/m</td>
+                        <td className="num amt">{Number(item.amountYen).toLocaleString("ja-JP")} 円</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
-                    <tr><td colSpan={4}>小計（税抜）</td><td>{Number(filmQuotation.subtotal).toLocaleString("ja-JP")} 円</td></tr>
-                    <tr><td colSpan={4}>消費税（10%）</td><td>{Number(filmQuotation.tax).toLocaleString("ja-JP")} 円</td></tr>
-                    <tr className="grand"><td colSpan={4}>合計（税込）</td><td>{Number(filmQuotation.grandTotal).toLocaleString("ja-JP")} 円</td></tr>
+                    <tr><td colSpan={4}>小計（税抜）</td><td className="num">{Number(filmQuotation.subtotal).toLocaleString("ja-JP")} 円</td></tr>
+                    <tr><td colSpan={4}>消費税（10%）</td><td className="num">{Number(filmQuotation.tax).toLocaleString("ja-JP")} 円</td></tr>
+                    <tr className="grand"><td colSpan={4}>合計（税込）</td><td className="num">{Number(filmQuotation.grandTotal).toLocaleString("ja-JP")} 円</td></tr>
                   </tfoot>
                 </table>
 
@@ -516,12 +526,12 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                 </section>
 
                 <footer className="film-quote-footer">
-                  <div className="seal-area">
-                    <small>上記の通りお見積り申し上げます。</small>
+                  <div className="greeting">
+                    <p>上記の通りお見積り申し上げます。<br />ご検討のほどよろしくお願いいたします。</p>
                   </div>
                   <div className="issuer-seal">
                     <strong>{kaneiTrade.name}</strong>
-                    <small>{kaneiTrade.representative}</small>
+                    <small>{kaneiTrade.representative}　印</small>
                   </div>
                 </footer>
               </div>

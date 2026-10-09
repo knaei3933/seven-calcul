@@ -48,7 +48,7 @@ export default function CurrentChecklistPage({ canViewInternal = false }: { canV
   const [reviewerName, setReviewerName] = useState("");
   const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
 
-  // 社内QA（カネイ貿易）タブはカネイ貿易アカウントにのみ表示する。
+  // 社内QA（金井貿易）タブは金井貿易アカウントにのみ表示する。
   const visibleAudiences = (["CUSTOMER", "INTERNAL_QA"] as ChecklistAudience[])
     .filter((audience) => audience === "CUSTOMER" || canViewInternal);
   const effectiveAudience = visibleAudiences.includes(activeAudience) ? activeAudience : "CUSTOMER";

@@ -2060,33 +2060,48 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .issue-fields-grid label.filled input { border-color: #10b981; background: #f0fdf4; }
 .issue-required-fields .help { margin: 6px 0 0; font-size: 11px; color: #92400e; }
 
+
+
 /* ── Film Quotation A4 ── */
-.film-quote-a4 { display: flex; flex-direction: column; padding: 15mm 18mm; }
+.film-quote-a4 { display: flex; flex-direction: column; padding: 14mm 16mm 12mm; }
 .film-quote-content { flex: 1; display: flex; flex-direction: column; }
-.film-quote-header { display: flex; justify-content: space-between; gap: 14mm; border-bottom: 2px solid #1f3a5f; padding-bottom: 4mm; margin-bottom: 5mm; }
-.film-quote-issuer { font-size: 9pt; line-height: 1.5; }
-.film-quote-issuer strong { font-size: 13pt; color: #1f3a5f; }
-.film-quote-issuer small { display: block; color: #64748b; font-size: 7.5pt; margin-top: 1mm; }
-.film-quote-issuer address { font-style: normal; color: #374151; margin-top: 2mm; font-size: 8pt; }
+.film-quote-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10mm; border-bottom: 2.5px solid #1f3a5f; padding-bottom: 4mm; margin-bottom: 4mm; }
+.film-quote-header::after { content: ""; }
+.film-quote-issuer { font-size: 8.5pt; line-height: 1.55; }
+.film-quote-issuer strong { font-size: 13pt; color: #1f3a5f; letter-spacing: .05em; display: block; }
+.film-quote-issuer small { display: block; color: #64748b; font-size: 7pt; margin: .5mm 0 1.5mm; letter-spacing: .08em; }
+.film-quote-issuer address { font-style: normal; color: #374151; font-size: 7.5pt; }
 .film-quote-title { text-align: right; }
-.film-quote-title .english { font-size: 8pt; letter-spacing: .2em; color: #64748b; margin: 0; text-transform: uppercase; }
-.film-quote-title h2 { margin: 1mm 0 3mm; font-size: 20pt; color: #1f3a5f; letter-spacing: .1em; }
-.film-quote-title dl { display: flex; gap: 4mm; font-size: 8.5pt; }
-.film-quote-title dl > div { display: flex; gap: 1.5mm; }
-.film-quote-title dt { color: #64748b; font-weight: 700; }
-.film-quote-title dd { margin: 0; font-weight: 700; }
-.film-quote-recipient { margin-bottom: 5mm; }
-.film-quote-recipient .to { font-size: 12pt; font-weight: 700; margin: 0; }
-.film-quote-table { width: 100%; border-collapse: collapse; margin-bottom: 6mm; }
-.film-quote-table th { padding: 2.5mm 3mm; background: #1f3a5f; color: white; font-size: 9pt; text-align: left; }
-.film-quote-table td { padding: 3mm; border-bottom: 1px solid #e2e8f0; font-size: 10pt; }
-.film-quote-table tfoot td { padding: 2mm 3mm; font-size: 10pt; font-weight: 600; border-bottom: 1px solid #cbd5e1; }
-.film-quote-table tfoot .grand td { background: #1f3a5f; color: white; font-size: 12pt; font-weight: 800; border: none; }
+.film-quote-title .english { font-size: 7pt; letter-spacing: .25em; color: #94a3b8; margin: 0; text-transform: uppercase; }
+.film-quote-title h2 { margin: 1mm 0 3mm; font-size: 19pt; color: #1f3a5f; letter-spacing: .15em; font-weight: 900; }
+.film-quote-title dl { display: flex; gap: 5mm; font-size: 8pt; }
+.film-quote-title dl > div { display: flex; flex-direction: column; gap: .5mm; }
+.film-quote-title dt { color: #94a3b8; font-size: 7pt; font-weight: 600; }
+.film-quote-title dd { margin: 0; font-weight: 700; color: #1e293b; }
+.film-quote-recipient { margin-bottom: 4mm; padding-bottom: 3mm; border-bottom: 1px solid #e2e8f0; }
+.film-quote-recipient .to { font-size: 13pt; font-weight: 800; margin: 0 0 1.5mm; color: #1e293b; }
+.film-quote-recipient .subject { font-size: 9.5pt; color: #374151; margin: 0; }
+.film-quote-summary { margin-bottom: 4mm; padding: 3mm 4mm; background: #f8fafc; border-radius: 2mm; }
+.film-quote-summary dl { display: flex; gap: 6mm; flex-wrap: wrap; margin: 0; }
+.film-quote-summary dl > div { display: flex; align-items: baseline; gap: 2mm; }
+.film-quote-summary dt { font-size: 8pt; color: #64748b; font-weight: 700; }
+.film-quote-summary dd { margin: 0; font-size: 9.5pt; font-weight: 700; color: #1e293b; }
+.film-quote-table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+.film-quote-table th { padding: 2.5mm 3mm; background: #1f3a5f; color: white; font-size: 8.5pt; text-align: center; font-weight: 700; }
+.film-quote-table th:first-child { text-align: left; }
+.film-quote-table td { padding: 2.8mm 3mm; border-bottom: 1px solid #e2e8f0; font-size: 9.5pt; color: #1e293b; }
+.film-quote-table td.desc { font-weight: 600; }
+.film-quote-table td.num { text-align: right; }
+.film-quote-table td.amt { font-weight: 800; }
+.film-quote-table tfoot td { padding: 2mm 3mm; font-size: 9.5pt; font-weight: 600; border-bottom: 1px solid #cbd5e1; text-align: right; color: #374151; }
+.film-quote-table tfoot td:first-child { text-align: left; }
+.film-quote-table tfoot .grand td { background: #1f3a5f; color: white; font-size: 11.5pt; font-weight: 800; border: none; padding: 3mm; }
 .film-quote-notes { margin-bottom: auto; }
-.film-quote-notes h3 { font-size: 9.5pt; color: #1f3a5f; margin: 0 0 2mm; border-left: 3px solid #1f3a5f; padding-left: 2mm; }
-.film-quote-notes ul { padding-left: 5mm; font-size: 8.5pt; color: #374151; line-height: 1.7; }
-.film-quote-footer { display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #cbd5e1; padding-top: 4mm; margin-top: 5mm; }
-.film-quote-footer .seal-area small { font-size: 9pt; color: #374151; }
-.film-quote-footer .issuer-seal { text-align: center; border: 1px solid #94a3b8; padding: 4mm 8mm; border-radius: 1mm; }
-.film-quote-footer .issuer-seal strong { display: block; font-size: 10pt; color: #1f3a5f; }
-.film-quote-footer .issuer-seal small { display: block; font-size: 8pt; color: #64748b; margin-top: 1mm; }
+.film-quote-notes h3 { font-size: 9pt; color: #1f3a5f; margin: 0 0 2mm; padding-left: 2.5mm; border-left: 3px solid #1f3a5f; }
+.film-quote-notes ul { padding-left: 5mm; font-size: 8pt; color: #475569; line-height: 1.75; margin: 0; }
+.film-quote-footer { display: flex; justify-content: space-between; align-items: flex-end; border-top: 1.5px solid #1f3a5f; padding-top: 4mm; margin-top: 4mm; }
+.film-quote-footer .greeting p { font-size: 9pt; color: #374151; margin: 0; line-height: 1.6; }
+.film-quote-footer .issuer-seal { text-align: center; min-width: 35mm; padding: 4mm 6mm; border: 1.5px solid #94a3b8; border-radius: 1.5mm; }
+.film-quote-footer .issuer-seal strong { display: block; font-size: 9.5pt; color: #1f3a5f; letter-spacing: .03em; }
+.film-quote-footer .issuer-seal small { display: block; font-size: 8pt; color: #64748b; margin-top: 1.5mm; }
+

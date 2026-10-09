@@ -486,7 +486,7 @@ async function sendProofNoticeMail(order: FilmOrder, uploadUrl: string): Promise
 async function sendApprovalMail(order: FilmOrder): Promise<MailSendResult[]> {
   const subject = `【校正承認・最終受注】${order.order_number} ${order.product_name}`;
   const text = [
-    `${order.order_number}（${order.product_name || "-"}）の校正データが承認され、カネイ貿易の最終受注処理が確定しました。`,
+    `${order.order_number}（${order.product_name || "-"}）の校正データが承認され、金井貿易の最終受注処理が確定しました。`,
     "",
     mailBodyBase(order),
   ].join("\n");

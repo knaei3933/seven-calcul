@@ -34,9 +34,9 @@ const STEP_DEFS: Array<{ key: string; label: string }> = [
 const STATUS_HINTS: Record<FilmOrderStatus, string> = {
   pending: "セブン化学が発注書をメール送付し、「発注書送信済み」にします。",
   ordered: "フィルム製作を開始するため、セブン化学が製作データ（AI必須・PDF任意）を入稿登録します。",
-  receiving_registered: "メーカー校正データの返却待ちです。返却後にカネイ貿易が登録します。",
+  receiving_registered: "メーカー校正データの返却待ちです。返却後に金井貿易が登録します。",
   proof_registered: "セブン化学が校正を承認、または再校正を依頼します。",
-  re_proof_requested: "カネイ貿易が再校正データを登録します。",
+  re_proof_requested: "金井貿易が再校正データを登録します。",
   final_approved: "ワークフロー完了です。",
 };
 
@@ -65,7 +65,7 @@ function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: boolean):
     case "receiving_registered":
       return isKanei
         ? { kind: "form", label: "校正データを登録", form: "proof" }
-        : { kind: "none", label: "カネイ貿易の校正データ登録待ち" };
+        : { kind: "none", label: "金井貿易の校正データ登録待ち" };
     case "proof_registered":
       return isSeven
         ? { kind: "run", label: "校正を承認する", body: { action: "approve" }, ok: "校正を承認しました。" }
@@ -73,7 +73,7 @@ function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: boolean):
     case "re_proof_requested":
       return isKanei
         ? { kind: "form", label: "再校正データを登録", form: "proof" }
-        : { kind: "none", label: "カネイ貿易の再校正データ登録待ち" };
+        : { kind: "none", label: "金井貿易の再校正データ登録待ち" };
     case "final_approved":
       return { kind: "none", label: "完了" };
   }
@@ -155,7 +155,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
         </div>
         <div className="film-orders-toolbar">
           <span className={`film-orders-role ${isSeven ? "seven" : "kanei"}`}>
-            {isSeven ? "セブン化学" : "カネイ貿易"}
+            {isSeven ? "セブン化学" : "金井貿易"}
           </span>
           <span className="film-orders-myturn" role="status" aria-live="polite">
             あなたの操作待ち <strong>{myTurnCount}</strong> 件
@@ -173,11 +173,11 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
       </div>
 
       <details className="film-order-guide">
-        <summary>{isSeven ? "セブン化学担当者の流れ" : "カネイ貿易担当者の流れ"}</summary>
+        <summary>{isSeven ? "セブン化学担当者の流れ" : "金井貿易担当者の流れ"}</summary>
         {isSeven ? (
           <ol>
             <li>見積履歴で見積を「成約」にすると、ここに発注が自動作成されます。</li>
-            <li>発注内容を確認し、発注書をメールでカネイ貿易へ送付したら「発注書送信済みにする」を押します。</li>
+            <li>発注内容を確認し、発注書をメールで金井貿易へ送付したら「発注書送信済みにする」を押します。</li>
             <li>フィルム製作用データを「入稿データを登録」します（AI必須・PDF任意。design@ へ自動連絡）。</li>
             <li>校正データが登録されたら「校正を承認」または「再校正を依頼」します。</li>
           </ol>
@@ -429,7 +429,7 @@ function OrderSteps({
       ))}
       {status === "re_proof_requested" ? <span className="film-order-reproof">再校正 {reProofCount}回目</span> : null}
       {status !== "final_approved" && nextRole !== "none" ? (
-        <span className={`film-order-step-role ${nextRole}`}>{nextRole === "seven" ? "次の操作: セブン化学" : "次の操作: カネイ貿易"}</span>
+        <span className={`film-order-step-role ${nextRole}`}>{nextRole === "seven" ? "次の操作: セブン化学" : "次の操作: 金井貿易"}</span>
       ) : null}
     </div>
   );
@@ -478,7 +478,7 @@ function NextStepPanel({
         <div className="next-step-wait">
           <p>{next.label}</p>
           <button className="button small" type="button" disabled title="担当部署のみ操作できます">
-            {STATUS_STEP_ROLE[order.status] === "seven" ? "入稿・承認操作（セブン化学）" : "校正データ操作（カネイ貿易）"}
+            {STATUS_STEP_ROLE[order.status] === "seven" ? "入稿・承認操作（セブン化学）" : "校正データ操作（金井貿易）"}
           </button>
         </div>
       ) : null}
@@ -578,7 +578,7 @@ function NextStepPanel({
       ) : null}
       {order.status === "final_approved" ? (
         <div className="film-order-inline-actions">
-          <p className="film-order-final">最終承認済み（カネイ貿易の最終受注処理が確定）。{order.po_sent_at ? "発注書は送信済みです。" : "発注書をメーカーへ送信してください。"}</p>
+          <p className="film-order-final">最終承認済み（金井貿易の最終受注処理が確定）。{order.po_sent_at ? "発注書は送信済みです。" : "発注書をメーカーへ送信してください。"}</p>
           {isKanei && !order.po_sent_at ? (
             <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "send-po" }, "発注書をメーカーへ送信しました。納期入力フォームを案内しました。")}>
               発注書をメーカーへ送信
@@ -642,7 +642,7 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
             </table>
           </div>
         ) : null}
-        <p className="film-order-sheet-note">発注書はセブン化学からカネイ貿易へメールで送付してください。送信後に「発注書送信済みにする」でステータスを進めます。</p>
+        <p className="film-order-sheet-note">発注書はセブン化学から金井貿易へメールで送付してください。送信後に「発注書送信済みにする」でステータスを進めます。</p>
       </div>
     </section>
   );

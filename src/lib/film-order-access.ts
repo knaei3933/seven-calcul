@@ -1,8 +1,8 @@
 /**
  * フィルム発注ワークフローの権限。
- * 見積を作成した会社（発注側）と、供給側（カネイ貿易 or 外部メーカー）で操作権限が決まる。
- * - Seven Chemical (@727.co.jp) が発注側: 入稿・承認はセブン化学、校正登録等はカネイ貿易
- * - Kanei Trade (@kanei-trade.co.jp) が発注側（カネイ自身の営業）: すべてカネイ貿易が操作
+ * 見積を作成した会社（発注側）と、供給側（金井貿易 or 外部メーカー）で操作権限が決まる。
+ * - Seven Chemical (@727.co.jp) が発注側: 入稿・承認はセブン化学、校正登録等は金井貿易
+ * - Kanei Trade (@kanei-trade.co.jp) が発注側（カネイ自身の営業）: すべて金井貿易が操作
  */
 export const SEVEN_CHEMICAL_EMAIL_DOMAIN = "@727.co.jp";
 export const KANEI_TRADE_EMAIL_DOMAIN = "@kanei-trade.co.jp";
@@ -45,8 +45,8 @@ const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
 };
 
 /**
- * 発注側会社のアカウントが buyer 操作を、カネイ貿易が seller 側操作を行う。
- * カネイ貿易が発注側の場合は seller 操作もカネイ貿易が行う。
+ * 発注側会社のアカウントが buyer 操作を、金井貿易が seller 側操作を行う。
+ * 金井貿易が発注側の場合は seller 操作も金井貿易が行う。
  */
 export function canPerformFilmOrderAction(
   action: string,

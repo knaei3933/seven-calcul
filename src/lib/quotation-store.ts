@@ -83,17 +83,17 @@ const CHECKLIST_COMPANY_NAME_NORMALIZATION = `
     SET
       checked_by = CASE checked_by
         WHEN '카네이무역 내부 QA' THEN '金井貿易株式会社 内部QA'
-        WHEN 'カネイ貿易 社内QA' THEN '金井貿易株式会社 社内QA'
+        WHEN '金井貿易 社内QA' THEN '金井貿易株式会社 社内QA'
         ELSE checked_by
       END,
       items_json = replace(
-        replace(items_json, 'カネイ貿易 社内QA', '金井貿易株式会社 社内QA'),
+        replace(items_json, '金井貿易 社内QA', '金井貿易株式会社 社内QA'),
         '카네이무역 내부 QA',
         '金井貿易株式会社 内部QA'
       )
-    WHERE checked_by IN ('카네이무역 내부 QA', 'カネイ貿易 社内QA')
+    WHERE checked_by IN ('카네이무역 내부 QA', '金井貿易 社内QA')
        OR items_json LIKE '%카네이무역%'
-       OR items_json LIKE '%カネイ貿易%'
+       OR items_json LIKE '%金井貿易%'
 `;
 
 const SQLITE_SCHEMA = `
