@@ -293,7 +293,7 @@ export default function PrintableQuotationPage() {
   const [checklistOpening, setChecklistOpening] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [issueSuccessMessage, setIssueSuccessMessage] = useState("");
-  const [issuedFilmQuotation, setIssuedFilmQuotation] = useState<{ quotationNumber: string; items: { description: string; orderLengthM: string; unitPriceYenPerM: string; amountYen: string }[]; subtotal: string; tax: string; grandTotal: string; validUntil: string } | null>(null);
+  const [issuedFilmQuotation, setIssuedFilmQuotation] = useState<{ quotationNumber: string; items: { description: string; webWidthMm: string; orderLengthM: string; unitPriceYenPerM: string; amountYen: string }[]; subtotal: string; tax: string; grandTotal: string; validUntil: string } | null>(null);
   const [quoteDraftStale, setQuoteDraftStale] = useState(false);
   const [selectedCandidateShortage, setSelectedCandidateShortage] = useState(false);
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrderSnapshot | null>(null);
