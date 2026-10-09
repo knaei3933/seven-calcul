@@ -1276,55 +1276,54 @@ export default function PrintableQuotationPage() {
 
   return (
     <main className={`quote-page ${mobileDrawer ? `drawer-open drawer-${mobileDrawer}` : ""}`}>
-      <section className="panel quote-toolbar" aria-labelledby="quote-toolbar-title">
-        <div>
-          <h1 id="quote-toolbar-title">見積書発行</h1>
-          <p>顧客情報・製品名を入力して「見積書を発行」で確定します。中央のA4見積書は直接編集できます。</p>
+      <section className="quote-header" aria-labelledby="quote-toolbar-title">
+        <div className="quote-header-top">
+          <div className="quote-header-title">
+            <h1 id="quote-toolbar-title">見積書発行</h1>
+            <div className="quote-status-chips">
+              {sourceVersion ? (
+                <span className="chip chip-ok" title={sourceVersion}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="2"/><path d="M5 8.5l2 2 4-4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  連携済み
+                </span>
+              ) : (
+                <span className="chip chip-muted">未連携</span>
+              )}
+              {quoteDraftStale ? <span className="chip chip-warn">要再計算</span> : null}
+              {selectedCandidateShortage ? <span className="chip chip-info">数量調整</span> : null}
+              {issueReady ? <span className="chip chip-ok">発行可能</span> : <span className="chip chip-warn">入力不足</span>}
+            </div>
+          </div>
+          <div className="toolbar-actions no-print">
+            <button className="button secondary" type="button" onClick={() => router.push("/")}>シミュレーターから取込</button>
+            <button className="btn-issue" type="button" data-testid="save-history" disabled={issueButtonDisabled} onClick={() => void saveToHistory()}>
+              {saving ? "発行中..." : savedAt ? `発行済 ${savedAt}` : "見積書を発行"}
+            </button>
+            <button className="button" type="button" data-testid="print-pdf" disabled={linkedQuoteActionsDisabled} onClick={() => void printPdf()}>PDF出力（A4）</button>
+            <button className="button secondary" type="button" disabled={linkedQuoteActionsDisabled || checklistOpening} title="現在の見積内容を保存し、計算確認チェックリストを開きます" data-testid="open-checklist" onClick={() => void openChecklist()}>
+              {checklistOpening ? "作成中..." : "計算確認チェックリスト"}
+            </button>
+          </div>
+        </div>
+        <div className="quote-header-meta">
           {issueReady ? null : (
-            <p className="warning" role="status" data-testid="issue-missing-fields">
-              発行に必要な情報が不足しています：{missingIssueFields.join("・")}
-            </p>
+            <p className="issue-missing" role="status" data-testid="issue-missing-fields">不足：{missingIssueFields.join("・")}</p>
           )}
-          <p className="help" data-testid="quote-source">
-            {sourceVersion ? `原価計算結果連携済み / 計算ID ${sourceVersion.slice(0, 12)}` : "原価シミュレーター未連携。手入力または「原価値を取込」後に出力できます。"}
-          </p>
           {quoteDraftStale ? (
-            <p className="warning" role="alert" data-testid="stale-quote-warning">
-              この見積書は古くなっています。シミュレーターの条件が変わったため、今は保存・PDF出力・チェックリスト操作ができません。シミュレーターに戻り、「サーバーで再計算する」を実行してから、これらの操作を行ってください。
-            </p>
+            <p className="header-alert" role="alert" data-testid="stale-quote-warning">この見積書は古くなっています。シミュレーターの条件が変わったため、再計算してください。</p>
           ) : null}
           {selectedCandidateShortage ? (
-            <p className="warning" role="alert" data-testid="shortage-quote-warning">
-              数量調整プランが選択されています。この見積書は選択後の製造計画数量基準です。元の発注数が必要な場合はシミュレーターに戻り、「元の数量へ戻る」を実行してください。
-            </p>
+            <p className="header-alert" role="alert" data-testid="shortage-quote-warning">数量調整プランが選択されています。元の発注数が必要な場合は「元の数量へ戻る」を実行してください。</p>
+          ) : null}
+          {saveError ? <p className="error" role="alert" data-testid="save-error">{saveError}</p> : null}
+          {issueSuccessMessage ? (
+            <p className="issue-success" role="status" data-testid="issue-success">{issueSuccessMessage} <button className="button secondary small" type="button" onClick={() => router.push("/history")}>履歴を見る</button></p>
           ) : null}
         </div>
-        <div className="toolbar-actions no-print">
-          <button className="button secondary" type="button" onClick={() => router.push("/")}>シミュレーターから取込</button>
-          <button className="button secondary" type="button" data-testid="save-history" disabled={issueButtonDisabled} onClick={() => void saveToHistory()}>{saving ? "発行中..." : savedAt ? `発行済 ${savedAt}` : "見積書を発行"}</button>
-          <button className="button" type="button" data-testid="print-pdf" disabled={linkedQuoteActionsDisabled} onClick={() => void printPdf()}>PDF出力（A4）</button>
-          <button
-            className="button secondary"
-            type="button"
-            disabled={linkedQuoteActionsDisabled || checklistOpening}
-            title="現在の見積内容を保存し、計算確認チェックリストを開きます"
-            data-testid="open-checklist"
-            onClick={() => void openChecklist()}
-          >
-            {checklistOpening ? "チェックリスト作成中..." : "計算確認チェックリスト"}
-          </button>
-        </div>
-        {saveError ? <p className="error" role="alert" data-testid="save-error">{saveError}</p> : null}
-        {issueSuccessMessage ? (
-          <p className="help" role="status" data-testid="issue-success">
-            {issueSuccessMessage} <button className="button secondary small" type="button" onClick={() => router.push("/history")}>履歴を見る</button>
-          </p>
-        ) : null}
       </section>
 
       {!issueReady ? (
-        <section className="panel issue-required-fields" data-testid="issue-required-fields" aria-labelledby="issue-fields-title">
-          <h2 id="issue-fields-title">発行に必要な情報を入力してください</h2>
+        <section className="issue-required-fields" data-testid="issue-required-fields" aria-labelledby="issue-fields-title">
           <div className="issue-fields-grid">
             <label className={form.customerName.trim() ? "filled" : "required"}>
               会社名 ★

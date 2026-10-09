@@ -591,17 +591,6 @@ header .version-badge { display: none; }
 
 /* 見積書画面：中央プレビュー＋左右エッジ編集 */
 .quote-page { max-width: 1720px; display: flex; flex-direction: column; gap: 16px; }
-.quote-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 18px; }
-.quote-toolbar h1 { margin: 0; font-size: clamp(22px, 3vw, 30px); }
-.quote-toolbar p { margin: 5px 0 0; }
-.toolbar-actions { display: grid; grid-template-columns: repeat(3, minmax(130px, auto)); gap: 8px; }
-.logo-mark { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--primary); color: white; font-weight: 900; font-size: 16px; }
-.logo-mark.large { width: 54px; height: 54px; font-size: 28px; }
-.menu-brand { display: flex; align-items: center; gap: 8px; font-weight: 800; }
-.menu-brand small { display: block; color: var(--muted); font-size: 11px; font-weight: 600; }
-
-.quote-workspace { display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr) minmax(300px, 350px); gap: 14px; align-items: start; }
-.sheet-scroll { min-width: 0; overflow-x: auto; scrollbar-width: thin; }
 .quote-side { position: sticky; top: calc(var(--global-header-height) + 16px); max-height: min(calc(100dvh - var(--global-header-height) - 32px), 1150px); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
 .quote-side-left { border-left: 4px solid var(--primary); }
 .quote-side-right { border-right: 4px solid var(--primary); }
@@ -1962,6 +1951,44 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-order-preview-label { font-size: 12px; font-weight: 800; color: var(--muted); margin: 0 0 6px; padding: 0 10px; }
 .film-order-preview-iframe { width: 100%; height: 420px; border: 0; background: white; }
 .film-order-preview-note { font-size: 12px; color: var(--muted); margin: 0; padding: 0 10px 6px; }
+
+
+/* ── Quote Header (툴바 + 필수입력 통합) ── */
+.quote-header { display: flex; flex-direction: column; gap: 0; margin: 0 auto 14px; max-width: 1100px; }
+.quote-header-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 14px 20px 10px; background: linear-gradient(135deg, #1f3a5f 0%, #2a4a75 100%); border-radius: 10px 10px 0 0; }
+.quote-header-title { display: flex; flex-direction: column; gap: 6px; }
+.quote-header-title h1 { margin: 0; font-size: 20px; color: white; letter-spacing: .02em; }
+.quote-status-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; letter-spacing: .03em; }
+.chip-ok { background: rgba(16,185,129,.2); color: #6ee7b7; border: 1px solid rgba(16,185,129,.4); }
+.chip-warn { background: rgba(245,158,11,.2); color: #fcd34d; border: 1px solid rgba(245,158,11,.4); }
+.chip-info { background: rgba(59,130,246,.2); color: #93c5fd; border: 1px solid rgba(59,130,246,.4); }
+.chip-muted { background: rgba(255,255,255,.1); color: #94a3b8; border: 1px solid rgba(255,255,255,.15); }
+.quote-header-top .toolbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.quote-header-top .toolbar-actions .button { background: rgba(255,255,255,.12); color: white; border: 1px solid rgba(255,255,255,.25); }
+.quote-header-top .toolbar-actions .button:hover { background: rgba(255,255,255,.2); }
+.quote-header-top .toolbar-actions .button:disabled { opacity: .4; }
+.btn-issue { padding: 8px 24px; background: #f59e0b; color: #1f3a5f; border: none; border-radius: 6px; font-size: 14px; font-weight: 800; cursor: pointer; transition: background .15s; white-space: nowrap; }
+.btn-issue:not(:disabled):hover { background: #fbbf24; }
+.btn-issue:disabled { opacity: .5; cursor: not-allowed; }
+.quote-header-meta { padding: 8px 20px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.issue-missing { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 700; color: #b45309; }
+.header-alert { margin: 0; font-size: 12px; color: #b91c1c; line-height: 1.5; }
+.issue-success { margin: 0; font-size: 13px; color: #059669; font-weight: 600; }
+.issue-success .button { margin-left: 8px; }
+.quote-header .error { margin: 0; font-size: 13px; color: #dc2626; }
+
+/* ── Required Fields Inline Form ── */
+.issue-required-fields { margin: 0 auto 14px; max-width: 1100px; padding: 10px 20px 8px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.issue-fields-grid { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: flex-end; }
+.issue-fields-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 700; flex: 1 1 160px; min-width: 140px; max-width: 240px; }
+.issue-fields-grid label.wide { flex: 2 1 300px; max-width: 480px; }
+.issue-fields-grid label.required { color: #b45309; }
+.issue-fields-grid label.filled { color: #059669; }
+.issue-fields-grid input { padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 13px; background: white; }
+.issue-fields-grid label.required input { border-color: #f59e0b; box-shadow: 0 0 0 1px rgba(245,158,11,.15); }
+.issue-fields-grid label.filled input { border-color: #10b981; background: #f0fdf4; }
+.issue-required-fields .help { margin: 6px 0 0; font-size: 11px; color: #64748b; }
 
 /* ── Film Price Master Admin ── */
 .film-price-admin { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }

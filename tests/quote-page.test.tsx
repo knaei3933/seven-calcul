@@ -74,8 +74,7 @@ describe("quotation page stale draft", () => {
     await waitFor(() => expect(screen.getByTestId("stale-quote-warning")).toBeVisible());
     expect(screen.getByTestId("stale-quote-warning")).toHaveTextContent("この見積書は古くなっています");
     expect(screen.getByTestId("stale-quote-warning")).toHaveTextContent("シミュレーターの条件が変わったため");
-    expect(screen.getByTestId("stale-quote-warning")).toHaveTextContent("シミュレーターに戻り、「サーバーで再計算する」を実行");
-    expect(screen.getByTestId("stale-quote-warning")).toHaveTextContent("保存・PDF出力・チェックリスト");
+    expect(screen.getByTestId("stale-quote-warning")).toHaveTextContent("再計算してください");
     expect(screen.getByTestId("save-history")).toBeDisabled();
     expect(screen.getByTestId("print-pdf")).toBeDisabled();
     expect(screen.getByTestId("open-checklist")).toBeDisabled();
@@ -109,7 +108,6 @@ describe("quotation page stale draft", () => {
 
     await waitFor(() => expect(screen.getByTestId("shortage-quote-warning")).toBeVisible());
     expect(screen.getByTestId("shortage-quote-warning")).toHaveTextContent("数量調整プラン");
-    expect(screen.getByTestId("shortage-quote-warning")).toHaveTextContent("選択後の製造計画数量基準");
     expect(screen.getByTestId("shortage-quote-warning")).toHaveTextContent("元の数量へ戻る");
     expect(screen.getByTestId("save-history")).toBeEnabled();
     expect(screen.getByTestId("print-pdf")).toBeEnabled();
