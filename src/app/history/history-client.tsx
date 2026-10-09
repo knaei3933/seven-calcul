@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { CALCULATION_VERSION, sizeMaster } from "@/lib/constants";
+import { buildFilmQuotationFromRecord, kaneiTrade } from "@/lib/film-quotation";
 import { D, Decimal } from "@/lib/decimal";
 import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
 import { analyzeQuotation, filmCompositionOf, printingMethodOf } from "@/lib/quotation-history";
@@ -277,8 +278,9 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
 }
 
 function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onSendEmail, sendingEmail }: { record: QuotationRecord; onClose: () => void; onPurchase: (record: QuotationRecord) => void; onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void; onSendEmail: (record: QuotationRecord) => void; sendingEmail: boolean }) {
-  const [detailTab, setDetailTab] = useState<"document" | "data">("document");
+  const [detailTab, setDetailTab] = useState<"document" | "film" | "data">("document");
   const analysis = analyzeQuotation(record);
+  const filmQuotation = buildFilmQuotationFromRecord(record);
   const snapshotCalculationVersion = typeof record.payload.calculationChecklistSnapshot === "object"
     && record.payload.calculationChecklistSnapshot !== null
     && typeof (record.payload.calculationChecklistSnapshot as { calculationVersion?: unknown }).calculationVersion === "string"
@@ -444,8 +446,87 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
         <div className="detail-scroll">
           <nav className="detail-tabbar no-print" aria-label="詳細表示切替">
             <button className={detailTab === "document" ? "button" : "button secondary"} type="button" onClick={() => setDetailTab("document")}>A4帳票</button>
+            {filmQuotation ? (
+              <button className={detailTab === "film" ? "button" : "button secondary"} type="button" onClick={() => setDetailTab("film")} data-testid="film-quote-tab">フィルム見積書</button>
+            ) : null}
             <button className={detailTab === "data" ? "button" : "button secondary"} type="button" onClick={() => setDetailTab("data")}>詳細データ</button>
           </nav>
+
+          {detailTab === "film" && filmQuotation ? (
+            <article className="a4-sheet history-a4 film-quote-a4" aria-label="フィルム見積書A4">
+              <div className="film-quote-content">
+                <header className="film-quote-header">
+                  <div className="film-quote-issuer">
+                    <strong>{kaneiTrade.name}</strong>
+                    <small>{kaneiTrade.englishName}</small>
+                    <address>
+                      {kaneiTrade.postalCode}<br />
+                      {kaneiTrade.address}<br />
+                      {kaneiTrade.telephone} ／ {kaneiTrade.fax}
+                    </address>
+                  </div>
+                  <div className="film-quote-title">
+                    <p className="english">QUOTATION</p>
+                    <h2>お見積書</h2>
+                    <dl>
+                      <div><dt>見積番号</dt><dd>{filmQuotation.quotationNumber}</dd></div>
+                      <div><dt>発行日</dt><dd>{filmQuotation.issueDate}</dd></div>
+                      <div><dt>有効期限</dt><dd>{filmQuotation.validUntil}</dd></div>
+                    </dl>
+                  </div>
+                </header>
+
+                <section className="film-quote-recipient">
+                  <p className="to">株式会社セブン化学 御中</p>
+                </section>
+
+                <table className="film-quote-table">
+                  <thead>
+                    <tr>
+                      <th>品名・仕様</th>
+                      <th>原反幅</th>
+                      <th>数量</th>
+                      <th>単価</th>
+                      <th>金額</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filmQuotation.items.map((item, i) => (
+                      <tr key={i}>
+                        <td>{item.description}</td>
+                        <td>{item.webWidthMm}mm</td>
+                        <td>{Number(item.orderLengthM).toLocaleString("ja-JP")} m</td>
+                        <td>{Number(item.unitPriceYenPerM).toLocaleString("ja-JP")} 円/m</td>
+                        <td>{Number(item.amountYen).toLocaleString("ja-JP")} 円</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr><td colSpan={4}>小計（税抜）</td><td>{Number(filmQuotation.subtotal).toLocaleString("ja-JP")} 円</td></tr>
+                    <tr><td colSpan={4}>消費税（10%）</td><td>{Number(filmQuotation.tax).toLocaleString("ja-JP")} 円</td></tr>
+                    <tr className="grand"><td colSpan={4}>合計（税込）</td><td>{Number(filmQuotation.grandTotal).toLocaleString("ja-JP")} 円</td></tr>
+                  </tfoot>
+                </table>
+
+                <section className="film-quote-notes">
+                  <h3>備考</h3>
+                  <ul>
+                    {filmQuotation.notes.map((note, i) => <li key={i}>{note}</li>)}
+                  </ul>
+                </section>
+
+                <footer className="film-quote-footer">
+                  <div className="seal-area">
+                    <small>上記の通りお見積り申し上げます。</small>
+                  </div>
+                  <div className="issuer-seal">
+                    <strong>{kaneiTrade.name}</strong>
+                    <small>{kaneiTrade.representative}</small>
+                  </div>
+                </footer>
+              </div>
+            </article>
+          ) : null}
 
           {detailTab === "document" ? (
           <>
