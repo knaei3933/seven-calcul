@@ -43,6 +43,11 @@ export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
             ユーザー管理
           </Link>
         ) : null}
+        {user?.role === "admin" ? (
+          <Link href="/admin/film-prices" aria-current={pathname === "/admin/film-prices" ? "page" : undefined}>
+            フィルム単価
+          </Link>
+        ) : null}
         {canViewFilmOrders(user?.email) ? (
           <Link href="/film-orders" aria-current={pathname === "/film-orders" ? "page" : undefined}>
             フィルム発注
