@@ -3,10 +3,10 @@ import { D } from "./decimal";
 export const kaneiTrade = {
   name: "金井貿易株式会社",
   englishName: "KANAI TRADING CO., LTD.",
-  postalCode: "〒541-0051",
-  address: "大阪府大阪市中央区備後町2-5-8",
-  telephone: "TEL 06-6231-1109",
-  fax: "FAX 06-6231-1108",
+  postalCode: "〒673-0892",
+  address: "兵庫県明石市本町2-1-29 みなとメゾン明石本町2F",
+  telephone: "TEL 050-3613-9673",
+  fax: "",
   email: "kim@kanei-trade.co.jp",
   representative: "代表取締役",
 } as const;
