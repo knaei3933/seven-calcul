@@ -38,6 +38,8 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   const requestOrder = useRef(0);
   const selectedRecord = records.find((record) => record.id === selectedId) ?? null;
   const [purchaseRecord, setPurchaseRecord] = useState<QuotationRecord | null>(null);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailMessage, setEmailMessage] = useState("");
 
   const load = useCallback(async (search: string, statusFilter: string, creatorFilter: string) => {
     const order = ++requestOrder.current;
@@ -124,6 +126,29 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
     if (!window.confirm(`${record.quotationNumber} を削除しますか？`)) return;
     const response = await fetch(`/api/quotations/${record.id}`, { method: "DELETE" });
     if (response.ok) setRecords((old) => old.filter((item) => item.id !== record.id));
+  };
+
+  const sendQuotationEmail = async (record: QuotationRecord) => {
+    setSendingEmail(true);
+    setEmailMessage("");
+    try {
+      const response = await fetch(`/api/quotations/${record.id}/send`, { method: "POST" });
+      const payload = await response.json();
+      if (response.ok) {
+        setRecords((old) => old.map((item) => (item.id === record.id ? payload.record as QuotationRecord : item)));
+        setEmailMessage(`${record.quotationNumber} を ${payload.sentTo} に送信しました。`);
+      } else if (payload.error === "smtp_not_configured") {
+        setEmailMessage("SMTPが設定されていません。.env に SMTP_HOST / SMTP_USER / SMTP_PASS を設定してください。");
+      } else if (payload.error === "customer_email_required") {
+        setEmailMessage("得意先のメールアドレスが登録されていません。");
+      } else {
+        setEmailMessage("送信に失敗しました。");
+      }
+    } catch {
+      setEmailMessage("送信に失敗しました。");
+    } finally {
+      setSendingEmail(false);
+    }
   };
 
   const canManage = (record: QuotationRecord) => currentUser.role === "admin" || currentUser.id === record.createdBy.id;
@@ -239,7 +264,10 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
       </section>
 
       {selectedRecord ? (
-        <QuotationDetailModal record={selectedRecord} onClose={() => setSelectedId(null)} onPurchase={setPurchaseRecord} onStatusChange={(record, nextStatus) => { void changeStatus(record, nextStatus); }} />
+        <>
+          <QuotationDetailModal record={selectedRecord} onClose={() => setSelectedId(null)} onPurchase={setPurchaseRecord} onStatusChange={(record, nextStatus) => { void changeStatus(record, nextStatus); }} onSendEmail={(record) => { void sendQuotationEmail(record); }} sendingEmail={sendingEmail} />
+          {emailMessage ? <p className="help" role="status" data-testid="email-message" style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 999, background: "white", padding: "8px 16px", borderRadius: 8, border: "1px solid #cbd5e1" }}>{emailMessage}</p> : null}
+        </>
       ) : null}
       {purchaseRecord ? (
         <PurchaseOrderModal record={purchaseRecord} onClose={() => setPurchaseRecord(null)} />
@@ -248,7 +276,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   );
 }
 
-function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange }: { record: QuotationRecord; onClose: () => void; onPurchase: (record: QuotationRecord) => void; onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void }) {
+function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onSendEmail, sendingEmail }: { record: QuotationRecord; onClose: () => void; onPurchase: (record: QuotationRecord) => void; onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void; onSendEmail: (record: QuotationRecord) => void; sendingEmail: boolean }) {
   const [detailTab, setDetailTab] = useState<"document" | "data">("document");
   const analysis = analyzeQuotation(record);
   const snapshotCalculationVersion = typeof record.payload.calculationChecklistSnapshot === "object"
@@ -397,6 +425,11 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange }: {
             <button className="button small" type="button" onClick={printA4Document}>PDF出力</button>
             {mailtoLink ? (
               <a className="button small" href={mailtoLink} data-testid="history-mail-link">メール作成</a>
+            ) : null}
+            {record.status === "draft" && typeof record.payload.customerEmail === "string" && record.payload.customerEmail.trim() ? (
+              <button className="button small" type="button" disabled={sendingEmail} onClick={() => onSendEmail(record)} data-testid="history-auto-send">
+                {sendingEmail ? "送信中..." : "自動送信"}
+              </button>
             ) : null}
             {record.status === "draft" ? (
               <button className="button small" type="button" onClick={() => onStatusChange(record, "sent")} data-testid="history-send-status">送付済みにする</button>
