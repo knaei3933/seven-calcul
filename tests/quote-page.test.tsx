@@ -29,10 +29,10 @@ describe("quotation page stale draft", () => {
     render(<QuotePage />);
 
     // 発行には会社名・郵便番号・電話番号・住所が必須。
-    await userEvent.setup().type(screen.getByLabelText("会社名 ★必須"), "手入力株式会社");
-    await userEvent.setup().type(screen.getByLabelText("郵便番号 ★必須"), "123-4567");
-    await userEvent.setup().type(screen.getByLabelText("電話番号 ★必須"), "03-1234-5678");
-    await userEvent.setup().type(screen.getByLabelText("住所 ★必須"), "東京都千代田区テスト1-1");
+    await userEvent.setup().type(screen.getByLabelText("会社名 ★"), "手入力株式会社");
+    await userEvent.setup().type(screen.getByLabelText("郵便番号 ★"), "123-4567");
+    await userEvent.setup().type(screen.getByLabelText("電話番号 ★"), "03-1234-5678");
+    await userEvent.setup().type(screen.getByLabelText("住所 ★"), "東京都千代田区テスト1-1");
 
     await waitFor(() => {
       expect(screen.getByTestId("save-history")).toBeEnabled();
@@ -102,10 +102,10 @@ describe("quotation page stale draft", () => {
     render(<QuotePage />);
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("会社名 ★必須"), "調整プラン株式会社");
-    await user.type(screen.getByLabelText("郵便番号 ★必須"), "100-0001");
-    await user.type(screen.getByLabelText("電話番号 ★必須"), "06-1234-5678");
-    await user.type(screen.getByLabelText("住所 ★必須"), "大阪府テスト市1-2-3");
+    await user.type(screen.getByLabelText("会社名 ★"), "調整プラン株式会社");
+    await user.type(screen.getByLabelText("郵便番号 ★"), "100-0001");
+    await user.type(screen.getByLabelText("電話番号 ★"), "06-1234-5678");
+    await user.type(screen.getByLabelText("住所 ★"), "大阪府テスト市1-2-3");
 
     await waitFor(() => expect(screen.getByTestId("shortage-quote-warning")).toBeVisible());
     expect(screen.getByTestId("shortage-quote-warning")).toHaveTextContent("数量調整プラン");
@@ -207,10 +207,10 @@ describe("quotation page stale draft", () => {
     }));
     render(<QuotePage />);
 
-    await user.type(screen.getByLabelText("会社名 ★必須"), "単価修正株式会社");
-    await user.type(screen.getByLabelText("郵便番号 ★必須"), "530-0001");
-    await user.type(screen.getByLabelText("電話番号 ★必須"), "06-9999-9999");
-    await user.type(screen.getByLabelText("住所 ★必須"), "大阪府修正市テスト3-4");
+    await user.type(screen.getByLabelText("会社名 ★"), "単価修正株式会社");
+    await user.type(screen.getByLabelText("郵便番号 ★"), "530-0001");
+    await user.type(screen.getByLabelText("電話番号 ★"), "06-9999-9999");
+    await user.type(screen.getByLabelText("住所 ★"), "大阪府修正市テスト3-4");
 
     await waitFor(() => expect(screen.getByTestId("save-history")).toBeEnabled());
     const fillingUnit = screen.getByLabelText("充填・加工単価");

@@ -1322,6 +1322,37 @@ export default function PrintableQuotationPage() {
         ) : null}
       </section>
 
+      {!issueReady ? (
+        <section className="panel issue-required-fields" data-testid="issue-required-fields" aria-labelledby="issue-fields-title">
+          <h2 id="issue-fields-title">発行に必要な情報を入力してください</h2>
+          <div className="issue-fields-grid">
+            <label className={form.customerName.trim() ? "filled" : "required"}>
+              会社名 ★
+              <input value={form.customerName} onChange={(e) => update("customerName", e.target.value)} placeholder="株式会社◯◯" />
+            </label>
+            <label className={form.customerPostalCode.trim() ? "filled" : "required"}>
+              郵便番号 ★
+              <input value={form.customerPostalCode} onChange={(e) => update("customerPostalCode", e.target.value)} placeholder="123-4567" />
+            </label>
+            <label className={form.customerTelephone.trim() ? "filled" : "required"}>
+              電話番号 ★
+              <input value={form.customerTelephone} onChange={(e) => update("customerTelephone", e.target.value)} placeholder="03-1234-5678" />
+            </label>
+            <label className={form.customerAddress.trim() ? "filled" : "required wide"}>
+              住所 ★
+              <input value={form.customerAddress} onChange={(e) => update("customerAddress", e.target.value)} placeholder="東京都◯◯区..." />
+            </label>
+            {form.skuNames.map((name, index) => (
+              <label key={index} className={name.trim() ? "filled wide" : "required wide"}>
+                製品名（SKU-{index + 1}）★
+                <input value={name} onChange={(e) => setForm((old) => ({ ...old, skuNames: old.skuNames.map((v, i) => i === index ? e.target.value : v) }))} placeholder="製品名を入力" />
+              </label>
+            ))}
+          </div>
+          <p className="help">★付きの項目をすべて入力すると「見積書を発行」ボタンが有効になります。</p>
+        </section>
+      ) : null}
+
       <div
         className={`quote-workspace ${mobileDrawer ? `drawer-open drawer-${mobileDrawer}` : ""} ${
           !isMobileWorkspace && !expandedDesktopPanels.left ? "left-collapsed" : ""

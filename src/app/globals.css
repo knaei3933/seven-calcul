@@ -2021,3 +2021,16 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .calc-table td:last-child { text-align: right; }
 .calc-table .total td { background: #1f3a5f; color: white; font-size: 16px; font-weight: 800; border: none; }
 .calc-table .per-m td { background: #f8fafc; color: #1f3a5f; font-weight: 700; }
+
+/* ── Required Fields Banner (発行に必要な情報) ── */
+.issue-required-fields { margin: 0 auto 16px; max-width: 1100px; padding: 16px 20px; border: 2px solid #f59e0b; border-radius: 10px; background: #fffbeb; }
+.issue-required-fields h2 { margin: 0 0 12px; font-size: 15px; color: #92400e; }
+.issue-fields-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 14px; }
+.issue-fields-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+.issue-fields-grid label.wide { grid-column: 1 / -1; }
+.issue-fields-grid label.required { color: #b45309; }
+.issue-fields-grid label.filled { color: #059669; }
+.issue-fields-grid input { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+.issue-fields-grid label.required input { border-color: #f59e0b; background: white; }
+.issue-fields-grid label.filled input { border-color: #10b981; background: #f0fdf4; }
+.issue-required-fields .help { margin: 10px 0 0; font-size: 12px; color: #92400e; }
