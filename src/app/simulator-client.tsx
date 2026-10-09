@@ -15,7 +15,7 @@ import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnit
 import { activeMaterialWidthMm } from "@/lib/purchase-order";
 import { isCalculationRequest } from "@/lib/calculation-provenance";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
-import { SIMULATOR_STALE_STATUS_KEY, type CustomerMaster, type CustomerMasterInput } from "@/lib/quotation-shared";
+import { SIMULATOR_STALE_STATUS_KEY } from "@/lib/quotation-shared";
 import {
   loadLiquidMaster,
   newLiquidMasterId,
@@ -924,13 +924,6 @@ const parameterGroups = [
 export default function QuotationPage({ userRole = "user" }: { userRole?: "admin" | "user" } = {}) {
   const initialSize = sizeMaster["round-50x60"];
   const [form, setForm] = useState({
-    customerCode: "",
-    customerName: "",
-    customerPostalCode: "",
-    customerAddress: "",
-    customerContact: "",
-    customerTelephone: "",
-    customerEmail: "",
     sizeKey: "round-50x60" as SizeKey,
     custom: false,
     widthMm: "50",
@@ -964,90 +957,8 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
   const [productionSpeedManual, setProductionSpeedManual] = useState(false);
-  type CustomerDraft = Pick<typeof form, 'customerName' | 'customerCode' | 'customerPostalCode' | 'customerAddress' | 'customerContact' | 'customerTelephone' | 'customerEmail'>;
-  const [customerDraft, setCustomerDraft] = useState<CustomerDraft | null>(null);
-  const [customerListOpen, setCustomerListOpen] = useState(false);
   const [liquidMaster, setLiquidMaster] = useState<LiquidMasterItem[]>([]);
   const [liquidDraft, setLiquidDraft] = useState({ name: "", unitPriceYen: "", memo: "" });
-  const [customerList, setCustomerList] = useState<CustomerMaster[]>([]);
-  const [customerListQuery, setCustomerListQuery] = useState("");
-  const [customerListLoading, setCustomerListLoading] = useState(false);
-  const [editingCustomerCode, setEditingCustomerCode] = useState<string | null>(null);
-  const [deletingCustomerCode, setDeletingCustomerCode] = useState<string | null>(null);
-  const [customerEdit, setCustomerEdit] = useState<CustomerMasterInput | null>(null);
-  const [customerEditSaving, setCustomerEditSaving] = useState(false);
-  const [customerListMessage, setCustomerListMessage] = useState("");
-  const [customerStatus, setCustomerStatus] = useState<{ loading: boolean; found: boolean; message: string; saving: boolean }>({
-    loading: false,
-    found: false,
-    message: "",
-    saving: false,
-  });
-
-  useEffect(() => {
-    const code = form.customerCode.trim();
-    if (!code) {
-      const timer = setTimeout(() => setCustomerStatus({ loading: false, found: false, message: "", saving: false }), 0);
-      return () => clearTimeout(timer);
-    }
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      setCustomerStatus((old) => ({ ...old, loading: true, message: "" }));
-      fetch(`/api/customers/${encodeURIComponent(code)}`, { signal: controller.signal })
-        .then(async (response) => {
-          const payload = await response.json();
-          if (!response.ok || !payload.customer) throw new Error("customer_not_found");
-          const customer = payload.customer as CustomerMasterInput;
-          setForm((old) => ({
-            ...old,
-            customerCode: code,
-            customerName: customer.customerName || "",
-            customerPostalCode: customer.customerPostalCode || "",
-            customerAddress: customer.customerAddress || "",
-            customerContact: customer.customerContact || "",
-            customerTelephone: customer.customerTelephone || "",
-            customerEmail: customer.customerEmail || "",
-          }));
-          setCustomerStatus({ loading: false, found: true, message: `顧客コード ${code} を読み込みました。`, saving: false });
-        })
-        .catch((error) => {
-          if (error.name === "AbortError") return;
-          setCustomerStatus({ loading: false, found: false, message: "登録されていない顧客コードです。入力後に保存できます。", saving: false });
-        });
-    }, 250);
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-    };
-  }, [form.customerCode]);
-
-  const saveCustomerMaster = async () => {
-    const code = form.customerCode.trim();
-    if (!code || !form.customerName.trim()) {
-      setCustomerStatus({ loading: false, found: false, message: "保存には顧客コードと会社名が必要です。", saving: false });
-      return;
-    }
-    setCustomerStatus((old) => ({ ...old, saving: true, message: "" }));
-    try {
-      const response = await fetch("/api/customers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          customerCode: code,
-          customerName: form.customerName,
-          customerPostalCode: form.customerPostalCode,
-          customerAddress: form.customerAddress,
-          customerContact: form.customerContact,
-          customerTelephone: form.customerTelephone,
-          customerEmail: form.customerEmail,
-        }),
-      });
-      if (!response.ok) throw new Error();
-      setCustomerStatus({ loading: false, found: true, message: `顧客コード ${code} を保存しました。`, saving: false });
-    } catch {
-      setCustomerStatus({ loading: false, found: false, message: "顧客マスタを保存できませんでした。", saving: false });
-    }
-  };
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -1062,7 +973,6 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
             productionSpeedManual?: boolean;
             serverResult?: ServerCalculation;
             calculatedAt?: string | null;
-            customerDraft?: CustomerDraft | null;
           };
           if (saved.form) setForm((old) => withMarginForPrintingMethod({
             ...old,
@@ -1144,10 +1054,7 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
           if (restoredServerResult && typeof saved.calculatedAt === "string") {
             setCalculatedAt(saved.calculatedAt);
           }
-          if (saved.customerDraft && typeof saved.customerDraft === "object") {
-            setCustomerDraft(saved.customerDraft);
-          }
-        }
+            }
       } catch {
         // 저장 상태가 손상된 경우 기본값을 유지한다.
       } finally {
@@ -1325,8 +1232,6 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
   ) => {
     const preliminarySnapshot = buildCalculationChecklistSnapshot(result, {
       quotationNumber: "保存前",
-      customerName: form.customerName,
-      customerCode: form.customerCode,
       printingMethod: result.printingMethod,
       sourceHash: result.audit.resultJsonSha256,
       resultHash: result.audit.resultJsonSha256,
@@ -1360,7 +1265,7 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
     const checklistSnapshotJson = JSON.stringify(preliminarySnapshot);
     sessionStorage.setItem(CURRENT_CHECKLIST_SNAPSHOT_KEY, checklistSnapshotJson);
     localStorage.setItem("pouch-current-checklist-snapshot-persistent-v1", checklistSnapshotJson);
-  }, [effectiveParameters, effectiveSize, form.bulkPrice, form.customerCode, form.customerName, form.lengthMm, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate]);
+  }, [effectiveParameters, effectiveSize, form.bulkPrice, form.lengthMm, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate]);
 
   const selectCandidate = async (candidate: PrintCandidate) => {
     if (!serverResult || pending || selecting) return;
@@ -1654,15 +1559,6 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
         targetMargin: requestedTargetMarginMode === "custom" ? "custom" : requestedTargetMargin,
         customMargin: requestedTargetMarginMode === "custom" ? requestedTargetMargin : old.customMargin,
       }));
-      setCustomerDraft({
-        customerName: form.customerName,
-        customerCode: form.customerCode,
-        customerPostalCode: form.customerPostalCode,
-        customerAddress: form.customerAddress,
-        customerContact: form.customerContact,
-        customerTelephone: form.customerTelephone,
-        customerEmail: form.customerEmail,
-      });
       writeChecklistSnapshot(selectedResult);
       setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (error) {
@@ -1748,7 +1644,7 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
       : "必要長を100m単位に切り上げて発注します。";
 
   useEffect(() => {
-    if (!serverResult || !quotationDraftResult || !customerDraft) return;
+    if (!serverResult || !quotationDraftResult) return;
     const draftSkus = form.skus.map((sku, index) => {
       const quantity = D(selectedRecommendation?.adjustedSkuQuantities[index] ?? sku.quantity);
       const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate, Number(form.connected));
@@ -1782,13 +1678,6 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
           skuNames: form.skus.map((sku, index) => sku.name.trim() || `充填物${index + 1}`),
           targetMargin: effectiveMargin,
           printingMethod: quotationDraftResult.printingMethod,
-          customerName: customerDraft.customerName,
-          customerCode: customerDraft.customerCode,
-          customerPostalCode: customerDraft.customerPostalCode,
-          customerAddress: customerDraft.customerAddress,
-          customerTelephone: customerDraft.customerTelephone,
-          customerEmail: customerDraft.customerEmail,
-          customerContact: customerDraft.customerContact,
           filmComposition: "PET12+AL7+PET12+LLDPE50",
           parameters: effectiveParameters,
           lossRate: parameters.lossRate,
@@ -1811,7 +1700,7 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
     } catch {
       // モード制限時は手入力用の既定見積書へフォールバックする。
     }
-  }, [customerDraft, effectiveMargin, effectiveSize, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate, quotationDraftResult, selectedRecommendation]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
+  }, [effectiveMargin, effectiveSize, form.connected, form.lengthMm, form.printingMethod, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate, quotationDraftResult, selectedRecommendation]); // eslint-disable-line react-hooks/exhaustive-deps -- effectiveSizeはform寸法から派生するため二重依存を避ける。
 
   useEffect(() => {
     if (!serverResult || !staleResult) return;
@@ -1819,128 +1708,6 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
     sessionStorage.setItem(SIMULATOR_STALE_STATUS_KEY, "input-changed");
   }, [serverResult, staleResult]);
 
-  const startCustomerEdit = (customer: CustomerMaster) => {
-    setEditingCustomerCode(customer.customerCode);
-    setCustomerEdit({
-      customerCode: customer.customerCode,
-      customerName: customer.customerName,
-      customerPostalCode: customer.customerPostalCode,
-      customerAddress: customer.customerAddress,
-      customerContact: customer.customerContact,
-      customerTelephone: customer.customerTelephone,
-      customerEmail: customer.customerEmail,
-    });
-    setCustomerListMessage("");
-  };
-
-  const updateCustomerEdit = (key: keyof CustomerMasterInput, value: string) => {
-    setCustomerEdit((old) => old ? { ...old, [key]: value } : old);
-  };
-
-  const cancelCustomerEdit = () => {
-    setEditingCustomerCode(null);
-    setCustomerEdit(null);
-  };
-
-  const saveCustomerEdit = async () => {
-    if (!customerEdit) return;
-    setCustomerEditSaving(true);
-    setCustomerListMessage("");
-    try {
-      const response = await fetch("/api/customers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(customerEdit),
-      });
-      const payload = await response.json();
-      if (!response.ok || !payload.customer) throw new Error();
-      const saved = payload.customer as CustomerMaster;
-      setCustomerList((old) => old.map((customer) => customer.customerCode === saved.customerCode ? saved : customer));
-      if (form.customerCode === saved.customerCode) {
-        setForm((old) => ({
-          ...old,
-          customerName: saved.customerName,
-          customerPostalCode: saved.customerPostalCode,
-          customerAddress: saved.customerAddress,
-          customerContact: saved.customerContact,
-          customerTelephone: saved.customerTelephone,
-          customerEmail: saved.customerEmail,
-        }));
-      }
-      setEditingCustomerCode(null);
-      setCustomerEdit(null);
-      setCustomerListMessage(`${saved.customerCode} を更新しました。`);
-    } catch {
-      setCustomerListMessage("顧客情報を更新できませんでした。");
-    } finally {
-      setCustomerEditSaving(false);
-    }
-  };
-
-  const openCustomerList = async () => {
-    setCustomerListOpen(true);
-    setCustomerListLoading(true);
-    try {
-      const response = await fetch(`/api/customers?q=${encodeURIComponent(customerListQuery)}`);
-      const payload = await response.json();
-      if (!response.ok) throw new Error();
-      setCustomerList(payload.customers as CustomerMaster[]);
-    } catch {
-      setCustomerList([]);
-    } finally {
-      setCustomerListLoading(false);
-    }
-  };
-
-  const deleteCustomerFromList = async (code: string, name: string) => {
-    if (deletingCustomerCode) return;
-    const confirmed = window.confirm(`顧客コード ${code}（${name || "無名"}）を顧客マスタから削除しますか？\n過去の見積書データは影響を受けません。`);
-    if (!confirmed) return;
-    setDeletingCustomerCode(code);
-    setCustomerListMessage("");
-    try {
-      const response = await fetch(`/api/customers/${encodeURIComponent(code)}`, { method: "DELETE" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error ?? "delete_failed");
-      setCustomerList((old) => old.filter((customer) => customer.customerCode !== code));
-      setCustomerListMessage(`${code} を削除しました。`);
-      if (form.customerCode === code) {
-        setCustomerStatus((old) => ({ ...old, found: false, message: `顧客コード ${code} は削除されました。` }));
-      }
-    } catch {
-      setCustomerListMessage("顧客情報を削除できませんでした。");
-    } finally {
-      setDeletingCustomerCode(null);
-    }
-  };
-
-  const selectCustomerFromList = (customer: CustomerMaster) => {
-    setForm((old) => ({
-      ...old,
-      customerCode: customer.customerCode,
-      customerName: customer.customerName,
-      customerPostalCode: customer.customerPostalCode,
-      customerAddress: customer.customerAddress,
-      customerContact: customer.customerContact,
-      customerTelephone: customer.customerTelephone,
-      customerEmail: customer.customerEmail,
-    }));
-    setCustomerStatus({ loading: false, found: true, message: `顧客コード ${customer.customerCode} を選択しました。`, saving: false });
-    setCustomerListOpen(false);
-  };
-
-  useEffect(() => {
-    if (!customerListOpen) return;
-    const timer = setTimeout(() => { void openCustomerList(); }, 200);
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setCustomerListOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [customerListOpen, customerListQuery]); // eslint-disable-line react-hooks/exhaustive-deps -- 検索語変更時に一覧を再取得する。
 
   useEffect(() => {
     if (!simulatorStateLoaded) return;
@@ -1953,7 +1720,6 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
       productionSpeedManual,
       serverResult,
       calculatedAt,
-      customerDraft,
     });
     try {
       sessionStorage.setItem(SIMULATOR_STATE_KEY, simulatorStateJson);
@@ -1965,7 +1731,7 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
     } catch {
       // private mode 등 저장 실패 시에도 계산은 계속 동작한다.
     }
-  }, [calculatedAt, customerDraft, form, machineBreakdown, normalizedGravureParameters, parameters, productionSpeedManual, serverResult, simulatorStateLoaded]);
+  }, [calculatedAt, form, machineBreakdown, normalizedGravureParameters, parameters, productionSpeedManual, serverResult, simulatorStateLoaded]);
 
   useEffect(() => {
     // Print the same simulator layout on every machine. Print media itself is
@@ -2075,45 +1841,6 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
             <li data-testid="simulator-guide-step-5">使う計画を選び、見積書発行へ進みます。</li>
           </ol>
         </details>
-        <section className="panel customer-panel" aria-labelledby="customer-block-title">
-          <h2 id="customer-block-title">顧客情報</h2>
-          <div className="customer-toolbar">
-              <div className="field-row">
-            <Field label="顧客コード" htmlFor="customer-code">
-              <input
-                id="customer-code"
-                inputMode="numeric"
-                aria-describedby="customer-code-help"
-                value={form.customerCode}
-                onChange={(e) => set("customerCode", e.target.value)}
-              />
-            </Field>
-            <div className="field">
-              <span>顧客マスタ</span>
-              <div className="button-row">
-                <button className="button secondary small" type="button" onClick={() => { setCustomerListOpen(true); }}>顧客一覧</button>
-                <button className="button secondary small" type="button" disabled={customerStatus.saving || !form.customerCode.trim() || !form.customerName.trim()} onClick={() => void saveCustomerMaster()}>
-                  {customerStatus.saving ? "保存中..." : "保存 / 更新"}
-                </button>
-              </div>
-              {customerStatus.loading ? <p className="help">読み込み中...</p> : customerStatus.message ? <p className="help">{customerStatus.message}</p> : null}
-            </div>
-          </div>
-          <div className="field-row">
-            <Field label="会社名" htmlFor="customer-name"><input id="customer-name" value={form.customerName} onChange={(e) => set("customerName", e.target.value)} /></Field>
-            <Field label="担当者" htmlFor="customer-contact"><input id="customer-contact" value={form.customerContact} onChange={(e) => set("customerContact", e.target.value)} /></Field>
-          </div>
-          <div className="field-row">
-            <Field label="郵便番号" htmlFor="customer-postal"><input id="customer-postal" value={form.customerPostalCode} onChange={(e) => set("customerPostalCode", e.target.value)} /></Field>
-            <Field label="電話番号" htmlFor="customer-telephone"><input id="customer-telephone" value={form.customerTelephone} onChange={(e) => set("customerTelephone", e.target.value)} /></Field>
-          </div>
-          <Field label="住所" htmlFor="customer-address"><input id="customer-address" value={form.customerAddress} onChange={(e) => set("customerAddress", e.target.value)} /></Field>
-          <Field label="メールアドレス" htmlFor="customer-email"><input id="customer-email" inputMode="email" value={form.customerEmail} onChange={(e) => set("customerEmail", e.target.value)} /></Field>
-          </div>
-          <p className="help customer-toolbar-note" id="customer-code-help">
-            顧客コード入力後に登録済み顧客情報を自動読込します。未登録コードは入力後に保存できます。
-          </p>
-        </section>
         <form onSubmit={submit} className="layout" noValidate data-testid="quotation-form" data-state={staleResult ? "stale" : "current"}>
           <section className="panel" aria-labelledby="input-title">
             <h2 id="input-title">製品情報</h2>
@@ -2932,82 +2659,6 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
             orderReason: originalOrderReason,
           }}
         />
-      ) : null}
-      {customerListOpen ? (
-        <div className="customer-list-layer" role="dialog" aria-modal="true" aria-labelledby="customer-list-title">
-          <div className="customer-list-panel">
-            <header className="customer-list-header">
-              <div>
-                <span className="side-kicker">CUSTOMER LIST</span>
-                <h2 id="customer-list-title">顧客一覧</h2>
-              </div>
-              <button className="button secondary small" type="button" onClick={() => setCustomerListOpen(false)}>閉じる</button>
-            </header>
-            <div className="customer-list-toolbar">
-              <input
-                aria-label="顧客検索"
-                placeholder="コード・会社名・住所・メールで検索"
-                value={customerListQuery}
-                onChange={(event) => setCustomerListQuery(event.target.value)}
-              />
-            </div>
-            {customerListMessage ? <p className="customer-list-message" role="status">{customerListMessage}</p> : null}
-            <div className="customer-list-body">
-              {customerListLoading ? <p>読み込み中...</p> : customerList.length === 0 ? <p>登録済み顧客はありません。</p> : (
-                <table>
-                  <thead><tr><th>コード</th><th>会社名</th><th>担当者</th><th>郵便番号</th><th>住所</th><th>電話</th><th>メール</th><th>操作</th></tr></thead>
-                  <tbody>
-                    {customerList.map((customer) => {
-                      const editing = editingCustomerCode === customer.customerCode;
-                      return editing && customerEdit ? (
-                        <tr key={customer.customerCode} className="customer-edit-row">
-                          <td>{customer.customerCode}</td>
-                          <td><input value={customerEdit.customerName} onChange={(event) => updateCustomerEdit("customerName", event.target.value)} /></td>
-                          <td><input value={customerEdit.customerContact} onChange={(event) => updateCustomerEdit("customerContact", event.target.value)} /></td>
-                          <td><input value={customerEdit.customerPostalCode} onChange={(event) => updateCustomerEdit("customerPostalCode", event.target.value)} /></td>
-                          <td><input value={customerEdit.customerAddress} onChange={(event) => updateCustomerEdit("customerAddress", event.target.value)} /></td>
-                          <td><input value={customerEdit.customerTelephone} onChange={(event) => updateCustomerEdit("customerTelephone", event.target.value)} /></td>
-                          <td><input value={customerEdit.customerEmail} onChange={(event) => updateCustomerEdit("customerEmail", event.target.value)} /></td>
-                          <td className="customer-edit-actions">
-                            <button className="button small" type="button" disabled={customerEditSaving || !customerEdit.customerName.trim()} onClick={() => void saveCustomerEdit()}>
-                              {customerEditSaving ? "保存中..." : "保存"}
-                            </button>
-                            <button className="button secondary small" type="button" disabled={customerEditSaving} onClick={cancelCustomerEdit}>取消</button>
-                          </td>
-                        </tr>
-                      ) : (
-                        <tr key={customer.customerCode}>
-                          <td>{customer.customerCode}</td>
-                          <td>{customer.customerName}</td>
-                          <td>{customer.customerContact || "-"}</td>
-                          <td>{customer.customerPostalCode || "-"}</td>
-                          <td>{customer.customerAddress || "-"}</td>
-                          <td>{customer.customerTelephone || "-"}</td>
-                          <td>{customer.customerEmail || "-"}</td>
-                          <td className="customer-edit-actions">
-                            <button className="button small" type="button" disabled={editingCustomerCode !== null} onClick={() => startCustomerEdit(customer)}>編集</button>
-                            <button className="button secondary small" type="button" disabled={editingCustomerCode !== null} onClick={() => selectCustomerFromList(customer)}>選択</button>
-                            {userRole === "admin" ? (
-                              <button
-                                className="button danger small"
-                                type="button"
-                                disabled={editingCustomerCode !== null || deletingCustomerCode !== null}
-                                onClick={() => void deleteCustomerFromList(customer.customerCode, customer.customerName)}
-                              >
-                                {deletingCustomerCode === customer.customerCode ? "削除中..." : "削除"}
-                              </button>
-                            ) : null}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-          <div className="customer-list-overlay" onClick={() => setCustomerListOpen(false)} aria-hidden="true" />
-        </div>
       ) : null}
     </main>
   );

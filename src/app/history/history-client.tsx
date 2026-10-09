@@ -192,7 +192,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
                     <small>{record.resultHash ? `ID ${record.resultHash.slice(0, 8)}` : "手入力"}</small>
                   </td>
                   <td>{record.issueDate}</td>
-                  <td>{record.customerName || "-"}</td>
+                  <td>{record.customerName || <span className="badge" data-testid="customer-missing-badge">得意先未入力</span>}</td>
                   <td>{record.productName}<small>{record.sizeSummary}</small></td>
                   <td>{formatNumber(record.quantity, 0)} 枚</td>
                   <td>{formatCurrency(record.pricePerPiece, 2)}</td>
@@ -239,7 +239,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
       </section>
 
       {selectedRecord ? (
-        <QuotationDetailModal record={selectedRecord} onClose={() => setSelectedId(null)} onPurchase={setPurchaseRecord} />
+        <QuotationDetailModal record={selectedRecord} onClose={() => setSelectedId(null)} onPurchase={setPurchaseRecord} onStatusChange={(record, nextStatus) => { void changeStatus(record, nextStatus); }} />
       ) : null}
       {purchaseRecord ? (
         <PurchaseOrderModal record={purchaseRecord} onClose={() => setPurchaseRecord(null)} />
@@ -248,7 +248,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   );
 }
 
-function QuotationDetailModal({ record, onClose, onPurchase }: { record: QuotationRecord; onClose: () => void; onPurchase: (record: QuotationRecord) => void }) {
+function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange }: { record: QuotationRecord; onClose: () => void; onPurchase: (record: QuotationRecord) => void; onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void }) {
   const [detailTab, setDetailTab] = useState<"document" | "data">("document");
   const analysis = analyzeQuotation(record);
   const snapshotCalculationVersion = typeof record.payload.calculationChecklistSnapshot === "object"
@@ -371,6 +371,19 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
     });
   };
 
+  const customerEmail = record.payload.customerEmail;
+  const mailtoLink = (() => {
+    if (typeof customerEmail !== "string" || !customerEmail.trim()) return null;
+    const subject = encodeURIComponent(`お見積書 ${record.quotationNumber} のご案内`);
+    const body = encodeURIComponent(
+      `${record.customerName} 御中\n\nお見積書 ${record.quotationNumber} をご案内いたします。\n` +
+      `品名：${record.productName}\n数量：${formatNumber(Number(record.quantity))} 枚\n` +
+      `税込合計：${formatCurrency(record.grandTotal, 0)}\n有効期限：${record.validUntil || "-"}\n\n` +
+      `ご確認のほどよろしくお願いいたします。\nパッケージラボ\n`,
+    );
+    return `mailto:${customerEmail.trim()}?subject=${subject}&body=${body}`;
+  })();
+
   return (
     <div className="history-detail-layer printable-detail" role="dialog" aria-modal="true" aria-labelledby="history-detail-title">
       <div className="history-detail-panel">
@@ -382,6 +395,12 @@ function QuotationDetailModal({ record, onClose, onPurchase }: { record: Quotati
           </div>
           <div className="detail-header-actions">
             <button className="button small" type="button" onClick={printA4Document}>PDF出力</button>
+            {mailtoLink ? (
+              <a className="button small" href={mailtoLink} data-testid="history-mail-link">メール作成</a>
+            ) : null}
+            {record.status === "draft" ? (
+              <button className="button small" type="button" onClick={() => onStatusChange(record, "sent")} data-testid="history-send-status">送付済みにする</button>
+            ) : null}
             {record.status === "approved" ? (
               <button className="button small" type="button" onClick={() => onPurchase(record)}>発注内容</button>
             ) : null}

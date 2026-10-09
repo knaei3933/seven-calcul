@@ -566,6 +566,7 @@ header .version-badge { display: none; }
 .history-calc-cards dl { display: grid; gap: 1.5mm; margin: 0; }
 .history-cost-breakdown { margin: 3mm 0 0; padding: 2mm 3mm; border: .2mm dashed #cbd5e1; border-radius: 2mm; background: #f8fafc; font-size: 11px; color: #374151; break-inside: avoid; }
 .history-cost-split td { color: #475569; }
+.badge { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .history-calc-cards dl div { display: flex; justify-content: space-between; gap: 3mm; }
 .history-calc-cards dt { color: #526075; font-size: 8pt; }
 .history-calc-cards dd { margin: 0; font-weight: 800; }

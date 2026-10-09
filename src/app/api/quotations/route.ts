@@ -257,6 +257,17 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!hasValidSimulatorProvenance(input)) {
       return NextResponse.json({ error: "calculation_provenance_invalid" }, { status: 400 });
     }
+    // 発行には顧客の必須情報（会社名・郵便番号・電話番号・住所）が必要。
+    const payload = input.payload as Record<string, unknown>;
+    const missingIssueFields = [
+      !input.customerName.trim() && "customerName",
+      !(typeof payload.customerPostalCode === "string" && payload.customerPostalCode.trim()) && "customerPostalCode",
+      !(typeof payload.customerTelephone === "string" && payload.customerTelephone.trim()) && "customerTelephone",
+      !(typeof payload.customerAddress === "string" && payload.customerAddress.trim()) && "customerAddress",
+    ].filter(Boolean) as string[];
+    if (missingIssueFields.length > 0) {
+      return NextResponse.json({ error: "issue_fields_required", missing: missingIssueFields }, { status: 400 });
+    }
     const record = await saveQuotation(input, user.id, user.role);
     const snapshot = readCalculationChecklistSnapshot(input.payload.calculationChecklistSnapshot);
     if (snapshot) {

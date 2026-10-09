@@ -195,6 +195,9 @@ function quotationBody(
     calculationVersion: "simulator-linked",
     resultHash: result.audit.resultJsonSha256,
     payload: {
+      customerPostalCode: "577-0051",
+      customerTelephone: "06-1234-5678",
+      customerAddress: "大阪府柏原市テスト1-1",
       printingMethod: draft.printingMethod,
       quantity: draft.quantity,
       filmOrderLengthM: draft.filmOrderLengthM,
@@ -432,6 +435,9 @@ describe("quotation calculation provenance", () => {
       resultHash: "",
       calculationFilmTotal: "0",
       payload: {
+        customerPostalCode: "577-0051",
+        customerTelephone: "06-1234-5678",
+        customerAddress: "大阪府柏原市テスト1-1",
         printingMethod: "digital",
         quantity: "10000",
         filmOrderLengthM: "500",

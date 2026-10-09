@@ -87,6 +87,7 @@ type QuoteForm = {
   grandTotalLabel: string;
   grandTotalDisplay: string;
   quantity: string;
+  skuNames: string[];
   fillingCostPerPiece: string;
   bulkCostPerPiece: string;
   bulkUnitDisplay: string;
@@ -172,6 +173,7 @@ const defaultQuote: QuoteForm = {
   grandTotalLabel: "合計（税込）",
   grandTotalDisplay: "",
   quantity: "10000",
+  skuNames: [],
   fillingCostPerPiece: "0",
   bulkCostPerPiece: "0",
   bulkUnitDisplay: "",
@@ -290,6 +292,7 @@ export default function PrintableQuotationPage() {
   const [checklistUrl, setChecklistUrl] = useState("");
   const [checklistOpening, setChecklistOpening] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [issueSuccessMessage, setIssueSuccessMessage] = useState("");
   const [quoteDraftStale, setQuoteDraftStale] = useState(false);
   const [selectedCandidateShortage, setSelectedCandidateShortage] = useState(false);
 	  const [mobileDrawer, setMobileDrawer] = useState<"left" | "right" | null>(null);
@@ -297,6 +300,69 @@ export default function PrintableQuotationPage() {
 	  const [expandedDesktopPanels, setExpandedDesktopPanels] = useState({ left: false, right: false });
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrderSnapshot | null>(null);
   const [calculationChecklistSnapshot, setCalculationChecklistSnapshot] = useState<CalculationChecklistSnapshot | null>(null);
+  const [customerMasterStatus, setCustomerMasterStatus] = useState<{ loading: boolean; message: string; saving: boolean }>({
+    loading: false,
+    message: "",
+    saving: false,
+  });
+
+  const loadCustomerMaster = async () => {
+    const code = form.customerCode.trim();
+    if (!code) {
+      setCustomerMasterStatus({ loading: false, message: "顧客コードを入力してください。", saving: false });
+      return;
+    }
+    setCustomerMasterStatus({ loading: true, message: "", saving: false });
+    try {
+      const response = await fetch(`/api/customers/${encodeURIComponent(code)}`);
+      const payload = await response.json();
+      if (!response.ok || !payload.customer) throw new Error("not_found");
+      const customer = payload.customer as {
+        customerCode: string; customerName: string; customerPostalCode?: string;
+        customerAddress?: string; customerContact?: string; customerTelephone?: string; customerEmail?: string;
+      };
+      applyPatch({
+        customerCode: customer.customerCode,
+        customerName: customer.customerName || "",
+        customerPostalCode: customer.customerPostalCode || "",
+        customerAddress: customer.customerAddress || "",
+        customerContact: customer.customerContact || "",
+        customerTelephone: customer.customerTelephone || "",
+        customerEmail: customer.customerEmail || "",
+      });
+      setCustomerMasterStatus({ loading: false, message: `顧客コード ${code} を読み込みました。`, saving: false });
+    } catch {
+      setCustomerMasterStatus({ loading: false, message: "登録されていない顧客コードです。入力後に保存できます。", saving: false });
+    }
+  };
+
+  const saveCustomerMaster = async () => {
+    const code = form.customerCode.trim();
+    if (!code || !form.customerName.trim()) {
+      setCustomerMasterStatus({ loading: false, message: "保存には顧客コードと会社名が必要です。", saving: false });
+      return;
+    }
+    setCustomerMasterStatus((old) => ({ ...old, saving: true, message: "" }));
+    try {
+      const response = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerCode: code,
+          customerName: form.customerName,
+          customerPostalCode: form.customerPostalCode,
+          customerAddress: form.customerAddress,
+          customerContact: form.customerContact,
+          customerTelephone: form.customerTelephone,
+          customerEmail: form.customerEmail,
+        }),
+      });
+      if (!response.ok) throw new Error();
+      setCustomerMasterStatus({ loading: false, message: `顧客コード ${code} を保存しました。`, saving: false });
+    } catch {
+      setCustomerMasterStatus({ loading: false, message: "顧客マスタを保存できませんでした。", saving: false });
+    }
+  };
 
   useEffect(() => {
     const MM_TO_PX = 96 / 25.4;
@@ -392,8 +458,11 @@ export default function PrintableQuotationPage() {
         const restoredForm = { ...defaultQuote };
         (Object.keys(defaultQuote) as (keyof QuoteForm)[]).forEach((key) => {
           const value = restored[key];
-          if (typeof value === "string") restoredForm[key] = value;
+          if (typeof value === "string" && !Array.isArray(restoredForm[key])) restoredForm[key] = value as never;
         });
+        if (Array.isArray(restored.skuNames) && restored.skuNames.every((name) => typeof name === "string")) {
+          restoredForm.skuNames = restored.skuNames as string[];
+        }
         restoredForm.calculationRequestJson = restored.calculationRequest
           ? JSON.stringify(restored.calculationRequest)
           : "";
@@ -421,6 +490,7 @@ export default function PrintableQuotationPage() {
           productName: draft.productSummary,
           sizeSummary: draft.sizeSummary,
           quantity: draft.quantity,
+          skuNames: draft.skuNamesRaw ?? [],
           customerName: draft.customerName ?? old.customerName,
           customerCode: draft.customerCode ?? old.customerCode,
           customerPostalCode: draft.customerPostalCode ?? old.customerPostalCode,
@@ -498,6 +568,10 @@ export default function PrintableQuotationPage() {
   const saveToHistory = async (): Promise<string | false> => {
     if (!totals) return false;
     if (!shownTotals) return false;
+    if (!issueReady) {
+      setSaveError(`発行に必要な情報が不足しています：${missingIssueFields.join("・")}`);
+      return false;
+    }
     setSaving(true);
     setSaveError("");
     try {
@@ -547,6 +621,7 @@ export default function PrintableQuotationPage() {
         body: JSON.stringify({
           ...form,
           status: "draft",
+          productName: form.skuNames.filter((name) => name.trim()).join(" / ") || form.productName,
           filmCostPerPiece: D(form.filmCostPerPiece).plus(form.copperPlateCostPerPiece).toString(),
           pricePerPiece: shownTotals.pricePerPiece.toString(),
           subtotal: shownTotals.subtotal.toString(),
@@ -592,6 +667,7 @@ export default function PrintableQuotationPage() {
       setChecklistUrl(checklistUrl);
       sessionStorage.setItem(LAST_CHECKLIST_URL_KEY, checklistUrl);
       setSavedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
+      setIssueSuccessMessage(`見積書を発行しました（${form.quotationNumber || payload.record.quotationNumber}）。履歴からPDF出力・メール作成ができます。`);
       return checklistUrl;
     } catch {
       setSaveError("履歴DBに保存できませんでした。テスト環境ではデータが保持されない場合があります。");
@@ -644,7 +720,18 @@ export default function PrintableQuotationPage() {
   && !!parsedCustomQuantity && parsedCustomQuantity.gt(0)
     && !!parsedTargetMargin && parsedTargetMargin.gt(0) && parsedTargetMargin.lt(1)
     && !!parsedTaxRatePercent && parsedTaxRatePercent.gte(0);
+  // 발행 필수: 회사명·우편번호·전화번호·주소 + 전 SKU 제품명.
+  const missingIssueFields: string[] = [];
+  if (!form.customerName.trim()) missingIssueFields.push("会社名");
+  if (!form.customerPostalCode.trim()) missingIssueFields.push("郵便番号");
+  if (!form.customerTelephone.trim()) missingIssueFields.push("電話番号");
+  if (!form.customerAddress.trim()) missingIssueFields.push("住所");
+  form.skuNames.forEach((name, index) => {
+    if (!name.trim()) missingIssueFields.push(`製品名（SKU-${index + 1}）`);
+  });
+  const issueReady = valid && missingIssueFields.length === 0;
   const linkedQuoteActionsDisabled = !valid || saving || quoteDraftStale;
+  const issueButtonDisabled = !issueReady || saving || quoteDraftStale;
 
   const totals = (() => {
     if (!valid || !parsedQuantity || !parsedTargetMargin || !parsedTaxRatePercent || !parsedFillingCost || !parsedFilmCost || !parsedCopperCost || !parsedCustomLotCost || !parsedCustomQuantity || !parsedFilmMeterPrice || !parsedFilmOrderLength) return null;
@@ -1192,7 +1279,12 @@ export default function PrintableQuotationPage() {
       <section className="panel quote-toolbar" aria-labelledby="quote-toolbar-title">
         <div>
           <h1 id="quote-toolbar-title">見積書発行</h1>
-          <p>中央のA4見積書を直接編集できます。金額・数量・文面をクリックしてその場で修正してください。</p>
+          <p>顧客情報・製品名を入力して「見積書を発行」で確定します。中央のA4見積書は直接編集できます。</p>
+          {issueReady ? null : (
+            <p className="warning" role="status" data-testid="issue-missing-fields">
+              発行に必要な情報が不足しています：{missingIssueFields.join("・")}
+            </p>
+          )}
           <p className="help" data-testid="quote-source">
             {sourceVersion ? `原価計算結果連携済み / 計算ID ${sourceVersion.slice(0, 12)}` : "原価シミュレーター未連携。手入力または「原価値を取込」後に出力できます。"}
           </p>
@@ -1209,7 +1301,7 @@ export default function PrintableQuotationPage() {
         </div>
         <div className="toolbar-actions no-print">
           <button className="button secondary" type="button" onClick={() => router.push("/")}>シミュレーターから取込</button>
-          <button className="button secondary" type="button" data-testid="save-history" disabled={linkedQuoteActionsDisabled} onClick={() => void saveToHistory()}>{saving ? "保存中..." : savedAt ? `履歴保存済 ${savedAt}` : "履歴に保存"}</button>
+          <button className="button secondary" type="button" data-testid="save-history" disabled={issueButtonDisabled} onClick={() => void saveToHistory()}>{saving ? "発行中..." : savedAt ? `発行済 ${savedAt}` : "見積書を発行"}</button>
           <button className="button" type="button" data-testid="print-pdf" disabled={linkedQuoteActionsDisabled} onClick={() => void printPdf()}>PDF出力（A4）</button>
           <button
             className="button secondary"
@@ -1223,6 +1315,11 @@ export default function PrintableQuotationPage() {
           </button>
         </div>
         {saveError ? <p className="error" role="alert" data-testid="save-error">{saveError}</p> : null}
+        {issueSuccessMessage ? (
+          <p className="help" role="status" data-testid="issue-success">
+            {issueSuccessMessage} <button className="button secondary small" type="button" onClick={() => router.push("/history")}>履歴を見る</button>
+          </p>
+        ) : null}
       </section>
 
       <div
@@ -1309,7 +1406,7 @@ export default function PrintableQuotationPage() {
                 : "-"}</dd></div>
               <div><dt>フィルム構成</dt><dd><EditableText value={form.filmComposition || DEFAULT_FILM_COMPOSITION} label="フィルム構成" onCommit={(next) => update("filmComposition", next.trim())} /></dd></div>
               {calculationChecklistSnapshot?.skus?.length ? (
-                <div><dt>SKU</dt><dd>{calculationChecklistSnapshot.skus.map((sku) => `${sku.name} ／ ${formatNumber(sku.quantity)}枚`).join("　")}</dd></div>
+                <div><dt>SKU</dt><dd>{calculationChecklistSnapshot.skus.map((sku, index) => `${form.skuNames[index]?.trim() || sku.name} ／ ${formatNumber(sku.quantity)}枚`).join("　")}</dd></div>
               ) : null}
             </dl>
           </section>
@@ -1510,9 +1607,31 @@ export default function PrintableQuotationPage() {
   );
 
   function renderEditorGroups(position: "left" | "right") {
-    if (position === "left") {
-      return (
-        <>
+  if (position === "left") {
+    return (
+      <>
+          <details className="editor-group" open>
+            <summary>顧客情報（発行に必須）</summary>
+            <div className="editor-grid">
+              <label>顧客コード（空欄可）<input value={form.customerCode} onChange={(event) => update("customerCode", event.target.value)} placeholder="マスタから読込" /></label>
+              <div className="wide">
+                <div className="button-row">
+                  <button className="button secondary small" type="button" onClick={() => void loadCustomerMaster()}>マスタから読込</button>
+                  <button className="button secondary small" type="button" disabled={customerMasterStatus.saving || !form.customerCode.trim() || !form.customerName.trim()} onClick={() => void saveCustomerMaster()}>
+                    {customerMasterStatus.saving ? "保存中..." : "顧客マスタに保存"}
+                  </button>
+                </div>
+                {customerMasterStatus.message ? <p className="help" role="status">{customerMasterStatus.message}</p> : null}
+              </div>
+              <label>会社名 ★必須<input value={form.customerName} onChange={(event) => update("customerName", event.target.value)} placeholder="株式会社◯◯" /></label>
+              <label>郵便番号 ★必須<input value={form.customerPostalCode} onChange={(event) => update("customerPostalCode", event.target.value)} placeholder="123-4567" /></label>
+              <label className="wide">住所 ★必須<input value={form.customerAddress} onChange={(event) => update("customerAddress", event.target.value)} /></label>
+              <label>電話番号 ★必須<input value={form.customerTelephone} onChange={(event) => update("customerTelephone", event.target.value)} /></label>
+              <label>担当者（任意）<input value={form.customerContact} onChange={(event) => update("customerContact", event.target.value)} placeholder="◯◯様" /></label>
+              <label className="wide">メールアドレス（任意・送信時必須）<input inputMode="email" value={form.customerEmail} onChange={(event) => update("customerEmail", event.target.value)} /></label>
+            </div>
+          </details>
+
           <details className="editor-group" open>
             <summary>基本情報・宛先</summary>
             <div className="editor-grid">

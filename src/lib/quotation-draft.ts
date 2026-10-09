@@ -36,6 +36,8 @@ export interface QuotationDraft {
   calculationVersion: string;
   resultHash: string;
   calculationFilmTotal: string;
+  /** 시뮬레이터에 입력한 원시 SKU 제품명(자동 채움 전). 발행 필수 검증에 사용. */
+  skuNamesRaw?: string[];
   calculationRequest?: CalculationInput;
   customerName?: string;
   customerCode?: string;
@@ -168,6 +170,8 @@ export function buildQuotationDraft(
     calculationVersion: result.audit.calculationVersion,
     resultHash: result.audit.resultJsonSha256,
     calculationFilmTotal: result.film.filmTotal,
+    // 자동 채움(充填物N) 전의 원시 제품명. 발행 필수 검증에 사용.
+    skuNamesRaw: (context.skus ?? []).map((sku) => sku.name?.trim() ?? ""),
     calculationRequest: context.calculationRequest,
     printingMethod: context.printingMethod,
     customerName: context.customerName,
