@@ -295,9 +295,6 @@ export default function PrintableQuotationPage() {
   const [issueSuccessMessage, setIssueSuccessMessage] = useState("");
   const [quoteDraftStale, setQuoteDraftStale] = useState(false);
   const [selectedCandidateShortage, setSelectedCandidateShortage] = useState(false);
-	  const [mobileDrawer, setMobileDrawer] = useState<"left" | "right" | null>(null);
-	  const [isMobileWorkspace, setIsMobileWorkspace] = useState(false);
-	  const [expandedDesktopPanels, setExpandedDesktopPanels] = useState({ left: false, right: false });
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrderSnapshot | null>(null);
   const [calculationChecklistSnapshot, setCalculationChecklistSnapshot] = useState<CalculationChecklistSnapshot | null>(null);
   const [customerMasterStatus, setCustomerMasterStatus] = useState<{ loading: boolean; message: string; saving: boolean }>({
@@ -409,35 +406,6 @@ export default function PrintableQuotationPage() {
       window.removeEventListener("afterprint", resetFit);
     };
   }, []);
-
-  useEffect(() => {
-    const query = window.matchMedia("(max-width: 1200px)");
-    const update = () => setIsMobileWorkspace(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-
-	  useEffect(() => {
-	    if (!mobileDrawer) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileDrawer(null);
-    };
-    window.addEventListener("keydown", onKeyDown);
-	    return () => window.removeEventListener("keydown", onKeyDown);
-	  }, [mobileDrawer]);
-
-	  const toggleSidePanel = (side: "left" | "right") => {
-	    if (isMobileWorkspace) {
-	      setMobileDrawer((current) => (current === side ? null : side));
-	      return;
-	    }
-	    setExpandedDesktopPanels((current) => ({ ...current, [side]: !current[side] }));
-	  };
-
-	  const isSidePanelExpanded = (side: "left" | "right") => (
-	    isMobileWorkspace ? mobileDrawer === side : expandedDesktopPanels[side]
-	  );
 
   useEffect(() => {
     try {
@@ -1275,7 +1243,7 @@ export default function PrintableQuotationPage() {
   };
 
   return (
-    <main className={`quote-page ${mobileDrawer ? `drawer-open drawer-${mobileDrawer}` : ""}`}>
+    <main className="quote-page">
       <section className="quote-header" aria-labelledby="quote-toolbar-title">
         <div className="quote-header-top">
           <div className="quote-header-title">
@@ -1283,7 +1251,6 @@ export default function PrintableQuotationPage() {
             <div className="quote-status-chips">
               {sourceVersion ? (
                 <span className="chip chip-ok" title={sourceVersion}>
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="2"/><path d="M5 8.5l2 2 4-4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   連携済み
                 </span>
               ) : (
@@ -1352,35 +1319,7 @@ export default function PrintableQuotationPage() {
         </section>
       ) : null}
 
-      <div
-        className={`quote-workspace ${mobileDrawer ? `drawer-open drawer-${mobileDrawer}` : ""} ${
-          !isMobileWorkspace && !expandedDesktopPanels.left ? "left-collapsed" : ""
-        } ${!isMobileWorkspace && !expandedDesktopPanels.right ? "right-collapsed" : ""}`}
-      >
-	        <aside
-	          className={`panel quote-side quote-side-left no-print ${!isSidePanelExpanded("left") ? "desktop-collapsed" : ""}`}
-	          id="quote-editor-left"
-	          data-testid="quote-editor-left"
-	          aria-label="見積書基本編集"
-	          inert={isMobileWorkspace && mobileDrawer !== "left" ? true : undefined}
-	        >
-	          <div className="side-header">
-	            <span className="side-kicker">LEFT</span>
-	            <h2>基本・宛先</h2>
-	            <button
-	              className="side-toggle"
-	              type="button"
-	              data-testid="toggle-editor-left"
-	              aria-expanded={isSidePanelExpanded("left")}
-	              onClick={() => toggleSidePanel("left")}
-	            >
-	              {isSidePanelExpanded("left") ? "閉じる" : "開く"}
-	            </button>
-          </div>
-          <div className="side-body">{renderEditorGroups("left")}</div>
-        </aside>
-
-        <div className="sheet-scroll">
+      <div className="sheet-scroll">
           <article className="a4-sheet" aria-label="お見積書A4プレビュー" id="quote-preview">
           <div className="quote-a4-fit" ref={quoteFitRef}>
           <header className="sheet-header">
@@ -1598,241 +1537,11 @@ export default function PrintableQuotationPage() {
           </footer>
           </div>
           </article>
-        </div>
-
-	        <aside
-	          className={`panel quote-side quote-side-right no-print ${!isSidePanelExpanded("right") ? "desktop-collapsed" : ""}`}
-	          id="quote-editor-right"
-	          data-testid="quote-editor-right"
-	          aria-label="見積書金額編集"
-	          inert={isMobileWorkspace && mobileDrawer !== "right" ? true : undefined}
-	        >
-	          <div className="side-header">
-	            <span className="side-kicker">RIGHT</span>
-	            <h2>明細・金額</h2>
-	            <button
-	              className="side-toggle"
-	              type="button"
-	              data-testid="toggle-editor-right"
-	              aria-expanded={isSidePanelExpanded("right")}
-	              onClick={() => toggleSidePanel("right")}
-	            >
-	              {isSidePanelExpanded("right") ? "閉じる" : "開く"}
-	            </button>
-          </div>
-          <div className="side-body">{renderEditorGroups("right")}</div>
-        </aside>
       </div>
 
-      <div className="quote-edge-handles no-print" aria-label="見積書編集クイック操作">
-        <button type="button" onClick={() => setMobileDrawer("left")} aria-expanded={mobileDrawer === "left"}>基本</button>
-        <button className="print-button" type="button" disabled={linkedQuoteActionsDisabled} onClick={() => void printPdf()}>PDF</button>
-        <button type="button" onClick={() => setMobileDrawer("right")} aria-expanded={mobileDrawer === "right"}>金額</button>
-      </div>
 
-      {isMobileWorkspace && mobileDrawer ? (
-        <div className="quote-drawer-overlay no-print" onClick={() => setMobileDrawer(null)} aria-hidden="true" />
-      ) : null}
     </main>
   );
-
-  function renderEditorGroups(position: "left" | "right") {
-  if (position === "left") {
-    return (
-      <>
-          <details className="editor-group" open>
-            <summary>顧客情報（発行に必須）</summary>
-            <div className="editor-grid">
-              <label>顧客コード（空欄可）<input value={form.customerCode} onChange={(event) => update("customerCode", event.target.value)} placeholder="マスタから読込" /></label>
-              <div className="wide">
-                <div className="button-row">
-                  <button className="button secondary small" type="button" onClick={() => void loadCustomerMaster()}>マスタから読込</button>
-                  <button className="button secondary small" type="button" disabled={customerMasterStatus.saving || !form.customerCode.trim() || !form.customerName.trim()} onClick={() => void saveCustomerMaster()}>
-                    {customerMasterStatus.saving ? "保存中..." : "顧客マスタに保存"}
-                  </button>
-                </div>
-                {customerMasterStatus.message ? <p className="help" role="status">{customerMasterStatus.message}</p> : null}
-              </div>
-              <label>会社名 ★必須<input value={form.customerName} onChange={(event) => update("customerName", event.target.value)} placeholder="株式会社◯◯" /></label>
-              <label>郵便番号 ★必須<input value={form.customerPostalCode} onChange={(event) => update("customerPostalCode", event.target.value)} placeholder="123-4567" /></label>
-              <label className="wide">住所 ★必須<input value={form.customerAddress} onChange={(event) => update("customerAddress", event.target.value)} /></label>
-              <label>電話番号 ★必須<input value={form.customerTelephone} onChange={(event) => update("customerTelephone", event.target.value)} /></label>
-              <label>担当者（任意）<input value={form.customerContact} onChange={(event) => update("customerContact", event.target.value)} placeholder="◯◯様" /></label>
-              <label className="wide">メールアドレス（任意・送信時必須）<input inputMode="email" value={form.customerEmail} onChange={(event) => update("customerEmail", event.target.value)} /></label>
-            </div>
-          </details>
-
-          <details className="editor-group" open>
-            <summary>基本情報・宛先</summary>
-            <div className="editor-grid">
-              <label>見積番号<input value={form.quotationNumber} onChange={(event) => update("quotationNumber", event.target.value)} /></label>
-              <label>発行日<input type="date" value={form.issueDate} onChange={(event) => update("issueDate", event.target.value)} /></label>
-              <label>有効期限<input type="date" value={form.validUntil} onChange={(event) => update("validUntil", event.target.value)} /></label>
-              <label>文書タイトル<input value={form.documentHeading} onChange={(event) => update("documentHeading", event.target.value)} /></label>
-              <label>文書英字タイトル<input value={form.documentEnglish} onChange={(event) => update("documentEnglish", event.target.value)} /></label>
-              <label>顧客コード<input value={form.customerCode} onChange={(event) => update("customerCode", event.target.value)} /></label>
-              <label>得意先名<input value={form.customerName} onChange={(event) => update("customerName", event.target.value)} placeholder="株式会社◯◯" /></label>
-              <label>得意先郵便番号<input value={form.customerPostalCode} onChange={(event) => update("customerPostalCode", event.target.value)} /></label>
-              <label className="wide">得意先住所<input value={form.customerAddress} onChange={(event) => update("customerAddress", event.target.value)} /></label>
-              <label>得意先担当者<input value={form.customerContact} onChange={(event) => update("customerContact", event.target.value)} placeholder="◯◯様" /></label>
-              <label>得意先電話番号<input value={form.customerTelephone} onChange={(event) => update("customerTelephone", event.target.value)} /></label>
-              <label>得意先メールアドレス<input value={form.customerEmail} onChange={(event) => update("customerEmail", event.target.value)} /></label>
-              <label className="wide">宛先文言<textarea rows={4} value={form.greeting} onChange={(event) => update("greeting", event.target.value)} /></label>
-            </div>
-          </details>
-
-          <details className="editor-group" open>
-            <summary>発行者情報</summary>
-            <div className="editor-grid">
-              <label>発行者名<input value={form.issuerName} onChange={(event) => update("issuerName", event.target.value)} /></label>
-              <label>発行者英字名<input value={form.issuerEnglishName} onChange={(event) => update("issuerEnglishName", event.target.value)} /></label>
-              <label>代表者<input value={form.representative} onChange={(event) => update("representative", event.target.value)} /></label>
-              <label>郵便番号<input value={form.issuerPostalCode} onChange={(event) => update("issuerPostalCode", event.target.value)} /></label>
-              <label className="wide">住所<input value={form.issuerAddress} onChange={(event) => update("issuerAddress", event.target.value)} /></label>
-              <label>電話番号<input value={form.issuerTelephone} onChange={(event) => update("issuerTelephone", event.target.value)} /></label>
-              <label>ウェブサイト<input value={form.issuerWebsite} onChange={(event) => update("issuerWebsite", event.target.value)} /></label>
-            </div>
-          </details>
-
-          <details className="editor-group">
-            <summary>条件・備考・社内判</summary>
-            <div className="editor-grid">
-              <label>納期<input value={form.deliveryDate} onChange={(event) => update("deliveryDate", event.target.value)} /></label>
-              <label>お支払条件<input value={form.paymentTerms} onChange={(event) => update("paymentTerms", event.target.value)} /></label>
-              <label className="wide">備考<textarea rows={4} value={form.notes} onChange={(event) => update("notes", event.target.value)} /></label>
-              <label>社内判文言<input value={form.sealText} onChange={(event) => update("sealText", event.target.value)} /></label>
-              <label className="wide">フッター文言<textarea rows={3} value={form.footerNote} onChange={(event) => update("footerNote", event.target.value)} /></label>
-            </div>
-          </details>
-        </>
-      );
-    }
-
-    return (
-      <>
-        {renderQuotationGuide()}
-      <details className="editor-group">
-        <summary>明細・金額</summary>
-        <div className="editor-grid">
-          <label>品名<input value={form.productName} onChange={(event) => update("productName", event.target.value)} /></label>
-          <label>仕様<input value={form.sizeSummary} onChange={(event) => update("sizeSummary", event.target.value)} /></label>
-          <label>数量（枚）<input inputMode="numeric" value={form.quantity} onChange={(event) => update("quantity", event.target.value)} /></label>
-          <label>充填・加工 項目名<input value={form.fillingItemName} onChange={(event) => update("fillingItemName", event.target.value)} /></label>
-          <label className="wide">充填・加工 説明<textarea rows={2} value={form.fillingItemDescription} onChange={(event) => update("fillingItemDescription", event.target.value)} /></label>
-          <label>充填・加工 単価（空欄=自動）<input inputMode="decimal" value={form.fillingUnitDisplay} onChange={(event) => update("fillingUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>充填・加工 金額（空欄=自動）<input inputMode="decimal" value={form.fillingAmountDisplay} onChange={(event) => update("fillingAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>バルク 原価 / 枚（0＝貴社支給）<input inputMode="decimal" value={form.bulkCostPerPiece} onChange={(event) => applyPatch({
-            bulkCostPerPiece: event.target.value,
-            bulkUnitDisplay: "",
-            bulkAmountDisplay: "",
-            fillingUnitDisplay: "",
-            fillingAmountDisplay: "",
-            filmUnitDisplay: "",
-            filmPouchUnitDisplay: "",
-            filmAmountDisplay: "",
-            subtotalDisplay: "",
-            taxDisplay: "",
-            grandTotalDisplay: "",
-          })} /></label>
-          <label>バルク 販売単価（空欄=自動・非表示可）<input inputMode="decimal" value={form.bulkUnitDisplay} onChange={(event) => update("bulkUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>バルク 金額（空欄=自動）<input inputMode="decimal" value={form.bulkAmountDisplay} onChange={(event) => update("bulkAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>金型 原価（ロット合計）<input inputMode="decimal" value={form.customLotCost} onChange={(event) => update("customLotCost", event.target.value)} /></label>
-          <label>金型 数量（式）<input inputMode="decimal" value={form.customQuantity} onChange={(event) => update("customQuantity", event.target.value)} /></label>
-          <label>金型 単価（空欄=自動）<input inputMode="decimal" value={form.customUnitDisplay} onChange={(event) => update("customUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>金型 金額（空欄=自動）<input inputMode="decimal" value={form.customAmountDisplay} onChange={(event) => update("customAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>金型 項目名<input value={form.customItemName} onChange={(event) => update("customItemName", event.target.value)} /></label>
-          <label className="wide">金型 説明<textarea rows={2} value={form.customItemDescription} onChange={(event) => update("customItemDescription", event.target.value)} /></label>
-          <label>銅版費 原価 / 枚<input inputMode="decimal" value={form.copperPlateCostPerPiece} onChange={(event) => update("copperPlateCostPerPiece", event.target.value)} /></label>
-          {form.printingMethod === "gravure" && (calculationChecklistSnapshot?.sascheCandidates?.length ?? 0) > 0 ? (
-            <>
-            <label className="wide">
-              Sasche 発注候補（推奨＝バランス）
-              <select
-                value={form.sascheCandidateId}
-                onChange={(event) => selectSascheCandidate(event.target.value)}
-              >
-                {(calculationChecklistSnapshot?.sascheCandidates ?? []).map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.laneCount}丁 / {candidate.printTierM}m印刷 / 約{formatNumber(candidate.outputLengthM, 0)}m /
-                    調整後数量 {formatNumber(candidate.adjustedQuantity, 0)}枚 /
-                    数量減 {formatNumber(Number(candidate.quantityReductionRatio), 1)}% /
-                    フィルム {formatCurrency(candidate.filmTotalYen, 0)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {Number(form.copperColorCount) > 0 && Number(form.quantity) > 0 && Number(candidateQuantityReductionRatio) > 15 ? (
-              <p className="warning wide">
-                選択した候補は発注数量を15%以上減らします（{formatNumber(Number(candidateQuantityReductionRatio), 1)}%減）。理由を入力してください。
-              </p>
-            ) : null}
-            </>
-          ) : null}
-          <label>銅版費 単価 /色（空欄=自動）<input inputMode="decimal" value={form.copperUnitDisplay} onChange={(event) => update("copperUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>銅版費 色数<input inputMode="decimal" value={form.copperColorCount} onChange={(event) => update("copperColorCount", event.target.value)} /></label>
-          <label>銅版費 金額（空欄=自動）<input inputMode="decimal" value={form.copperAmountDisplay} onChange={(event) => update("copperAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>銅版費 項目名<input value={form.copperItemName} onChange={(event) => update("copperItemName", event.target.value)} /></label>
-          <label className="wide">銅版費 説明<textarea rows={2} value={form.copperItemDescription} onChange={(event) => update("copperItemDescription", event.target.value)} /></label>
-          <label>フィルム 項目名<input value={form.filmItemName} onChange={(event) => update("filmItemName", event.target.value)} /></label>
-          <label className="wide">フィルム 説明<textarea rows={2} value={form.filmItemDescription} onChange={(event) => update("filmItemDescription", event.target.value)} /></label>
-          <label className="wide">フィルム構成<input value={form.filmComposition} onChange={(event) => update("filmComposition", event.target.value)} placeholder={DEFAULT_FILM_COMPOSITION} /></label>
-          <label>フィルム 仕入m単価（参考）<input inputMode="decimal" value={form.filmMeterPrice} onChange={(event) => update("filmMeterPrice", event.target.value)} /></label>
-          <label>フィルム発注長さ (m)<input inputMode="decimal" value={form.filmOrderLengthM} onChange={(event) => update("filmOrderLengthM", event.target.value)} /></label>
-          <label>{form.printingMethod === "gravure" ? "フィルム 販売m単価（空欄=残額配分自動）" : "フィルム 販売m単価（380〜480 / 空欄=発注長別自動）"}<input inputMode="decimal" value={form.filmUnitDisplay} onChange={(event) => update("filmUnitDisplay", event.target.value)} placeholder={form.printingMethod === "gravure" ? "自動計算" : "自動：500m=450 / 1,000m=410 / 1,500m=380"} /></label>
-          <label>フィルム パウチ換算（参考・空欄=自動）<input inputMode="decimal" value={form.filmPouchUnitDisplay} onChange={(event) => update("filmPouchUnitDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>フィルム 金額（空欄=自動）<input inputMode="decimal" value={form.filmAmountDisplay} onChange={(event) => update("filmAmountDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>端数調整 項目名<input value={form.roundingItemName} onChange={(event) => update("roundingItemName", event.target.value)} /></label>
-          <label className="wide">端数調整 説明<textarea rows={2} value={form.roundingItemDescription} onChange={(event) => update("roundingItemDescription", event.target.value)} /></label>
-          <label>端数調整 金額（空欄=自動）<input inputMode="decimal" value={form.adjustmentDisplay} onChange={(event) => update("adjustmentDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>見積単価 / 枚（空欄=自動）<input inputMode="decimal" value={form.pricePerPieceDisplay} onChange={(event) => applyPatch({
-            pricePerPieceDisplay: event.target.value,
-            fillingUnitDisplay: "",
-            bulkUnitDisplay: "",
-            bulkAmountDisplay: "",
-            fillingAmountDisplay: "",
-            filmUnitDisplay: "",
-            filmPouchUnitDisplay: "",
-            filmAmountDisplay: "",
-            copperUnitDisplay: "",
-            copperAmountDisplay: "",
-            customUnitDisplay: "",
-            customAmountDisplay: "",
-            adjustmentDisplay: "",
-            subtotalDisplay: "",
-            taxDisplay: "",
-            grandTotalDisplay: "",
-          })} placeholder="自動計算" /></label>
-          <label>小計ラベル<input value={form.subtotalLabel} onChange={(event) => update("subtotalLabel", event.target.value)} /></label>
-          <label>小計（空欄=自動）<input inputMode="decimal" value={form.subtotalDisplay} onChange={(event) => update("subtotalDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>消費税ラベル（空欄=自動）<input value={form.taxLabel} onChange={(event) => update("taxLabel", event.target.value)} placeholder={`消費税（${formatNumber(Number(form.taxRatePercent), 0)}%）`} /></label>
-          <label>消費税率（%）<input inputMode="decimal" value={form.taxRatePercent} onChange={(event) => update("taxRatePercent", event.target.value)} /></label>
-          <label>消費税（空欄=自動）<input inputMode="decimal" value={form.taxDisplay} onChange={(event) => update("taxDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>合計ラベル<input value={form.grandTotalLabel} onChange={(event) => update("grandTotalLabel", event.target.value)} /></label>
-          <label>合計（空欄=自動）<input inputMode="decimal" value={form.grandTotalDisplay} onChange={(event) => update("grandTotalDisplay", event.target.value)} placeholder="自動計算" /></label>
-          <label>目標利益率（%）<input inputMode="decimal" value={isFiniteNumber(form.targetMargin) ? D(form.targetMargin).times(100).toDecimalPlaces(2, Decimal.ROUND_DOWN).toString() : ""} onChange={(event) => {
-            const raw = event.target.value.trim();
-            if (raw === "") {
-              updateTargetMargin("");
-              return;
-            }
-            const percent = Number(raw);
-            if (Number.isFinite(percent)) updateTargetMargin((percent / 100).toString());
-          }} /></label>
-          {shownTotals && parsedCopperCost && parsedQuantity && parsedTargetMargin && parsedTargetMargin.gt(0) && parsedTargetMargin.lt(1) ? (
-            <div className="chain copper-cost-audit" data-testid="copper-cost-audit">
-              <strong>銅版費の計算確認（非印刷）</strong>
-              <p>
-                原価 = {formatCurrency(parsedCopperCost.times(parsedQuantity).toString())}（{formatCurrency(D(parsedCopperCost.times(parsedQuantity)).div(parseDecimal(form.copperColorCount) ?? D(1)).toString())} /色）<br />
-                銅版目標利益率 = {formatNumber(COPPER_TARGET_MARGIN.times(100).toString(), 0)}%<br />
-                見積金額 = {formatCurrency(shownTotals.copperAmount)}（{formatCurrency(shownTotals.copperColorUnit)} /色・1円単位切上げ）
-              </p>
-            </div>
-          ) : null}
-        </div>
-      </details>
-      </>
-    );
-  }
 
   function renderQuotationGuide() {
     const isPriceOverride = isFiniteNumber(form.pricePerPieceDisplay);

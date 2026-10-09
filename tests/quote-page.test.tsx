@@ -126,63 +126,7 @@ describe("quotation page stale draft", () => {
 	    expect(a4Sheet).not.toHaveTextContent("PDF掲載金額に12%の販売マージン");
 	  });
 
-	  it("keeps side editor cards collapsed by default and lets users expand them independently", async () => {
-	    const user = userEvent.setup();
-	    render(<QuotePage />);
-
-	    const leftPanel = screen.getByTestId("quote-editor-left");
-	    const rightPanel = screen.getByTestId("quote-editor-right");
-	    expect(leftPanel).toHaveClass("desktop-collapsed");
-	    expect(rightPanel).toHaveClass("desktop-collapsed");
-
-	    await user.click(screen.getByTestId("toggle-editor-left"));
-	    expect(leftPanel).not.toHaveClass("desktop-collapsed");
-	    expect(rightPanel).toHaveClass("desktop-collapsed");
-
-	    await user.click(screen.getByTestId("toggle-editor-right"));
-	    expect(leftPanel).not.toHaveClass("desktop-collapsed");
-	    expect(rightPanel).not.toHaveClass("desktop-collapsed");
-
-	    await user.click(screen.getByTestId("toggle-editor-left"));
-	    expect(leftPanel).toHaveClass("desktop-collapsed");
-	    expect(rightPanel).not.toHaveClass("desktop-collapsed");
-	  });
-
-  it("keeps mold amount and an edited subtotal reconciled across line edits", async () => {
-    const user = userEvent.setup();
-    render(<QuotePage />);
-    await user.click(screen.getByTestId("toggle-editor-right"));
-
-    await user.clear(screen.getByLabelText("金型 原価（ロット合計）"));
-    await user.type(screen.getByLabelText("金型 原価（ロット合計）"), "30000");
-    await user.clear(screen.getByLabelText("フィルム発注長さ (m)"));
-    await user.type(screen.getByLabelText("フィルム発注長さ (m)"), "50");
-
-    const moldAmount = screen.getByLabelText("金型金額");
-    await waitFor(() => expect(moldAmount).toHaveTextContent("50,000"));
-
-    const editAmount = async (label: string, value: string) => {
-      const node = screen.getByLabelText(label);
-      node.focus();
-      document.getSelection()?.selectAllChildren(node);
-      await user.keyboard(value);
-      await user.tab();
-    };
-    await editAmount("充填・加工金額", "10000");
-    await editAmount("フィルム金額", "10000");
-    await expect(screen.getByLabelText("金型金額")).toHaveTextContent("50,000");
-
-    await editAmount("小計", "90000");
-    const fillingAmount = screen.getByLabelText("充填・加工金額");
-    const filmAmount = screen.getByLabelText("フィルム金額");
-    const subtotal = screen.getByLabelText("小計");
-    expect(fillingAmount.textContent?.match(/[0-9]/)).toBeTruthy();
-    expect(filmAmount.textContent?.match(/[0-9]/)).toBeTruthy();
-    expect(screen.getByLabelText("金型金額")).toHaveTextContent("50,000");
-    expect(subtotal).toHaveTextContent("90,000");
-  });
-
-  it("stores a manually edited filling unit and its recalculated totals into history", async () => {
+	  it("stores a manually edited filling unit and its recalculated totals into history", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ record: { id: 71 } }), {
       status: 201,
