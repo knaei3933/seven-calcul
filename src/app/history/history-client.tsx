@@ -449,7 +449,9 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
             ) : null}
             {record.status === "draft" && typeof record.payload.customerEmail === "string" && record.payload.customerEmail.trim() ? (
               <button className="button small" type="button" disabled={sendingEmail} onClick={() => onSendEmail(record)} data-testid="history-auto-send">
-                {sendingEmail ? "送信中..." : "自動送信"}
+                <span title="保存済みの顧客メールアドレスへ見積案内メールを送信し、状態を送付済みにします。PDFは添付されません。">
+                  {sendingEmail ? "送信中..." : "メール送信（PDFなし）"}
+                </span>
               </button>
             ) : null}
             {record.status === "draft" ? (
