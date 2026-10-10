@@ -283,6 +283,11 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
   // 발행 시 자동 생성된 필름 견적서(payload 저장분)를 우선 사용, 없으면 조회 시 생성
   const storedFilmQuotation = record.payload.filmQuotation as import("@/lib/film-quotation").FilmQuotationData | undefined;
   const filmQuotation = storedFilmQuotation ?? buildFilmQuotationFromRecord(record);
+  const calculationChecklistSnapshot = record.payload.calculationChecklistSnapshot as {
+    fillMlPerChamber?: string;
+    connectedChambers?: number;
+    totalFillMlPerPouch?: string;
+  } | null | undefined;
   const snapshotCalculationVersion = typeof record.payload.calculationChecklistSnapshot === "object"
     && record.payload.calculationChecklistSnapshot !== null
     && typeof (record.payload.calculationChecklistSnapshot as { calculationVersion?: unknown }).calculationVersion === "string"
@@ -494,7 +499,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                     {calculationChecklistSnapshot ? (
                       <>
                         <div><dt>充填量</dt><dd>{formatNumber(Number(calculationChecklistSnapshot.fillMlPerChamber))}ml/室 × {calculationChecklistSnapshot.connectedChambers}室 ＝ {formatNumber(Number(calculationChecklistSnapshot.totalFillMlPerPouch))}ml/枚</dd></div>
-                        <div><dt>パウチ数量</dt><dd>{Number(filmQuotation.quantity).toLocaleString("ja-JP")} 枚（総室数 {Number(D(filmQuotation.quantity).times(calculationChecklistSnapshot.connectedChambers)).toLocaleString("ja-JP")} 室）</dd></div>
+                        <div><dt>パウチ数量</dt><dd>{Number(filmQuotation.quantity).toLocaleString("ja-JP")} 枚（総室数 {Number(D(filmQuotation.quantity).times(calculationChecklistSnapshot?.connectedChambers ?? 1)).toLocaleString("ja-JP")} 室）</dd></div>
                       </>
                     ) : null}
                     <div><dt>発注フィルム</dt><dd>原反幅 {filmQuotation.items[0]?.webWidthMm ?? "-"}mm × {Number(filmQuotation.items[0]?.orderLengthM ?? 0).toLocaleString("ja-JP")}m</dd></div>
