@@ -1519,6 +1519,7 @@ export default function PrintableQuotationPage() {
               <div className="film-quote-meta">
                 <span>対象顧客：<strong>{issuedFilmQuotation.endCustomerName || "-"}</strong></span>
                 <span>製品名：<strong>{issuedFilmQuotation.productName}</strong></span>
+                <span>フィルム仕様：<strong>{issuedFilmQuotation.filmComposition}／{issuedFilmQuotation.printingMethodLabel}／{issuedFilmQuotation.colorCountLabel}</strong></span>
                 <span>見積番号：<strong>{issuedFilmQuotation.quotationNumber}</strong></span>
                 <span>パウチ見積番号：<strong>{issuedFilmQuotation.pouchQuotationNumber}</strong></span>
                 <span>有効期限：<strong>{issuedFilmQuotation.validUntil}</strong></span>
@@ -1530,7 +1531,10 @@ export default function PrintableQuotationPage() {
                 <tbody>
                   {issuedFilmQuotation.items.map((item, i) => (
                     <tr key={i}>
-                      <td>{item.description}</td>
+                      <td>
+                        <div>{item.description}</div>
+                        {item.specification ? <small className="film-item-spec">{item.specification}</small> : null}
+                      </td>
                       <td>{item.webWidthMm}mm</td>
                       <td>{Number(item.orderLengthM).toLocaleString("ja-JP")}m</td>
                       <td>{Number(item.unitPriceYenPerM).toLocaleString("ja-JP")} 円/m</td>

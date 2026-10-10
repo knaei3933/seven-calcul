@@ -109,7 +109,7 @@ describe("quotation history ownership UI", () => {
     await user.click(screen.getAllByRole("button", { name: "詳細" })[0]);
     await user.click(screen.getByTestId("film-quote-tab"));
 
-    expect(screen.getByText(/History Pouch用/)).toBeInTheDocument();
+    expect(screen.getByText(/異形パウチ専用フィルム/)).toBeInTheDocument();
     expect(screen.getAllByText("History Test").length).toBeGreaterThan(0);
     expect(screen.queryByText("最終損益サマリー")).not.toBeInTheDocument();
     vi.unstubAllGlobals();

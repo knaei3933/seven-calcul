@@ -16,10 +16,13 @@ export interface FilmQuotationData {
   pouchQuotationNumber: string;
   endCustomerName: string;
   productName: string;
+  filmComposition: string;
+  printingMethodLabel: string;
+  colorCountLabel: string;
   quantity: string;
   issueDate: string;
   validUntil: string;
-  items: { description: string; webWidthMm: string; orderLengthM: string; unitPriceYenPerM: string; amountYen: string }[];
+  items: { description: string; specification: string; webWidthMm: string; orderLengthM: string; unitPriceYenPerM: string; amountYen: string }[];
   subtotal: string;
   tax: string;
   grandTotal: string;
@@ -39,14 +42,22 @@ export function buildFilmQuotationFromRecord(record: {
 }): FilmQuotationData | null {
   const payload = record.payload as {
     filmOrderLengthM?: string;
+    printingMethod?: string;
     calculationFilmTotal?: string;
     filmUnitDisplay?: string;
     calculationChecklistSnapshot?: {
+      printingMethod?: string;
       film?: { orderLengthM?: string; filmTotal?: string; unitPrice?: string; requiredLengthM?: string };
       materialWidthMm?: string;
-      skus?: { name?: string; quantity?: string }[];
+      skus?: { name?: string; quantity?: string; colorCount?: string }[];
     };
-    purchaseOrder?: { webWidthMm?: number; filmComposition?: string };
+    purchaseOrder?: {
+      printingMethod?: string;
+      webWidthMm?: number;
+      filmComposition?: string;
+      colorCount?: number;
+      skuOrderDetails?: { name?: string; colorCount?: string }[];
+    };
   };
   const snapshot = payload.calculationChecklistSnapshot;
   const orderLength = snapshot?.film?.orderLengthM ?? payload.filmOrderLengthM ?? record.filmOrderLengthM;
@@ -60,10 +71,33 @@ export function buildFilmQuotationFromRecord(record: {
       : "0");
   const webWidth = String(payload.purchaseOrder?.webWidthMm ?? snapshot?.materialWidthMm ?? "");
   const composition = payload.purchaseOrder?.filmComposition ?? "PET12+AL7+PET12+LLDPE50μ";
-  const skuNames = snapshot?.skus?.map((s) => s.name).filter(Boolean) ?? [];
-  const productLabel = record.productName || skuNames.join("・") || "パウチ製品";
+  const skuNames = [
+    ...(payload.purchaseOrder?.skuOrderDetails ?? []).map((sku) => sku.name),
+    ...(snapshot?.skus ?? []).map((sku) => sku.name),
+  ].filter(Boolean);
+  const productLabel = record.productName || skuNames[0] || snapshot?.skus?.map((sku) => sku.name).filter(Boolean).join("・") || "パウチ製品";
   const endCustomerName = record.customerName?.trim() || "";
-  const filmSubjectLabel = endCustomerName ? `【${endCustomerName}】${productLabel}` : productLabel;
+
+  const rawPrintingMethod = payload.purchaseOrder?.printingMethod
+    ?? snapshot?.printingMethod
+    ?? payload.printingMethod
+    ?? "digital";
+  const printingMethodLabel = rawPrintingMethod === "gravure" ? "グラビア印刷（ロール）" : "デジタル印刷";
+
+  const colorValues = [
+    ...(payload.purchaseOrder?.skuOrderDetails ?? []).map((sku) => Number(sku.colorCount)),
+    ...(snapshot?.skus ?? []).map((sku) => Number(sku.colorCount)),
+  ].filter((count) => Number.isFinite(count) && count > 0);
+  if (colorValues.length === 0) {
+    const purchaseColorCount = Number(payload.purchaseOrder?.colorCount);
+    if (Number.isFinite(purchaseColorCount) && purchaseColorCount > 0) colorValues.push(purchaseColorCount);
+  }
+  const uniqueColorValues = [...new Set(colorValues)];
+  const colorCountLabel = uniqueColorValues.length === 0
+    ? "要確認"
+    : uniqueColorValues.length === 1
+      ? `${uniqueColorValues[0]}色`
+      : `SKU別（${uniqueColorValues.map((count) => `${count}色`).join("・")}）`;
 
   const now = new Date(record.issueDate);
   const yy = String(now.getFullYear()).slice(2);
@@ -83,11 +117,20 @@ export function buildFilmQuotationFromRecord(record: {
     pouchQuotationNumber: record.quotationNumber,
     endCustomerName,
     productName: productLabel,
+    filmComposition: composition,
+    printingMethodLabel,
+    colorCountLabel,
     quantity: record.quantity,
     issueDate: record.issueDate,
     validUntil: record.validUntil,
     items: [{
-      description: `${filmSubjectLabel}用 フィルム（${composition}）`,
+      description: "異形パウチ専用フィルム",
+      specification: [
+        `商品名：${endCustomerName ? `${endCustomerName}／${productLabel}` : productLabel}`,
+        `フィルム構成：${composition}`,
+        `印刷方式：${printingMethodLabel}`,
+        `印刷色数：${colorCountLabel}`,
+      ].join("\n"),
       webWidthMm: webWidth,
       orderLengthM: orderLength,
       unitPriceYenPerM: unitPrice,
@@ -98,7 +141,7 @@ export function buildFilmQuotationFromRecord(record: {
     grandTotal: grandD.toString(),
     notes: [
       `パウチ見積書 ${record.quotationNumber} 対応`,
-      `対象製品：${filmSubjectLabel}（${Number(record.quantity).toLocaleString("ja-JP")}枚）`,
+      `対象製品：${productLabel}（${Number(record.quantity).toLocaleString("ja-JP")}枚）`,
       "納期：ご注文後、3〜4週間（データ確定後）",
       "お支払い：月末締め翌月末払い",
       "有効期限経過後は再度お見積りいたします",

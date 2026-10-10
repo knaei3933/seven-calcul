@@ -2219,6 +2219,8 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-quote-preview .film-quote-lines tfoot td:first-child { text-align: left; }
 .film-quote-preview .film-quote-lines tfoot tr.grand td { background: #1f3a5f; color: white; font-weight: 800; }
 .film-quote-preview .note { margin: 6px 0 0; font-size: 11px; color: #94a3b8; }
+.film-item-spec { display: block; margin-top: 1.2mm; color: #64748b; font-size: 7.6pt; line-height: 1.55; white-space: pre-line; }
+.film-quote-preview .film-item-spec { margin-top: 2px; font-size: 10px; line-height: 1.45; color: #64748b; }
 
 /* ── Film Quote Background (発注背景説明) ── */
 .film-quote-background { margin-bottom: 4mm; padding: 3mm 4mm; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 1.5mm; }

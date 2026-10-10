@@ -284,6 +284,10 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
   const storedFilmQuotation = record.payload.filmQuotation as import("@/lib/film-quotation").FilmQuotationData | undefined;
   const legacyFilmQuotation = !storedFilmQuotation
     || !storedFilmQuotation.endCustomerName
+    || !storedFilmQuotation.filmComposition
+    || !storedFilmQuotation.printingMethodLabel
+    || !storedFilmQuotation.colorCountLabel
+    || !storedFilmQuotation.items[0]?.specification
     || !/^K-\d{6}-\d{3,}-F$/.test(storedFilmQuotation.quotationNumber);
   const filmQuotation = legacyFilmQuotation
     ? buildFilmQuotationFromRecord(record)
@@ -502,6 +506,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                     <div><dt>発注顧客</dt><dd>{filmQuotation.endCustomerName || "-"}</dd></div>
                     <div><dt>対象製品</dt><dd>{filmQuotation.productName}</dd></div>
                     <div><dt>パウチ仕様</dt><dd>{record.sizeSummary}</dd></div>
+                    <div><dt>フィルム仕様</dt><dd>{filmQuotation.filmComposition}／{filmQuotation.printingMethodLabel}／{filmQuotation.colorCountLabel}</dd></div>
                     {calculationChecklistSnapshot ? (
                       <>
                         <div><dt>充填量</dt><dd>{formatNumber(Number(calculationChecklistSnapshot.fillMlPerChamber))}ml/室 × {calculationChecklistSnapshot.connectedChambers}室 ＝ {formatNumber(Number(calculationChecklistSnapshot.totalFillMlPerPouch))}ml/枚</dd></div>
@@ -525,6 +530,9 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                   <dl>
                     <div><dt>発注顧客</dt><dd>{filmQuotation.endCustomerName || "-"}</dd></div>
                     <div><dt>対象製品</dt><dd>{filmQuotation.productName}</dd></div>
+                    <div><dt>印刷方式</dt><dd>{filmQuotation.printingMethodLabel}</dd></div>
+                    <div><dt>印刷色数</dt><dd>{filmQuotation.colorCountLabel}</dd></div>
+                    <div><dt>フィルム構成</dt><dd>{filmQuotation.filmComposition}</dd></div>
                     <div><dt>パウチ数量</dt><dd>{Number(filmQuotation.quantity).toLocaleString("ja-JP")} 枚</dd></div>
                     <div><dt>パウチ見積番号</dt><dd>{filmQuotation.pouchQuotationNumber}</dd></div>
                   </dl>
@@ -544,7 +552,10 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                   <tbody>
                     {filmQuotation.items.map((item, i) => (
                       <tr key={i}>
-                        <td className="desc">{item.description}</td>
+                        <td className="desc">
+                          <div className="film-item-name">{item.description}</div>
+                          {item.specification ? <small className="film-item-spec">{item.specification}</small> : null}
+                        </td>
                         <td className="num">{item.webWidthMm}mm</td>
                         <td className="num">{Number(item.orderLengthM).toLocaleString("ja-JP")} m</td>
                         <td className="num">{Number(item.unitPriceYenPerM).toLocaleString("ja-JP")} 円/m</td>

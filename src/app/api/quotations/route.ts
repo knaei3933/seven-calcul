@@ -272,6 +272,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // 발행 시 金井貿易→セブン化學 필름 견적서를 자동 생성해 payload에 포함
     const filmQuotation = buildFilmQuotationFromRecord({
       quotationNumber: input.quotationNumber,
+      customerName: input.customerName,
       issueDate: input.issueDate,
       validUntil: input.validUntil,
       productName: input.productName,
