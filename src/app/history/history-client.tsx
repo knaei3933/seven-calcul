@@ -491,7 +491,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
 
           {detailTab === "film" && filmQuotation ? (
             <article className="a4-sheet history-a4 film-quote-a4" aria-label="フィルム見積書A4">
-              <div className="history-a4-fit">
+              <div className="history-a4-fit" ref={(element) => { fitContentRefs.current[0] = element; }}>
                 {/* ── 発行ヘッダ ── */}
                 <header className="film-quote-header">
                   <div className="film-quote-issuer">
