@@ -282,7 +282,12 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
   const analysis = analyzeQuotation(record);
   // 발행 시 자동 생성된 필름 견적서(payload 저장분)를 우선 사용, 없으면 조회 시 생성
   const storedFilmQuotation = record.payload.filmQuotation as import("@/lib/film-quotation").FilmQuotationData | undefined;
-  const filmQuotation = storedFilmQuotation ?? buildFilmQuotationFromRecord(record);
+  const legacyFilmQuotation = !storedFilmQuotation
+    || !storedFilmQuotation.endCustomerName
+    || !/^K-\d{6}-\d{3,}-F$/.test(storedFilmQuotation.quotationNumber);
+  const filmQuotation = legacyFilmQuotation
+    ? buildFilmQuotationFromRecord(record)
+    : storedFilmQuotation;
   const calculationChecklistSnapshot = record.payload.calculationChecklistSnapshot as {
     fillMlPerChamber?: string;
     connectedChambers?: number;
@@ -494,6 +499,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                 <section className="film-quote-background">
                   <h3>お見積りの背景</h3>
                   <dl className="film-quote-bg-list">
+                    <div><dt>発注顧客</dt><dd>{filmQuotation.endCustomerName || "-"}</dd></div>
                     <div><dt>対象製品</dt><dd>{filmQuotation.productName}</dd></div>
                     <div><dt>パウチ仕様</dt><dd>{record.sizeSummary}</dd></div>
                     {calculationChecklistSnapshot ? (
@@ -517,6 +523,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                 {/* ── 明細テーブル ── */}
                 <section className="film-quote-summary">
                   <dl>
+                    <div><dt>発注顧客</dt><dd>{filmQuotation.endCustomerName || "-"}</dd></div>
                     <div><dt>対象製品</dt><dd>{filmQuotation.productName}</dd></div>
                     <div><dt>パウチ数量</dt><dd>{Number(filmQuotation.quantity).toLocaleString("ja-JP")} 枚</dd></div>
                     <div><dt>パウチ見積番号</dt><dd>{filmQuotation.pouchQuotationNumber}</dd></div>
@@ -815,7 +822,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
               </div>
             </article>
           </>
-          ) : (
+          ) : detailTab === "data" ? (
           <>
           <section className="profit-summary" aria-label="損益サマリー">
             <div className="profit-summary-head">
@@ -1035,7 +1042,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
             </div>
             <textarea className="payload-json" readOnly rows={10} value={JSON.stringify(record.payload, null, 2)} aria-label="保存payload JSON" />
           </details>
-          </>)}
+          </>) : null}
         </div>
       </div>
       <div className="history-detail-overlay" onClick={onClose} aria-hidden="true" />

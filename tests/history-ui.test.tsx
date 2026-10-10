@@ -93,4 +93,25 @@ describe("quotation history ownership UI", () => {
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("creatorId=1"), { cache: "no-store" });
     vi.unstubAllGlobals();
   });
+
+  it("shows the film quotation alone without the internal profit summary", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ records: [adminRecord] }, { status: 200 })));
+    const user = userEvent.setup();
+    render(<HistoryClient currentUser={currentUser} />);
+
+    await screen.findByText("S7-HISTORY-ADMIN");
+    await user.click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    await user.click(screen.getByTestId("film-quote-tab"));
+
+    expect(screen.getByText(/History Pouch用/)).toBeInTheDocument();
+    expect(screen.getAllByText("History Test").length).toBeGreaterThan(0);
+    expect(screen.queryByText("最終損益サマリー")).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
 });

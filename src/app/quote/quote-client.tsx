@@ -16,6 +16,8 @@ import {
   SIMULATOR_STALE_STATUS_KEY,
 } from "@/lib/quotation-shared";
 import { clampGravureFilmMeterUnit, COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
+import type { CustomerMaster } from "@/lib/quotation-shared";
+import type { FilmQuotationData } from "@/lib/film-quotation";
 
 const LAST_CHECKLIST_URL_KEY = "pouch-last-checklist-url-v1";
 import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
@@ -293,7 +295,7 @@ export default function PrintableQuotationPage() {
   const [checklistOpening, setChecklistOpening] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [issueSuccessMessage, setIssueSuccessMessage] = useState("");
-  const [issuedFilmQuotation, setIssuedFilmQuotation] = useState<{ quotationNumber: string; items: { description: string; webWidthMm: string; orderLengthM: string; unitPriceYenPerM: string; amountYen: string }[]; subtotal: string; tax: string; grandTotal: string; validUntil: string } | null>(null);
+  const [issuedFilmQuotation, setIssuedFilmQuotation] = useState<FilmQuotationData | null>(null);
   const [quoteDraftStale, setQuoteDraftStale] = useState(false);
   const [selectedCandidateShortage, setSelectedCandidateShortage] = useState(false);
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrderSnapshot | null>(null);
@@ -303,6 +305,23 @@ export default function PrintableQuotationPage() {
     message: "",
     saving: false,
   });
+  const [customerSearchTerm, setCustomerSearchTerm] = useState("");
+  const [customerSearchResults, setCustomerSearchResults] = useState<CustomerMaster[]>([]);
+  const [customerSearchStatus, setCustomerSearchStatus] = useState<"idle" | "loading" | "error">("idle");
+
+  const searchCustomerMaster = async (query: string) => {
+    setCustomerSearchStatus("loading");
+    try {
+      const response = await fetch(`/api/customers?q=${encodeURIComponent(query)}&limit=30`);
+      const payload = await response.json();
+      if (!response.ok || !Array.isArray(payload.customers)) throw new Error("search_failed");
+      setCustomerSearchResults(payload.customers as CustomerMaster[]);
+      setCustomerSearchStatus("idle");
+    } catch {
+      setCustomerSearchResults([]);
+      setCustomerSearchStatus("error");
+    }
+  };
 
   const loadCustomerMaster = async () => {
     const code = form.customerCode.trim();
@@ -356,10 +375,44 @@ export default function PrintableQuotationPage() {
         }),
       });
       if (!response.ok) throw new Error();
+      await searchCustomerMaster("");
       setCustomerMasterStatus({ loading: false, message: `顧客コード ${code} を保存しました。`, saving: false });
     } catch {
       setCustomerMasterStatus({ loading: false, message: "顧客マスタを保存できませんでした。", saving: false });
     }
+  };
+
+  const selectCustomerMaster = (customer: CustomerMaster) => {
+    applyPatch({
+      customerCode: customer.customerCode,
+      customerName: customer.customerName,
+      customerPostalCode: customer.customerPostalCode,
+      customerAddress: customer.customerAddress,
+      customerContact: customer.customerContact,
+      customerTelephone: customer.customerTelephone,
+      customerEmail: customer.customerEmail,
+    });
+    setCustomerSearchTerm("");
+    setCustomerSearchResults([]);
+    setCustomerMasterStatus({ loading: false, message: `顧客コード ${customer.customerCode} を読み込みました。`, saving: false });
+  };
+
+  const fillTestData = () => {
+    const suffix = "0001";
+    setForm((old) => ({
+      ...old,
+      customerCode: `TEST-${suffix}`,
+      customerName: `テスト顧客株式会社 ${suffix}`,
+      customerPostalCode: `10${suffix.slice(0, 2)}-0001`,
+      customerAddress: `東京都千代田区テスト${suffix}-1-1`,
+      customerContact: `テスト担当${suffix}`,
+      customerTelephone: `03-${suffix.slice(0, 4)}-${suffix.slice(-4)}`,
+      customerEmail: `test${suffix}@example.co.jp`,
+      skuNames: old.skuNames.length
+        ? old.skuNames.map((name, index) => name.trim() || `テスト製品${suffix}-${index + 1}`)
+        : [`テスト製品${suffix}-1`],
+    }));
+    setCustomerMasterStatus({ loading: false, message: "テスト用入力を適用しました。", saving: false });
   };
 
   useEffect(() => {
@@ -1300,8 +1353,71 @@ export default function PrintableQuotationPage() {
         </div>
       </section>
 
-      {!issueReady ? (
-        <section className="issue-required-fields" data-testid="issue-required-fields" aria-labelledby="issue-fields-title">
+      {(
+        <section className="issue-required-fields quote-issue-panel" data-testid="issue-required-fields" aria-labelledby="issue-fields-title">
+          <div className="issue-panel-top no-print">
+            <form
+              className="customer-master-controls"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const query = customerSearchTerm.trim();
+                if (query) void loadCustomerMaster();
+              }}
+            >
+              <label className="customer-search-field">
+                顧客コード・検索
+                <input
+                  value={customerSearchTerm}
+                  onFocus={() => { if (customerSearchResults.length === 0) void searchCustomerMaster(customerSearchTerm.trim()); }}
+                  onChange={(event) => {
+                    setCustomerSearchTerm(event.target.value);
+                    applyPatch({ customerCode: event.target.value });
+                  }}
+                  placeholder="C-001 または 会社名"
+                  data-testid="customer-search-input"
+                />
+              </label>
+              <button
+                className="button secondary"
+                type="button"
+                disabled={customerSearchStatus === "loading" || !customerSearchTerm.trim()}
+                onClick={() => void searchCustomerMaster(customerSearchTerm.trim())}
+              >
+                {customerSearchStatus === "loading" ? "検索中..." : "検索"}
+              </button>
+              <button
+                className="button secondary"
+                type="button"
+                disabled={customerMasterStatus.loading || !customerSearchTerm.trim()}
+                onClick={() => void loadCustomerMaster()}
+              >
+                読込
+              </button>
+              <button
+                className="button secondary"
+                type="button"
+                disabled={customerMasterStatus.saving || !form.customerCode.trim() || !form.customerName.trim()}
+                onClick={() => void saveCustomerMaster()}
+              >
+                {customerMasterStatus.saving ? "保存中..." : "保存"}
+              </button>
+              <button className="button" type="button" data-testid="fill-test-data" onClick={fillTestData}>
+                テスト用入力
+              </button>
+            </form>
+            {customerMasterStatus.message ? <p className="customer-master-status" role="status">{customerMasterStatus.message}</p> : null}
+          </div>
+          {customerSearchResults.length ? (
+            <div className="customer-search-results" data-testid="customer-search-results">
+              {customerSearchResults.map((customer) => (
+                <button key={customer.customerCode} type="button" onClick={() => selectCustomerMaster(customer)}>
+                  <strong>{customer.customerCode}</strong>
+                  <span>{customer.customerName}</span>
+                  <small>{customer.customerAddress || "住所未登録"}</small>
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="issue-fields-grid">
             <label className={form.customerName.trim() ? "filled" : "required"}>
               会社名 ★
@@ -1326,9 +1442,13 @@ export default function PrintableQuotationPage() {
               </label>
             ))}
           </div>
-          <p className="help">★付きの項目をすべて入力すると「見積書を発行」ボタンが有効になります。</p>
+          <p className="help">
+            {issueReady
+              ? "必須項目は入力済みです。顧客情報はこの固定パネルから読込・保存できます。"
+              : "★付きの項目をすべて入力すると「見積書を発行」ボタンが有効になります。"}
+          </p>
         </section>
-      ) : null}
+      )}
 
       <div className="sheet-scroll">
           <article className="a4-sheet" aria-label="お見積書A4プレビュー" id="quote-preview">
@@ -1395,7 +1515,10 @@ export default function PrintableQuotationPage() {
             <section className="film-quote-preview" data-testid="film-quote-preview">
               <h3 id="film-quote-title">フィルム見積書（金井貿易 → セブン化学）</h3>
               <div className="film-quote-meta">
+                <span>対象顧客：<strong>{issuedFilmQuotation.endCustomerName || "-"}</strong></span>
+                <span>製品名：<strong>{issuedFilmQuotation.productName}</strong></span>
                 <span>見積番号：<strong>{issuedFilmQuotation.quotationNumber}</strong></span>
+                <span>パウチ見積番号：<strong>{issuedFilmQuotation.pouchQuotationNumber}</strong></span>
                 <span>有効期限：<strong>{issuedFilmQuotation.validUntil}</strong></span>
               </div>
               <table className="film-quote-lines">

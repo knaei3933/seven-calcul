@@ -219,4 +219,40 @@ describe("quotation page stale draft", () => {
     // 客給（バルク原価なし）の場合はバルクラインを表示しない。
     expect(screen.queryByTestId("bulk-line")).not.toBeInTheDocument();
   });
+
+  it("keeps the issue panel fixed, restores saved customers, and fills test data", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const target = String(url);
+      if (target === "/api/customers?q=&limit=30") {
+        return new Response(JSON.stringify({
+          customers: [{
+            customerCode: "C-001",
+            customerName: "既存顧客株式会社",
+            customerPostalCode: "650-0001",
+            customerAddress: "兵庫県神戸市テスト1-2-3",
+            customerContact: "既存担当",
+            customerTelephone: "078-000-0000",
+            customerEmail: "existing@example.co.jp",
+          }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({}), { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<QuotePage />);
+    await user.click(screen.getByTestId("customer-search-input"));
+    await waitFor(() => expect(screen.getByTestId("customer-search-results")).toBeInTheDocument());
+    expect(screen.getByTestId("issue-required-fields")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /既存顧客株式会社/ }));
+    expect(screen.getByLabelText("会社名 ★")).toHaveValue("既存顧客株式会社");
+    expect(screen.getByLabelText("住所 ★")).toHaveValue("兵庫県神戸市テスト1-2-3");
+
+    await user.click(screen.getByTestId("fill-test-data"));
+    expect((screen.getByLabelText("会社名 ★") as HTMLInputElement).value).toMatch("テスト顧客株式会社");
+    expect(screen.getByTestId("issue-required-fields")).toBeVisible();
+    expect(screen.getByRole("button", { name: "見積書を発行" })).toBeEnabled();
+  });
 });
