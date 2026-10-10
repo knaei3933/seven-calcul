@@ -126,7 +126,7 @@ describe("quotation page stale draft", () => {
 	    expect(a4Sheet).not.toHaveTextContent("PDF掲載金額に12%の販売マージン");
 	  });
 
-	  it("stores a manually edited filling unit and its recalculated totals into history", async () => {
+  it("stores a manually edited filling unit and its recalculated totals into history", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ record: { id: 71 } }), {
       status: 201,
@@ -175,6 +175,46 @@ describe("quotation page stale draft", () => {
     expect(body.payload.grandTotalDisplay).toBe("1237500");
     // 원가 기준은 수동 수정의 영향을 받지 않는다.
     expect(body.fillingCostPerPiece).toBe("53.8");
+  });
+
+  it("carries simulator SKU product names into the quotation and history record", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      record: { id: 81, productName: "レモン琺瑯 / 充填物2" },
+    }), { status: 201, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
+      productSummary: "レモン琺瑯 / 充填物2",
+      sizeSummary: "60×80mm / 2連",
+      quantity: "10000",
+      targetMargin: "0.4",
+      fillingCostPerPiece: "53.8",
+      filmCostPerPiece: "20.1",
+      filmMeterPrice: "402",
+      filmOrderLengthM: "500",
+      totalCostPerPiece: "73.9",
+      calculationVersion: "simulator-linked",
+      resultHash: "sku-name-transfer-check",
+      calculationFilmTotal: "201000",
+      skuNamesRaw: ["レモン琺瑯", "充填物2"],
+    }));
+    render(<QuotePage />);
+
+    await user.type(screen.getByLabelText("会社名 ★"), "SKU名称株式会社");
+    await user.type(screen.getByLabelText("郵便番号 ★"), "650-0001");
+    await user.type(screen.getByLabelText("電話番号 ★"), "078-000-0000");
+    await user.type(screen.getByLabelText("住所 ★"), "兵庫県神戸市テスト1-2-3");
+
+    expect(screen.getByLabelText("製品名（SKU-1）★")).toHaveValue("レモン琺瑯");
+    expect(screen.getByLabelText("製品名（SKU-2）★")).toHaveValue("充填物2");
+    expect(screen.getByTestId("quote-spec")).toHaveTextContent("レモン琺瑯 / 充填物2");
+
+    await waitFor(() => expect(screen.getByTestId("save-history")).toBeEnabled());
+    await user.click(screen.getByTestId("save-history"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
+    expect(body.productName).toBe("レモン琺瑯 / 充填物2");
+    expect(body.payload.skuNames).toEqual(["レモン琺瑯", "充填物2"]);
   });
 
   it("shows the bulk line only when bulk is sold", async () => {
