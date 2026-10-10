@@ -854,7 +854,7 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
   .no-print, .top-menu { display: none !important; }
   main { max-width: none; padding: 0; height: 296mm; overflow: hidden; }
   .quote-page { display: block; max-width: none; }
-  .panel, .quote-toolbar, .quote-editor, .issue-required-fields { display: none !important; }
+  .panel, .quote-toolbar, .quote-editor, .issue-workbench, .issue-required-fields { display: none !important; }
   .a4-sheet { width: 209mm !important; height: 296mm !important; min-height: 296mm !important; margin: 0 auto !important; border: 0 !important; border-top: 2.2mm solid #1f3a5f !important; box-shadow: none !important; overflow: hidden !important; print-color-adjust: exact !important; -webkit-print-color-adjust: exact !important; }
   .sheet-editable { background: transparent !important; border-bottom-color: transparent !important; box-shadow: none !important; }
   .quote-a4-fit {
@@ -1962,23 +1962,37 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-order-preview-note { font-size: 12px; color: var(--muted); margin: 0; padding: 0 10px 6px; }
 
 
+.issue-workbench {
+  position: sticky;
+  top: 65px;
+  z-index: 30;
+  max-width: 1100px;
+  margin: 0 auto 14px;
+  overflow: visible;
+  border: 1px solid #94a3b8;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 5px 18px rgba(15, 23, 42, .06);
+}
 /* ── Quote Page Header (Formal Business Style) ── */
-.quote-header { display: flex; flex-direction: column; gap: 0; margin: 0 auto 14px; max-width: 1100px; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; }
-.quote-header-top { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 20px; background: #fff; border-bottom: 1px solid #e2e8f0; }
-.quote-header-title { display: flex; align-items: center; gap: 12px; }
-.quote-header-title h1 { margin: 0; font-size: 18px; color: #1e293b; font-weight: 700; letter-spacing: .01em; }
+.issue-workbench .quote-header { display: flex; flex-direction: column; gap: 0; margin: 0; max-width: none; border: 0; border-radius: 10px 10px 0 0; overflow: visible; }
+.quote-header-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; background: #fff; border-bottom: 1px solid #e2e8f0; }
+.quote-header-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.quote-header-title h1 { margin: 0; font-size: 16px; line-height: 1.2; color: #1e293b; font-weight: 800; letter-spacing: .01em; white-space: nowrap; }
+.quote-workbench-subtitle { margin: 1px 0 0; color: #64748b; font-size: 10px; font-weight: 600; white-space: nowrap; }
 .quote-status-chips { display: flex; gap: 6px; }
 .chip { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 .chip-ok { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
 .chip-warn { background: #fefce8; color: #a16207; border: 1px solid #fef08a; }
 .chip-info { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
 .chip-muted { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }
-.quote-header-top .toolbar-actions { display: flex; gap: 8px; }
-.quote-header-top .toolbar-actions .button { padding: 7px 14px; font-size: 13px; }
-.btn-issue { padding: 7px 24px; background: #1e293b; color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 700; cursor: pointer; transition: background .15s; }
+.quote-header-top .toolbar-actions { display: flex; flex: none; gap: 6px; }
+.quote-header-top .toolbar-actions .button,
+.quote-header-top .btn-issue { min-height: 32px; padding: 5px 10px; font-size: 12px; }
+.btn-issue { padding: 5px 18px; background: #1e293b; color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 800; cursor: pointer; transition: background .15s; }
 .btn-issue:not(:disabled):hover { background: #334155; }
 .btn-issue:disabled { opacity: .4; cursor: not-allowed; }
-.quote-header-meta { padding: 6px 20px 8px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 4px; }
+.quote-header-meta { padding: 5px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 3px; }
 .issue-missing { margin: 0; font-size: 12px; color: #b45309; font-weight: 600; }
 .header-alert { margin: 0; font-size: 12px; color: #b91c1c; }
 .issue-success { margin: 0; font-size: 12px; color: #15803d; font-weight: 600; }
@@ -2047,13 +2061,13 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .calc-table .per-m td { background: #f8fafc; color: #1f3a5f; font-weight: 700; }
 
 /* ── Required Fields Banner (発行に必要な情報) ── */
-.issue-required-fields { position: sticky; top: 65px; z-index: 30; margin: 0 auto 12px; max-width: 1100px; padding: 8px 16px 8px; border: 1px solid #94a3b8; border-radius: 8px; background: #fff; box-shadow: 0 4px 14px rgba(15,23,42,.05); }
-.issue-panel-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 7px; }
+.issue-required-fields { position: static; margin: 0; max-width: none; padding: 8px 14px 9px; border: 0; border-radius: 0 0 10px 10px; background: #fff; box-shadow: none; }
+.issue-panel-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
 .customer-master-controls { display: flex; align-items: flex-end; gap: 5px; min-width: 0; }
 .customer-master-controls .customer-search-field { display: grid; gap: 2px; min-width: 150px; font-size: 10px; font-weight: 800; color: #334155; }
-.customer-master-controls .customer-search-field input { width: 170px; min-width: 0; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; font-size: 12px; }
-.customer-master-controls .button { padding: 5px 8px; font-size: 11px; white-space: nowrap; }
-.customer-master-status { margin: 0; font-size: 11px; color: #334155; white-space: nowrap; }
+.customer-master-controls .customer-search-field input { width: 190px; min-width: 0; min-height: 32px; padding: 5px 7px; border: 1px solid #94a3b8; border-radius: 5px; font-size: 12px; }
+.customer-master-controls .button { min-height: 32px; padding: 5px 9px; font-size: 11px; white-space: nowrap; }
+.customer-master-status { margin: 0; font-size: 11px; line-height: 32px; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .customer-search-results {
   position: absolute; z-index: 35; left: 16px; right: 16px; margin-top: 3px;
   overflow: auto; max-height: 180px; display: grid; gap: 4px; padding: 5px;
@@ -2080,13 +2094,19 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .issue-fields-grid label.wide { max-width: none; }
 .issue-fields-grid label.required { color: #b45309; }
 .issue-fields-grid label.filled { color: #059669; }
-.issue-fields-grid input { padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; background: white; width: 100%; box-sizing: border-box; }
+.issue-fields-grid input { min-height: 32px; padding: 5px 7px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 12px; background: white; width: 100%; box-sizing: border-box; }
 .issue-fields-grid label.required input { border-color: #f59e0b; background: white; }
 .issue-fields-grid label.filled input { border-color: #10b981; background: #f0fdf4; }
-.issue-required-fields .help { margin: 6px 0 0; font-size: 11px; color: #334155; }
+.issue-required-fields .help { margin: 5px 0 0; font-size: 11px; line-height: 1.35; color: #334155; text-align: right; }
 @media (max-width: 900px) {
-  .issue-required-fields { position: static; }
+  .issue-workbench { position: static; }
   .issue-panel-top { align-items: stretch; flex-direction: column; }
+  .quote-header-top { align-items: stretch; flex-direction: column; }
+  .quote-workbench-subtitle { white-space: normal; }
+  .quote-status-chips { flex-wrap: wrap; }
+  .quote-header-top .toolbar-actions { width: 100%; overflow-x: auto; }
+  .quote-header-top .toolbar-actions .button,
+  .quote-header-top .btn-issue { flex: 1 0 auto; }
   .customer-master-controls { align-items: stretch; flex-wrap: wrap; }
   .customer-master-controls .customer-search-field { flex: 1 1 180px; }
   .customer-master-controls .customer-search-field input { width: 100%; }
