@@ -2170,8 +2170,8 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
   min-height: 297mm;
   padding: 10mm 13mm 8mm;
   font-family: var(--font-noto-serif-jp), "Hiragino Mincho ProN", "Yu Mincho", serif;
-  font-size: 8.8pt;
-  line-height: 1.35;
+  font-size: 9.7pt;
+  line-height: 1.42;
   color: #1e293b;
   display: flex;
   flex-direction: column;
@@ -2181,53 +2181,46 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 /* Header */
 .film-quote-header {
   display: flex; justify-content: space-between; align-items: flex-start; gap: 7mm;
-  border-bottom: 2.5px solid #1f3a5f; padding-bottom: 2.2mm; margin-bottom: 3mm;
+  border-bottom: 2.5px solid #1f3a5f; padding-bottom: 2.5mm; margin-bottom: 3.2mm;
 }
-.film-quote-issuer { font-size: 7.2pt; line-height: 1.35; }
-.film-quote-issuer strong { font-size: 12pt; color: #1f3a5f; letter-spacing: .07em; display: block; margin-bottom: .8mm; }
-.film-quote-issuer small { display: block; color: #94a3b8; font-size: 6.2pt; margin: .4mm 0 1.2mm; letter-spacing: .11em; text-transform: uppercase; }
-.film-quote-issuer address { font-style: normal; color: #374151; font-size: 6.7pt; }
+.film-quote-issuer { font-size: 8pt; line-height: 1.42; }
+.film-quote-issuer strong { font-size: 14pt; color: #1f3a5f; letter-spacing: .07em; display: block; margin-bottom: 1mm; }
+.film-quote-issuer small { display: block; color: #94a3b8; font-size: 6.8pt; margin: .5mm 0 1.4mm; letter-spacing: .11em; text-transform: uppercase; }
+.film-quote-issuer address { font-style: normal; color: #374151; font-size: 7.4pt; }
 .film-quote-title { text-align: right; }
-.film-quote-title .english { font-size: 6.2pt; letter-spacing: .28em; color: #94a3b8; margin: 0 0 .8mm; text-transform: uppercase; }
-.film-quote-title h2 { margin: 0 0 1.6mm; font-size: 16pt; color: #1f3a5f; letter-spacing: .16em; font-weight: 900; border-bottom: 2px solid #1f3a5f; padding-bottom: 1.2mm; display: inline-block; }
-.film-quote-title dl { display: flex; gap: 4mm; font-size: 7.2pt; margin: 1mm 0 0; justify-content: flex-end; }
+.film-quote-title .english { font-size: 6.8pt; letter-spacing: .28em; color: #94a3b8; margin: 0 0 .8mm; text-transform: uppercase; }
+.film-quote-title h2 { margin: 0 0 1.8mm; font-size: 18pt; color: #1f3a5f; letter-spacing: .16em; font-weight: 900; border-bottom: 2px solid #1f3a5f; padding-bottom: 1.3mm; display: inline-block; }
+.film-quote-title dl { display: flex; gap: 4mm; font-size: 7.8pt; margin: 1mm 0 0; justify-content: flex-end; }
 .film-quote-title dl > div { display: flex; flex-direction: column; align-items: flex-end; gap: .3mm; }
-.film-quote-title dt { color: #94a3b8; font-size: 5.8pt; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
-.film-quote-title dd { margin: 0; font-weight: 800; color: #1e293b; font-size: 8.2pt; }
+.film-quote-title dt { color: #94a3b8; font-size: 6.2pt; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.film-quote-title dd { margin: 0; font-weight: 800; color: #1e293b; font-size: 8.8pt; }
 
 /* Recipient */
-.film-quote-recipient { margin-bottom: 2.8mm; padding-bottom: 1.8mm; border-bottom: 1px solid #e2e8f0; }
-.film-quote-recipient .to { font-size: 11pt; font-weight: 800; margin: 0 0 1mm; color: #1e293b; letter-spacing: .05em; }
-.film-quote-recipient .subject { font-size: 8.2pt; color: #475569; margin: 0; }
+.film-quote-recipient { margin-bottom: 3mm; padding-bottom: 2mm; border-bottom: 1px solid #e2e8f0; }
+.film-quote-recipient .to { font-size: 12pt; font-weight: 800; margin: 0 0 1.1mm; color: #1e293b; letter-spacing: .05em; }
+.film-quote-recipient .subject { font-size: 9pt; color: #475569; margin: 0; }
 
 /* Background */
-.film-quote-background { margin-bottom: 2.4mm; padding: 1.8mm 2.4mm; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 1.5mm; }
-.film-quote-background h3 { margin: 0 0 1.2mm; font-size: 7.8pt; color: #1f3a5f; font-weight: 800; }
-.film-quote-bg-list { display: grid; grid-template-columns: 1fr 1fr; gap: .9mm 4mm; margin: 0 0 1.2mm; }
-.film-quote-bg-list > div { display: flex; align-items: baseline; gap: 1.5mm; font-size: 7.1pt; min-width: 0; }
-.film-quote-bg-list dt { flex: none; min-width: 14mm; color: #64748b; font-weight: 600; }
+.film-quote-background { margin-bottom: 2.8mm; padding: 2.4mm 3mm; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 1.5mm; }
+.film-quote-background h3 { margin: 0 0 1.6mm; font-size: 8.8pt; color: #1f3a5f; font-weight: 800; }
+.film-quote-bg-list { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1mm 4.5mm; margin: 0 0 1.6mm; }
+.film-quote-bg-list > div { display: flex; align-items: baseline; gap: 1.8mm; font-size: 8.4pt; min-width: 0; }
+.film-quote-bg-list dt { flex: none; min-width: 16mm; color: #64748b; font-weight: 600; }
 .film-quote-bg-list dd { margin: 0; color: #1e293b; font-weight: 600; overflow-wrap: anywhere; }
-.film-quote-bg-chain { border-top: 1px dashed #cbd5e1; padding-top: 1.2mm; margin-top: .8mm; }
-.chain-label { font-size: 6.9pt; font-weight: 700; color: #1f3a5f; margin: 0 0 .5mm; }
-.chain-text { font-size: 7.1pt; color: #374151; margin: 0; line-height: 1.35; }
-
-/* Summary */
-.film-quote-summary { margin-bottom: 2.6mm; padding: 1.8mm 2.4mm; background: #f0f4f8; border-radius: 1.5mm; border-left: 3px solid #1f3a5f; }
-.film-quote-summary dl { display: flex; gap: 3mm 5mm; flex-wrap: wrap; margin: 0; }
-.film-quote-summary dl > div { display: flex; align-items: baseline; gap: 1.5mm; min-width: 0; }
-.film-quote-summary dt { font-size: 6.8pt; color: #64748b; font-weight: 600; }
-.film-quote-summary dd { margin: 0; font-size: 7.8pt; font-weight: 700; color: #1e293b; overflow-wrap: anywhere; }
+.film-quote-bg-chain { border-top: 1px dashed #cbd5e1; padding-top: 1.5mm; margin-top: 1mm; }
+.chain-label { font-size: 7.8pt; font-weight: 700; color: #1f3a5f; margin: 0 0 .6mm; }
+.chain-text { font-size: 8.4pt; color: #374151; margin: 0; line-height: 1.45; }
 
 /* Table */
-.film-quote-table { width: 100%; border-collapse: collapse; margin-bottom: 3mm; border: 1.5px solid #1f3a5f; }
+.film-quote-table { width: 100%; border-collapse: collapse; margin-bottom: 3.5mm; border: 1.5px solid #1f3a5f; }
 .film-quote-table thead th {
-  padding: 1.5mm 1.8mm; background: #1f3a5f; color: white; font-size: 7.4pt;
+  padding: 1.8mm 2mm; background: #1f3a5f; color: white; font-size: 8.6pt;
   text-align: center; font-weight: 700; border: .5px solid #1f3a5f;
 }
 .film-quote-table thead th:first-child { text-align: left; }
 .film-quote-table tbody td {
-  padding: 1.7mm 1.8mm; border-bottom: .5px solid #cbd5e1;
-  font-size: 7.8pt; color: #1e293b; border-left: .5px solid #e2e8f0; border-right: .5px solid #e2e8f0;
+  padding: 2.2mm 2.2mm; border-bottom: .5px solid #cbd5e1;
+  font-size: 9.2pt; color: #1e293b; border-left: .5px solid #e2e8f0; border-right: .5px solid #e2e8f0;
 }
 .film-quote-table tbody td:first-child { border-left: none; }
 .film-quote-table tbody td:last-child { border-right: none; text-align: right; font-weight: 700; }
@@ -2235,35 +2228,35 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-quote-table tbody td.desc { font-weight: 600; }
 .film-quote-table tbody td.amt { font-weight: 800; }
 .film-quote-table tfoot td {
-  padding: 1.3mm 1.8mm; font-size: 7.8pt; font-weight: 600;
+  padding: 1.6mm 2.2mm; font-size: 9.2pt; font-weight: 600;
   border-bottom: 1px solid #cbd5e1; text-align: right; color: #374151;
   border-left: .5px solid #e2e8f0; border-right: .5px solid #e2e8f0;
 }
 .film-quote-table tfoot td:first-child { text-align: left; border-left: none; }
 .film-quote-table tfoot .grand td {
-  background: #1f3a5f; color: white; font-size: 9.5pt; font-weight: 800;
-  border: none; padding: 2mm;
+  background: #1f3a5f; color: white; font-size: 11pt; font-weight: 800;
+  border: none; padding: 2.2mm;
 }
-.film-item-spec { display: block; margin-top: .8mm; color: #64748b; font-size: 6.5pt; line-height: 1.28; white-space: pre-line; }
+.film-item-spec { display: block; margin-top: 1mm; color: #64748b; font-size: 7.6pt; line-height: 1.38; white-space: pre-line; }
 
 /* Notes */
 .film-quote-notes { margin-bottom: auto; }
 .film-quote-notes h3 {
-  font-size: 7.8pt; color: #1f3a5f; margin: 0 0 1mm;
-  padding-left: 1.8mm; border-left: 3px solid #1f3a5f; font-weight: 800;
+  font-size: 8.8pt; color: #1f3a5f; margin: 0 0 1.3mm;
+  padding-left: 2mm; border-left: 3px solid #1f3a5f; font-weight: 800;
 }
-.film-quote-notes ul { padding-left: 4mm; font-size: 6.9pt; color: #475569; line-height: 1.35; margin: 0; list-style-type: disc; }
-.film-quote-notes li + li { margin-top: .3mm; }
+.film-quote-notes ul { padding-left: 4.5mm; font-size: 7.8pt; color: #475569; line-height: 1.45; margin: 0; list-style-type: disc; }
+.film-quote-notes li + li { margin-top: .4mm; }
 
 /* Footer */
 .film-quote-footer {
   display: flex; justify-content: space-between; align-items: flex-end;
-  border-top: 2px solid #1f3a5f; padding-top: 2.2mm; margin-top: 2.5mm;
+  border-top: 2px solid #1f3a5f; padding-top: 2.6mm; margin-top: 3mm;
 }
-.film-quote-footer .greeting p { font-size: 7.5pt; color: #374151; margin: 0; line-height: 1.35; }
-.film-quote-footer .issuer-seal { text-align: center; min-width: 32mm; padding: 2.6mm 5mm; border: 1.5px solid #1f3a5f; border-radius: 1.5mm; }
-.film-quote-footer .issuer-seal strong { display: block; font-size: 8.4pt; color: #1f3a5f; letter-spacing: .05em; margin-bottom: .8mm; }
-.film-quote-footer .issuer-seal small { display: block; font-size: 6.7pt; color: #64748b; margin-top: .4mm; }
+.film-quote-footer .greeting p { font-size: 8.5pt; color: #374151; margin: 0; line-height: 1.45; }
+.film-quote-footer .issuer-seal { text-align: center; min-width: 35mm; padding: 3.2mm 6mm; border: 1.5px solid #1f3a5f; border-radius: 1.5mm; }
+.film-quote-footer .issuer-seal strong { display: block; font-size: 9.4pt; color: #1f3a5f; letter-spacing: .05em; margin-bottom: .9mm; }
+.film-quote-footer .issuer-seal small { display: block; font-size: 7.4pt; color: #64748b; margin-top: .5mm; }
 
 /* ── Film Quote Preview on Quote Page ── */
 .film-quote-preview { margin: 0 auto 14px; max-width: 1100px; padding: 12px 18px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; }

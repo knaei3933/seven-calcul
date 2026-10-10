@@ -547,19 +547,6 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                 </section>
 
                 {/* ── 明細テーブル ── */}
-                <section className="film-quote-summary">
-                  <dl>
-                    <div><dt>発注顧客</dt><dd>{filmQuotation.endCustomerName || "-"}</dd></div>
-                    <div><dt>対象製品</dt><dd>{filmQuotation.productName}</dd></div>
-                    <div><dt>印刷方式</dt><dd>{filmQuotation.printingMethodLabel}</dd></div>
-                    <div><dt>印刷色数</dt><dd>{filmQuotation.colorCountLabel}</dd></div>
-                    <div><dt>フィルム構成</dt><dd>{filmQuotation.filmComposition}</dd></div>
-                    <div><dt>パウチ数量</dt><dd>{Number(filmQuotation.quantity).toLocaleString("ja-JP")} 枚</dd></div>
-                    <div><dt>パウチ見積番号</dt><dd>{filmQuotation.pouchQuotationNumber}</dd></div>
-                  </dl>
-                </section>
-
-                {/* ── 明細テーブル ── */}
                 <table className="film-quote-table">
                   <thead>
                     <tr>
