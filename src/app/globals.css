@@ -2163,3 +2163,14 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-quote-preview .film-quote-lines tfoot td:first-child { text-align: left; }
 .film-quote-preview .film-quote-lines tfoot tr.grand td { background: #1f3a5f; color: white; font-weight: 800; }
 .film-quote-preview .note { margin: 6px 0 0; font-size: 11px; color: #94a3b8; }
+
+/* ── Film Quote Background (発注背景説明) ── */
+.film-quote-background { margin-bottom: 4mm; padding: 3mm 4mm; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 1.5mm; }
+.film-quote-background h3 { margin: 0 0 2mm; font-size: 9pt; color: #1f3a5f; font-weight: 800; }
+.film-quote-bg-list { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5mm 5mm; margin: 0 0 2.5mm; }
+.film-quote-bg-list > div { display: flex; align-items: baseline; gap: 2mm; font-size: 8.5pt; }
+.film-quote-bg-list dt { flex: none; min-width: 18mm; color: #64748b; font-weight: 600; }
+.film-quote-bg-list dd { margin: 0; color: #1e293b; font-weight: 600; }
+.film-quote-bg-chain { border-top: 1px dashed #cbd5e1; padding-top: 2mm; margin-top: 2mm; }
+.chain-label { font-size: 8pt; font-weight: 700; color: #1f3a5f; margin: 0 0 1mm; }
+.chain-text { font-size: 8.5pt; color: #374151; margin: 0; line-height: 1.7; }

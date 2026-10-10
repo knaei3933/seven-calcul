@@ -457,6 +457,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
           {detailTab === "film" && filmQuotation ? (
             <article className="a4-sheet history-a4 film-quote-a4" aria-label="フィルム見積書A4">
               <div className="history-a4-fit">
+                {/* ── 発行ヘッダ ── */}
                 <header className="film-quote-header">
                   <div className="film-quote-issuer">
                     <strong>{kaneiTrade.name}</strong>
@@ -479,11 +480,36 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                   </div>
                 </header>
 
+                {/* ── 宛先・背景説明 ── */}
                 <section className="film-quote-recipient">
                   <p className="to">株式会社セブン化学 御中</p>
-                  <p className="subject">下記の通りフィルムのお見積りを申し上げます。</p>
+                  <p className="subject">貴社パウチ充填用フィルムにつきまして、下記の通りお見積りを申し上げます。</p>
                 </section>
 
+                <section className="film-quote-background">
+                  <h3>お見積りの背景</h3>
+                  <dl className="film-quote-bg-list">
+                    <div><dt>対象製品</dt><dd>{filmQuotation.productName}</dd></div>
+                    <div><dt>パウチ仕様</dt><dd>{record.sizeSummary}</dd></div>
+                    {calculationChecklistSnapshot ? (
+                      <>
+                        <div><dt>充填量</dt><dd>{formatNumber(Number(calculationChecklistSnapshot.fillMlPerChamber))}ml/室 × {calculationChecklistSnapshot.connectedChambers}室 ＝ {formatNumber(Number(calculationChecklistSnapshot.totalFillMlPerPouch))}ml/枚</dd></div>
+                        <div><dt>パウチ数量</dt><dd>{Number(filmQuotation.quantity).toLocaleString("ja-JP")} 枚（総室数 {Number(D(filmQuotation.quantity).times(calculationChecklistSnapshot.connectedChambers)).toLocaleString("ja-JP")} 室）</dd></div>
+                      </>
+                    ) : null}
+                    <div><dt>発注フィルム</dt><dd>原反幅 {filmQuotation.items[0]?.webWidthMm ?? "-"}mm × {Number(filmQuotation.items[0]?.orderLengthM ?? 0).toLocaleString("ja-JP")}m</dd></div>
+                  </dl>
+                  <div className="film-quote-bg-chain">
+                    <p className="chain-label">発注に至る経緯</p>
+                    <p className="chain-text">
+                      {filmQuotation.productName}（{record.sizeSummary}）を{Number(filmQuotation.quantity).toLocaleString("ja-JP")}枚充填するため、
+                      原反幅{filmQuotation.items[0]?.webWidthMm ?? "-"}mmのフィルムが{Number(filmQuotation.items[0]?.orderLengthM ?? 0).toLocaleString("ja-JP")}m必要です。
+                      金井貿易よりこのフィルムを調達させていただきます。
+                    </p>
+                  </div>
+                </section>
+
+                {/* ── 明細テーブル ── */}
                 <section className="film-quote-summary">
                   <dl>
                     <div><dt>対象製品</dt><dd>{filmQuotation.productName}</dd></div>
@@ -492,6 +518,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                   </dl>
                 </section>
 
+                {/* ── 明細テーブル ── */}
                 <table className="film-quote-table">
                   <thead>
                     <tr>
@@ -520,6 +547,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                   </tfoot>
                 </table>
 
+                {/* ── 備考 ── */}
                 <section className="film-quote-notes">
                   <h3>備考</h3>
                   <ul>
@@ -527,6 +555,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                   </ul>
                 </section>
 
+                {/* ── 署名 ── */}
                 <footer className="film-quote-footer">
                   <div className="greeting">
                     <p>上記の通りお見積り申し上げます。<br />ご検討のほどよろしくお願いいたします。</p>
