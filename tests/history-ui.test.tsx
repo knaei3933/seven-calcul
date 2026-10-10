@@ -112,6 +112,16 @@ describe("quotation history ownership UI", () => {
     expect(screen.getByText(/異形パウチ専用フィルム/)).toBeInTheDocument();
     expect(screen.getAllByText("History Test").length).toBeGreaterThan(0);
     expect(screen.queryByText("最終損益サマリー")).not.toBeInTheDocument();
+    expect(screen.getByTestId("detail-print-current")).toHaveTextContent("フィルム見積書PDF");
+
+    const printSpy = vi.spyOn(window, "print").mockImplementation(() => {});
+    await user.click(screen.getByRole("button", { name: "詳細データ" }));
+    expect(screen.getByTestId("data-report-a4")).toBeVisible();
+    expect(screen.getByTestId("data-report-a4")).toHaveTextContent("内部管理用");
+    expect(screen.getByTestId("detail-print-current")).toHaveTextContent("詳細データPDF");
+    await user.click(screen.getByTestId("detail-print-current"));
+    await waitFor(() => expect(printSpy).toHaveBeenCalledTimes(1));
+    printSpy.mockRestore();
     vi.unstubAllGlobals();
   });
 });
