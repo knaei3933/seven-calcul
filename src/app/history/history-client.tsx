@@ -495,7 +495,29 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                 {/* ── 発行ヘッダ ── */}
                 <header className="film-quote-header">
                   <div className="film-quote-issuer">
-                    <strong>{kaneiTrade.name}</strong>
+                    <div className="film-quote-brand-row">
+                      <img
+                        src="/api/brand-assets/kanei-trade-logo.png"
+                        alt="金井貿易株式会社 ロゴ"
+                        className="film-quote-kanei-logo"
+                        width={612}
+                        height={408}
+                      />
+                      <div className="film-quote-company">
+                        <strong className="film-quote-company-name">{kaneiTrade.name}</strong>
+                        <span className="film-quote-division">
+                          <strong>{kaneiTrade.divisionName}</strong>
+                          <span>{kaneiTrade.divisionLabel}</span>
+                        </span>
+                      </div>
+                      <img
+                        src="/api/brand-assets/epackage-lab-logo.png"
+                        alt="Epackage-Lab ロゴ"
+                        className="film-quote-division-logo"
+                        width={2172}
+                        height={724}
+                      />
+                    </div>
                     <small>{kaneiTrade.englishName}</small>
                     <address>
                       {kaneiTrade.postalCode}<br />
@@ -593,7 +615,13 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
                   </div>
                   <div className="issuer-seal">
                     <strong>{kaneiTrade.name}</strong>
-                    <small>{kaneiTrade.representative}　印</small>
+                    <img
+                      src="/api/brand-assets/kanei-trade-seal.png"
+                      alt="金井貿易株式会社各印"
+                      className="film-quote-seal-image"
+                      width={1254}
+                      height={1254}
+                    />
                   </div>
                 </footer>
               </div>

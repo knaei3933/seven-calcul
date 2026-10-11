@@ -3,12 +3,14 @@ import { D, Decimal } from "./decimal";
 export const kaneiTrade = {
   name: "金井貿易株式会社",
   englishName: "KANAI TRADING CO., LTD.",
+  divisionName: "Epackage-Lab",
+  divisionLabel: "フィルム販売事業部",
   postalCode: "〒673-0892",
   address: "兵庫県明石市本町2-1-29 みなとメゾン明石本町2F",
   telephone: "TEL 050-3613-9673",
   fax: "",
   email: "kim@kanei-trade.co.jp",
-  representative: "代表取締役",
+  representative: "代表取締役 金 乾雄",
 } as const;
 
 export interface FilmQuotationData {

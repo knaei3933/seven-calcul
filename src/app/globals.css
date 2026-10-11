@@ -2183,8 +2183,27 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
   display: flex; justify-content: space-between; align-items: flex-start; gap: 7mm;
   border-bottom: 2.5px solid #1f3a5f; padding-bottom: 2.5mm; margin-bottom: 3.2mm;
 }
+.film-quote-brand-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2.5mm;
+  margin-bottom: 1mm;
+}
+.film-quote-kanei-logo { width: 15mm; height: auto; }
+.film-quote-division-logo { width: 24mm; height: auto; }
+.film-quote-company { display: grid; gap: .4mm; min-width: 0; }
+.film-quote-company-name { font-size: 12pt; line-height: 1.1; }
+.film-quote-division {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5mm;
+  color: #1f3a5f;
+}
+.film-quote-division strong { font-size: 8.2pt; line-height: 1.1; }
+.film-quote-division span { font-size: 6.7pt; color: #64748b; font-weight: 600; }
 .film-quote-issuer { font-size: 8pt; line-height: 1.42; }
-.film-quote-issuer strong { font-size: 14pt; color: #1f3a5f; letter-spacing: .07em; display: block; margin-bottom: 1mm; }
+.film-quote-issuer strong { color: #1f3a5f; letter-spacing: .07em; }
 .film-quote-issuer small { display: block; color: #94a3b8; font-size: 6.8pt; margin: .5mm 0 1.4mm; letter-spacing: .11em; text-transform: uppercase; }
 .film-quote-issuer address { font-style: normal; color: #374151; font-size: 7.4pt; }
 .film-quote-title { text-align: right; }
@@ -2255,8 +2274,13 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 }
 .film-quote-footer .greeting p { font-size: 8.5pt; color: #374151; margin: 0; line-height: 1.45; }
 .film-quote-footer .issuer-seal { text-align: center; min-width: 35mm; padding: 3.2mm 6mm; border: 1.5px solid #1f3a5f; border-radius: 1.5mm; }
-.film-quote-footer .issuer-seal strong { display: block; font-size: 9.4pt; color: #1f3a5f; letter-spacing: .05em; margin-bottom: .9mm; }
-.film-quote-footer .issuer-seal small { display: block; font-size: 7.4pt; color: #64748b; margin-top: .5mm; }
+.film-quote-footer .issuer-seal strong { display: block; font-size: 9.4pt; color: #1f3a5f; letter-spacing: .05em; margin-bottom: .8mm; }
+.film-quote-seal-image {
+  display: block;
+  width: 17mm;
+  height: auto;
+  margin: 0 auto;
+}
 
 /* ── Film Quote Preview on Quote Page ── */
 .film-quote-preview { margin: 0 auto 14px; max-width: 1100px; padding: 12px 18px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; }
