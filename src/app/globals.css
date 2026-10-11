@@ -2259,25 +2259,33 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-item-spec { display: block; margin-top: 1mm; color: #64748b; font-size: 7.6pt; line-height: 1.38; white-space: pre-line; }
 
 /* Notes */
-.film-quote-notes { margin-bottom: auto; }
+.film-quote-notes { margin-bottom: 4mm; }
 .film-quote-notes h3 {
-  font-size: 8.8pt; color: #1f3a5f; margin: 0 0 1.3mm;
+  font-size: 10.8pt; color: #1f3a5f; margin: 0 0 1.5mm;
   padding-left: 2mm; border-left: 3px solid #1f3a5f; font-weight: 800;
 }
-.film-quote-notes ul { padding-left: 4.5mm; font-size: 7.8pt; color: #475569; line-height: 1.45; margin: 0; list-style-type: disc; }
+.film-quote-notes ul { padding-left: 5mm; font-size: 9.8pt; color: #475569; line-height: 1.42; margin: 0; list-style-type: disc; }
 .film-quote-notes li + li { margin-top: .4mm; }
 
 /* Footer */
 .film-quote-footer {
-  display: flex; justify-content: space-between; align-items: flex-end;
-  border-top: 2px solid #1f3a5f; padding-top: 2.6mm; margin-top: 3mm;
+  display: flex; justify-content: space-between; align-items: flex-end; gap: 5mm;
+  border-top: 2px solid #1f3a5f; padding-top: 2.5mm; margin-top: 0;
 }
 .film-quote-footer .greeting p { font-size: 8.5pt; color: #374151; margin: 0; line-height: 1.45; }
-.film-quote-footer .issuer-seal { text-align: center; min-width: 35mm; padding: 3.2mm 6mm; border: 1.5px solid #1f3a5f; border-radius: 1.5mm; }
-.film-quote-footer .issuer-seal strong { display: block; font-size: 9.4pt; color: #1f3a5f; letter-spacing: .05em; margin-bottom: .8mm; }
+.film-quote-footer .issuer-seal {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-width: 22mm;
+  padding: 1.5mm;
+  border: 0;
+  border-radius: 0;
+}
+.film-quote-footer .issuer-seal strong { display: block; font-size: 9pt; color: #1f3a5f; letter-spacing: .04em; margin-bottom: .6mm; }
 .film-quote-seal-image {
   display: block;
-  width: 17mm;
+  width: 18mm;
   height: auto;
   margin: 0 auto;
 }

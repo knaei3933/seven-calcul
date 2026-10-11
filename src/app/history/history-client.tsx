@@ -410,7 +410,18 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
     };
   }, [record.id]);
 
-  const printCurrentDocument = () => {
+  const printCurrentDocument = async () => {
+    // ブランド印などのAPI画像は印刷直後に空白になることがあるため、描画完了を待つ。
+    await Promise.all(
+      Array.from(document.querySelectorAll<HTMLImageElement>(".history-detail-panel img")).map(async (image) => {
+        if (image.complete && image.naturalWidth > 0) return;
+        try {
+          await image.decode();
+        } catch {
+          // 読み込み失敗時は既存のalt表示で印刷を妨げない。
+        }
+      }),
+    );
     requestAnimationFrame(() => {
       requestAnimationFrame(() => window.print());
     });
@@ -439,7 +450,7 @@ function QuotationDetailModal({ record, onClose, onPurchase, onStatusChange, onS
             <p data-testid="history-film-composition">{record.customerName || "得意先未設定"} / {record.productName} / フィルム構成 {composition || DEFAULT_FILM_COMPOSITION}</p>
           </div>
           <div className="detail-header-actions">
-            <button className="button small" type="button" onClick={printCurrentDocument} data-testid="detail-print-current">
+            <button className="button small" type="button" onClick={() => void printCurrentDocument()} data-testid="detail-print-current">
               {detailTab === "document" ? "見積書PDF"
                 : detailTab === "film" ? "フィルム見積書PDF"
                   : "詳細データPDF"}
