@@ -1411,6 +1411,7 @@ export default function PrintableQuotationPage() {
                 className="button secondary"
                 type="button"
                 disabled={customerMasterStatus.saving || !form.customerCode.trim() || !form.customerName.trim()}
+                title={!form.customerCode.trim() || !form.customerName.trim() ? "顧客コードと会社名を入力してください" : ""}
                 onClick={() => void saveCustomerMaster()}
               >
                 {customerMasterStatus.saving ? "保存中..." : "保存"}
@@ -1419,6 +1420,9 @@ export default function PrintableQuotationPage() {
                 テスト用入力
               </button>
             </form>
+            {!form.customerName.trim() && form.customerCode.trim() ? (
+              <p className="customer-master-status" role="status">↓ 会社名を入力すると保存できます</p>
+            ) : null}
             {customerMasterStatus.message ? <p className="customer-master-status" role="status">{customerMasterStatus.message}</p> : null}
           </div>
           {customerSearchResults.length ? (
