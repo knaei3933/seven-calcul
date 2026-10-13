@@ -309,6 +309,7 @@ export default function PrintableQuotationPage() {
   });
   const [customerSearchTerm, setCustomerSearchTerm] = useState("");
   const [customerSearchResults, setCustomerSearchResults] = useState<CustomerMaster[]>([]);
+  const customerSearchRef = useRef<HTMLFormElement | null>(null);
   const [customerSearchStatus, setCustomerSearchStatus] = useState<"idle" | "loading" | "error">("idle");
 
   const searchCustomerMaster = async (query: string) => {
@@ -384,7 +385,14 @@ export default function PrintableQuotationPage() {
     }
   };
 
+  const clearCustomerSearch = () => {
+    setCustomerSearchResults([]);
+    setCustomerSearchTerm("");
+  };
+
   const selectCustomerMaster = (customer: CustomerMaster) => {
+    clearCustomerSearch();
+    setCustomerSearchTerm(customer.customerCode);
     applyPatch({
       customerCode: customer.customerCode,
       customerName: customer.customerName,
@@ -1362,6 +1370,7 @@ export default function PrintableQuotationPage() {
         <div className="issue-required-fields quote-issue-panel" aria-label="発行入力">
           <div className="issue-panel-top no-print">
             <form
+              ref={customerSearchRef}
               className="customer-master-controls"
               onSubmit={(event) => {
                 event.preventDefault();
