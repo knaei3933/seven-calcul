@@ -2,6 +2,7 @@ import type { CostParameters, SizeMaster, SizeKey } from "./types";
 import { D } from "./decimal";
 
 export const CALCULATION_VERSION = "2026-10.1";
+export const GRAVURE_MASTER_CALCULATION_VERSION = "2026-10.2-gravure-master";
 
 /**
  * 連結形式別の充填・加工単価加算率（1連を基準した見積単価への加算）。

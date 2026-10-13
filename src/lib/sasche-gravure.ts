@@ -1,8 +1,23 @@
 import { D, Decimal } from "./decimal";
 import type { GravureRollCostResult } from "./gravure-roll";
 
-const SELLER_MARKUP = "1.12" as const;
-const PLATE_MINIMUM = "32000";
+export const DEFAULT_SELLER_MARKUP = "1.12";
+
+export interface GravureYSupplierSourceRow {
+  id: number;
+  webWidthMm: number;
+  laneCount: number;
+  printTierM: number;
+  approxOutputLengthM: string;
+  supplierUnitPriceYenPerM: string;
+  plateBaseYenPerColor: string;
+  sellerMarkup: string;
+}
+
+export interface GravureYSupplierPrice extends GravureYSupplierSourceRow {
+  effectiveFrom: string;
+  effectiveTo: string;
+}
 
 export type SascheLane = 1 | 2;
 export type SaschePrintTier = 2000 | 4000;
@@ -24,13 +39,14 @@ export type SascheCandidate = {
   quantityToleranceExceeded: boolean;
   colorCount: number;
   supplierUnitPriceYenPerM: string;
-  sellerMarkup: "1.12";
+  sellerMarkup: string;
   filmUnitPriceYen: string;
   filmTotalYen: string;
   plateUnitPriceYen: string;
   plateTotalYen: string;
   skuOutputLengthsM?: string[];
   skuPatternIds?: string[];
+  sourceRows: GravureYSupplierSourceRow[];
   surplusLengthM: string;
   shortageLengthM: string;
   surplusRatio: string;
@@ -54,8 +70,21 @@ const supplierMatrix = [
   { webWidthMm: 620, laneCount: 1, printTierM: 4000, approxLengthM: 3500, unitPrice: "133.50", plateBase: "32000" },
 ] as const;
 
-function nearestWidthRow(webWidthMm: number) {
-  return supplierMatrix
+export function defaultGravureYSupplierRows(): GravureYSupplierSourceRow[] {
+  return supplierMatrix.map((row, index) => ({
+    id: -(index + 1),
+    webWidthMm: row.webWidthMm,
+    laneCount: row.laneCount,
+    printTierM: row.printTierM,
+    approxOutputLengthM: String(row.approxLengthM),
+    supplierUnitPriceYenPerM: row.unitPrice,
+    plateBaseYenPerColor: row.plateBase,
+    sellerMarkup: DEFAULT_SELLER_MARKUP,
+  }));
+}
+
+function nearestWidthRow(webWidthMm: number, rows: readonly GravureYSupplierSourceRow[]) {
+  return rows
     .map((row) => ({
       row,
       difference: Math.abs(webWidthMm - row.webWidthMm),
@@ -65,8 +94,6 @@ function nearestWidthRow(webWidthMm: number) {
       left.difference - right.difference || right.width - left.width,
     )[0].row;
 }
-
-const QUANTITY_TOLERANCE = 0.15;
 
 function adjustedQuantityForOutput(outputLengthM: Decimal, requiredLengthM: Decimal, quantity: Decimal) {
   const perPieceRequiredLength = quantity.gt(0) ? requiredLengthM.div(quantity) : D(0);
@@ -81,23 +108,25 @@ type SascheSelectorInput = {
   requiredLengthM: Decimal;
   quantity: Decimal;
   colorCount: Decimal;
+  rows?: readonly GravureYSupplierSourceRow[];
 };
 
-function buildSascheRows({ webWidthMm, requiredLengthM, quantity, colorCount }: SascheSelectorInput): SascheCandidate[] {
+function buildSascheRows({ webWidthMm, requiredLengthM, quantity, colorCount, rows }: SascheSelectorInput): SascheCandidate[] {
   if (webWidthMm <= 0 || requiredLengthM.lte(0) || quantity.lte(0)) return [];
   if (colorCount.lt(0)) return [];
 
-  const matchedWidth = nearestWidthRow(webWidthMm);
+  const availableRows = rows?.length ? rows : defaultGravureYSupplierRows();
+  const matchedWidth = nearestWidthRow(webWidthMm, availableRows);
   const plateCount = colorCount.toDecimalPlaces(0, Decimal.ROUND_CEIL).toNumber();
 
-  return supplierMatrix
+  return availableRows
     .filter((row) => row.webWidthMm === matchedWidth.webWidthMm)
     .map((row): SascheCandidate => {
-      const outputLengthM = D(row.approxLengthM);
-      const plateUnitBase = plateCount === 0 ? D(0) : D(row.plateBase).times(SELLER_MARKUP);
+      const outputLengthM = D(row.approxOutputLengthM);
+      const plateUnitBase = plateCount === 0 ? D(0) : D(row.plateBaseYenPerColor).times(row.sellerMarkup);
       const plateTotal = plateUnitBase.times(plateCount);
       const plateUnitPrice = plateCount === 0 ? D(0) : plateUnitBase;
-      const filmUnit = D(row.unitPrice).times(SELLER_MARKUP);
+      const filmUnit = D(row.supplierUnitPriceYenPerM).times(row.sellerMarkup);
       const filmTotal = outputLengthM.times(filmUnit);
       const perPieceRequiredLength = quantity.gt(0) ? requiredLengthM.div(quantity) : D(0);
       const adjustedQuantity = adjustedQuantityForOutput(outputLengthM, requiredLengthM, quantity);
@@ -115,13 +144,13 @@ function buildSascheRows({ webWidthMm, requiredLengthM, quantity, colorCount }: 
         id,
         webWidthMm: row.webWidthMm,
         matchedWidthMm: matchedWidth.webWidthMm,
-        laneCount: row.laneCount,
-        printTierM: row.printTierM,
+        laneCount: row.laneCount as SascheLane,
+        printTierM: row.printTierM as SaschePrintTier,
         patternCount: 1,
         filmLabel: "Y",
-        baseApproxLengthM: row.approxLengthM,
-        supplierUnitPriceYenPerM: row.unitPrice,
-        sellerMarkup: SELLER_MARKUP,
+        baseApproxLengthM: Number(row.approxOutputLengthM),
+        supplierUnitPriceYenPerM: row.supplierUnitPriceYenPerM,
+        sellerMarkup: row.sellerMarkup,
         filmUnitPriceYen: filmUnit.toString(),
         requiredLengthM: requiredLengthM.toString(),
         quantity: quantity.toString(),
@@ -135,6 +164,7 @@ function buildSascheRows({ webWidthMm, requiredLengthM, quantity, colorCount }: 
         filmTotalYen: filmTotal.toString(),
         skuOutputLengthsM: [outputLengthM.toString()],
         skuPatternIds: [id],
+        sourceRows: [{ ...row }],
         surplusLengthM: surplus.toString(),
         shortageLengthM: shortage.toString(),
         surplusRatio: surplusRatio.toString(),
@@ -168,17 +198,20 @@ export function buildSascheCandidates({
   requiredLengthM,
   quantity,
   colorCount,
+  rows,
 }: {
   webWidthMm: number;
   requiredLengthM: Decimal;
   quantity: Decimal;
   colorCount: Decimal;
+  rows?: readonly GravureYSupplierSourceRow[];
 }): SascheCandidate[] {
   const candidates = buildSascheRows({
     webWidthMm,
     requiredLengthM,
     quantity,
     colorCount,
+    rows,
   });
   const selected = candidates.find((candidate) => candidate.recommended);
 

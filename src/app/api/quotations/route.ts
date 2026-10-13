@@ -11,14 +11,21 @@ import { calculatePouchCost, type CalculationInput, type CostResult } from "@/li
 import { isCalculationRequest } from "@/lib/calculation-provenance";
 import { D } from "@/lib/decimal";
 import { activeMaterialWidthMm, type PurchaseOrderSnapshot } from "@/lib/purchase-order";
-import { defaultParameters } from "@/lib/constants";
+import { defaultParameters, GRAVURE_MASTER_CALCULATION_VERSION } from "@/lib/constants";
 import { defaultGravureRollParameters, GRAVURE_ROLL_COPPER_PLATE_MINIMUM_YEN } from "@/lib/gravure-roll";
 import { candidateSkuOrderLengthM } from "@/lib/print-recommendation";
-import type { QuotationRecordInput } from "@/lib/quotation-shared";
+import type { QuotationRecord, QuotationRecordInput } from "@/lib/quotation-shared";
 import { getSessionUser } from "@/lib/api-auth";
 import { getQuotationByNumber } from "@/lib/quotation-store";
 import type { AuthenticatedUser } from "@/lib/auth-store";
 import { buildFilmQuotationFromRecord } from "@/lib/film-quotation";
+import {
+  GravureDurableDatabaseRequiredError,
+  GravureInfrastructureError,
+  GRAVURE_SNAPSHOT_CALCULATION_VERSION,
+  isGravureSnapshotIssuanceEnabled,
+  verifyGravureSnapshotIssuance,
+} from "@/lib/gravure-price-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -228,6 +235,82 @@ function hasValidSimulatorProvenance(input: QuotationRecordInput | null): boolea
   }
 }
 
+function isGravureIssuance(input: QuotationRecordInput): boolean {
+  const request = input.payload.calculationRequest as CalculationInput | undefined;
+  return input.payload.pricingSnapshot != null
+    || request?.printingMethod === "gravure"
+    || input.payload.printingMethod === "gravure"
+    || input.calculationVersion === GRAVURE_MASTER_CALCULATION_VERSION;
+}
+
+function isPersistedLegacyGravureRecord(existing: QuotationRecord | null): existing is QuotationRecord {
+  if (!existing) return false;
+  const request = existing.payload.calculationRequest as CalculationInput | undefined;
+  const storedVersion = request && typeof request === "object"
+    ? (request as { audit?: { calculationVersion?: unknown } }).audit?.calculationVersion
+    : undefined;
+  return request?.printingMethod === "gravure"
+    && typeof storedVersion === "string"
+    && storedVersion !== GRAVURE_MASTER_CALCULATION_VERSION;
+}
+
+function applyPersistedLegacyIssuance(input: QuotationRecordInput, existing: QuotationRecord): void {
+  const submitted = input.payload as Record<string, unknown>;
+  const persisted = existing.payload as Record<string, unknown>;
+  const preserved = Object.fromEntries([
+    "customerName", "customerCode", "customerContact", "customerPostalCode",
+    "customerAddress", "customerTelephone", "customerEmail",
+  ].map((field) => [field, submitted[field] ?? persisted[field]]).filter(([, value]) => typeof value === "string"));
+  input.quantity = existing.quantity;
+  input.filmCostPerPiece = existing.filmCostPerPiece;
+  input.filmMeterPrice = existing.filmMeterPrice;
+  input.filmOrderLengthM = existing.filmOrderLengthM;
+  input.calculationVersion = existing.calculationVersion;
+  input.resultHash = existing.resultHash;
+  input.payload = { ...persisted, ...preserved };
+}
+
+async function applySnapshotAuthoritativeIssuance(
+  input: QuotationRecordInput,
+): Promise<boolean> {
+  const reference = input.payload.pricingSnapshot as {
+    id?: unknown;
+    sha256?: unknown;
+    publicProjection?: unknown;
+  } | undefined;
+  if (!reference || typeof reference.id !== "string" || typeof reference.sha256 !== "string") return false;
+  const verified = await verifyGravureSnapshotIssuance({
+    snapshotId: reference.id,
+    snapshotSha256: reference.sha256,
+    publicProjection: reference.publicProjection,
+  });
+  if (input.resultHash !== verified.result.audit.resultJsonSha256) return false;
+
+  // Replace every client calculation surface with server state. Customer-entered
+  // issue/contact fields remain, but no source value can fill a request gap.
+  const submitted = input.payload as Record<string, unknown>;
+  const preserved = Object.fromEntries([
+    "customerName", "customerCode", "customerContact", "customerPostalCode",
+    "customerAddress", "customerTelephone", "customerEmail",
+  ].map((field) => [field, submitted[field]]).filter(([, value]) => typeof value === "string"));
+  input.quantity = verified.result.quantity;
+  input.filmCostPerPiece = verified.result.costPerPieceComponents.film;
+  input.filmMeterPrice = verified.result.film.unitPrice;
+  input.filmOrderLengthM = verified.result.film.orderLengthM;
+  input.calculationVersion = GRAVURE_MASTER_CALCULATION_VERSION;
+  input.resultHash = verified.result.audit.resultJsonSha256;
+  input.payload = {
+    ...verified.snapshot.canonicalPublicProjection,
+    ...preserved,
+    pricingSnapshot: {
+      id: verified.snapshot.id,
+      sha256: verified.snapshot.snapshotSha256,
+      publicProjection: verified.snapshot.canonicalPublicProjection,
+    },
+  };
+  return true;
+}
+
 export async function GET(request: Request): Promise<NextResponse> {
   const user = await getSessionUser(request);
   if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
@@ -255,7 +338,31 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (existing && !canManageQuotation(user, existing.createdBy.id)) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
-    if (!hasValidSimulatorProvenance(input)) {
+    if (isGravureIssuance(input)) {
+      if (!isGravureSnapshotIssuanceEnabled()) {
+        return NextResponse.json({ error: "gravure_snapshot_issuance_disabled" }, { status: 503 });
+      }
+      let snapshotIssued = false;
+      try {
+        snapshotIssued = await applySnapshotAuthoritativeIssuance(input);
+      } catch (error) {
+        if (error instanceof GravureDurableDatabaseRequiredError) {
+          return NextResponse.json({ error: "gravure_master_unavailable" }, { status: 503 });
+        }
+        if (error instanceof GravureInfrastructureError) {
+          return NextResponse.json({ error: "gravure_master_unavailable" }, { status: 503 });
+        }
+        return NextResponse.json({ error: "pricing_snapshot_invalid" }, { status: 400 });
+      }
+      const persistedLegacy = !snapshotIssued && isPersistedLegacyGravureRecord(existing);
+      if (persistedLegacy) applyPersistedLegacyIssuance(input, existing);
+      if (!snapshotIssued && !persistedLegacy) {
+        return NextResponse.json({ error: "pricing_snapshot_required" }, { status: 400 });
+      }
+      if (!snapshotIssued && !hasValidSimulatorProvenance(input)) {
+        return NextResponse.json({ error: "calculation_provenance_invalid" }, { status: 400 });
+      }
+    } else if (!hasValidSimulatorProvenance(input)) {
       return NextResponse.json({ error: "calculation_provenance_invalid" }, { status: 400 });
     }
     // 発行には顧客の必須情報（会社名・郵便番号・電話番号・住所）が必要。

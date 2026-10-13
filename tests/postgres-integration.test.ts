@@ -159,4 +159,28 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     await expect(db.run("DELETE FROM users WHERE id = ?", [owner.id]))
       .rejects.toThrow(/foreign key/iu);
   });
+
+  it("records the gravure migration and serializes overlapping master writes", { timeout: 120_000 }, async () => {
+    const {
+      createGravureYMasterRow,
+      getGravureMigrationVersion,
+      validateGravureYMasterInput,
+    } = await import("@/lib/gravure-price-store");
+    expect(await getGravureMigrationVersion()).toBe(1);
+
+    const input = validateGravureYMasterInput({
+      webWidthMm: 356,
+      laneCount: 1,
+      printTierM: 2000,
+      approxOutputLengthM: "1700",
+      supplierUnitPriceYenPerM: "141.00",
+      plateBaseYenPerColor: "26000",
+      sellerMarkup: "1.12",
+      effectiveFrom: "2026-10-01",
+      memo: "pg-overlap",
+    });
+    const admin = { actor: "pg-admin@kanei-trade.co.jp" };
+    await createGravureYMasterRow(input, admin.actor);
+    await expect(createGravureYMasterRow(input, admin.actor)).rejects.toThrow(/overlap/i);
+  });
 });

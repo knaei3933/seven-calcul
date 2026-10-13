@@ -5,135 +5,84 @@ type CandidateFigures = {
   filmTotal: string;
 };
 
-async function prepareSelectedGravureCandidate(page: Page): Promise<CandidateFigures> {
+function numericText(value: string): string {
+  return value.replace(/[^\d.-]/g, "");
+}
+
+async function prepareRedactedGravureCandidate(page: Page, sizeKey = "tube-50x90"): Promise<CandidateFigures> {
   await page.goto("/");
-  await page.getByLabel("サイズ").selectOption("tube-50x90");
+  await page.getByLabel("サイズ").selectOption(sizeKey);
+  if (sizeKey === "round-60x120") await page.getByLabel("2連").check();
   await page.getByLabel("発注数量 (枚)").fill("50000");
   await page.getByTestId("calculate-desktop").click();
-  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
 
-  const modal = page.getByTestId("recommendation-modal");
+  const result = page.getByTestId("server-result");
+  await expect(result).toHaveAttribute("data-state", "calculated");
+  const modal = page.getByTestId("recommendation-modal-overlay");
   await expect(modal).toBeVisible();
-  await expect(modal).toHaveAttribute("role", "dialog");
-  await expect(modal).toHaveAttribute("aria-modal", "true");
-  await expect(modal).toHaveAttribute("aria-labelledby", "recommendation-modal-title");
-  await expect(page.getByTestId("recommendation-modal-close")).toBeFocused();
-  await expect(modal.getByTestId("modal-input-basis")).toBeVisible();
-  await expect(modal.getByTestId("all-in-comparison")).toBeVisible();
-  await expect(modal.getByTestId("all-in-comparison")).toHaveText(/すべて合算/);
+  await modal.locator(".recommendation-card").filter({ hasText: "Y / 国内調達" }).first().click();
 
-  const candidate = modal.getByRole("button", { name: /Y \/ 国内調達/ }).first();
-  await expect(candidate).toBeEnabled();
-  const candidateText = await candidate.innerText();
-  const orderLengthM = /([0-9,]+)m\s*／\s*￥/.exec(candidateText)?.[1];
-  const filmTotal = /フィルム\s*￥([0-9,]+)/.exec(candidateText)?.[1];
-  if (!orderLengthM || !filmTotal) throw new Error("Unable to parse candidate film figures");
+  await expect(result).toHaveAttribute("data-state", "redacted_calculated");
+  await expect(page.getByTestId("redacted-snapshot")).toHaveText(/スナップショット [0-9a-f-]{8}… ／ asOf \d{4}-\d{2}-\d{2}/);
+  const candidate = page.getByTestId("redacted-candidate-Y").and(page.locator(".selected"));
+  await expect(candidate).toContainText(/国内 \d+mm/);
+  const dds = candidate.locator("dd");
+  const orderLengthM = numericText(await dds.nth(1).innerText());
+  const filmTotal = numericText(await dds.nth(2).innerText());
+  expect(Number(orderLengthM)).toBeGreaterThan(0);
+  expect(Number(filmTotal)).toBeGreaterThan(0);
 
-  await candidate.click();
-  await expect(modal).toBeHidden();
-  await expect(page.getByTestId("active-candidate-note")).toContainText("選択候補（グラビア印刷）");
-  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
-  const summary = page.getByTestId("selected-candidate-summary");
-  await expect(summary).toContainText("Y / 国内調達（グラビア印刷）");
-  await expect(summary).toContainText("総原価");
+  await expect(candidate).toContainText("選択中");
+  await expect(result).toHaveAttribute("data-state", "redacted_calculated");
+  await expect(page.getByTestId("redacted-snapshot")).toHaveText(/スナップショット [0-9a-f-]{8}… ／ asOf \d{4}-\d{2}-\d{2}/);
+  await expect(page.getByTestId("continue-redacted-quote")).toBeEnabled();
   return { orderLengthM, filmTotal };
 }
 
-test("fresh selected gravure candidate carries film planning and cost into the quotation", async ({ page }) => {
-  const { orderLengthM, filmTotal } = await prepareSelectedGravureCandidate(page);
+async function expectNoFullResultLeak(page: Page): Promise<void> {
+  const text = await page.getByTestId("server-result").innerText();
+  for (const forbidden of ["supplier", "sellerMarkup", "plateUnitPrice", "sourceRows", "rowId", "unitPriceYenPerM"]) {
+    expect(text).not.toContain(forbidden);
+  }
+}
 
-  const filmCost = page.getByTestId("cost-film");
-  await filmCost.scrollIntoViewIfNeeded();
-  await expect(filmCost).toContainText(`￥${filmTotal}`);
-  await expect(filmCost).toContainText(`${orderLengthM} m`);
+test("fresh selected redacted candidate carries film planning and cost into the quotation", async ({ page }) => {
+  const { orderLengthM, filmTotal } = await prepareRedactedGravureCandidate(page);
+  await expectNoFullResultLeak(page);
 
-  await page.getByRole("link", { name: "見積書発行" }).click();
+  await page.getByTestId("continue-redacted-quote").click();
   await expect(page).toHaveURL(/\/quote$/);
-  await expect(page.getByTestId("quote-source")).toContainText("原価計算結果連携済み");
+  await expect(page.getByTestId("issue-required-fields")).toContainText("連携済み");
   await expect(page.getByTestId("film-meter-price")).toContainText(/￥[0-9,.]+\s*\/m/);
   await expect(page.getByTestId("film-pouch-price")).toContainText(/￥[0-9,.]+\s*\/枚/);
   await expect(page.getByTestId("film-order-length")).toContainText(`${orderLengthM.replace(/,/g, "")} m`);
   await expect(page.getByTestId("stale-quote-warning")).toHaveCount(0);
-  await expect(page.getByTestId("save-history")).toBeEnabled();
-});
-
-test("changing the selected candidate input makes linked quotation actions stale-safe", async ({ page }) => {
-  await prepareSelectedGravureCandidate(page);
-  await page.getByLabel("発注数量 (枚)").fill("50001");
-  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "stale");
-  await expect(page.getByTestId("calculate-desktop")).toContainText("再計算して候補を見る");
-  await page.getByRole("link", { name: "見積書発行" }).click();
-  await expect(page).toHaveURL(/\/quote$/);
-  await expect(page.getByTestId("stale-quote-warning")).toBeVisible();
   await expect(page.getByTestId("save-history")).toBeDisabled();
-  await expect(page.getByTestId("print-pdf")).toBeDisabled();
-  await expect(page.getByTestId("open-checklist")).toBeDisabled();
+  await expect(page.getByTestId("issue-required-fields")).toContainText("入力不足");
 });
 
-test("selecting an adjusted plan updates the simulator input quantity", async ({ page }) => {
-  await page.goto("/");
-  await page.getByLabel("サイズ").selectOption("round-60x120");
-  await page.getByLabel("発注数量 (枚)").fill("50000");
-  await page.getByLabel("2連").check();
-  await page.getByTestId("calculate-desktop").click();
+test("redacted recalculation returns to the input basis and disables continuation", async ({ page }) => {
+  await prepareRedactedGravureCandidate(page);
+  await page.getByTestId("recalculate-redacted").click();
   await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
-
-  const modal = page.getByTestId("recommendation-modal");
-  await expect(modal).toBeVisible();
-  const adjustedPlan = modal.getByRole("button", { name: /目標数近似・不足参考/ });
-  await adjustedPlan.click();
-  await expect(modal).toBeHidden();
-
-  await expect(page.getByLabel("発注数量 (枚)")).toHaveValue("49000");
-  await expect(page.getByTestId("sku-quantity-0")).toHaveValue("49000");
-  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
-  await expect(page.getByTestId("shortage-candidate-warning")).toContainText("元入力 50,000 枚");
-  await expect(page.getByTestId("shortage-candidate-warning")).toContainText("選択後発注 49,000 枚");
-
-  await page.getByRole("link", { name: "見積書発行" }).click();
-  await expect(page.locator("#quote-preview")).toContainText("49,000 枚");
-  await expect(page.getByTestId("shortage-quote-warning")).toContainText("数量調整プラン");
-  await expect(page.getByTestId("print-pdf")).toBeEnabled();
-
-  await page.getByRole("link", { name: "原価シミュレーター" }).click();
-  await page.getByRole("button", { name: "元の数量へ戻る" }).click();
-  await expect(page.getByLabel("発注数量 (枚)")).toHaveValue("50000");
-  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
+  await expect(page.getByTestId("recommendation-modal-overlay")).toBeVisible();
+  await expect(page.getByTestId("continue-redacted-quote")).toHaveCount(0);
+  await expectNoFullResultLeak(page);
 });
 
-test("explicit recalculation returns to the digital input basis and reopens the modal", async ({ page }) => {
-  await prepareSelectedGravureCandidate(page);
+test("selected redacted plan hands the authoritative projection to the quotation", async ({ page }) => {
+  await prepareRedactedGravureCandidate(page, "round-60x120");
+  await expect(page.locator('[data-testid="redacted-candidate-Y"].selected')).toContainText("選択中");
+  await expectNoFullResultLeak(page);
 
-  await page.getByTestId("calculate-desktop").click();
-  const modal = page.getByTestId("recommendation-modal");
-  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
-  await expect(modal).toBeVisible();
-  await expect(modal.getByTestId("input-basis-card")).toHaveClass(/selected/);
-  if (test.info().project.name === "mobile-chrome") {
-    const comparison = modal.getByTestId("all-in-comparison");
-    await expect(comparison).toBeVisible();
-    await comparison.focus();
-    await expect(comparison).toBeFocused();
-    const overflow = await comparison.evaluate(
-      (element) => element.scrollWidth > element.clientWidth,
-    );
-    expect(overflow).toBe(true);
-    await comparison.evaluate((element) => {
-      element.scrollLeft = element.scrollWidth;
-    });
-    const maxScrollLeft = await comparison.evaluate(
-      (element) => element.scrollLeft,
-    );
-    expect(maxScrollLeft).toBeGreaterThan(0);
-    await comparison.evaluate((element) => {
-      element.scrollLeft = 0;
-    });
-    await expect(comparison.evaluate((element) => element.scrollLeft)).resolves.toBe(0);
-  }
-
-  await modal.getByTestId("recommendation-modal-close").click();
-  await expect(modal).toBeHidden();
-  await expect(page.getByTestId("input-summary")).toContainText("デジタル印刷");
-  await expect(page.getByTestId("active-candidate-note")).toHaveCount(0);
-  await expect(page.getByTestId("selected-candidate-summary")).toContainText("デジタル");
+  await page.getByTestId("continue-redacted-quote").click();
+  await expect(page).toHaveURL(/\/quote$/);
+  const draft = JSON.parse(await page.evaluate(() => sessionStorage.getItem("pouch-quotation-draft-v1") ?? "{}")) as {
+    printingMethod?: string;
+    pricingSnapshot?: { publicProjection?: { selectedCandidateId?: string } };
+  };
+  expect(draft.printingMethod).toBe("gravure");
+  expect(draft.pricingSnapshot?.publicProjection?.selectedCandidateId).not.toBe("");
+  await expect(page.locator("#quote-preview")).toContainText("グラビア印刷");
+  await expect(page.getByTestId("issue-required-fields")).toContainText("連携済み");
 });

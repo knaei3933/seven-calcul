@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { CALCULATION_VERSION, CONNECTED_FILLING_SURCHARGE, CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForFillMl, sizeMaster } from "./constants";
+import { canonicalize } from "./canonical-json";
+import { CALCULATION_VERSION, CONNECTED_FILLING_SURCHARGE, CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForFillMl, GRAVURE_MASTER_CALCULATION_VERSION, sizeMaster } from "./constants";
 import { D, Decimal, ceilTo, eq, maxD, roundTo2, roundUp1, sum } from "./decimal";
 import { normalizeDigitalFilmOrder, QuotationValidationError, type FilmOrderAdjustment, type FilmSkuOrder } from "./digital-film";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
 import { calculateGravureRollCost, defaultGravureRollParameters, type GravureRollParameters } from "./gravure-roll";
 import { buildSascheCandidates, buildSascheGravureRollResult, selectSascheCandidate } from "./sasche-gravure";
-import type { SascheCandidate } from "./sasche-gravure";
+import type { GravureYSupplierPrice, SascheCandidate } from "./sasche-gravure";
 import type { GravureRollCostResult } from "./gravure-roll";
 import { buildPrintCandidates, createPrintCandidateContext, type PrintCandidate } from "./print-recommendation";
 import type { CostParameters, FilmPriceMode, PriceBand, PouchSpec, PrintingMethod, QuotationStatus, SizeMaster } from "./types";
@@ -87,7 +88,13 @@ export interface CostResult {
   audit: {
     calculationVersion: string;
     inputJsonSha256: string;
+    governedInputJson: string;
     resultJsonSha256: string;
+    pricingSnapshot?: {
+      id: string;
+      sha256: string;
+      publicProjectionSha256: string;
+    };
     digitalFilmPriceMode: FilmPriceMode;
     unresolvedInputFlags: WarningCode[];
     componentReconciliationDifference: string;
@@ -162,6 +169,7 @@ export interface CalculationInput {
   recommendationMode?: boolean;
   selectedCandidateId?: string;
   selectedCandidateTargetMargins?: string[];
+  gravureYRows?: GravureYSupplierPrice[];
 }
 
 type RecommendationOptions = {
@@ -192,7 +200,7 @@ function resolveTargetMargins(targetMargins?: string[]): string[] {
 }
 
 function calculatePouchCostCore(
-  { spec, quantity, printingMethod, parameters, gravureParameters, targetMargins, recommendation }: CoreCalculationInput & { recommendation?: RecommendationOptions },
+  { spec, quantity, printingMethod, parameters, gravureParameters, gravureYRows, targetMargins, recommendation }: CoreCalculationInput & { recommendation?: RecommendationOptions },
 ): CostResult {
   const quantityD = D(quantity);
   if (quantityD.lte(0) || D(spec.fillMlPerChamber).lte(0) || spec.fillingLanes <= 0) throw validationError("invalid_positive_input");
@@ -259,6 +267,7 @@ function calculatePouchCostCore(
         requiredLengthM,
         quantity: quantityD,
         colorCount: copperPlateColors,
+        rows: gravureYRows,
       }))
     : null;
   const sascheCandidates = printingMethod === "gravure"
@@ -267,6 +276,7 @@ function calculatePouchCostCore(
         requiredLengthM,
         quantity: quantityD,
         colorCount: copperPlateColors,
+        rows: gravureYRows,
       })
     : [];
   const gravureRoll = printingMethod === "gravure"
@@ -463,10 +473,10 @@ function calculatePouchCostCore(
 
   const warnings = unresolvedWarnings(spec, size, params);
   const gravurePricingMode: "standard" | "sasche" = printingMethod === "gravure" && sascheCandidate ? "sasche" : "standard";
-  const serializedInput = JSON.stringify({ spec, quantity, printingMethod, targetMargins: targetMargins ?? null, parameters: parameters ?? null, gravureParameters: gravureParameters ?? null });
+  const serializedInput = canonicalize({ spec, quantity, printingMethod, targetMargins: targetMargins ?? null, parameters: parameters ?? null, gravureParameters: gravureParameters ?? null, gravureYRows: gravureYRows ?? null });
   const result = { quantity: quantityD.toString(), chamberCount: chamberCount.toString(), bulkUsageMl: bulkUsage.toString(), costComponents, costTotal: costTotal.toString(), sellingPrices };
 
-  return {
+  const resultDocument: Omit<CostResult, "audit"> = {
     printingMethod,
     quantity: quantityD.toString(),
     connectedChambers: spec.connectedChambers,
@@ -553,14 +563,20 @@ function calculatePouchCostCore(
       ...(sascheCandidates.length ? { sascheCandidates } : {}),
     } : {}),
     warnings,
-    audit: {
-      calculationVersion: CALCULATION_VERSION,
+  };
+  const resultForAudit = resultDocument;
+  const audit: CostResult["audit"] = {
+      calculationVersion: gravureYRows ? GRAVURE_MASTER_CALCULATION_VERSION : CALCULATION_VERSION,
       inputJsonSha256: hash(serializedInput),
-      resultJsonSha256: hash(JSON.stringify(result)),
-      digitalFilmPriceMode: "common_fallback",
+      governedInputJson: serializedInput,
+      resultJsonSha256: hash(canonicalize(resultForAudit)),
+      digitalFilmPriceMode: "common_fallback" as const,
       unresolvedInputFlags: warnings,
       componentReconciliationDifference: reconciliation.toString(),
-    },
+  };
+  return {
+    ...resultDocument,
+    audit,
   };
 }
 
@@ -639,6 +655,7 @@ export function calculatePouchCost(input: CalculationInput): CostResult {
     parameters: params,
     gravureParameters: coreInput.gravureParameters ?? defaultGravureRollParameters(),
     printingMethod: coreInput.printingMethod,
+    ySupplierRows: coreInput.gravureYRows ?? [],
     basisFilmOrderLengthM: original.film.orderLengthM,
     basisFilmTotalYen: original.film.filmTotal,
   });
@@ -652,7 +669,24 @@ export function calculatePouchCost(input: CalculationInput): CostResult {
       allInDeltaYen: D(economics.costTotal).minus(D(original.costTotal)).toString(),
     };
   });
-  const attach = (result: CostResult): CostResult => ({ ...result, recommendationCandidates: candidates, selectedCandidateId: selectedCandidateId ?? "" });
+  const attach = (result: CostResult): CostResult => {
+    const enriched: CostResult = {
+      ...result,
+      recommendationCandidates: candidates,
+      selectedCandidateId: selectedCandidateId ?? "",
+    };
+    // Candidate economics are governed data, but the core hash necessarily
+    // runs before candidates exist. Gravure-master snapshots therefore bind
+    // the final enriched result; legacy digital keeps its original hash shape.
+    if (enriched.audit.calculationVersion !== GRAVURE_MASTER_CALCULATION_VERSION) return enriched;
+    return {
+      ...enriched,
+      audit: {
+        ...enriched.audit,
+        resultJsonSha256: hash(canonicalize(enriched)),
+      },
+    };
+  };
   if (!selectedCandidateId) return attach(original);
 
   const selected = candidates.find((candidate) => candidate.id === selectedCandidateId);

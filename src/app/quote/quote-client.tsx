@@ -108,6 +108,7 @@ type QuoteForm = {
   footerNote: string;
   purchaseOrderJson: string;
   calculationRequestJson: string;
+  pricingSnapshotJson: string;
 };
 
 const defaultQuote: QuoteForm = {
@@ -204,6 +205,7 @@ const defaultQuote: QuoteForm = {
   footerNote: "本お見積りに関するご不明点は、下記連絡先までお気軽にお問い合わせください。",
   purchaseOrderJson: "",
   calculationRequestJson: "",
+  pricingSnapshotJson: "",
 };
 
 function isFiniteNumber(value: string) {
@@ -543,6 +545,7 @@ export default function PrintableQuotationPage() {
           targetMargin: draft.targetMargin,
           purchaseOrderJson: draft.purchaseOrder ? JSON.stringify(draft.purchaseOrder) : "",
           calculationRequestJson: draft.calculationRequest ? JSON.stringify(draft.calculationRequest) : "",
+          pricingSnapshotJson: draft.pricingSnapshot ? JSON.stringify(draft.pricingSnapshot) : "",
         }));
         setPurchaseOrder(draft.purchaseOrder ?? null);
         setCalculationChecklistSnapshot(draft.calculationChecklistSnapshot ?? null);
@@ -667,6 +670,7 @@ export default function PrintableQuotationPage() {
             calculationRequest: form.calculationRequestJson
               ? JSON.parse(form.calculationRequestJson) as CalculationInput
               : undefined,
+            pricingSnapshot: form.pricingSnapshotJson ? JSON.parse(form.pricingSnapshotJson) : undefined,
             purchaseOrder: savedPurchaseOrder,
             calculationChecklistSnapshot: calculationChecklistSnapshot,
             filmUnitDisplay: shownTotals.filmUnit,

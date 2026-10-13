@@ -1,7 +1,14 @@
 import { D, Decimal, ceilTo, sum } from "./decimal";
 import { normalizeDigitalFilmOrder } from "./digital-film";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
-import { buildSascheCandidates, type SascheCandidate, type SascheLane, type SaschePrintTier } from "./sasche-gravure";
+import {
+  buildSascheCandidates,
+  DEFAULT_SELLER_MARKUP,
+  type GravureYSupplierSourceRow,
+  type SascheCandidate,
+  type SascheLane,
+  type SaschePrintTier,
+} from "./sasche-gravure";
 import { calculateGravureRollCost, type GravureRollCostResult, type GravureRollParameters } from "./gravure-roll";
 import { sizeMaster } from "./constants";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeMaster } from "./types";
@@ -95,6 +102,7 @@ export function createPrintCandidateContext({
   printingMethod,
   basisFilmOrderLengthM,
   basisFilmTotalYen,
+  ySupplierRows = [],
 }: {
   spec: PouchSpec;
   quantity: string | number | Decimal;
@@ -103,6 +111,7 @@ export function createPrintCandidateContext({
   printingMethod?: PrintingMethod;
   basisFilmOrderLengthM?: string | number | Decimal;
   basisFilmTotalYen?: string | number | Decimal;
+  ySupplierRows?: readonly GravureYSupplierSourceRow[];
 }): PrintCandidateContext {
   const originalQuantity = D(quantity);
   const baseSize = sizeMaster[spec.sizeKey];
@@ -128,6 +137,7 @@ export function createPrintCandidateContext({
     printingMethod,
     basisFilmOrderLengthM: basisFilmOrderLengthM ? D(basisFilmOrderLengthM) : null,
     basisFilmTotalYen: basisFilmTotalYen ? D(basisFilmTotalYen) : null,
+    ySupplierRows,
   };
 }
 
@@ -143,10 +153,12 @@ export type PrintCandidateContext = {
   printingMethod?: PrintingMethod;
   basisFilmOrderLengthM: Decimal | null;
   basisFilmTotalYen: Decimal | null;
+  ySupplierRows: readonly GravureYSupplierSourceRow[];
 };
 
 const PRINT_CANDIDATE_LIMIT = 6;
 const PRACTICAL_SURPLUS_PERCENT = 15;
+const QUANTITY_TOLERANCE_PERCENT = "15";
 const NEAR_TARGET_SHORTAGE_RATIO = "0.15";
 const NEAR_TARGET_SHORTAGE_REFERENCE_LIMIT = 2;
 
@@ -353,6 +365,7 @@ function repeatSascheCandidate(
 ): SascheCandidate {
   const outputLengthM = D(candidate.outputLengthM).times(count);
   const filmTotalYen = D(candidate.filmTotalYen).times(count);
+  const sourceMarkup = D(candidate.sourceRows[0]?.sellerMarkup ?? DEFAULT_SELLER_MARKUP);
   const quantity = D(candidate.quantity);
   const perPieceRequiredLength = quantity.gt(0) ? requiredLengthM.div(quantity) : D(0);
   const adjustedQuantity = perPieceRequiredLength.gt(0)
@@ -372,21 +385,30 @@ function repeatSascheCandidate(
     filmTotalYen: filmTotalYen.toString(),
     filmUnitPriceYen: outputLengthM.gt(0) ? filmTotalYen.div(outputLengthM).toString() : "0",
     supplierUnitPriceYenPerM: outputLengthM.gt(0)
-      ? filmTotalYen.div("1.12").div(outputLengthM).toString()
+      ? filmTotalYen.div(sourceMarkup).div(outputLengthM).toString()
       : "0",
     requiredLengthM: requiredLengthM.toString(),
     adjustedQuantity: adjustedQuantity.toString(),
     quantityReductionRatio: quantityReductionRatio.toString(),
-    quantityToleranceExceeded: quantityReductionRatio.gt("0.15"),
+    quantityToleranceExceeded: quantityReductionRatio.gt(D(QUANTITY_TOLERANCE_PERCENT)),
     surplusLengthM: surplusLengthM.toString(),
     shortageLengthM: shortageLengthM.toString(),
     surplusRatio: requiredLengthM.gt(0)
       ? surplusLengthM.div(requiredLengthM).times(100).toString()
       : "0",
-    feasible: outputLengthM.gte(requiredLengthM) || quantityReductionRatio.lte("0.15"),
+    feasible: outputLengthM.gte(requiredLengthM) || quantityReductionRatio.lte(D(QUANTITY_TOLERANCE_PERCENT)),
     skuOutputLengthsM: [outputLengthM.toString()],
     skuPatternIds: Array.from({ length: count }, () => candidate.id),
+    sourceRows: Array.from({ length: count }, () => ({ ...candidate.sourceRows[0] })),
   };
+}
+
+function weightedSascheMarkup(rows: readonly GravureYSupplierSourceRow[]) {
+  const totalLength = rows.reduce((total, row) => total.plus(D(row.approxOutputLengthM)), D(0));
+  return totalLength.gt(0) ? rows.reduce(
+    (total, row) => total.plus(D(row.approxOutputLengthM).times(row.sellerMarkup)),
+    D(0),
+  ).div(totalLength) : D(DEFAULT_SELLER_MARKUP);
 }
 
 function candidateCommon(
@@ -891,6 +913,7 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
       requiredLengthM: context.skuRequiredLengths[skuIndex],
       quantity: context.skuQuantities[skuIndex],
       colorCount: D(skuColorCounts[skuIndex]),
+      rows: context.ySupplierRows,
     });
     if (options.length === 0) return [];
 
@@ -929,6 +952,8 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
       for (const right of expandedOptions) {
         const outputLengthM = left.outputLengthM.plus(right.outputLengthM);
         const filmTotalYen = left.filmTotalYen.plus(right.filmTotalYen);
+        const combinedSourceRows = [...left.sasche.sourceRows, ...right.sourceRows];
+        const weightedMarkup = weightedSascheMarkup(combinedSourceRows);
         const plateTotalYen = left.plateTotalYen.plus(right.plateTotalYen);
         const adjustedQuantity = left.adjustedQuantities.reduce(
           (total, value) => total.plus(value),
@@ -948,10 +973,11 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
             patternCount: left.sasche.patternCount + right.patternCount,
             filmLabel: "Y",
             baseApproxLengthM: left.sasche.baseApproxLengthM + right.baseApproxLengthM,
+            sourceRows: combinedSourceRows,
             supplierUnitPriceYenPerM: outputLengthM.gt(0)
-              ? filmTotalYen.div("1.12").div(outputLengthM).toString()
+              ? filmTotalYen.div(weightedMarkup).div(outputLengthM).toString()
               : "0",
-            sellerMarkup: "1.12",
+            sellerMarkup: weightedMarkup.toString(),
             filmUnitPriceYen: outputLengthM.gt(0) ? filmTotalYen.div(outputLengthM).toString() : "0",
             filmTotalYen: filmTotalYen.toString(),
             requiredLengthM: requiredLengthM.toString(),
@@ -960,7 +986,10 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
             plateUnitPriceYen: colorCount > 0 ? plateTotalYen.div(colorCount).toString() : "0",
             plateTotalYen: plateTotalYen.toString(),
             skuOutputLengthsM: [...left.sasche.skuOutputLengthsM ?? [], right.outputLengthM],
-            skuPatternIds: [...left.sasche.skuPatternIds ?? [], right.id],
+            skuPatternIds: [
+              ...left.sasche.skuPatternIds ?? [],
+              ...Array.from({ length: right.patternCount }, () => right.id),
+            ],
             adjustedQuantity: adjustedQuantity.toString(),
             quantityReductionRatio: context.originalQuantity.gt(0)
               ? Decimal.max(D(0), context.originalQuantity.minus(adjustedQuantity))
@@ -968,7 +997,7 @@ function buildDomesticCandidates(context: PrintCandidateContext): CandidateDraft
               : "0",
             quantityToleranceExceeded: context.originalQuantity.gt(0)
               && Decimal.max(D(0), context.originalQuantity.minus(adjustedQuantity))
-                .div(context.originalQuantity).gt("0.15"),
+                .div(context.originalQuantity).gt(D(QUANTITY_TOLERANCE_PERCENT)),
             outputLengthM: outputLengthM.toString(),
             surplusLengthM: surplusLengthM.toString(),
             shortageLengthM: shortageLengthM.toString(),

@@ -57,7 +57,7 @@ const originalRequest: CalculationInput = {
   selectedCandidateTargetMargins: baseInput.targetMargins,
 };
 const originalResult = calculatePouchCost(originalRequest);
-const candidate = originalResult.recommendationCandidates!.find((item) => item.route === "Y")!;
+const candidate = originalResult.recommendationCandidates!.find((item) => item.route === "D")!;
 const selectedRequest: CalculationInput = {
   ...baseInput,
   selectedCandidateId: candidate.id,
@@ -283,11 +283,10 @@ describe("quotation calculation provenance", () => {
 	    await expect(copperChecklistResponse.json()).resolves.toEqual({ error: "calculation_provenance_invalid" });
 	  });
 
-	  it("accepts an original multi-SKU gravure calculation with no selected candidate", async () => {
-    const response = await post(quotationBody("S7-PROVENANCE-GRAVURE-ORIGINAL", gravureDraft, gravureResult));
-    expect(response.status).toBe(201);
-    const payload = await response.json();
-	    expect(payload.record.resultHash).toBe(gravureResult.audit.resultJsonSha256);
+	  it("rejects a new multi-SKU gravure calculation without a persisted snapshot", async () => {
+    const response = await post(quotationBody(`S7-PROVENANCE-GRAVURE-ORIGINAL-${Date.now()}`, gravureDraft, gravureResult));
+    expect(response.status).toBe(400);
+	    await expect(response.json()).resolves.toEqual({ error: "pricing_snapshot_required" });
 	  });
 
 	  it("accepts a selected multi-SKU domestic Y request with independent roll lengths", async () => {
@@ -352,9 +351,10 @@ describe("quotation calculation provenance", () => {
 	      },
 	    });
 
-	    const body = quotationBody("S7-PROVENANCE-Y-MULTI", draft, selectedY);
+	    const body = quotationBody(`S7-PROVENANCE-Y-MULTI-${Date.now()}`, draft, selectedY);
 	    const response = await post(body);
-	    expect(response.status).toBe(201);
+	    expect(response.status).toBe(400);
+	    await expect(response.json()).resolves.toEqual({ error: "pricing_snapshot_required" });
 	  });
 
 	  it("accepts a selected small-width Korean request using its actual production pattern", async () => {
@@ -378,11 +378,12 @@ describe("quotation calculation provenance", () => {
 	    expect(selectedK.film.orderLengthM).toBe("12000");
 
 	    const response = await post(quotationBody(
-	      "S7-PROVENANCE-K-SMALL",
+	      `S7-PROVENANCE-K-SMALL-${Date.now()}`,
 	      draftFor(selectedK, selectedKRequest),
 	      selectedK,
 	    ));
-	    expect(response.status).toBe(201);
+	    expect(response.status).toBe(400);
+	    await expect(response.json()).resolves.toEqual({ error: "pricing_snapshot_required" });
 	  });
 
 	  it("rejects a fabricated result hash before persistence", async () => {

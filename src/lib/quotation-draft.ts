@@ -6,6 +6,7 @@ import type { GravureRollParameters } from "./gravure-roll";
 import { activeMaterialWidthMm, buildPurchaseOrderSnapshot, type PurchaseContext, type PurchaseOrderSnapshot } from "./purchase-order";
 import { buildCalculationChecklistSnapshot, type CalculationChecklistSnapshot } from "./calculation-checklist";
 import type { SascheCandidate } from "./sasche-gravure";
+import type { ReturnedPublicProjection } from "./gravure-price-store";
 
 export const QUOTATION_DRAFT_KEY = "pouch-quotation-draft-v1";
 
@@ -59,6 +60,11 @@ export interface QuotationDraft {
   sascheCandidates?: SascheCandidate[];
   sascheOverToleranceReason?: string;
   calculationChecklistSnapshot?: import("./calculation-checklist").CalculationChecklistSnapshot;
+  pricingSnapshot?: {
+    id: string;
+    sha256: string;
+    publicProjection: ReturnedPublicProjection;
+  };
 }
 
 export function buildQuotationDraft(
@@ -236,4 +242,44 @@ export function parseQuotationDraft(value: unknown): QuotationDraft | null {
   ];
   if (required.some((item) => typeof item !== "string" || item.trim() === "")) return null;
   return candidate as QuotationDraft;
+}
+
+export function buildRedactedQuotationDraft(
+  projection: ReturnedPublicProjection,
+  context: {
+    productSummary: string;
+    sizeSummary: string;
+    targetMargin: string;
+  },
+): QuotationDraft {
+  const selected = projection.candidates.find((candidate) => candidate.id === projection.selectedCandidateId)
+    ?? projection.candidates[0];
+  if (!selected) throw new Error("redacted_projection_invalid");
+  return {
+    productSummary: context.productSummary,
+    sizeSummary: context.sizeSummary,
+    quantity: projection.quantity,
+    targetMargin: context.targetMargin,
+    customLotCost: "0",
+    customQuantity: "1",
+    fillingCostPerPiece: "0",
+    bulkCostPerPiece: "0",
+    pricingFillingCostPerPiece: "0",
+    filmCostPerPiece: selected.filmCostPerPieceYen,
+    filmMeterPrice: D(selected.requiredLengthM).gt(0)
+      ? D(selected.filmTotalYen).div(selected.requiredLengthM).toString()
+      : "0",
+    filmOrderLengthM: selected.orderLengthM,
+    totalCostPerPiece: selected.allInCostPerPieceYen ?? selected.filmCostPerPieceYen,
+    calculationVersion: projection.calculationVersion,
+    resultHash: projection.resultHash,
+    calculationFilmTotal: selected.filmTotalYen,
+    skuNamesRaw: [context.productSummary],
+    printingMethod: projection.printingMethod,
+    pricingSnapshot: {
+      id: projection.pricingSnapshot.id,
+      sha256: projection.pricingSnapshot.sha256,
+      publicProjection: projection,
+    },
+  };
 }

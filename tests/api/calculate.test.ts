@@ -5,12 +5,12 @@ import { afterAll, describe, expect, it } from "vitest";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "calculate-api-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
-process.env.ADMIN_EMAIL = "admin@calculate.test";
+process.env.ADMIN_EMAIL = "admin@kanei-trade.co.jp";
 process.env.ADMIN_PASSWORD = "admin-calculate-password";
 process.env.ADMIN_NAME = "Calculate Admin";
 const { POST } = await import("@/app/api/calculate/route");
 const { createUser, createSession } = await import("@/lib/auth-store");
-const user = await createUser({ email: "user@calculate.test", name: "Calculate User", password: "user-calculate-password", role: "user" });
+const user = await createUser({ email: "user@kanei-trade.co.jp", name: "Calculate User", password: "user-calculate-password", role: "admin" });
 const session = await createSession(user.id);
 
 function authenticatedRequest(url: string, body: string): Request {
@@ -152,5 +152,26 @@ describe("calculate API recommendations", () => {
       })));
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "candidate_not_found" });
+  });
+
+  it("fails closed for production gravure calculations without PostgreSQL", async () => {
+    const previousEnvironment = process.env.NODE_ENV;
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    const previousPostgresUrl = process.env.POSTGRES_URL;
+    Object.assign(process.env, { NODE_ENV: "production" });
+    delete process.env.DATABASE_URL;
+    delete process.env.POSTGRES_URL;
+    try {
+      const response = await POST(authenticatedRequest(
+        "http://localhost/api/calculate",
+        JSON.stringify({ ...recommendationInput, recommendationMode: true }),
+      ));
+      expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: "gravure_master_unavailable" });
+    } finally {
+      Object.assign(process.env, { NODE_ENV: previousEnvironment });
+      if (previousDatabaseUrl != null) process.env.DATABASE_URL = previousDatabaseUrl;
+      if (previousPostgresUrl != null) process.env.POSTGRES_URL = previousPostgresUrl;
+    }
   });
 });

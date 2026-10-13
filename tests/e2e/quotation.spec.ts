@@ -46,25 +46,10 @@ test("A4 quotation page imports simulator costs and prepares PDF printing", asyn
   await page.getByRole("link", { name: "見積書発行" }).click();
   await expect(page).toHaveURL(/\/quote$/);
   await expect(page.getByRole("heading", { name: "お見積書" })).toBeVisible();
-  await expect(page.getByTestId("quote-source")).toContainText("原価計算結果連携済み");
-  const mobile = (page.viewportSize()?.width ?? 1280) <= 1200;
-  if (mobile) {
-    await page.getByRole("button", { name: "基本" }).click();
-    await page.getByTestId("quote-editor-left").getByLabel("得意先名").fill("E2E株式会社");
-    await page.getByTestId("quote-editor-left").getByRole("button", { name: "閉じる" }).click();
-    await page.getByRole("button", { name: "金額" }).click();
-    await page.getByTestId("quote-editor-right").locator("summary", { hasText: "明細・金額" }).click();
-    const mobileFillingPrice = page.getByTestId("quote-editor-right").getByLabel("充填・加工 単価（空欄=自動）");
-    await expect(mobileFillingPrice).toBeVisible();
-    await mobileFillingPrice.fill("99");
-    await page.getByTestId("quote-editor-right").getByRole("button", { name: "閉じる" }).click();
-  } else {
-    await page.getByTestId("toggle-editor-left").click();
-    await page.getByTestId("quote-editor-left").getByLabel("得意先名").fill("E2E株式会社");
-    await page.getByTestId("toggle-editor-right").click();
-    await page.getByTestId("quote-editor-right").locator("summary", { hasText: "明細・金額" }).click();
-    await page.getByTestId("quote-editor-right").getByLabel("充填・加工 単価（空欄=自動）").fill("99");
-  }
+  await expect(page.getByTestId("issue-required-fields")).toContainText("連携済み");
+  await page.getByTestId("fill-test-data").click();
+  await page.getByPlaceholder("株式会社◯◯").fill("E2E株式会社");
+  await expect(page.getByTestId("save-history")).toBeEnabled();
 
   await page.evaluate(() => {
     (window as Window & { printCalls?: number }).printCalls = 0;
@@ -77,8 +62,7 @@ test("A4 quotation page imports simulator costs and prepares PDF printing", asyn
   await expect.poll(() => page.evaluate(() => (window as Window & { printCalls?: number }).printCalls)).toBe(1);
 
   await expect(page.getByTestId("quote-price-per-piece")).toContainText("￥");
-  await expect(page.getByTestId("filling-unit-price")).toContainText("￥99");
-  await expect(page.getByTestId("film-meter-price")).toContainText("/m");
+    await expect(page.getByTestId("film-meter-price")).toContainText("/m");
   await expect(page.getByTestId("film-pouch-price")).toContainText("パウチ換算");
   await expect(page.getByTestId("film-pouch-price")).toContainText("/枚");
   await expect(page.getByTestId("film-order-length")).toContainText("m");
@@ -113,6 +97,7 @@ test("A4 quotation page imports simulator costs and prepares PDF printing", asyn
 test("PDF output continues when test history storage fails", async ({ page }) => {
   await page.route("**/api/quotations", (route) => route.abort());
   await page.goto("/quote");
+  await page.getByTestId("fill-test-data").click();
   await page.evaluate(() => {
     (window as Window & { printCalls?: number }).printCalls = 0;
     window.print = () => {

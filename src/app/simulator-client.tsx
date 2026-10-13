@@ -9,13 +9,14 @@ import { CURRENT_CHECKLIST_SNAPSHOT_KEY, buildCalculationChecklistSnapshot } fro
 import Link from "next/link";
 import { defaultGravureRollParameters, type GravureRollParameters } from "@/lib/gravure-roll";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
-import { QUOTATION_DRAFT_KEY, buildQuotationDraft } from "@/lib/quotation-draft";
+import { QUOTATION_DRAFT_KEY, buildQuotationDraft, buildRedactedQuotationDraft } from "@/lib/quotation-draft";
 import { calculateAutomaticQuotation } from "@/lib/quotation-pricing";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "@/lib/size-calculations";
 import { activeMaterialWidthMm } from "@/lib/purchase-order";
 import { isCalculationRequest } from "@/lib/calculation-provenance";
 import type { CostParameters, PouchSpec, PrintingMethod, SizeKey } from "@/lib/types";
 import { SIMULATOR_STALE_STATUS_KEY } from "@/lib/quotation-shared";
+import type { ReturnedPublicProjection } from "@/lib/gravure-price-store";
 import {
   loadLiquidMaster,
   newLiquidMasterId,
@@ -51,6 +52,7 @@ type CalculationPayload = {
   result?: unknown;
   originalResult?: unknown;
   candidates?: unknown;
+  projection?: unknown;
   error?: string;
 };
 
@@ -70,6 +72,12 @@ type ServerCalculation = {
   originalTargetMarginMode?: TargetMarginMode;
   calculationRequest?: CalculationInput;
   originalCalculationRequest?: CalculationInput;
+};
+
+type RedactedCalculation = {
+  projection: ReturnedPublicProjection;
+  request: CalculationInput;
+  selectedCandidateId: string;
 };
 
 async function postCalculationWithTimeout(request: CalculationInput): Promise<{
@@ -128,6 +136,11 @@ function calculationErrorFor(error: unknown, fallbackCode: string): { code: stri
   };
 }
 
+function returnedProjectionFrom(payload: CalculationPayload): ReturnedPublicProjection | null {
+  if (isReturnedPublicProjection(payload)) return payload;
+  return isReturnedPublicProjection(payload.projection) ? payload.projection : null;
+}
+
 function candidateSelectionErrorMessage(code: string): string {
   return `候補を反映できませんでした。状態は変わっていません。もう一度候補を選択してください。このダイアログの「閉じる」で状態を確認することもできます。（エラー: ${code}）`;
 }
@@ -138,6 +151,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isFiniteNumberString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && Number.isFinite(Number(value));
+}
+
+const NON_NEGATIVE_DECIMAL_PATTERN = /^\d+(?:\.\d+)?$/;
+
+function isFiniteDecimalString(value: unknown): value is string {
+  return typeof value === "string"
+    && NON_NEGATIVE_DECIMAL_PATTERN.test(value)
+    && Number.isFinite(Number(value));
 }
 
 function hasRequiredFields(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
@@ -241,6 +262,60 @@ function isCostResult(value: unknown): value is CostResult {
     && isFiniteNumberString(result.audit.componentReconciliationDifference);
 }
 
+export function isReturnedPublicProjection(value: unknown): value is ReturnedPublicProjection {
+  if (!isRecord(value)) return false;
+  const metadata = value.pricingSnapshot;
+  const size = value.size;
+  const allowedTopKeys = [
+    "calculationVersion", "candidates", "connectedChambers", "fillingMethod", "pricingSnapshot",
+    "printingMethod", "publicProjectionHash", "quantity", "resultHash", "selectedCandidateId", "size",
+  ];
+  return Object.keys(value).sort().join() === allowedTopKeys.join()
+    && typeof value.publicProjectionHash === "string"
+    && typeof value.calculationVersion === "string"
+    && typeof value.printingMethod === "string"
+    && typeof value.quantity === "string"
+    && isFiniteNumber(value.connectedChambers)
+    && typeof value.fillingMethod === "string"
+    && typeof value.selectedCandidateId === "string"
+    && typeof value.resultHash === "string"
+    && isRecord(metadata)
+    && Object.keys(metadata).sort().join() === "asOf,id,resolverVersion,sha256,view"
+    && typeof metadata.id === "string"
+    && typeof metadata.sha256 === "string"
+    && typeof metadata.resolverVersion === "string"
+    && typeof metadata.asOf === "string"
+    && metadata.view === "redacted"
+    && isRecord(size)
+    && Object.keys(size).sort().join() === "lengthMm,widthMm"
+    && typeof size.widthMm === "string"
+    && typeof size.lengthMm === "string"
+    && Array.isArray(value.candidates)
+    && value.candidates.length > 0
+    && value.candidates.every((candidate) => {
+      if (!isRecord(candidate)) return false;
+      const knownKeys = new Set([
+        "allInCostPerPieceYen", "adjustedQuantity", "adjustedSkuQuantities",
+        "capacityQuantity", "colorText", "compositionText", "detailLabel", "effectiveLengthM",
+        "filmCostPerPieceYen", "filmTotalYen", "id", "materialText", "orderLengthM", "pouchSpecText",
+        "patternText", "printingMethod", "requiredLengthM", "route",
+      ]);
+      return Object.keys(candidate).every((key) => knownKeys.has(key))
+        && typeof candidate.id === "string"
+        && typeof candidate.route === "string"
+        && typeof candidate.printingMethod === "string"
+        && typeof candidate.adjustedQuantity === "string"
+        && typeof candidate.capacityQuantity === "string"
+        && Array.isArray(candidate.adjustedSkuQuantities)
+        && candidate.adjustedSkuQuantities.every(isFiniteNumberString)
+        && typeof candidate.requiredLengthM === "string"
+        && typeof candidate.orderLengthM === "string"
+        && typeof candidate.effectiveLengthM === "string"
+        && typeof candidate.filmTotalYen === "string"
+        && typeof candidate.filmCostPerPieceYen === "string";
+    });
+}
+
 function isFilmOrder(value: unknown): value is { skuCode: string; requiredLengthM: string; orderLengthM: string } {
   return hasRequiredFields(value, ["skuCode", "requiredLengthM", "orderLengthM"])
     && typeof value.skuCode === "string"
@@ -274,7 +349,7 @@ function isSascheCandidate(value: unknown): value is SascheCandidate {
     && isNonNegativeInteger(sasche.patternCount)
     && isNonNegativeInteger(sasche.colorCount)
     && sasche.filmLabel === "Y"
-    && sasche.sellerMarkup === "1.12"
+    && isFiniteDecimalString(sasche.sellerMarkup)
     && typeof sasche.quantityToleranceExceeded === "boolean"
     && typeof sasche.feasible === "boolean"
     && typeof sasche.recommended === "boolean"
@@ -921,7 +996,10 @@ const parameterGroups = [
   },
 ];
 
-export default function QuotationPage({ userRole = "user" }: { userRole?: "admin" | "user" } = {}) {
+export default function QuotationPage({
+  userRole = "user",
+  kanaiMasterAccess = false,
+}: { userRole?: "admin" | "user"; kanaiMasterAccess?: boolean } = {}) {
   const initialSize = sizeMaster["round-50x60"];
   const [form, setForm] = useState({
     sizeKey: "round-50x60" as SizeKey,
@@ -947,12 +1025,15 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
   const [gravureParameters, setGravureParameters] = useState<GravureRollParameters>(() => normalizeGravureParameters(defaultGravureRollParameters()));
   const [machineBreakdown, setMachineBreakdown] = useState<Record<MachineBreakdownKey, string>>(() => ({ ...MACHINE_BREAKDOWN_DEFAULTS }));
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
+  const [redactedCalculation, setRedactedCalculation] = useState<RedactedCalculation | null>(null);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [calculationError, setCalculationError] = useState<{ code: string; message: string } | null>(null);
   const [recommendationModalOpen, setRecommendationModalOpen] = useState(false);
   const [selectionError, setSelectionError] = useState<{ code: string; message: string } | null>(null);
   const [selecting, setSelecting] = useState(false);
+  const [kMasterApplied, setKMasterApplied] = useState(false);
+  const [kMasterUnavailable, setKMasterUnavailable] = useState(false);
   const [shortagePlansOpen, setShortagePlansOpen] = useState(false);
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
@@ -1063,6 +1144,37 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
       }
     });
   }, []);
+
+  // Seven never calls Y/K admin APIs. Only the server-verified Kanai prop can
+  // enable this read-only master synchronization.
+  useEffect(() => {
+    if (!kanaiMasterAccess) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/film-prices/gravure/k");
+        if (cancelled) return;
+        if (!response.ok) {
+          setKMasterUnavailable(true);
+          return;
+        }
+        const payload = await response.json() as { parameterSets?: Array<{ effectiveFrom?: string; effectiveTo?: string; supersededById?: number | null; derived?: Partial<GravureRollParameters> }> };
+        const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" });
+        const active = payload.parameterSets?.find((row) => row.derived
+          && row.supersededById == null
+          && (!row.effectiveFrom || row.effectiveFrom <= today)
+          && (!row.effectiveTo || row.effectiveTo >= today));
+        if (!active) setKMasterUnavailable(true);
+        if (active?.derived) {
+          setGravureParameters(normalizeGravureParameters(active.derived));
+          setKMasterApplied(true);
+        }
+      } catch {
+        if (!cancelled) setKMasterUnavailable(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [kanaiMasterAccess]);
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((old) => ({ ...old, [key]: value }));
   const patchForm = (patch: Partial<typeof form>) => setForm((old) => ({ ...old, ...patch }));
@@ -1312,6 +1424,25 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
       };
       const { response, payload } = await postCalculationWithTimeout(calculationRequest);
       if (!response.ok) throw new Error(payload.error ?? "candidate_calculation_failed");
+      const returnedProjection = returnedProjectionFrom(payload);
+      if (returnedProjection) {
+        if (requestOrder !== requestOrderRef.current) return;
+        setRedactedCalculation({
+          projection: returnedProjection,
+          request: calculationRequest,
+          selectedCandidateId: candidate.id,
+        });
+        setForm((old) => ({
+          ...old,
+          quantity: returnedProjection.quantity,
+          skus: old.skus.map((sku, index) => ({
+            ...sku,
+            quantity: returnedProjection.candidates.find((item) => item.id === candidate.id)
+              ?.adjustedSkuQuantities[index] ?? returnedProjection.quantity,
+          })),
+        }));
+        return;
+      }
       if (requestOrder !== requestOrderRef.current) return;
       if (!isCostResult(payload.result) || !isCostResult(payload.originalResult)) {
         throw new Error("candidate_response_invalid");
@@ -1475,6 +1606,47 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
     }
   };
 
+  const selectRedactedCandidate = async (candidate: ReturnedPublicProjection["candidates"][number]) => {
+    if (!redactedCalculation || selecting) return;
+    const requestOrder = ++requestOrderRef.current;
+    setSelecting(true);
+    setSelectionError(null);
+    try {
+      const base = redactedCalculation.request;
+      const adjusted = candidate.adjustedSkuQuantities;
+      const quantity = adjusted.reduce<Decimal>((total, value) => total.plus(D(value)), D(0)).toString();
+      const request: CalculationInput = {
+        ...base,
+        quantity,
+        spec: { ...base.spec, skuQuantities: adjusted },
+        recommendationMode: true,
+        selectedCandidateId: candidate.id,
+        selectedCandidateTargetMargins: base.targetMargins,
+      };
+      const { response, payload } = await postCalculationWithTimeout(request);
+      if (!response.ok) throw new Error(payload.error ?? "candidate_calculation_failed");
+      const projection = returnedProjectionFrom(payload);
+      if (requestOrder !== requestOrderRef.current || !projection) {
+        throw new Error("candidate_response_invalid");
+      }
+      setRedactedCalculation({
+        projection,
+        request,
+        selectedCandidateId: candidate.id,
+      });
+      setForm((old) => ({
+        ...old,
+        quantity,
+        skus: old.skus.map((sku, index) => ({ ...sku, quantity: adjusted[index] ?? quantity })),
+      }));
+    } catch (error) {
+      const mapped = calculationErrorFor(error, "candidate_calculation_failed");
+      setSelectionError(mapped);
+    } finally {
+      if (requestOrder === requestOrderRef.current) setSelecting(false);
+    }
+  };
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (blocker) return;
@@ -1482,6 +1654,7 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
     setPending(true);
     setCalculationError(null);
     setServerResult(null);
+    setRedactedCalculation(null);
     try {
       const shouldRestoreInputMargin = Boolean(serverResult?.selectedCandidateId);
       // The explicit recalculation button always returns to the customer's
@@ -1515,6 +1688,17 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
       const { response, payload } = await postCalculationWithTimeout(calculationRequest);
       if (!response.ok) throw new Error(payload.error ?? "calculation_failed");
       if (requestOrder !== requestOrderRef.current) return;
+      const projection = returnedProjectionFrom(payload);
+      if (projection) {
+        setCalculationError(null);
+        setRedactedCalculation({
+          projection,
+          request: calculationRequest,
+          selectedCandidateId: projection.selectedCandidateId,
+        });
+        setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+        return;
+      }
       if (
         !isCostResult(payload.result)
         || !isCostResult(payload.originalResult)
@@ -1779,6 +1963,78 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
       resetUiPrint();
     };
   }, []);
+
+  const redactedSelected = redactedCalculation?.projection.candidates.find(
+    (candidate) => candidate.id === redactedCalculation.selectedCandidateId,
+  ) ?? null;
+  const continueRedactedQuote = () => {
+    if (!redactedCalculation || !redactedSelected) return;
+    try {
+      sessionStorage.setItem(
+        QUOTATION_DRAFT_KEY,
+        JSON.stringify(buildRedactedQuotationDraft(redactedCalculation.projection, {
+          productSummary: form.skus.map((sku) => sku.name.trim() || "充填物").join(" / "),
+          sizeSummary: `${form.widthMm}×${form.lengthMm}mm / ${form.connected}連`,
+          targetMargin: effectiveMargin,
+        })),
+      );
+      sessionStorage.removeItem(SIMULATOR_STALE_STATUS_KEY);
+      // Session-scoped quotation handoff intentionally reloads the app.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign("/quote");
+    } catch {
+      setCalculationError({ code: "quotation_draft_failed", message: "見積書ドラフトを作成できませんでした。" });
+    }
+  };
+
+  if (redactedCalculation) {
+    const projection = redactedCalculation.projection;
+    return (
+      <main className="simulator-page">
+        <div className="app-shell">
+          <header className="app-header">
+            <div>
+              <h1>パウチ参考原価・販売価格シミュレーター</h1>
+              <p>サーバー発行の非開示プロジェクションで計算を継続できます。</p>
+            </div>
+          </header>
+          <section className="panel" data-testid="server-result" data-state="redacted_calculated">
+            <div className="result-header">
+              <h2>原価・調達プラン</h2>
+              <span className="result-status">計算済み {calculatedAt ?? ""}</span>
+            </div>
+            <p className="help" data-testid="redacted-snapshot">
+              スナップショット {projection.pricingSnapshot.id.slice(0, 8)}… ／ asOf {projection.pricingSnapshot.asOf}
+            </p>
+            {calculationError ? <p className="error" role="alert" data-testid="calculation-error">{calculationError.message}</p> : null}
+            {selectionError ? <p className="error" role="alert" data-testid="candidate-selection-error">{selectionError.message}</p> : null}
+            <div className="recommendation-list">
+              {projection.candidates.map((candidate) => (
+                <article key={candidate.id} data-testid={`redacted-candidate-${candidate.route}`} className={candidate.id === projection.selectedCandidateId ? "recommendation-card selected" : "recommendation-card"}>
+                  <h3>{candidate.detailLabel ?? `${candidate.route} route`}</h3>
+                  <p>{candidate.materialText ?? ""} {candidate.colorText ?? ""}</p>
+                  <dl>
+                    <div><dt>数量</dt><dd>{formatNumber(candidate.adjustedQuantity, 0)}枚</dd></div>
+                    <div><dt>発注長</dt><dd>{formatNumber(candidate.orderLengthM, 0)}m</dd></div>
+                    <div><dt>フィルム総額</dt><dd>{formatCurrency(candidate.filmTotalYen, 0)}</dd></div>
+                    <div><dt>フィルム単価</dt><dd>{formatCurrency(candidate.filmCostPerPieceYen, 2)}</dd></div>
+                    {candidate.allInCostPerPieceYen ? <div><dt>総原価単価</dt><dd>{formatCurrency(candidate.allInCostPerPieceYen, 2)}</dd></div> : null}
+                  </dl>
+                  {candidate.id !== projection.selectedCandidateId ? (
+                    <button type="button" disabled={selecting || pending} onClick={() => void selectRedactedCandidate(candidate)}>このプランを選択</button>
+                  ) : <strong>選択中</strong>}
+                </article>
+              ))}
+            </div>
+            <div className="result-actions">
+              <form onSubmit={submit}><button className="btn-primary" type="submit" data-testid="recalculate-redacted" disabled={pending}>{pending ? "計算中..." : "再計算"}</button></form>
+              <button className="btn-primary" type="button" data-testid="continue-redacted-quote" disabled={!redactedSelected || pending || selecting} onClick={continueRedactedQuote}>見積書へ進む</button>
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   const effectiveProductionSpeedPerMinute = Number(form.connected) > 0
     ? Number(effectiveParameters.productionSpeedPerMinute) * Number(CONNECTED_PRODUCTION_SPEED_FACTOR[Number(form.connected) as 1 | 2 | 3 | 4] ?? 1)
@@ -2060,24 +2316,26 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
                   {resultPrintingMethod === "gravure" ? (
                     <fieldset className="parameter-group" data-testid="gravure-parameters">
                       <legend>グラビアロール</legend>
-                      <label className="parameter-label">PET 単価 (円/kg)<input inputMode="decimal" value={normalizedGravureParameters.petUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, petUnitPriceYenPerKg: e.target.value }))} /></label>
-                      <label className="parameter-label">AL 単価 (円/kg)<input inputMode="decimal" value={normalizedGravureParameters.alUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, alUnitPriceYenPerKg: e.target.value }))} /></label>
-                      <label className="parameter-label">LLDPE 単価 (円/kg)<input inputMode="decimal" value={normalizedGravureParameters.lldpeUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, lldpeUnitPriceYenPerKg: e.target.value }))} /></label>
-                      <label className="parameter-label">印刷単価 (円/m)<input inputMode="decimal" value={normalizedGravureParameters.printingUnitPriceYenPerM} onChange={(e) => setGravureParameters((old) => ({ ...old, printingUnitPriceYenPerM: e.target.value }))} /></label>
-                      <label className="parameter-label">ラミ単価 AL有 (円/m)<input inputMode="decimal" value={normalizedGravureParameters.laminationUnitPriceYenPerMWithAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithAl: e.target.value }))} /></label>
-                      <label className="parameter-label">ラミ単価 AL無 (円/m)<input inputMode="decimal" value={normalizedGravureParameters.laminationUnitPriceYenPerMWithoutAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithoutAl: e.target.value }))} /></label>
-                      <label className="parameter-label">新規銅版単価 (円)<input inputMode="decimal" value={normalizedGravureParameters.newCopperPlateUnitPriceYen} onChange={(e) => setGravureParameters((old) => ({ ...old, newCopperPlateUnitPriceYen: e.target.value }))} /></label>
+                      {kMasterApplied ? <p className="badge active" data-testid="k-master-applied">マスター適用中</p> : null}
+                      {kMasterUnavailable ? <p className="error" role="alert" data-testid="k-master-unavailable">KマスターAPIが利用できません。既定値を表示中です。</p> : null}
+                      <label className="parameter-label">PET 単価 (円/kg)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.petUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, petUnitPriceYenPerKg: e.target.value }))} /></label>
+                      <label className="parameter-label">AL 単価 (円/kg)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.alUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, alUnitPriceYenPerKg: e.target.value }))} /></label>
+                      <label className="parameter-label">LLDPE 単価 (円/kg)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.lldpeUnitPriceYenPerKg} onChange={(e) => setGravureParameters((old) => ({ ...old, lldpeUnitPriceYenPerKg: e.target.value }))} /></label>
+                      <label className="parameter-label">印刷単価 (円/m)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.printingUnitPriceYenPerM} onChange={(e) => setGravureParameters((old) => ({ ...old, printingUnitPriceYenPerM: e.target.value }))} /></label>
+                      <label className="parameter-label">ラミ単価 AL有 (円/m)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.laminationUnitPriceYenPerMWithAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithAl: e.target.value }))} /></label>
+                      <label className="parameter-label">ラミ単価 AL無 (円/m)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.laminationUnitPriceYenPerMWithoutAl} onChange={(e) => setGravureParameters((old) => ({ ...old, laminationUnitPriceYenPerMWithoutAl: e.target.value }))} /></label>
+                      <label className="parameter-label">新規銅版単価 (円)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.newCopperPlateUnitPriceYen} onChange={(e) => setGravureParameters((old) => ({ ...old, newCopperPlateUnitPriceYen: e.target.value }))} /></label>
                       <label className="parameter-label">標準納品パターン (m)<input inputMode="decimal" readOnly value={formatNumber(normalizedGravureParameters.deliverablePatternLengthM)} /></label>
                       <label className="parameter-label">標準製作ロット (m)<input inputMode="decimal" readOnly value={formatNumber(normalizedGravureParameters.productionPatternLengthM)} /></label>
-                      <label className="parameter-label">小幅閾値 (mm)<input inputMode="decimal" value={normalizedGravureParameters.smallWidthThresholdMm} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthThresholdMm: e.target.value }))} /></label>
-                      <label className="parameter-label">小幅納品パターン (m)<input inputMode="decimal" value={normalizedGravureParameters.smallWidthOrderPatternLengthM} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthOrderPatternLengthM: e.target.value }))} /></label>
-                      <label className="parameter-label">小幅製作ロット (m)<input inputMode="decimal" value={normalizedGravureParameters.smallWidthProductionPatternLengthM} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthProductionPatternLengthM: e.target.value }))} /></label>
-                      <label className="parameter-label">小幅固定製造単価 (원/m)<input inputMode="decimal" value={normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthManufacturerUnitPriceKRWPerM: e.target.value }))} /></label>
-                      <label className="parameter-label">海外配送単位 (m)<input inputMode="decimal" value={normalizedGravureParameters.overseasShippingUnitM} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingUnitM: e.target.value }))} /></label>
-                      <label className="parameter-label">海外配送費 / 回 (円)<input inputMode="decimal" value={normalizedGravureParameters.overseasShippingPerTripYen} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingPerTripYen: e.target.value }))} /></label>
-                      <label className="parameter-label">製造マージン率 (%)<input inputMode="decimal" value={formatNumber(Number(normalizedGravureParameters.manufacturerMarginRate) * 100, 3)} onChange={(e) => setGravureParameters((old) => ({ ...old, manufacturerMarginRate: formatNumber(Number(e.target.value) / 100, 6) }))} /></label>
-                      <label className="parameter-label">관세율 (%)<input inputMode="decimal" value={formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 3)} onChange={(e) => setGravureParameters((old) => ({ ...old, customsRate: formatNumber(Number(e.target.value) / 100, 6) }))} /></label>
-                      <label className="parameter-label">為替 (100円=원)<input inputMode="decimal" value={normalizedGravureParameters.krwPer100Yen} onChange={(e) => setGravureParameters((old) => ({ ...old, krwPer100Yen: e.target.value }))} /></label>
+                      <label className="parameter-label">小幅閾値 (mm)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.smallWidthThresholdMm} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthThresholdMm: e.target.value }))} /></label>
+                      <label className="parameter-label">小幅納品パターン (m)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.smallWidthOrderPatternLengthM} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthOrderPatternLengthM: e.target.value }))} /></label>
+                      <label className="parameter-label">小幅製作ロット (m)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.smallWidthProductionPatternLengthM} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthProductionPatternLengthM: e.target.value }))} /></label>
+                      <label className="parameter-label">小幅固定製造単価 (원/m)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.smallWidthManufacturerUnitPriceKRWPerM} onChange={(e) => setGravureParameters((old) => ({ ...old, smallWidthManufacturerUnitPriceKRWPerM: e.target.value }))} /></label>
+                      <label className="parameter-label">海外配送単位 (m)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.overseasShippingUnitM} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingUnitM: e.target.value }))} /></label>
+                      <label className="parameter-label">海外配送費 / 回 (円)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.overseasShippingPerTripYen} onChange={(e) => setGravureParameters((old) => ({ ...old, overseasShippingPerTripYen: e.target.value }))} /></label>
+                      <label className="parameter-label">製造マージン率 (%)<input inputMode="decimal" readOnly={kMasterApplied} value={formatNumber(Number(normalizedGravureParameters.manufacturerMarginRate) * 100, 3)} onChange={(e) => setGravureParameters((old) => ({ ...old, manufacturerMarginRate: formatNumber(Number(e.target.value) / 100, 6) }))} /></label>
+                      <label className="parameter-label">관세율 (%)<input inputMode="decimal" readOnly={kMasterApplied} value={formatNumber(Number(normalizedGravureParameters.customsRate) * 100, 3)} onChange={(e) => setGravureParameters((old) => ({ ...old, customsRate: formatNumber(Number(e.target.value) / 100, 6) }))} /></label>
+                      <label className="parameter-label">為替 (100円=원)<input inputMode="decimal" readOnly={kMasterApplied} value={normalizedGravureParameters.krwPer100Yen} onChange={(e) => setGravureParameters((old) => ({ ...old, krwPer100Yen: e.target.value }))} /></label>
                       <p className="help">初期値は100円=850원で換算しました。固定構成は PET12+AL7+PET12+LLDPE50 です。</p>
                     </fieldset>
                   ) : null}
@@ -2138,6 +2396,11 @@ export default function QuotationPage({ userRole = "user" }: { userRole?: "admin
           </section>
           <section className="panel" aria-labelledby="result-title">
 	            <p className="input-summary" data-testid="input-summary">{`${form.widthMm}×${form.lengthMm} / ${form.connected}連 / ${formatNumber(form.quantity)}枚 / ${resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"} / SKU ${form.skuCount}件（${form.skus.map((sku, index) => `${skuDisplayName(index)} ${formatNumber(sku.quantity)}枚`).join("＋")}）`}</p>
+	            {serverResult && kMasterApplied ? (
+	              <div className="stale-recalc-banner" role="alert" data-testid="k-master-recalculation-required">
+	                <strong>Kマスター適用中。</strong> 既存表示を更新するため再計算してください。
+	              </div>
+	            ) : null}
 	            {serverResult && staleResult ? (
 	              <div className="stale-recalc-banner" role="alert" data-testid="stale-input-warning">
 	                <div>

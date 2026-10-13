@@ -1,7 +1,11 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { approvedCommission, calculatePouchCost } from "@/lib/calculation";
+import { canonicalize } from "@/lib/canonical-json";
 import { defaultParameters, defaultProductionSpeedForFillMl, sizeMaster } from "@/lib/constants";
 import { normalizeDigitalFilmOrder } from "@/lib/digital-film";
+import { defaultGravureRollParameters } from "@/lib/gravure-roll";
+import { defaultGravureYSupplierRows } from "@/lib/sasche-gravure";
 import type { PouchSpec } from "@/lib/types";
 
 const baseSpec: PouchSpec = {
@@ -17,6 +21,150 @@ const baseSpec: PouchSpec = {
 };
 
 describe("bulk calculation", () => {
+  it("binds selected gravure hashes to changed unselected candidate economics", () => {
+    const spec: PouchSpec = {
+      sizeKey: "tube-35x80",
+      fillMlPerChamber: "10",
+      connectedChambers: 1,
+      fillingMethod: "hopper",
+      fillingLanes: 4,
+      isCustom: false,
+      colorCount: 2,
+      bulkUnitPrice: "0",
+      skuCount: 2,
+      skuQuantities: ["500000", "500000"],
+      skuNames: ["Serum", "Emulsion"],
+      skuFillMlPerChamber: ["10", "20"],
+      skuColorCounts: ["2", "3"],
+    };
+    const recommendationBasis = calculatePouchCost({
+      spec,
+      quantity: "1000000",
+      printingMethod: "gravure",
+      targetMargins: ["0.3"],
+      recommendationMode: true,
+      selectedCandidateId: "",
+      selectedCandidateTargetMargins: ["0.3"],
+    });
+    const selectedCandidate = recommendationBasis.recommendationCandidates!.find((candidate) => candidate.route === "K")!;
+    const selectedCandidateId = selectedCandidate.id;
+    const selectedYCandidate = recommendationBasis.recommendationCandidates!.find((candidate) => candidate.route === "Y")!.sasche!;
+    const request = {
+      spec,
+      quantity: "1000000",
+      printingMethod: "gravure" as const,
+      targetMargins: ["0.3"],
+      recommendationMode: true,
+      selectedCandidateId,
+      selectedCandidateTargetMargins: ["0.3"],
+    };
+    const yRows = defaultGravureYSupplierRows().map((row) => ({
+      ...row,
+      effectiveFrom: "2026-01-01",
+      effectiveTo: "9999-12-31",
+    }));
+    const unchanged = calculatePouchCost({ ...request, gravureYRows: yRows });
+    const changedRows = structuredClone(yRows);
+    const targetRowIndex = changedRows.findIndex((row) => row.webWidthMm === selectedYCandidate.webWidthMm
+      && row.laneCount === selectedYCandidate.laneCount
+      && row.printTierM === selectedYCandidate.printTierM);
+    changedRows[targetRowIndex].supplierUnitPriceYenPerM = "999.99";
+    const changed = calculatePouchCost({ ...request, gravureYRows: changedRows });
+
+    expect(unchanged.costTotal).toBe(changed.costTotal);
+    expect(unchanged.totalCostPerPiece).toBe(changed.totalCostPerPiece);
+    expect(unchanged.film.filmTotal).toBe(changed.film.filmTotal);
+    const yBefore = unchanged.recommendationCandidates!.find((candidate) => candidate.route === "Y")!;
+    const yAfter = changed.recommendationCandidates!.find((candidate) => candidate.route === "Y")!;
+    expect(yBefore.sasche!.filmTotalYen).not.toBe(yAfter.sasche!.filmTotalYen);
+    expect(yBefore.allInTotalCostYen).not.toBe(yAfter.allInTotalCostYen);
+    expect(unchanged.audit.resultJsonSha256).not.toBe(changed.audit.resultJsonSha256);
+  });
+
+  it("binds selected gravure hashes to changed unselected K economics", () => {
+    const spec: PouchSpec = {
+      sizeKey: "tube-35x80",
+      fillMlPerChamber: "10",
+      connectedChambers: 1,
+      fillingMethod: "hopper",
+      fillingLanes: 4,
+      isCustom: false,
+      colorCount: 2,
+      bulkUnitPrice: "0",
+      skuCount: 2,
+      skuQuantities: ["500000", "500000"],
+      skuNames: ["Serum", "Emulsion"],
+      skuFillMlPerChamber: ["10", "20"],
+      skuColorCounts: ["2", "3"],
+    };
+    const basis = calculatePouchCost({
+      spec,
+      quantity: "1000000",
+      printingMethod: "gravure",
+      targetMargins: ["0.3"],
+      recommendationMode: true,
+      selectedCandidateId: "",
+      selectedCandidateTargetMargins: ["0.3"],
+    });
+    const selectedY = basis.recommendationCandidates!.find((candidate) => candidate.route === "Y")!;
+    const request = {
+      spec,
+      quantity: "1000000",
+      printingMethod: "gravure" as const,
+      targetMargins: ["0.3"],
+      recommendationMode: true,
+      selectedCandidateId: selectedY.id,
+      selectedCandidateTargetMargins: ["0.3"],
+    };
+    const yRows = defaultGravureYSupplierRows().map((row) => ({
+      ...row,
+      effectiveFrom: "2026-01-01",
+      effectiveTo: "9999-12-31",
+    }));
+    const unchangedParameters = defaultGravureRollParameters();
+    const changedParameters = {
+      ...unchangedParameters,
+      newCopperPlateUnitPriceYen: (Number(unchangedParameters.newCopperPlateUnitPriceYen) + 12345).toString(),
+    };
+    const unchanged = calculatePouchCost({ ...request, gravureParameters: unchangedParameters, gravureYRows: yRows });
+    const changed = calculatePouchCost({ ...request, gravureParameters: changedParameters, gravureYRows: yRows });
+    const kBefore = unchanged.recommendationCandidates!.find((candidate) => candidate.route === "K")!;
+    const kAfter = changed.recommendationCandidates!.find((candidate) => candidate.route === "K")!;
+
+    expect(unchanged.costTotal).toBe(changed.costTotal);
+    expect(unchanged.totalCostPerPiece).toBe(changed.totalCostPerPiece);
+    expect(kBefore.allInTotalCostYen).not.toBe(kAfter.allInTotalCostYen);
+    expect(unchanged.audit.resultJsonSha256).not.toBe(changed.audit.resultJsonSha256);
+  });
+
+  it("preserves legacy digital recommendation hashes before candidate attachment", () => {
+    const request = {
+      spec: {
+        ...baseSpec,
+        sizeKey: "tube-35x80" as const,
+        connectedChambers: 1 as const,
+        skuQuantities: ["10000"],
+        skuColorCounts: ["4"],
+      },
+      quantity: "10000",
+      printingMethod: "digital" as const,
+      parameters: defaultParameters,
+      recommendationMode: true,
+      targetMargins: ["0.3"],
+    };
+    const result = calculatePouchCost(request);
+    const {
+      audit: _audit,
+      recommendationCandidates: _candidates,
+      selectedCandidateId: _selected,
+      ...legacyResult
+    } = result;
+    void _candidates;
+    void _selected;
+    const legacyHash = createHash("sha256").update(canonicalize(legacyResult)).digest("hex");
+    expect(result.audit.resultJsonSha256).toBe(legacyHash);
+  });
+
   it("derives the machine charge from the documented basis (6.3 機械関連)", () => {
     // (25,000,000÷7 + 10,800×32) ÷ 1,800h = 2,176.126984...（月額賃借料は除外）
     expect(Number(defaultParameters.machineChargePerHour)).toBeCloseTo(2176.126984126984, 10);
