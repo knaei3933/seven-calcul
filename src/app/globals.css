@@ -2049,6 +2049,8 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 
 /* ── Film Price Master Admin ── */
 .film-price-admin { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
+.film-price-admin .history-table-wrap { overflow-x: auto; margin-top: 10px; }
+.film-price-admin .history-table-wrap .history-table { min-width: 900px; }
 .film-price-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 .film-price-header h1 { font-size: 22px; margin: 0; }
 .film-price-header .subtitle { color: #64748b; font-size: 13px; margin: 4px 0 0; }

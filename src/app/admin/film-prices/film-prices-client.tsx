@@ -560,17 +560,21 @@ export default function FilmPricesClient() {
         <section className="rules-grid">
           <div className="rule-card">
             <h3>Master supersede history</h3>
-            <table className="history-table">
-              <thead><tr><th>#</th><th>Table</th><th>Row</th><th>Action</th><th>Actor</th><th>JST</th><th>After</th></tr></thead>
-              <tbody>{audit.map((entry) => <tr key={entry.id}><td>{entry.id}</td><td>{entry.tableName}</td><td>{entry.rowId}</td><td>{entry.action}</td><td>{entry.actor}</td><td>{jstDateTime(entry.createdAt)}</td><td><code>{JSON.stringify(entry.after)}</code></td></tr>)}</tbody>
-            </table>
+            <div className="history-table-wrap">
+              <table className="history-table">
+                <thead><tr><th>#</th><th>Table</th><th>Row</th><th>Action</th><th>Actor</th><th>JST</th><th>After</th></tr></thead>
+                <tbody>{audit.map((entry) => <tr key={entry.id}><td>{entry.id}</td><td>{entry.tableName}</td><td>{entry.rowId}</td><td>{entry.action}</td><td>{entry.actor}</td><td>{jstDateTime(entry.createdAt)}</td><td><code>{JSON.stringify(entry.after)}</code></td></tr>)}</tbody>
+              </table>
+            </div>
           </div>
           <div className="rule-card">
             <h3>Source rows & snapshots</h3>
-            <table className="history-table">
-              <thead><tr><th>Snapshot</th><th>asOf(JST)</th><th>Y rows</th><th>K source</th><th>Hash</th><th>Creator</th><th>Created</th></tr></thead>
-              <tbody>{snapshots.map((snapshot) => <tr key={snapshot.id}><td><code>{snapshot.id}</code></td><td>{snapshot.asOf}</td><td>{snapshot.yRows.map((row) => `#${row.id}:${row.webWidthMm}/${row.laneCount}/${row.printTierM}`).join(", ") || "fallback"}</td><td><code>{JSON.stringify(snapshot.kSource)}</code></td><td><code>{snapshot.snapshotSha256.slice(0, 16)}…</code></td><td>{snapshot.createdBy}</td><td>{jstDateTime(snapshot.createdAt)}</td></tr>)}</tbody>
-            </table>
+            <div className="history-table-wrap">
+              <table className="history-table">
+                <thead><tr><th>Snapshot</th><th>asOf(JST)</th><th>Y rows</th><th>K source</th><th>Hash</th><th>Creator</th><th>Created</th></tr></thead>
+                <tbody>{snapshots.map((snapshot) => <tr key={snapshot.id}><td><code>{snapshot.id}</code></td><td>{snapshot.asOf}</td><td>{snapshot.yRows.map((row) => `#${row.id}:${row.webWidthMm}/${row.laneCount}/${row.printTierM}`).join(", ") || "fallback"}</td><td><code>{JSON.stringify(snapshot.kSource)}</code></td><td><code>{snapshot.snapshotSha256.slice(0, 16)}…</code></td><td>{snapshot.createdBy}</td><td>{jstDateTime(snapshot.createdAt)}</td></tr>)}</tbody>
+              </table>
+            </div>
             {loading ? <p>読み込み中...</p> : null}
           </div>
         </section>
