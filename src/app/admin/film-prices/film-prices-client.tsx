@@ -83,33 +83,33 @@ const Y_DIMENSIONS = [
 ] as const;
 
 const K_FIELD_LABELS: Record<GravureKSourceField, string> = {
-  petPriceKrwPerKg: "PET price (KRW/kg)",
-  alPriceKrwPerKg: "AL price (KRW/kg)",
-  lldpePriceKrwPerKg: "LLDPE price (KRW/kg)",
-  printingPriceKrwPerM: "Printing (KRW/m)",
-  laminationPriceKrwPerMWithAl: "Lamination with AL (KRW/m)",
-  laminationPriceKrwPerMWithoutAl: "Lamination without AL (KRW/m)",
-  newCopperPlatePriceKrw: "New copper plate (KRW)",
-  copperPlateWidthExtraMm: "Copper plate width extra (mm)",
-  copperPlateMinimumDiameterMm: "Copper plate minimum diameter (mm)",
-  krwPer100Yen: "KRW per 100 JPY",
-  deliverablePatternLengthM: "Deliverable pattern (m)",
-  productionPatternLengthM: "Production pattern (m)",
-  overseasShippingUnitM: "Overseas shipping unit (m)",
-  overseasShippingPerTripYen: "Overseas shipping / trip (JPY)",
-  manufacturerMarginRate: "Manufacturer margin rate",
-  customsRate: "Customs rate",
-  smallWidthThresholdMm: "Small-width threshold (mm)",
-  smallWidthOrderPatternLengthM: "Small-width order pattern (m)",
-  smallWidthProductionPatternLengthM: "Small-width production pattern (m)",
-  smallWidthManufacturerUnitPriceKrwPerM: "Small-width manufacturer price (KRW/m)",
+  petPriceKrwPerKg: "PET単価 (KRW/kg)",
+  alPriceKrwPerKg: "AL単価 (KRW/kg)",
+  lldpePriceKrwPerKg: "LLDPE単価 (KRW/kg)",
+  printingPriceKrwPerM: "印刷単価 (KRW/m)",
+  laminationPriceKrwPerMWithAl: "ラミネート単価（ALあり / KRW/m）",
+  laminationPriceKrwPerMWithoutAl: "ラミネート単価（ALなし / KRW/m）",
+  newCopperPlatePriceKrw: "新規銅版単価 (KRW)",
+  copperPlateWidthExtraMm: "銅版幅の余白 (mm)",
+  copperPlateMinimumDiameterMm: "銅版最小直径 (mm)",
+  krwPer100Yen: "100円あたりKRW",
+  deliverablePatternLengthM: "納品パターン長 (m)",
+  productionPatternLengthM: "製造パターン長 (m)",
+  overseasShippingUnitM: "海外輸送単位 (m)",
+  overseasShippingPerTripYen: "海外輸送費 (円/回)",
+  manufacturerMarginRate: "メーカーマージン率",
+  customsRate: "通関税率",
+  smallWidthThresholdMm: "小判幅しきい値 (mm)",
+  smallWidthOrderPatternLengthM: "小判幅 発注パターン長 (m)",
+  smallWidthProductionPatternLengthM: "小判幅 製造パターン長 (m)",
+  smallWidthManufacturerUnitPriceKrwPerM: "小判幅 メーカー単価 (KRW/m)",
 };
 
 const K_GROUPS: Array<{ title: string; fields: GravureKSourceField[] }> = [
-  { title: "材料・加工 KRW source", fields: ["petPriceKrwPerKg", "alPriceKrwPerKg", "lldpePriceKrwPerKg", "printingPriceKrwPerM", "laminationPriceKrwPerMWithAl", "laminationPriceKrwPerMWithoutAl"] },
-  { title: "Copper plate & pattern", fields: ["newCopperPlatePriceKrw", "copperPlateWidthExtraMm", "copperPlateMinimumDiameterMm", "krwPer100Yen", "deliverablePatternLengthM", "productionPatternLengthM"] },
-  { title: "Logistics & rates", fields: ["overseasShippingUnitM", "overseasShippingPerTripYen", "manufacturerMarginRate", "customsRate"] },
-  { title: "Small-width rules", fields: ["smallWidthThresholdMm", "smallWidthOrderPatternLengthM", "smallWidthProductionPatternLengthM", "smallWidthManufacturerUnitPriceKrwPerM"] },
+  { title: "材料・加工（KRWソース）", fields: ["petPriceKrwPerKg", "alPriceKrwPerKg", "lldpePriceKrwPerKg", "printingPriceKrwPerM", "laminationPriceKrwPerMWithAl", "laminationPriceKrwPerMWithoutAl"] },
+  { title: "銅版・パターン", fields: ["newCopperPlatePriceKrw", "copperPlateWidthExtraMm", "copperPlateMinimumDiameterMm", "krwPer100Yen", "deliverablePatternLengthM", "productionPatternLengthM"] },
+  { title: "物流・レート", fields: ["overseasShippingUnitM", "overseasShippingPerTripYen", "manufacturerMarginRate", "customsRate"] },
+  { title: "小判幅ルール", fields: ["smallWidthThresholdMm", "smallWidthOrderPatternLengthM", "smallWidthProductionPatternLengthM", "smallWidthManufacturerUnitPriceKrwPerM"] },
 ];
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -363,27 +363,27 @@ export default function FilmPricesClient() {
       <header className="film-price-header">
         <div>
           <h1>フィルム単価マスター</h1>
-          <p className="subtitle">Digital is legacy UTC. Gravure Y/K and snapshots use Asia/Tokyo.</p>
+          <p className="subtitle">デジタルは従来どおりUTC基準。グラビアY/Kとスナップショットは日本時間（Asia/Tokyo）で管理します。</p>
         </div>
-        <nav className="tab-bar" role="tablist" aria-label="Film price master">
-          <button role="tab" aria-selected={tab === "digital"} className={tab === "digital" ? "active" : ""} onClick={() => setTab("digital")}>Digital</button>
-          <button role="tab" aria-selected={tab === "y"} className={tab === "y" ? "active" : ""} onClick={() => setTab("y")}>Gravure Y</button>
-          <button role="tab" aria-selected={tab === "k"} className={tab === "k" ? "active" : ""} onClick={() => setTab("k")}>Gravure K</button>
-          <button role="tab" aria-selected={tab === "rules"} className={tab === "rules" ? "active" : ""} onClick={() => setTab("rules")}>Rules</button>
-          <button role="tab" aria-selected={tab === "audit"} className={tab === "audit" ? "active" : ""} onClick={() => setTab("audit")}>Audit</button>
+        <nav className="tab-bar" role="tablist" aria-label="フィルム単価マスター">
+          <button role="tab" aria-selected={tab === "digital"} className={tab === "digital" ? "active" : ""} onClick={() => setTab("digital")}>デジタル単価</button>
+          <button role="tab" aria-selected={tab === "y"} className={tab === "y" ? "active" : ""} onClick={() => setTab("y")}>グラビアY</button>
+          <button role="tab" aria-selected={tab === "k"} className={tab === "k" ? "active" : ""} onClick={() => setTab("k")}>グラビアK</button>
+          <button role="tab" aria-selected={tab === "rules"} className={tab === "rules" ? "active" : ""} onClick={() => setTab("rules")}>適用ルール</button>
+          <button role="tab" aria-selected={tab === "audit"} className={tab === "audit" ? "active" : ""} onClick={() => setTab("audit")}>監査履歴</button>
         </nav>
       </header>
       {message ? <p className={`msg ${messageIsError ? "msg-error" : "msg-ok"}`} role="status">{message}</p> : null}
       {!masterAvailability.y || !masterAvailability.k || !masterAvailability.audit ? (
         <p className="msg msg-error" role="alert" data-testid="gravure-master-unavailable">
-          Y/K監査マスタAPIが利用できません。表示中の値は未取得またはfallbackです。
+          Y/K監査マスタAPIが利用できません。表示中の値は未取得または既定値です。
         </p>
       ) : null}
 
       {tab === "digital" ? (
         <section>
           <p className="rule-note" data-testid="digital-precedence">
-            Digital labels preserve the legacy UTC effective date. Simulator-supplied explicit film unit prices override this master when present.
+            デジタル単価は従来のUTC適用日を保持します。シミュレーターで明示的に入力したフィルム単価がある場合は、このマスターより優先されます。
           </p>
           <div className="price-toolbar">
             <label>適用開始（UTC） <input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} /></label>
@@ -445,46 +445,46 @@ export default function FilmPricesClient() {
       {tab === "y" ? (
         <section>
           <div className="rule-card">
-            <h3>Y merge-with-fallback policy</h3>
-            <p>Active rows replace only the matching width + lane + tier dimension. Other dimensions retain the exact current fallback matrix.</p>
+            <h3>Y行のフォールバック統合ルール</h3>
+            <p>有効なY行は、同じ「原反幅＋列数＋印刷パターン長」の既定行のみ置き換えます。未登録の寸法は現在の既定マトリクスをそのまま使用します。</p>
           </div>
           <div className="rules-grid">
             <div className="rule-card">
-              <h3>{yForm.supersedeId ? `Supersede Y #${yForm.supersedeId}` : "Create normalized Y row"}</h3>
+              <h3>{yForm.supersedeId ? `Y行差し替え #${yForm.supersedeId}` : "新しいY行を作成"}</h3>
               <div className="calc-inputs">
-                <label>Dimension
+                <label>寸法構成
                   <select value={`${yForm.webWidthMm}:${yForm.laneCount}:${yForm.printTierM}`} disabled={Boolean(yForm.supersedeId)}
                     onChange={(e) => {
                       const value = Y_DIMENSIONS.find((item) => `${item.webWidthMm}:${item.laneCount}:${item.printTierM}` === e.target.value)!;
                       setYForm((old) => ({ ...old, ...value }));
                     }}>
-                    {Y_DIMENSIONS.map((item) => <option key={`${item.webWidthMm}:${item.laneCount}:${item.printTierM}`}>{item.webWidthMm}mm / {item.laneCount}列 / {item.printTierM}m tier</option>)}
+                    {Y_DIMENSIONS.map((item) => <option key={`${item.webWidthMm}:${item.laneCount}:${item.printTierM}`}>{item.webWidthMm}mm / {item.laneCount}列 / {item.printTierM}mパターン</option>)}
                   </select>
                 </label>
-                <label>Approx output (m) <input inputMode="decimal" value={yForm.approxOutputLengthM} onChange={(e) => setYForm((old) => ({ ...old, approxOutputLengthM: e.target.value }))} /></label>
-                <label>Supplier unit price (円/m) <input data-testid="y-supplier-price" inputMode="decimal" value={yForm.supplierUnitPriceYenPerM} onChange={(e) => setYForm((old) => ({ ...old, supplierUnitPriceYenPerM: e.target.value }))} /></label>
-                <label>Plate base / color (円) <input inputMode="decimal" value={yForm.plateBaseYenPerColor} onChange={(e) => setYForm((old) => ({ ...old, plateBaseYenPerColor: e.target.value }))} /></label>
-                <label>Seller markup <input data-testid="y-seller-markup" inputMode="decimal" value={yForm.sellerMarkup} onChange={(e) => setYForm((old) => ({ ...old, sellerMarkup: e.target.value }))} /></label>
-                <label>Effective from (JST) <input type="date" value={yForm.effectiveFrom} onChange={(e) => setYForm((old) => ({ ...old, effectiveFrom: e.target.value }))} /></label>
-                <label>Effective to (JST, optional) <input type="date" value={yForm.effectiveTo} onChange={(e) => setYForm((old) => ({ ...old, effectiveTo: e.target.value }))} /></label>
-                <label>Memo <input value={yForm.memo} onChange={(e) => setYForm((old) => ({ ...old, memo: e.target.value }))} /></label>
+                <label>概算出力長 (m) <input inputMode="decimal" value={yForm.approxOutputLengthM} onChange={(e) => setYForm((old) => ({ ...old, approxOutputLengthM: e.target.value }))} /></label>
+                <label>供給単価 (円/m) <input data-testid="y-supplier-price" inputMode="decimal" value={yForm.supplierUnitPriceYenPerM} onChange={(e) => setYForm((old) => ({ ...old, supplierUnitPriceYenPerM: e.target.value }))} /></label>
+                <label>銅版基準費 (円/色) <input data-testid="y-plate-base" inputMode="decimal" value={yForm.plateBaseYenPerColor} onChange={(e) => setYForm((old) => ({ ...old, plateBaseYenPerColor: e.target.value }))} /></label>
+                <label>売価倍率 <input data-testid="y-seller-markup" inputMode="decimal" value={yForm.sellerMarkup} onChange={(e) => setYForm((old) => ({ ...old, sellerMarkup: e.target.value }))} /></label>
+                <label>適用開始日（JST） <input type="date" value={yForm.effectiveFrom} onChange={(e) => setYForm((old) => ({ ...old, effectiveFrom: e.target.value }))} /></label>
+                <label>適用終了日（JST・任意） <input type="date" value={yForm.effectiveTo} onChange={(e) => setYForm((old) => ({ ...old, effectiveTo: e.target.value }))} /></label>
+                <label>メモ <input value={yForm.memo} onChange={(e) => setYForm((old) => ({ ...old, memo: e.target.value }))} /></label>
               </div>
               <button className="btn-primary" disabled={saving} onClick={() => void submitY()}>{saving ? "保存中..." : yForm.supersedeId ? "差し替え保存" : "行を作成"}</button>
               {yForm.supersedeId ? <button className="btn-secondary" onClick={() => setYForm(defaultYForm())}>新規作成に戻す</button> : null}
             </div>
             <div className="rule-card">
-              <h3>Active resolution</h3>
-              <p>{activeY ? `#${activeY.id} / markup ${activeY.sellerMarkup}` : "No active Y row: 12-row fallback"}</p>
+              <h3>現在適用中のY行</h3>
+              <p>{activeY ? `#${activeY.id}／売価倍率 ${activeY.sellerMarkup}` : "有効なY行なし：12行の既定マトリクスを使用中"}</p>
               <table className="history-table">
-                <thead><tr><th>#</th><th>Dimension</th><th>Supplier</th><th>Markup</th><th>Period(JST)</th><th>Status</th><th></th></tr></thead>
+                <thead><tr><th>ID</th><th>寸法構成</th><th>供給単価</th><th>売価倍率</th><th>適用期間(JST)</th><th>状態</th><th>操作</th></tr></thead>
                 <tbody>
                   {yPrices.map((row) => (
                     <tr key={row.id}>
                       <td>{row.id}</td><td>{row.webWidthMm}/{row.laneCount}/{row.printTierM}</td>
                       <td>{row.supplierUnitPriceYenPerM}</td><td>{row.sellerMarkup}</td>
                       <td>{row.effectiveFrom}〜{row.effectiveTo}</td>
-                      <td>{row.supersededById ? <span className="badge expired">superseded #{row.supersededById}</span> : isTodayIn(row.effectiveFrom, row.effectiveTo, todayJst()) ? <span className="badge active">active</span> : <span className="badge expired">inactive</span>}</td>
-                      <td><button onClick={() => { setYForm(yFormFromRow(row)); showMessage(`Y行 #${row.id} を差し替えフォームに複製しました。`); }}>Supersede</button></td>
+                      <td>{row.supersededById ? <span className="badge expired">差し替え済み #{row.supersededById}</span> : isTodayIn(row.effectiveFrom, row.effectiveTo, todayJst()) ? <span className="badge active">適用中</span> : <span className="badge expired">対象外</span>}</td>
+                      <td><button onClick={() => { setYForm(yFormFromRow(row)); showMessage(`Y行 #${row.id} を差し替えフォームに複製しました。`); }}>差し替え</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -498,33 +498,33 @@ export default function FilmPricesClient() {
         <section>
           <div className="rules-grid">
             <div className="rule-card">
-              <h3>{kForm.supersedeId ? `Supersede K #${kForm.supersedeId}` : "Create normalized K source set"}</h3>
+              <h3>{kForm.supersedeId ? `Kセット差し替え #${kForm.supersedeId}` : "新しいKパラメータセットを作成"}</h3>
               <div className="calc-inputs">
                 {K_GROUPS.flatMap((group) => group.fields.map((field) => (
                   <label key={field}>{K_FIELD_LABELS[field]}
                     <input inputMode="decimal" value={kForm.source[field]} onChange={(e) => setKForm((old) => ({ ...old, source: { ...old.source, [field]: e.target.value } }))} />
                   </label>
                 )))}
-                <label>Effective from (JST) <input type="date" value={kForm.effectiveFrom} onChange={(e) => setKForm((old) => ({ ...old, effectiveFrom: e.target.value }))} /></label>
-                <label>Effective to (JST, optional) <input type="date" value={kForm.effectiveTo} onChange={(e) => setKForm((old) => ({ ...old, effectiveTo: e.target.value }))} /></label>
-                <label>Memo <input value={kForm.memo} onChange={(e) => setKForm((old) => ({ ...old, memo: e.target.value }))} /></label>
+                <label>適用開始日（JST） <input type="date" value={kForm.effectiveFrom} onChange={(e) => setKForm((old) => ({ ...old, effectiveFrom: e.target.value }))} /></label>
+                <label>適用終了日（JST・任意） <input type="date" value={kForm.effectiveTo} onChange={(e) => setKForm((old) => ({ ...old, effectiveTo: e.target.value }))} /></label>
+                <label>メモ <input value={kForm.memo} onChange={(e) => setKForm((old) => ({ ...old, memo: e.target.value }))} /></label>
               </div>
               <button className="btn-primary" disabled={saving} onClick={() => void submitK()}>{saving ? "保存中..." : kForm.supersedeId ? "差し替え保存" : "セットを作成"}</button>
               {kForm.supersedeId ? <button onClick={() => setKForm(defaultKForm())}>新規作成に戻す</button> : null}
             </div>
             <div className="rule-card">
-              <h3>Active K derived state</h3>
-              <p data-testid="active-k-state">{activeK ? `#${activeK.id} マスター適用中` : "No active K set: current defaults"}</p>
+              <h3>現在適用中のKパラメータ</h3>
+              <p data-testid="active-k-state">{activeK ? `#${activeK.id} マスター適用中` : "有効なKセットなし：現在の既定値を使用中"}</p>
               {activeK ? <pre>{JSON.stringify(activeK.derived, null, 2)}</pre> : null}
               <table className="history-table">
-                <thead><tr><th>#</th><th>PET KRW</th><th>Period(JST)</th><th>Status</th><th></th></tr></thead>
+                <thead><tr><th>ID</th><th>PET単価</th><th>適用期間(JST)</th><th>状態</th><th>操作</th></tr></thead>
                 <tbody>
                   {kSets.map((row) => (
                     <tr key={row.id}>
                       <td>{row.id}</td><td>{row.source.petPriceKrwPerKg}</td>
                       <td>{row.effectiveFrom}〜{row.effectiveTo}</td>
-                      <td>{row.supersededById ? <span className="badge expired">superseded #{row.supersededById}</span> : isTodayIn(row.effectiveFrom, row.effectiveTo, todayJst()) ? <span className="badge active">active</span> : <span className="badge expired">inactive</span>}</td>
-                      <td><button onClick={() => { setKForm(kFormFromRow(row)); showMessage(`Kセット #${row.id} を差し替えフォームに複製しました。`); }}>Supersede</button></td>
+                      <td>{row.supersededById ? <span className="badge expired">差し替え済み #{row.supersededById}</span> : isTodayIn(row.effectiveFrom, row.effectiveTo, todayJst()) ? <span className="badge active">適用中</span> : <span className="badge expired">対象外</span>}</td>
+                      <td><button onClick={() => { setKForm(kFormFromRow(row)); showMessage(`Kセット #${row.id} を差し替えフォームに複製しました。`); }}>差し替え</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -537,13 +537,13 @@ export default function FilmPricesClient() {
       {tab === "rules" ? (
         <section className="rules-grid">
           <div className="rule-card">
-            <h3>Digital precedence</h3><p>Legacy UTC dates. Explicit simulator `filmUnitPrices` override Digital master rows.</p>
+            <h3>デジタル単価の優先順位</h3><p>デジタルは従来どおりUTC基準です。シミュレーターで明示入力したフィルム単価は、マスターより優先されます。</p>
           </div>
           <div className="rule-card">
-            <h3>Gravure Y policy</h3><p>Asia/Tokyo dates, append-only writes, audited supersede, atomic overlap rejection. Active rows replace only their phase-one dimension.</p>
+            <h3>グラビアYの運用ルール</h3><p>日本時間で管理し、追記型登録・監査付き差し替え・期間重複の排除を行います。有効行は同一寸法構成のみ置き換えます。</p>
           </div>
           <div className="rule-card">
-            <h3>Gravure K policy</h3><p>One active source set overrides simulator K inputs. KRW source values and derived JPY values are snapshotted together.</p>
+            <h3>グラビアKの運用ルール</h3><p>有効なKセットはシミュレーターのK入力より優先されます。KRWソース値と換算後のJPY値はスナップショットに同時保存します。</p>
           </div>
           <div className="rule-card">
             <h3>配送単位（原反幅で決定）</h3>
@@ -559,20 +559,20 @@ export default function FilmPricesClient() {
       {tab === "audit" ? (
         <section className="rules-grid">
           <div className="rule-card">
-            <h3>Master supersede history</h3>
+            <h3>マスター差し替え履歴</h3>
             <div className="history-table-wrap">
               <table className="history-table">
-                <thead><tr><th>#</th><th>Table</th><th>Row</th><th>Action</th><th>Actor</th><th>JST</th><th>After</th></tr></thead>
+                <thead><tr><th>ID</th><th>対象テーブル</th><th>行ID</th><th>操作</th><th>実行者</th><th>日時(JST)</th><th>変更後</th></tr></thead>
                 <tbody>{audit.map((entry) => <tr key={entry.id}><td>{entry.id}</td><td>{entry.tableName}</td><td>{entry.rowId}</td><td>{entry.action}</td><td>{entry.actor}</td><td>{jstDateTime(entry.createdAt)}</td><td><code>{JSON.stringify(entry.after)}</code></td></tr>)}</tbody>
               </table>
             </div>
           </div>
           <div className="rule-card">
-            <h3>Source rows & snapshots</h3>
+            <h3>ソース行とスナップショット</h3>
             <div className="history-table-wrap">
               <table className="history-table">
-                <thead><tr><th>Snapshot</th><th>asOf(JST)</th><th>Y rows</th><th>K source</th><th>Hash</th><th>Creator</th><th>Created</th></tr></thead>
-                <tbody>{snapshots.map((snapshot) => <tr key={snapshot.id}><td><code>{snapshot.id}</code></td><td>{snapshot.asOf}</td><td>{snapshot.yRows.map((row) => `#${row.id}:${row.webWidthMm}/${row.laneCount}/${row.printTierM}`).join(", ") || "fallback"}</td><td><code>{JSON.stringify(snapshot.kSource)}</code></td><td><code>{snapshot.snapshotSha256.slice(0, 16)}…</code></td><td>{snapshot.createdBy}</td><td>{jstDateTime(snapshot.createdAt)}</td></tr>)}</tbody>
+                <thead><tr><th>スナップショット</th><th>対象日(JST)</th><th>Y行</th><th>Kソース</th><th>ハッシュ</th><th>作成者</th><th>作成日時</th></tr></thead>
+                <tbody>{snapshots.map((snapshot) => <tr key={snapshot.id}><td><code>{snapshot.id}</code></td><td>{snapshot.asOf}</td><td>{snapshot.yRows.map((row) => `#${row.id}:${row.webWidthMm}/${row.laneCount}/${row.printTierM}`).join(", ") || "既定マトリクス"}</td><td><code>{JSON.stringify(snapshot.kSource)}</code></td><td><code>{snapshot.snapshotSha256.slice(0, 16)}…</code></td><td>{snapshot.createdBy}</td><td>{jstDateTime(snapshot.createdAt)}</td></tr>)}</tbody>
               </table>
             </div>
             {loading ? <p>読み込み中...</p> : null}

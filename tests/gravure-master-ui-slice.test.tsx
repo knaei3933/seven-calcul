@@ -122,20 +122,20 @@ describe("G010-G015 admin and simulator slice", () => {
     const Client = (await import("@/app/admin/film-prices/film-prices-client")).default;
     const user = userEvent.setup();
     render(<Client />);
-    for (const tab of ["Digital", "Gravure Y", "Gravure K", "Rules", "Audit"]) {
+    for (const tab of ["デジタル単価", "グラビアY", "グラビアK", "適用ルール", "監査履歴"]) {
       expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument();
     }
-    expect(screen.getByTestId("digital-precedence")).toHaveTextContent(/UTC.*explicit film unit prices/is);
-    await user.click(screen.getByRole("tab", { name: "Gravure K" }));
-    expect(screen.getByText("Lamination with AL (KRW/m)")).toBeInTheDocument();
-    expect(screen.getByText("Lamination without AL (KRW/m)")).toBeInTheDocument();
+    expect(screen.getByTestId("digital-precedence")).toHaveTextContent(/UTC.*フィルム単価/is);
+    await user.click(screen.getByRole("tab", { name: "グラビアK" }));
+    expect(screen.getByText("ラミネート単価（ALあり / KRW/m）")).toBeInTheDocument();
+    expect(screen.getByText("ラミネート単価（ALなし / KRW/m）")).toBeInTheDocument();
     expect(screen.getAllByRole("textbox")).toHaveLength(21);
-    await user.click(screen.getByRole("tab", { name: "Gravure Y" }));
-    expect(screen.getByText(/Active rows replace only the matching width \+ lane \+ tier/)).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "グラビアY" }));
+    expect(screen.getByText(/有効なY行は、同じ「原反幅＋列数＋印刷パターン長」の既定行のみ置き換えます/)).toBeInTheDocument();
     expect(screen.getByTestId("y-seller-markup")).toHaveValue("1.12");
-    await user.click(screen.getByRole("tab", { name: "Audit" }));
-    expect(screen.getByText("Master supersede history")).toBeInTheDocument();
-    expect(screen.getByText("Source rows & snapshots")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "監査履歴" }));
+    expect(screen.getByText("マスター差し替え履歴")).toBeInTheDocument();
+    expect(screen.getByText("ソース行とスナップショット")).toBeInTheDocument();
   });
 
   it("keeps Seven away from Y/K admin endpoints while Kanai can sync K", async () => {
