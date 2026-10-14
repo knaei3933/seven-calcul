@@ -2460,3 +2460,4 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
   white-space: nowrap;
 }
 .customer-delete-btn:hover { background: #fef2f2; }
+.film-order-pdf-frame { width: 100%; height: 800px; border: 1px solid var(--line); border-radius: 8px; background: white; }

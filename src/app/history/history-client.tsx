@@ -258,6 +258,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
 
 function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, sendingEmail }: { record: QuotationRecord; onClose: () => void; onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void; onSendEmail: (record: QuotationRecord) => void; sendingEmail: boolean }) {
   const [detailTab, setDetailTab] = useState<"document" | "film" | "data">("document");
+  const [savedPdfUrl, setSavedPdfUrl] = useState<string | null>(null);
   const analysis = analyzeQuotation(record);
   // 발행 시 자동 생성된 필름 견적서(payload 저장분)를 우선 사용, 없으면 조회 시 생성
   const storedFilmQuotation = record.payload.filmQuotation as import("@/lib/film-quotation").FilmQuotationData | undefined;
@@ -357,6 +358,10 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
   const fitContentRefs = useRef<Array<HTMLDivElement | null>>([]);
 
   useEffect(() => {
+    if (!record.id) return;
+    fetch(`/api/quotations/${record.id}/pdf`)
+      .then((res) => { if (res.ok) setSavedPdfUrl(`/api/quotations/${record.id}/pdf`); })
+      .catch(() => {});
     const fitForPrint = () => {
       for (const content of fitContentRefs.current) {
         if (!content) continue;
