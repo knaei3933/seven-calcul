@@ -302,8 +302,9 @@ export default function PrintableQuotationPage() {
   const [selectedCandidateShortage, setSelectedCandidateShortage] = useState(false);
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrderSnapshot | null>(null);
   const [calculationChecklistSnapshot, setCalculationChecklistSnapshot] = useState<CalculationChecklistSnapshot | null>(null);
-  const [customerMasterStatus, setCustomerMasterStatus] = useState<{ loading: boolean; message: string; saving: boolean }>({
+  const [customerMasterStatus, setCustomerMasterStatus] = useState<{ loading: boolean; found: boolean; message: string; saving: boolean }>({
     loading: false,
+    found: false,
     message: "",
     saving: false,
   });
@@ -329,10 +330,10 @@ export default function PrintableQuotationPage() {
   const loadCustomerMaster = async () => {
     const code = form.customerCode.trim();
     if (!code) {
-      setCustomerMasterStatus({ loading: false, message: "顧客コードを入力してください。", saving: false });
+      setCustomerMasterStatus({ loading: false, found: false, message: "顧客コードを入力してください。", saving: false });
       return;
     }
-    setCustomerMasterStatus({ loading: true, message: "", saving: false });
+    setCustomerMasterStatus({ loading: true, found: false, message: "", saving: false });
     try {
       const response = await fetch(`/api/customers/${encodeURIComponent(code)}`);
       const payload = await response.json();
@@ -350,16 +351,30 @@ export default function PrintableQuotationPage() {
         customerTelephone: customer.customerTelephone || "",
         customerEmail: customer.customerEmail || "",
       });
-      setCustomerMasterStatus({ loading: false, message: `顧客コード ${code} を読み込みました。`, saving: false });
+      setCustomerMasterStatus({ found: false,  loading: false, message: `顧客コード ${code} を読み込みました。`, saving: false });
     } catch {
-      setCustomerMasterStatus({ loading: false, message: "登録されていない顧客コードです。入力後に保存できます。", saving: false });
+      setCustomerMasterStatus({ loading: false, found: false, message: "登録されていない顧客コードです。入力後に保存できます。", saving: false });
+    }
+  };
+
+  const deleteCustomerMaster = async (code: string) => {
+    if (!window.confirm(`顧客コード ${code} を削除しますか？\n過去の見積データは影響を受けません。`)) return;
+    setCustomerMasterStatus((old) => ({ ...old, saving: true, message: "" }));
+    try {
+      const response = await fetch(`/api/customers/${encodeURIComponent(code)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error();
+      setCustomerMasterStatus({ loading: false, found: false, message: `顧客コード ${code} を削除しました。`, saving: false });
+      setCustomerSearchResults((old) => old.filter((c) => c.customerCode !== code));
+      if (form.customerCode === code) applyPatch({ customerCode: "", customerName: "" });
+    } catch {
+      setCustomerMasterStatus({ loading: false, found: false, message: "削除できませんでした。", saving: false });
     }
   };
 
   const saveCustomerMaster = async () => {
     const code = form.customerCode.trim();
     if (!code || !form.customerName.trim()) {
-      setCustomerMasterStatus({ loading: false, message: "保存には顧客コードと会社名が必要です。", saving: false });
+      setCustomerMasterStatus({ loading: false, found: false, message: "保存には顧客コードと会社名が必要です。", saving: false });
       return;
     }
     setCustomerMasterStatus((old) => ({ ...old, saving: true, message: "" }));
@@ -379,9 +394,9 @@ export default function PrintableQuotationPage() {
       });
       if (!response.ok) throw new Error();
       await searchCustomerMaster("");
-      setCustomerMasterStatus({ loading: false, message: `顧客コード ${code} を保存しました。`, saving: false });
+      setCustomerMasterStatus({ found: false,  loading: false, message: `顧客コード ${code} を保存しました。`, saving: false });
     } catch {
-      setCustomerMasterStatus({ loading: false, message: "顧客マスタを保存できませんでした。", saving: false });
+      setCustomerMasterStatus({ loading: false, found: false, message: "顧客マスタを保存できませんでした。", saving: false });
     }
   };
 
@@ -404,7 +419,7 @@ export default function PrintableQuotationPage() {
     });
     setCustomerSearchTerm("");
     setCustomerSearchResults([]);
-    setCustomerMasterStatus({ loading: false, message: `顧客コード ${customer.customerCode} を読み込みました。`, saving: false });
+    setCustomerMasterStatus({ found: false,  loading: false, message: `顧客コード ${customer.customerCode} を読み込みました。`, saving: false });
   };
 
   const fillTestData = () => {
@@ -422,7 +437,7 @@ export default function PrintableQuotationPage() {
         ? old.skuNames.map((name, index) => name.trim() || `テスト製品${suffix}-${index + 1}`)
         : [`テスト製品${suffix}-1`],
     }));
-    setCustomerMasterStatus({ loading: false, message: "テスト用入力を適用しました。", saving: false });
+    setCustomerMasterStatus({ loading: false, found: false, message: "テスト用入力を適用しました。", saving: false });
   };
 
   useEffect(() => {
@@ -1428,11 +1443,19 @@ export default function PrintableQuotationPage() {
           {customerSearchResults.length ? (
             <div className="customer-search-results" data-testid="customer-search-results">
               {customerSearchResults.map((customer) => (
-                <button key={customer.customerCode} type="button" onClick={() => selectCustomerMaster(customer)}>
-                  <strong>{customer.customerCode}</strong>
-                  <span>{customer.customerName}</span>
-                  <small>{customer.customerAddress || "住所未登録"}</small>
-                </button>
+                <div key={customer.customerCode} className="customer-search-result-row">
+                  <button type="button" onClick={() => selectCustomerMaster(customer)}>
+                    <strong>{customer.customerCode}</strong>
+                    <span>{customer.customerName}</span>
+                    <small>{customer.customerAddress || "住所未登録"}</small>
+                  </button>
+                  {(
+                    <button className="customer-delete-btn" type="button" disabled={customerMasterStatus.saving}
+                      onClick={() => void deleteCustomerMaster(customer.customerCode)}
+                      title="この顧客を削除"
+                    >削除</button>
+                  )}
+                </div>
               ))}
             </div>
           ) : null}
