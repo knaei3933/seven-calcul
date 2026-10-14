@@ -623,7 +623,7 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
           {detailTab === "document" ? (
           <>
             <article className="a4-sheet history-a4" aria-label="見積書A4">
-              <div className="history-a4-fit">
+              <div className="history-a4-fit" ref={(element) => { fitContentRefs.current[0] = element; }}>
                 <header className="sheet-header">
                   <div className="issuer">
                     <div className="issuer-logo">
