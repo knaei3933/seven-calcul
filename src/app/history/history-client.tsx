@@ -617,7 +617,7 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
 
           {detailTab === "document" ? (
           <>
-            <article className="a4-sheet quote-a4-fit" aria-label="見積書A4">
+            <article className="a4-sheet history-a4" aria-label="見積書A4">
               <header className="sheet-header">
                 <div className="issuer">
                   <div className="issuer-logo">

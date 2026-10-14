@@ -2412,3 +2412,51 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-quote-preview .film-quote-lines tfoot tr.grand td { background: #1f3a5f; color: white; font-weight: 800; }
 .film-quote-preview .note { margin: 6px 0 0; font-size: 11px; color: #94a3b8; }
 .film-quote-preview .film-item-spec { margin-top: 2px; font-size: 10px; line-height: 1.45; color: #64748b; }
+
+.customer-search-wrapper { position: relative; }
+.customer-search-results {
+  position: absolute;
+  z-index: 50;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(23,33,58,.14);
+  max-height: 280px;
+  overflow-y: auto;
+}
+.customer-search-result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.customer-search-result-row:last-child { border-bottom: 0; }
+.customer-search-result-row > button:first-child {
+  all: unset;
+  cursor: pointer;
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+.customer-search-result-row > button:first-child:hover { background: #f0f4f8; border-radius: 6px; padding: 2px 4px; }
+.customer-search-result-row strong { color: var(--primary); font-size: 13px; white-space: nowrap; }
+.customer-search-result-row span { font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.customer-search-result-row small { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.customer-delete-btn {
+  all: unset;
+  cursor: pointer;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border: 1px solid var(--danger);
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.customer-delete-btn:hover { background: #fef2f2; }
