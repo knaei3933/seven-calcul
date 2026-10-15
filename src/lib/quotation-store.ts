@@ -629,22 +629,3 @@ export async function updateChecklistItem(
   );
   return updated ? mapChecklistRow(updated) : null;
 }
-
-export async function saveQuotationPdf(quotationId: number, pdfData: Buffer, fileName: string): Promise<boolean> {
-  const db = await getDatabase();
-  const result = await db.run(
-    "UPDATE quotations SET pdf_data = ?, pdf_file_name = ?, pdf_uploaded_at = ? WHERE id = ?",
-    [pdfData, fileName, new Date().toISOString(), quotationId],
-  );
-  return result.changes > 0;
-}
-
-export async function getQuotationPdf(quotationId: number): Promise<{ data: Buffer; fileName: string } | null> {
-  const db = await getDatabase();
-  const row = await db.get<{ pdf_data: Buffer; pdf_file_name: string }>(
-    "SELECT pdf_data, pdf_file_name FROM quotations WHERE id = ? AND pdf_data IS NOT NULL",
-    [quotationId],
-  );
-  if (!row?.pdf_data) return null;
-  return { data: row.pdf_data, fileName: row.pdf_file_name };
-}
