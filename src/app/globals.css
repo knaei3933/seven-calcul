@@ -2461,3 +2461,11 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 }
 .customer-delete-btn:hover { background: #fef2f2; }
 .film-order-pdf-frame { width: 100%; height: 800px; border: 1px solid var(--line); border-radius: 8px; background: white; }
+.history-quote-open { display: flex; justify-content: center; padding: 40px 20px; }
+.history-quote-open-card { display: flex; flex-direction: column; gap: 14px; max-width: 480px; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px 28px; box-shadow: 0 6px 20px rgba(23,33,58,.06); }
+.history-quote-open-card h3 { margin: 0; font-size: 22px; }
+.history-quote-open-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; margin: 0; }
+.history-quote-open-card dl > div { display: flex; gap: 6px; align-items: baseline; border-bottom: 1px dotted var(--line); padding: 3px 0; }
+.history-quote-open-card dt { color: var(--muted); font-size: 12px; font-weight: 700; min-width: 64px; }
+.history-quote-open-card dd { margin: 0; font-weight: 700; font-size: 13px; overflow-wrap: anywhere; }
+.history-quote-open-card .help { color: var(--muted); font-size: 12px; margin: 0; }

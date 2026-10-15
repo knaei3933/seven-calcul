@@ -621,109 +621,82 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
           ) : null}
 
           {detailTab === "document" ? (
-          <>
-            <article className="a4-sheet history-a4" aria-label="見積書A4">
-              <div className="history-a4-fit" ref={(element) => { fitContentRefs.current[0] = element; }}>
-                <header className="sheet-header">
-                  <div className="issuer">
-                    <div className="issuer-logo">
-                      <span className="logo-mark large" aria-hidden="true">7</span>
-                      <div>
-                        <strong>{issuerName}</strong>
-                        <small>{issuerEnglishName}</small>
-                      </div>
-                    </div>
-                    <address>
-                      {issuerRepresentative}<br />
-                      {issuerPostalCode} {issuerAddress}<br />
-                      {issuerTelephone} / {issuerWebsite}
-                    </address>
-                  </div>
-                  <div className="document-title">
-                    <p className="english">QUOTATION</p>
-                    <h2>お見積書</h2>
-                    <dl>
-                      <div><dt>見積番号</dt><dd>{record.quotationNumber}</dd></div>
-                      <div><dt>発行日</dt><dd>{record.issueDate}</dd></div>
-                    </dl>
-                  </div>
-                </header>
-
-                <section className="recipient-block">
-                  <p className="customer-postal">{(record.payload.customerPostalCode as string) || "〒"}</p>
-                  <p className="customer-address">{(record.payload.customerAddress as string) || "得意先住所未入力"}</p>
-                  <p className="customer">{record.customerName || "得意先名未入力"}</p>
-                  <p>{record.customerContact ? `${record.customerContact} 御中` : "御中"}</p>
-                  <p className="help">顧客コード: {(record.payload.customerCode as string) || "-"} ／ メール: {(record.payload.customerEmail as string) || "-"}</p>
-                  <p className="greeting">平より格別のお引き立てを賜り、厚く御礼申し上げます。下記の通りお見積りを申し上げます。</p>
-                </section>
-
-                <section className="quote-spec" data-testid="quote-spec">
-                  <h3 id="quote-spec-title">お見積製品仕様</h3>
-                  <dl>
-                    <div><dt>品名</dt><dd>{record.productName}</dd></div>
-                    <div><dt>パウチ仕様</dt><dd>{record.sizeSummary}</dd></div>
-                    <div><dt>数量</dt><dd>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</dd></div>
-                    <div><dt>印刷方式</dt><dd>{printingMethodOf(record) === "gravure" ? "グラビア印刷" : "デジタル印刷"}</dd></div>
-                    <div><dt>フィルム構成</dt><dd>{composition || DEFAULT_FILM_COMPOSITION}</dd></div>
-                    {analysis.filmOrderLength.gt(0) ? <div><dt>発注長</dt><dd>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</dd></div> : null}
-                  </dl>
-                </section>
-
-                <section className="price-highlight">
-                  <div>
-                    <span>お見積単価（税抜）</span>
-                    <strong>{formatCurrency(analysis.sellingUnit.toNumber(), 2)} <small>/枚</small></strong>
-                  </div>
-                  <div>
-                    <span>数量</span>
-                    <strong>{formatNumber(analysis.quantity.toNumber(), 0)} <small>枚</small></strong>
-                  </div>
-                  <div>
-                    <span>税込合計</span>
-                    <strong>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</strong>
-                  </div>
-                </section>
-
-                <table className="quote-table">
-                  <thead>
-                    <tr><th scope="col">品名・仕様</th><th scope="col">単価</th><th scope="col">数量</th><th scope="col">金額</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr><td><strong>充填・加工費</strong></td><td>{formatCurrency(analysis.fillingUnit.toNumber(), 2)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.fillingAmount.toNumber(), 0)}</td></tr>
-                    {analysis.bulkAmount.gt(0) ? <tr><td>バルク費用</td><td>{formatCurrency(analysis.bulkUnit.toNumber(), 2)} /枚</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.bulkAmount.toNumber(), 0)}</td></tr> : null}
-                    <tr><td><strong>フィルム費用</strong> <small>{composition || DEFAULT_FILM_COMPOSITION}</small></td><td>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toNumber(), 2)} /m` : "-"}</td><td>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</td><td>{formatCurrency(analysis.filmAmount.toNumber(), 0)}</td></tr>
-                    {printingMethodOf(record) === "gravure" && analysis.copperAmount.gt(0) ? <tr><td>新規銅版費</td><td>-</td><td>{formatNumber(analysis.copperColorCount.toNumber(), 0)} 色</td><td>{formatCurrency(analysis.copperAmount.toNumber(), 0)}</td></tr> : null}
-                    {analysis.customCostUnit.gt(0) ? <tr><td>金型費用</td><td>-</td><td>-</td><td>{formatCurrency(analysis.customAmount.toNumber(), 0)}</td></tr> : null}
-                  </tbody>
-                </table>
-
-                <section className="total-block">
-                  <div><span>小計（税抜）</span><strong>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</strong></div>
-                  <div><span>消費税</span><strong>{formatCurrency(analysis.tax.toFixed(0), 0)}</strong></div>
-                  <div className="grand"><span>税込合計</span><strong>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</strong></div>
-                </section>
-
-                <section className="terms">
-                  <dl>
-                    <div><dt>納期</dt><dd>{record.deliveryDate || "-"}</dd></div>
-                    <div><dt>お支払条件</dt><dd>{record.paymentTerms || "-"}</dd></div>
-                    <div><dt>見積有効期限</dt><dd>{record.validUntil || "-"}</dd></div>
-                  </dl>
-                  <p className="notes"><strong>備考</strong> {record.notes || "-"}</p>
-                </section>
-
-                <footer className="sheet-footer">
-                  <p>{record.quotationNumber}</p>
-                  <div className="approval">
-                    <span>{issuerName}</span>
-                  </div>
-                </footer>
-                </div>
-              </article>
-            </>
-            
-          ) : detailTab === "data" ? (
+            <div className="history-quote-open">
+              <div className="history-quote-open-card">
+                <span className="side-kicker">QUOTATION</span>
+                <h3>お見積書</h3>
+                <dl>
+                  <div><dt>見積番号</dt><dd>{record.quotationNumber}</dd></div>
+                  <div><dt>発行日</dt><dd>{record.issueDate}</dd></div>
+                  <div><dt>得意先</dt><dd>{record.customerName || "-"}</dd></div>
+                  <div><dt>品名</dt><dd>{record.productName}</dd></div>
+                  <div><dt>数量</dt><dd>{Number(record.quantity).toLocaleString("ja-JP")} 枚</dd></div>
+                  <div><dt>税込合計</dt><dd>{Number(record.grandTotal).toLocaleString("ja-JP")} 円</dd></div>
+                </dl>
+                <button
+                  className="button"
+                  type="button"
+                  data-testid="open-quotation-in-quote"
+                  onClick={() => {
+                    const draft = {
+                      quotationNumber: record.quotationNumber,
+                      issueDate: record.issueDate,
+                      validUntil: record.validUntil,
+                      customerName: record.customerName,
+                      customerContact: record.customerContact,
+                      productName: record.productName,
+                      sizeSummary: record.sizeSummary,
+                      quantity: record.quantity,
+                      fillingCostPerPiece: record.fillingCostPerPiece,
+                      filmCostPerPiece: record.filmCostPerPiece,
+                      filmMeterPrice: record.filmMeterPrice,
+                      filmOrderLengthM: record.filmOrderLengthM,
+                      targetMargin: record.targetMargin,
+                      taxRatePercent: record.taxRatePercent,
+                      pricePerPiece: record.pricePerPiece,
+                      subtotal: record.subtotal,
+                      tax: record.tax,
+                      grandTotal: record.grandTotal,
+                      deliveryDate: record.deliveryDate,
+                      paymentTerms: record.paymentTerms,
+                      notes: record.notes,
+                      calculationVersion: record.calculationVersion,
+                      resultHash: record.resultHash,
+                      calculationFilmTotal: record.payload.calculationFilmTotal,
+                      customerCode: record.payload.customerCode,
+                      customerPostalCode: record.payload.customerPostalCode,
+                      customerAddress: record.payload.customerAddress,
+                      customerEmail: record.payload.customerEmail,
+                      printingMethod: record.payload.printingMethod,
+                      copperPlateCostPerPiece: record.payload.copperPlateCostPerPiece,
+                      customLotCost: record.payload.customLotCost,
+                      customQuantity: record.payload.customQuantity,
+                      filmUnitDisplay: record.payload.filmUnitDisplay,
+                      fillingUnitDisplay: record.payload.fillingUnitDisplay,
+                      copperUnitDisplay: record.payload.copperUnitDisplay,
+                      customUnitDisplay: record.payload.customUnitDisplay,
+                      pricePerPieceDisplay: record.payload.pricePerPieceDisplay,
+                      adjustmentDisplay: record.payload.adjustmentDisplay,
+                      subtotalDisplay: record.payload.subtotalDisplay,
+                      taxDisplay: record.payload.taxDisplay,
+                      grandTotalDisplay: record.payload.grandTotalDisplay,
+                      fillingAmountDisplay: record.payload.fillingAmountDisplay,
+                      filmAmountDisplay: record.payload.filmAmountDisplay,
+                      copperAmountDisplay: record.payload.copperAmountDisplay,
+                      customAmountDisplay: record.payload.customAmountDisplay,
+                      purchaseOrder: record.payload.purchaseOrder,
+                    };
+                    sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify(draft));
+                    window.location.href = "/quote";
+                  }}
+                >
+                  見積書を表示・印刷（A4）
+                </button>
+                <p className="help">/quote ページで完全に同じ書式が表示され、そのままPDF出力・再発行できます。</p>
+              </div>
+            </div>
+          ) : null}
+          {detailTab === "data" ? (
           <>
             <article className="a4-sheet history-a4 data-report-a4" aria-label="詳細データA4帳票" data-testid="data-report-a4">
               <div className="history-a4-fit" ref={(element) => { fitContentRefs.current[1] = element; }}>
