@@ -621,65 +621,19 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
           ) : null}
 
           {detailTab === "document" ? (
-          <div className="history-quote-redirect">
-            <p>見積書A4は /quote ページで表示・印刷します。</p>
-            <button className="button" type="button" onClick={() => {
-              
-              // sessionStorageに見積データを復元して/quoteへ遷移
-              const draft = {
-                quotationNumber: record.quotationNumber,
-                issueDate: record.issueDate,
-                validUntil: record.validUntil,
-                customerName: record.customerName,
-                customerContact: record.customerContact,
-                productName: record.productName,
-                sizeSummary: record.sizeSummary,
-                quantity: record.quantity,
-                fillingCostPerPiece: record.fillingCostPerPiece,
-                filmCostPerPiece: record.filmCostPerPiece,
-                filmMeterPrice: record.filmMeterPrice,
-                filmOrderLengthM: record.filmOrderLengthM,
-                targetMargin: record.targetMargin,
-                taxRatePercent: record.taxRatePercent,
-                pricePerPiece: record.pricePerPiece,
-                subtotal: record.subtotal,
-                tax: record.tax,
-                grandTotal: record.grandTotal,
-                deliveryDate: record.deliveryDate,
-                paymentTerms: record.paymentTerms,
-                notes: record.notes,
-                calculationVersion: record.calculationVersion,
-                resultHash: record.resultHash,
-                calculationFilmTotal: record.payload.calculationFilmTotal,
-                customerCode: record.payload.customerCode,
-                customerPostalCode: record.payload.customerPostalCode,
-                customerAddress: record.payload.customerAddress,
-                customerEmail: record.payload.customerEmail,
-                printingMethod: record.payload.printingMethod,
-                copperPlateCostPerPiece: record.payload.copperPlateCostPerPiece,
-                customLotCost: record.payload.customLotCost,
-                customQuantity: record.payload.customQuantity,
-                filmUnitDisplay: record.payload.filmUnitDisplay,
-                fillingUnitDisplay: record.payload.fillingUnitDisplay,
-                copperUnitDisplay: record.payload.copperUnitDisplay,
-                customUnitDisplay: record.payload.customUnitDisplay,
-                pricePerPieceDisplay: record.payload.pricePerPieceDisplay,
-                adjustmentDisplay: record.payload.adjustmentDisplay,
-                subtotalDisplay: record.payload.subtotalDisplay,
-                taxDisplay: record.payload.taxDisplay,
-                grandTotalDisplay: record.payload.grandTotalDisplay,
-                fillingAmountDisplay: record.payload.fillingAmountDisplay,
-                filmAmountDisplay: record.payload.filmAmountDisplay,
-                copperAmountDisplay: record.payload.copperAmountDisplay,
-                customAmountDisplay: record.payload.customAmountDisplay,
-                purchaseOrder: record.payload.purchaseOrder,
-              };
-              sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify(draft));
-              window.location.href = "/quote";
-            }}>
-              見積書を /quote で開く
-            </button>
-          </div>
+          <>
+            {savedPdfUrl ? (
+              <div className="history-pdf-viewer">
+                <iframe src={savedPdfUrl} className="history-pdf-frame" title="保存済み見積書PDF" />
+                <a className="button secondary small" href={savedPdfUrl} target="_blank" rel="noreferrer">PDFを別タブで開く</a>
+              </div>
+            ) : (
+              <div className="history-pdf-loading">
+                <p>この見積はPDF保存前のデータです。/quote で再発行するとPDFが保存されます。</p>
+                <a className="button secondary small" href="/quote">/quote へ移動</a>
+              </div>
+            )}
+          </>
           ) : null}
           {detailTab === "data" ? (
           <>
