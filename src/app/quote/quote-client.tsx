@@ -714,6 +714,23 @@ export default function PrintableQuotationPage() {
       setSavedRecordId(Number(payload.record.id));
       setChecklistUrl(checklistUrl);
       sessionStorage.setItem(LAST_CHECKLIST_URL_KEY, checklistUrl);
+      // 見積書発行時にA4をPDFとしてNeonに保存（履歴で同一ファイル表示を保証）
+      try {
+        const element = document.getElementById("quote-preview");
+        if (element) {
+          const html2pdf = (await import("html2pdf.js")).default;
+          const pdfBlob = await html2pdf().from(element).set({
+            margin: [0, 0, 0, 0],
+            filename: `${payload.record.quotationNumber}.pdf`,
+            image: { type: "jpeg", quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+            jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+          }).outputPdf("blob");
+          const fd = new FormData();
+          fd.append("pdf", pdfBlob, `${payload.record.quotationNumber}.pdf`);
+          await fetch(`/api/quotations/${payload.record.id}/pdf`, { method: "POST", body: fd });
+        }
+      } catch { /* PDF保存失敗でも見積保存は成功扱い */ }
       setSavedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
       const filmQuoteNum = payload.record.payload?.filmQuotation?.quotationNumber;
       setIssueSuccessMessage(
