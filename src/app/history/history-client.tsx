@@ -630,6 +630,62 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
                 </div>
               </div>
             ) : (
+              <>
+              <div className="history-pdf-reissue" style={{ marginBottom: 12, padding: "10px 14px", border: "1px dashed #b45309", borderRadius: 8, background: "#fffbeb", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, color: "#92400e" }}>この見積はPDF保存前のデータです。再発行すると以後、完全に同じPDFが表示されます。</span>
+                <button className="button secondary small" type="button" onClick={() => {
+                  const draft = {
+                    quotationNumber: record.quotationNumber,
+                    issueDate: record.issueDate,
+                    validUntil: record.validUntil,
+                    customerName: record.customerName,
+                    customerContact: record.customerContact,
+                    productName: record.productName,
+                    sizeSummary: record.sizeSummary,
+                    quantity: record.quantity,
+                    fillingCostPerPiece: record.fillingCostPerPiece,
+                    filmCostPerPiece: record.filmCostPerPiece,
+                    filmMeterPrice: record.filmMeterPrice,
+                    filmOrderLengthM: record.filmOrderLengthM,
+                    targetMargin: record.targetMargin,
+                    taxRatePercent: record.taxRatePercent,
+                    pricePerPiece: record.pricePerPiece,
+                    subtotal: record.subtotal,
+                    tax: record.tax,
+                    grandTotal: record.grandTotal,
+                    deliveryDate: record.deliveryDate,
+                    paymentTerms: record.paymentTerms,
+                    notes: record.notes,
+                    calculationVersion: record.calculationVersion,
+                    resultHash: record.resultHash,
+                    calculationFilmTotal: record.payload.calculationFilmTotal,
+                    customerCode: record.payload.customerCode,
+                    customerPostalCode: record.payload.customerPostalCode,
+                    customerAddress: record.payload.customerAddress,
+                    customerEmail: record.payload.customerEmail,
+                    printingMethod: record.payload.printingMethod,
+                    copperPlateCostPerPiece: record.payload.copperPlateCostPerPiece,
+                    customLotCost: record.payload.customLotCost,
+                    customQuantity: record.payload.customQuantity,
+                    filmUnitDisplay: record.payload.filmUnitDisplay,
+                    fillingUnitDisplay: record.payload.fillingUnitDisplay,
+                    copperUnitDisplay: record.payload.copperUnitDisplay,
+                    customUnitDisplay: record.payload.customUnitDisplay,
+                    pricePerPieceDisplay: record.payload.pricePerPieceDisplay,
+                    adjustmentDisplay: record.payload.adjustmentDisplay,
+                    subtotalDisplay: record.payload.subtotalDisplay,
+                    taxDisplay: record.payload.taxDisplay,
+                    grandTotalDisplay: record.payload.grandTotalDisplay,
+                    fillingAmountDisplay: record.payload.fillingAmountDisplay,
+                    filmAmountDisplay: record.payload.filmAmountDisplay,
+                    copperAmountDisplay: record.payload.copperAmountDisplay,
+                    customAmountDisplay: record.payload.customAmountDisplay,
+                    purchaseOrder: record.payload.purchaseOrder,
+                  };
+                  sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify(draft));
+                  window.location.href = "/quote";
+                }}>PDF再発行</button>
+              </div>
               <article className="a4-sheet history-a4" aria-label="見積書A4">
                 <div className="history-a4-fit" ref={(element) => { fitContentRefs.current[0] = element; }}>
                   <header className="sheet-header">
@@ -705,6 +761,7 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
                   </footer>
                 </div>
               </article>
+              </>
             )}
           </>
           ) : null}
