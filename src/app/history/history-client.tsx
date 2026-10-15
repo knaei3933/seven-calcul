@@ -625,13 +625,86 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
             {savedPdfUrl ? (
               <div className="history-pdf-viewer">
                 <iframe src={savedPdfUrl} className="history-pdf-frame" title="保存済み見積書PDF" />
-                <a className="button secondary small" href={savedPdfUrl} target="_blank" rel="noreferrer">PDFを別タブで開く</a>
+                <div className="history-pdf-actions">
+                  <a className="button secondary small" href={savedPdfUrl} target="_blank" rel="noreferrer">PDFを別タブで開く</a>
+                </div>
               </div>
             ) : (
-              <div className="history-pdf-loading">
-                <p>この見積はPDF保存前のデータです。/quote で再発行するとPDFが保存されます。</p>
-                <a className="button secondary small" href="/quote">/quote へ移動</a>
-              </div>
+              <article className="a4-sheet history-a4" aria-label="見積書A4">
+                <div className="history-a4-fit" ref={(element) => { fitContentRefs.current[0] = element; }}>
+                  <header className="sheet-header">
+                    <div className="issuer">
+                      <div className="issuer-logo">
+                        <span className="logo-mark large" aria-hidden="true">7</span>
+                        <div>
+                          <strong>{issuerName}</strong>
+                          <small>{issuerEnglishName}</small>
+                        </div>
+                      </div>
+                      <address>
+                        {issuerRepresentative}<br />
+                        {issuerPostalCode} {issuerAddress}<br />
+                        {issuerTelephone} / {issuerWebsite}
+                      </address>
+                    </div>
+                    <div className="document-title">
+                      <p className="english">QUOTATION</p>
+                      <h2>お見積書</h2>
+                      <dl>
+                        <div><dt>見積番号</dt><dd>{record.quotationNumber}</dd></div>
+                        <div><dt>発行日</dt><dd>{record.issueDate}</dd></div>
+                      </dl>
+                    </div>
+                  </header>
+                  <section className="recipient-block">
+                    <p className="customer">{record.customerName || "得意先未設定"}</p>
+                    <p>{record.customerContact ? `${record.customerContact} 御中` : "御中"}</p>
+                    <p className="greeting">下記の通りお見積りを申し上げます。</p>
+                  </section>
+                  <section className="quote-spec" data-testid="quote-spec">
+                    <h3 id="quote-spec-title">お見積製品仕様</h3>
+                    <dl>
+                      <div><dt>品名</dt><dd>{record.productName}</dd></div>
+                      <div><dt>パウチ仕様</dt><dd>{record.sizeSummary}</dd></div>
+                      <div><dt>数量</dt><dd>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</dd></div>
+                      <div><dt>印刷方式</dt><dd>{printingMethodOf(record) === "gravure" ? "グラビア印刷" : "デジタル印刷"}</dd></div>
+                      <div><dt>フィルム構成</dt><dd>{composition || DEFAULT_FILM_COMPOSITION}</dd></div>
+                    </dl>
+                  </section>
+                  <section className="price-highlight">
+                    <div><span>お見積単価（税抜）</span><strong>{formatCurrency(analysis.sellingUnit.toNumber(), 2)}</strong></div>
+                    <div><span>数量</span><strong>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</strong></div>
+                    <div><span>税込合計</span><strong>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</strong></div>
+                  </section>
+                  <table className="quote-table">
+                    <thead><tr><th>品名・仕様</th><th>単価</th><th>数量</th><th>金額</th></tr></thead>
+                    <tbody>
+                      <tr><td>充填・加工費</td><td>{formatCurrency(analysis.fillingUnit.toNumber(), 2)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.fillingAmount.toNumber(), 0)}</td></tr>
+                      {analysis.bulkAmount.gt(0) ? <tr><td>バルク費用</td><td>{formatCurrency(analysis.bulkUnit.toNumber(), 2)}</td><td>-</td><td>{formatCurrency(analysis.bulkAmount.toNumber(), 0)}</td></tr> : null}
+                      <tr><td>フィルム費用</td><td>{analysis.displayedFilmMeterUnit ? `${formatCurrency(analysis.displayedFilmMeterUnit.toNumber(), 2)} /m` : "-"}</td><td>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</td><td>{formatCurrency(analysis.filmAmount.toNumber(), 0)}</td></tr>
+                      {printingMethodOf(record) === "gravure" && analysis.copperAmount.gt(0) ? <tr><td>新規銅版費</td><td>-</td><td>-</td><td>{formatCurrency(analysis.copperAmount.toNumber(), 0)}</td></tr> : null}
+                      {analysis.customCostUnit.gt(0) ? <tr><td>金型費用</td><td>-</td><td>-</td><td>{formatCurrency(analysis.customAmount.toNumber(), 0)}</td></tr> : null}
+                    </tbody>
+                    <tfoot>
+                      <tr><th colSpan={3}>小計（税抜）</th><td>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</td></tr>
+                      <tr><th colSpan={3}>消費税</th><td>{formatCurrency(analysis.tax.toFixed(0), 0)}</td></tr>
+                      <tr><th colSpan={3}>税込合計</th><td>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</td></tr>
+                    </tfoot>
+                  </table>
+                  <section className="terms">
+                    <dl>
+                      <div><dt>納期</dt><dd>{record.deliveryDate || "-"}</dd></div>
+                      <div><dt>お支払条件</dt><dd>{record.paymentTerms || "-"}</dd></div>
+                      <div><dt>見積有効期限</dt><dd>{record.validUntil || "-"}</dd></div>
+                    </dl>
+                    {record.notes ? <p className="notes"><strong>備考</strong> {record.notes}</p> : null}
+                  </section>
+                  <footer className="sheet-footer">
+                    <p>{record.quotationNumber}</p>
+                    <div className="approval"><span>{issuerName}</span></div>
+                  </footer>
+                </div>
+              </article>
             )}
           </>
           ) : null}
