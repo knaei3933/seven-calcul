@@ -621,80 +621,65 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
           ) : null}
 
           {detailTab === "document" ? (
-            <div className="history-quote-open">
-              <div className="history-quote-open-card">
-                <span className="side-kicker">QUOTATION</span>
-                <h3>お見積書</h3>
-                <dl>
-                  <div><dt>見積番号</dt><dd>{record.quotationNumber}</dd></div>
-                  <div><dt>発行日</dt><dd>{record.issueDate}</dd></div>
-                  <div><dt>得意先</dt><dd>{record.customerName || "-"}</dd></div>
-                  <div><dt>品名</dt><dd>{record.productName}</dd></div>
-                  <div><dt>数量</dt><dd>{Number(record.quantity).toLocaleString("ja-JP")} 枚</dd></div>
-                  <div><dt>税込合計</dt><dd>{Number(record.grandTotal).toLocaleString("ja-JP")} 円</dd></div>
-                </dl>
-                <button
-                  className="button"
-                  type="button"
-                  data-testid="open-quotation-in-quote"
-                  onClick={() => {
-                    const draft = {
-                      quotationNumber: record.quotationNumber,
-                      issueDate: record.issueDate,
-                      validUntil: record.validUntil,
-                      customerName: record.customerName,
-                      customerContact: record.customerContact,
-                      productName: record.productName,
-                      sizeSummary: record.sizeSummary,
-                      quantity: record.quantity,
-                      fillingCostPerPiece: record.fillingCostPerPiece,
-                      filmCostPerPiece: record.filmCostPerPiece,
-                      filmMeterPrice: record.filmMeterPrice,
-                      filmOrderLengthM: record.filmOrderLengthM,
-                      targetMargin: record.targetMargin,
-                      taxRatePercent: record.taxRatePercent,
-                      pricePerPiece: record.pricePerPiece,
-                      subtotal: record.subtotal,
-                      tax: record.tax,
-                      grandTotal: record.grandTotal,
-                      deliveryDate: record.deliveryDate,
-                      paymentTerms: record.paymentTerms,
-                      notes: record.notes,
-                      calculationVersion: record.calculationVersion,
-                      resultHash: record.resultHash,
-                      calculationFilmTotal: record.payload.calculationFilmTotal,
-                      customerCode: record.payload.customerCode,
-                      customerPostalCode: record.payload.customerPostalCode,
-                      customerAddress: record.payload.customerAddress,
-                      customerEmail: record.payload.customerEmail,
-                      printingMethod: record.payload.printingMethod,
-                      copperPlateCostPerPiece: record.payload.copperPlateCostPerPiece,
-                      customLotCost: record.payload.customLotCost,
-                      customQuantity: record.payload.customQuantity,
-                      filmUnitDisplay: record.payload.filmUnitDisplay,
-                      fillingUnitDisplay: record.payload.fillingUnitDisplay,
-                      copperUnitDisplay: record.payload.copperUnitDisplay,
-                      customUnitDisplay: record.payload.customUnitDisplay,
-                      pricePerPieceDisplay: record.payload.pricePerPieceDisplay,
-                      adjustmentDisplay: record.payload.adjustmentDisplay,
-                      subtotalDisplay: record.payload.subtotalDisplay,
-                      taxDisplay: record.payload.taxDisplay,
-                      grandTotalDisplay: record.payload.grandTotalDisplay,
-                      fillingAmountDisplay: record.payload.fillingAmountDisplay,
-                      filmAmountDisplay: record.payload.filmAmountDisplay,
-                      copperAmountDisplay: record.payload.copperAmountDisplay,
-                      customAmountDisplay: record.payload.customAmountDisplay,
-                      purchaseOrder: record.payload.purchaseOrder,
-                    };
-                    sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify(draft));
-                    window.location.href = "/quote";
-                  }}
-                >
-                  見積書を表示・印刷（A4）
-                </button>
-                <p className="help">/quote ページで完全に同じ書式が表示され、そのままPDF出力・再発行できます。</p>
+          savedPdfUrl ? (
+            <iframe src={savedPdfUrl} className="history-pdf-frame" title="見積書PDF" style={{ width: "100%", height: "800px", border: "1px solid #d7deea", borderRadius: 8, background: "white" }} />
+          ) : (
+            <article className="a4-sheet history-a4" aria-label="見積書A4">
+              <div className="history-a4-fit" ref={(element) => { fitContentRefs.current[0] = element; }}>
+                <header className="sheet-header">
+                  <div className="issuer">
+                    <div className="issuer-logo">
+                      <span className="logo-mark large" aria-hidden="true">7</span>
+                      <div>
+                        <strong>{issuerName}</strong>
+                        <small>{issuerEnglishName}</small>
+                      </div>
+                    </div>
+                    <address>
+                      {issuerRepresentative}<br />
+                      {issuerPostalCode} {issuerAddress}<br />
+                      {issuerTelephone} / {issuerWebsite}
+                    </address>
+                  </div>
+                  <div className="document-title">
+                    <p className="english">QUOTATION</p>
+                    <h2>お見積書</h2>
+                    <dl>
+                      <div><dt>見積番号</dt><dd>{record.quotationNumber}</dd></div>
+                      <div><dt>発行日</dt><dd>{record.issueDate}</dd></div>
+                    </dl>
+                  </div>
+                </header>
+                <section className="recipient-block">
+                  <p className="customer">{record.customerName || "得意先未設定"}</p>
+                  <p>{record.customerContact ? `${record.customerContact} 御中` : "御中"}</p>
+                </section>
+                <section className="price-highlight">
+                  <div><span>お見積単価</span><strong>{formatCurrency(analysis.sellingUnit.toNumber(), 2)}</strong></div>
+                  <div><span>数量</span><strong>{formatNumber(analysis.quantity.toNumber(), 0)}</strong></div>
+                  <div><span>税込合計</span><strong>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</strong></div>
+                </section>
+                <table className="quote-table">
+                  <thead><tr><th>品名・仕様</th><th>単価</th><th>数量</th><th>金額</th></tr></thead>
+                  <tbody>
+                    <tr><td>充填・加工費</td><td>{formatCurrency(analysis.fillingUnit.toNumber(), 2)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.fillingAmount.toNumber(), 0)}</td></tr>
+                    <tr><td>フィルム費用</td><td>{analysis.displayedFilmMeterUnit ? formatCurrency(analysis.displayedFilmMeterUnit.toNumber(), 2) : "-"} /m</td><td>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</td><td>{formatCurrency(analysis.filmAmount.toNumber(), 0)}</td></tr>
+                  </tbody>
+                  <tfoot>
+                    <tr><th colSpan={3}>小計</th><td>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</td></tr>
+                    <tr><th colSpan={3}>税込合計</th><td>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</td></tr>
+                  </tfoot>
+                </table>
+                <section className="terms">
+                  <dl>
+                    <div><dt>納期</dt><dd>{record.deliveryDate || "-"}</dd></div>
+                    <div><dt>お支払条件</dt><dd>{record.paymentTerms || "-"}</dd></div>
+                    <div><dt>見積有効期限</dt><dd>{record.validUntil || "-"}</dd></div>
+                  </dl>
+                </section>
               </div>
-            </div>
+            </article>
+          )
           ) : null}
           {detailTab === "data" ? (
           <>
