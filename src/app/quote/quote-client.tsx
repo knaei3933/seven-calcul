@@ -1919,7 +1919,6 @@ export default function PrintableQuotationPage({
               </div>
             </div>
             <div className="approval">
-              <span><EditableText value={form.issuerName} label="承認発行者名" onCommit={(next) => update("issuerName", next.trim())} /></span>
               <div className="approval-seal-group">
                 <span className="seal" aria-hidden="true">
                   {approverName.trim() ? <span className="seal-name">{approverName}</span> : null}
