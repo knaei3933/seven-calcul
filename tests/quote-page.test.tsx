@@ -91,6 +91,8 @@ describe("quotation page stale draft", () => {
     // 印刷方式は右上ではなくフィルム費用の行に表示する。
     expect(screen.getByTestId("film-printing-method")).toHaveTextContent("印刷方式：デジタル印刷");
     expect(screen.queryByTestId("quote-printing-method")).not.toBeInTheDocument();
+    expect(screen.getByAltText("セブン化學ロゴ")).toBeVisible();
+    expect(screen.queryByText("代表取締役社長 吾藤 靖")).not.toBeInTheDocument();
     // 標準備考（入金・容器処分・振込手数料・保管・出来高±10%）を含む。
     const sheet = within(document.getElementById("quote-preview")!);
     expect(sheet.getAllByText(/ご入金およびデータ入稿後に正式受注処理/).length).toBeGreaterThan(0);
@@ -339,4 +341,12 @@ describe("quotation page stale draft", () => {
     expect(screen.getByTestId("issue-required-fields")).toBeVisible();
     expect(screen.getByRole("button", { name: "見積書を発行" })).toBeEnabled();
   });
+});
+
+it("shows the authenticated approver directly above the internal review seal", () => {
+  render(<QuotePage approverName="石井" />);
+
+  const approval = screen.getByText("石井").closest<HTMLElement>(".approval-seal-group");
+  expect(approval).not.toBeNull();
+  expect(within(approval!).getByText("検討済")).toBeVisible();
 });

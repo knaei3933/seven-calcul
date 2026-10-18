@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ asset: string }> };
 
 const ASSETS = {
+  "seven-chemical-logo.svg": { file: "seven-chemical-logo.svg", contentType: "image/svg+xml" },
   "kanei-trade-logo.png": { file: "kanei-trade-logo.png", contentType: "image/png" },
   "epackage-lab-logo.png": { file: "epackage-lab-logo.png", contentType: "image/png" },
   "kanei-trade-seal.png": { file: "kanei-trade-seal.png", contentType: "image/png" },

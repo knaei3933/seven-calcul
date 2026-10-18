@@ -40,7 +40,6 @@ type QuoteForm = {
   documentHeading: string;
   issuerName: string;
   issuerEnglishName: string;
-  representative: string;
   issuerPostalCode: string;
   issuerAddress: string;
   issuerTelephone: string;
@@ -230,7 +229,6 @@ const defaultQuote: QuoteForm = {
   documentHeading: "お見積書",
   issuerName: sevenChemical.name,
   issuerEnglishName: sevenChemical.englishName,
-  representative: sevenChemical.representative,
   issuerPostalCode: sevenChemical.postalCode,
   issuerAddress: sevenChemical.address,
   issuerTelephone: sevenChemical.telephone,
@@ -388,7 +386,11 @@ function EditableText({ value, label, className, multiline = false, onCommit }: 
   return <span {...shared} />;
 }
 
-export default function PrintableQuotationPage() {
+export default function PrintableQuotationPage({
+  approverName = "",
+}: {
+  approverName?: string;
+} = {}) {
   const router = useRouter();
   const quoteFitRef = useRef<HTMLDivElement | null>(null);
   const [form, setForm] = useState<QuoteForm>(defaultQuote);
@@ -1666,15 +1668,20 @@ export default function PrintableQuotationPage() {
           <div className="quote-a4-fit" ref={quoteFitRef}>
           <header className="sheet-header">
             <div className="issuer">
-              <div className="issuer-logo">
-                <span className="logo-mark large" aria-hidden="true">7</span>
+	            <div className="issuer-logo">
+	                {/* eslint-disable-next-line @next/next/no-img-element -- A4 capture/print uses an ordinary img so html2canvas preserves the exact SVG size. */}
+	                <img
+	                  // A4 capture/print uses an ordinary img so html2canvas preserves the exact SVG size.
+	                  className="issuer-brand-logo"
+                  src="/api/brand-assets/seven-chemical-logo.svg"
+                  alt="セブン化學ロゴ"
+                />
                 <div>
                   <strong><EditableText value={form.issuerName} label="発行者名" onCommit={(next) => update("issuerName", next.trim())} /></strong>
                   <small><EditableText value={form.issuerEnglishName} label="発行者英字名" onCommit={(next) => update("issuerEnglishName", next.trim())} /></small>
                 </div>
               </div>
               <address>
-                <EditableText value={form.representative} label="代表者" onCommit={(next) => update("representative", next.trim())} /><br />
                 <EditableText value={`${form.issuerPostalCode} ${form.issuerAddress}`} label="発行者住所" onCommit={(next) => {
                   const match = next.trim().match(/^(\S+)\s+(.+)$/);
                   applyPatch({ issuerPostalCode: match?.[1] ?? next.trim(), issuerAddress: match?.[2] ?? "" });
@@ -1876,7 +1883,10 @@ export default function PrintableQuotationPage() {
             <p><EditableText value={form.footerNote} label="フッター文言" multiline onCommit={(next) => update("footerNote", next)} /></p>
             <div className="approval">
               <span><EditableText value={form.issuerName} label="承認発行者名" onCommit={(next) => update("issuerName", next.trim())} /></span>
-              <span className="seal" aria-hidden="true"><EditableText value={form.sealText} label="社内判文言" onCommit={(next) => update("sealText", next.trim())} /></span>
+              <div className="approval-seal-group">
+                {approverName.trim() ? <span className="approver-name">{approverName}</span> : null}
+                <span className="seal" aria-hidden="true"><EditableText value={form.sealText} label="社内判文言" onCommit={(next) => update("sealText", next.trim())} /></span>
+              </div>
             </div>
           </footer>
           </div>

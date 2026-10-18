@@ -735,8 +735,13 @@ header .version-badge { display: none; }
 .sheet-header { position: relative; display: flex; justify-content: space-between; gap: 14mm; align-items: start; border-bottom: 1px solid #8b96a6; padding-bottom: 4mm; }
 .sheet-header::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1mm; height: .7mm; background: #1f3a5f; }
 .issuer { max-width: 62%; }
-.issuer-logo { display: flex; align-items: center; gap: 5mm; }
-.issuer-logo { gap: 3.5mm; }
+.issuer-logo { display: flex; align-items: center; gap: 3.5mm; }
+.issuer-logo .issuer-brand-logo {
+  flex: 0 0 auto;
+  width: auto;
+  height: 11mm;
+  object-fit: contain;
+}
 .issuer-logo .logo-mark.large { background: #1f3a5f; border-radius: 2.8mm; }
 .issuer-logo strong { display: block; font-size: 13.5pt; letter-spacing: .05em; }
 .issuer-logo small { color: #5b6573; font-size: 8.2pt; letter-spacing: .09em; }
@@ -841,7 +846,9 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
   margin: 0;
   box-shadow: none;
 }
-.approval { display: flex; align-items: center; gap: 5mm; font-size: 10pt; font-weight: 800; color: #111827; }
+.approval { display: flex; align-items: flex-end; gap: 5mm; font-size: 10pt; font-weight: 800; color: #111827; }
+.approval-seal-group { display: grid; justify-items: center; gap: 1.2mm; }
+.approver-name { font-size: 9.4pt; line-height: 1; color: #111827; }
 .seal { display: grid; place-items: center; width: 17mm; height: 17mm; border: 2.5px solid #b91c1c; border-radius: 50%; color: #b91c1c; font-size: 8.5pt; transform: rotate(-9deg); }
 .sheet-error { margin-top: 8mm; }
 
