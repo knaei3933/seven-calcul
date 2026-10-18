@@ -2230,9 +2230,9 @@ export default function QuotationPage({
                 ? `1枚あたり総充填量＝${form.chambers.map((chamber, index) => `${index + 1}室 ${formatNumber(Number(chamber.fill) || 0)}ml`).join("＋")}＝${formatNumber(chamberTotalFill, 3)} ml`
                 : `1枚あたり総充填量（平均）＝${formatNumber(weightedAvgFill)}ml × ${form.connected}＝${formatNumber(weightedAvgFill * Number(form.connected), 3)} ml`}</p>
               {totalChambers !== null && bulkUsagePreview !== null ? (
-                <p className="help" data-testid="connected-preview">総室数＝{formatNumber(form.quantity)}枚×{form.connected}＝{formatNumber(totalChambers)} 室 ／ バルク使用量（概算）＝{formatNumber(bulkUsagePreview)} ml ／ 実効生産速度＝{formatNumber(effectiveProductionSpeedPerMinute)} 枚/分（{formatNumber(effectiveProductionSpeed)} 枚/h）</p>
+                <p className="help" data-testid="connected-preview">総室数＝{formatNumber(form.quantity)}枚×{form.connected}＝{formatNumber(totalChambers)} 室 ／ バルク使用量（概算）＝{formatNumber(bulkUsagePreview)} g ／ 実効生産速度＝{formatNumber(effectiveProductionSpeedPerMinute)} 枚/分（{formatNumber(effectiveProductionSpeed)} 枚/h）</p>
               ) : null}
-              {!chamberConfigActive && Number(form.bulkPrice) === 0 ? <p className="help">※バルク単価が0円のため、連結数を変えても金額は変化しません（使用量のみ変化）。金額に反映するには「バルク単価 (円/ml)」を入力してください。</p> : null}
+              {!chamberConfigActive && Number(form.bulkPrice) === 0 ? <p className="help">※バルク単価が0円のため、連結数を変えても金額は変化しません（使用量のみ変化）。金額に反映するには「バルク単価 (円/g)」を入力してください。</p> : null}
               {Number(form.connected) >= 2 ? (
                 <label className="chamber-toggle">
                   <input
@@ -2271,13 +2271,13 @@ export default function QuotationPage({
                         }}
                       >
                         <option value="">液体マスタから選択</option>
-                        {liquidMaster.map((liquid) => <option key={liquid.id} value={liquid.id}>{liquid.name}（{formatNumber(liquid.unitPriceYen)}円/ml）</option>)}
+                        {liquidMaster.map((liquid) => <option key={liquid.id} value={liquid.id}>{liquid.name}（{formatNumber(liquid.unitPriceYen)}円/g）</option>)}
                       </select>
                       <input aria-label={`${index + 1}室の液体名`} placeholder={`液体${index + 1}`} value={chamber.name} onChange={(event) => setForm((old) => ({ ...old, chambers: old.chambers.map((item, i) => i === index ? { ...item, name: event.target.value } : item) }))} />
                       <input aria-label={`${index + 1}室の充填量 ml`} inputMode="decimal" value={chamber.fill} onChange={(event) => setForm((old) => ({ ...old, chambers: old.chambers.map((item, i) => i === index ? { ...item, fill: event.target.value } : item) }))} />
                       <span className="unit">ml/室</span>
-                      <input aria-label={`${index + 1}室のバルク単価 円/ml`} inputMode="decimal" value={chamber.price} onChange={(event) => setForm((old) => ({ ...old, chambers: old.chambers.map((item, i) => i === index ? { ...item, price: event.target.value } : item) }))} />
-                      <span className="unit">円/ml</span>
+                      <input aria-label={`${index + 1}室のバルク単価 円/g`} inputMode="decimal" value={chamber.price} onChange={(event) => setForm((old) => ({ ...old, chambers: old.chambers.map((item, i) => i === index ? { ...item, price: event.target.value } : item) }))} />
+                      <span className="unit">円/g</span>
                     </div>
                   ))}
                   {!chamberFillsValid ? <p className="error" role="alert" data-testid="chamber-fill-error">室ごとの充填量は0より大きい数値、バルク単価は0以上の数値で入力してください。</p> : null}
@@ -2285,7 +2285,7 @@ export default function QuotationPage({
                     <summary>液体マスタ管理</summary>
                     <div className="liquid-master-form">
                       <label>液体名<input value={liquidDraft.name} onChange={(event) => setLiquidDraft((old) => ({ ...old, name: event.target.value }))} /></label>
-                      <label>バルク単価（円/ml）<input inputMode="decimal" value={liquidDraft.unitPriceYen} onChange={(event) => setLiquidDraft((old) => ({ ...old, unitPriceYen: event.target.value }))} /></label>
+                      <label>バルク単価（円/g）<input inputMode="decimal" value={liquidDraft.unitPriceYen} onChange={(event) => setLiquidDraft((old) => ({ ...old, unitPriceYen: event.target.value }))} /></label>
                       <label className="wide">メモ<input value={liquidDraft.memo} onChange={(event) => setLiquidDraft((old) => ({ ...old, memo: event.target.value }))} /></label>
                       <button
                         type="button"
@@ -2303,7 +2303,7 @@ export default function QuotationPage({
                     <ul className="liquid-master-list">
                       {liquidMaster.map((liquid) => (
                         <li key={liquid.id}>
-                          <span>{liquid.name}（{formatNumber(liquid.unitPriceYen)}円/ml）{liquid.memo ? ` ／ ${liquid.memo}` : ""}</span>
+                          <span>{liquid.name}（{formatNumber(liquid.unitPriceYen)}円/g）{liquid.memo ? ` ／ ${liquid.memo}` : ""}</span>
                           <button type="button" className="button secondary small" onClick={() => setLiquidMaster(removeLiquidMaster(liquid.id))}>削除</button>
                         </li>
                       ))}
@@ -2345,7 +2345,7 @@ export default function QuotationPage({
             </div>
             {chamberConfigActive
               ? <p className="help" data-testid="bulk-price-note">バルク単価は室ごとの液体設定の各行で入力します（ここでは入力しません）。</p>
-              : <Field label="バルク単価 (円/ml)" htmlFor="bulk"><input id="bulk" inputMode="decimal" value={form.bulkPrice} onChange={(e) => set("bulkPrice", e.target.value)} /></Field>}
+              : <Field label="バルク単価 (円/g)" htmlFor="bulk"><input id="bulk" inputMode="decimal" value={form.bulkPrice} onChange={(e) => set("bulkPrice", e.target.value)} /></Field>}
             <details className="parameters" data-testid="parameters">
               <summary>計算パラメータ調整</summary>
                   {parameterGroups.map((group) => (
@@ -2717,10 +2717,10 @@ export default function QuotationPage({
                     <table className="table breakdown-table">
                       <thead><tr><th scope="col">項目</th><th scope="col">単価</th><th scope="col">数量</th><th scope="col">金額</th></tr></thead>
                       <tbody>
-                        <tr><td>充填分（SKUごとの充填量を合計し、ロス{formatNumber(Number(parameters.bulkLossRate) * 100, 3)}%を含みます・{formatNumber(resultShown.chamberCount)}室）</td><td>{formatCurrency(displayAmount(form.bulkPrice))} /ml</td><td>{formatNumber(bulkFillMlOf(resultShown).toString())} ml</td><td>{formatCurrency(displayAmount(bulkFillMlOf(resultShown).times(form.bulkPrice).toString()))}</td></tr>
-                        <tr><td>初期投入（{form.method === "hopper" ? "ホッパ" : "加圧"}）</td><td>{formatCurrency(displayAmount(form.bulkPrice))} /ml</td><td>{formatNumber(resultShown.initialChargeMl)} ml</td><td>{formatCurrency(displayAmount(D(resultShown.initialChargeMl).times(form.bulkPrice).toString()))}</td></tr>
-                        <tr><td>テスト充填</td><td>{formatCurrency(displayAmount(form.bulkPrice))} /ml</td><td data-testid="test-fill">{formatNumber(resultShown.testFillMl)} ml</td><td>{formatCurrency(displayAmount(D(resultShown.testFillMl).times(form.bulkPrice).toString()))}</td></tr>
-                        <tr><td>使用量合計</td><td>—</td><td data-testid="bulk-usage">{formatNumber(resultShown.bulkUsageMl)} ml</td><td>{formatCurrency(displayAmount(resultShown.costComponents.bulk))}</td></tr>
+                        <tr><td>充填分（SKUごとの充填量を合計し、ロス{formatNumber(Number(parameters.bulkLossRate) * 100, 3)}%を含みます・{formatNumber(resultShown.chamberCount)}室）</td><td>{formatCurrency(displayAmount(form.bulkPrice))} /g</td><td>{formatNumber(bulkFillMlOf(resultShown).toString())} g</td><td>{formatCurrency(displayAmount(bulkFillMlOf(resultShown).times(form.bulkPrice).toString()))}</td></tr>
+                        <tr><td>初期投入（{form.method === "hopper" ? "ホッパ" : "加圧"}）</td><td>{formatCurrency(displayAmount(form.bulkPrice))} /g</td><td>{formatNumber(resultShown.initialChargeMl)} g</td><td>{formatCurrency(displayAmount(D(resultShown.initialChargeMl).times(form.bulkPrice).toString()))}</td></tr>
+                        <tr><td>テスト充填</td><td>{formatCurrency(displayAmount(form.bulkPrice))} /g</td><td data-testid="test-fill">{formatNumber(resultShown.testFillMl)} g</td><td>{formatCurrency(displayAmount(D(resultShown.testFillMl).times(form.bulkPrice).toString()))}</td></tr>
+                        <tr><td>使用量合計</td><td>—</td><td data-testid="bulk-usage">{formatNumber(resultShown.bulkUsageMl)} g</td><td>{formatCurrency(displayAmount(resultShown.costComponents.bulk))}</td></tr>
                       </tbody>
                     </table>
                   </details>
@@ -2755,7 +2755,7 @@ export default function QuotationPage({
                       <tr><th scope="row">テスト充填回数</th><td>{formatNumber(parameters.fillTestRuns)} 回</td><td>ロットを始める前に行う試験充填の回数です。実際の生産枚数には数えません。</td></tr>
                       <tr><th scope="row">初期投入量</th><td>{form.method === "hopper" ? formatNumber(parameters.hopperInitialChargeMl) : formatNumber(parameters.pressureInitialChargeMl)} ml</td><td>{form.method === "hopper" ? "ホッパ充填のラインに、生産前に投入しておく液体の量です。" : "加圧充填のラインに、生産前に投入しておく液体の量です。"}</td></tr>
                       <tr><th scope="row">バルクロス率</th><td>{formatNumber(Number(parameters.bulkLossRate) * 100, 3)}%</td><td>充填作業で出る液体材料のロスの割合です。</td></tr>
-                      <tr><th scope="row">バルク単価</th><td>{formatCurrency(displayAmount(form.bulkPrice))} /ml</td><td>液体材料1mlあたりの仕入れ価格です。</td></tr>
+                      <tr><th scope="row">バルク単価</th><td>{formatCurrency(displayAmount(form.bulkPrice))} /g</td><td>液体材料1gあたりの仕入れ価格です。</td></tr>
                     </tbody></table>
                     <p>室数＝発注枚数×{form.connected}</p>
                     <p>テスト充填＝{formatNumber(parameters.fillTestRuns)}回×{form.lanes}列×平均充填量{formatNumber(weightedAvgFill)}ml</p>
@@ -2786,7 +2786,7 @@ export default function QuotationPage({
                     <p>カスタム費用＝{form.custom ? formatCurrency(displayAmount(parameters.customPouchCharge)) : "0"}（カスタム区分時のみ）</p>
                     <p>総原価＝フィルム＋バルク＋変動加工＋ロット固定＋カスタム＋銅版</p>
                     <p>参考販売単価（原価シミュレーター表）＝総原価/枚÷(1−利益率)</p>
-                    <p>見積書単価＝フィルム＋金型は各原価/枚÷(1−利益率)、充填・加工は「1連基準の加工原価×連結室数×(1＋連結加算率)」÷(1−利益率)（連結加算率：2連20%・3連/4連80%）、バルクは当社販売時のみ「バルク原価/枚÷(1−利益率)」を別ラインで表示（客給時は非表示）、銅版費は各原価/枚÷(1−10%)</p>
+                    <p>見積書単価＝フィルム＋金型は各原価/枚÷(1−利益率)、充填・加工は「1連基準の加工原価×連結室数×(1＋連結加算率)」÷(1−利益率)（連結加算率：2連20%・3連/4連80%）、バルクは当社販売時のみ「バルク原価×1.4」を別ラインで表示（客給時は非表示）、銅版費は各原価/枚÷(1−10%)</p>
                   </div>
                   <div className="formula-group">
                     <h4>フィルム費用</h4>
@@ -2858,7 +2858,7 @@ export default function QuotationPage({
               </dl>
               {quotationPreview && resultShown ? (
                 <p className="help" data-testid="connected-filling-surcharge">
-                  充填・加工単価（バルク除く）：1連基準加工原価 {formatCurrency(resultShown.singleConnectedProcessingCostPerPiece, 2)} /枚 × {form.connected}連（室数）＝基本額 {formatCurrency(D(resultShown.singleConnectedProcessingCostPerPiece).times(D(form.connected)).toString(), 2)} /枚、さらに連結加算 {formatNumber(Number(resultShown.connectedFillingSurchargeRate) * 100, 0)}% を乗じて ÷ (1−利益率) ＝ 見積基準 {formatCurrency(D(resultShown.singleConnectedProcessingCostPerPiece).times(D(form.connected)).times(D(1).plus(D(resultShown.connectedFillingSurchargeRate))).div(D(1).minus(effectiveMargin)).toString(), 2)} /枚。{D(resultShown.costPerPieceComponents.bulk).gt(0) ? `バルクは別ライン：原価 ${formatCurrency(resultShown.costPerPieceComponents.bulk, 2)} /枚 ÷ (1−利益率) ＝ ${formatCurrency(quotationPreview.display.bulkUnit, 1)} /枚` : "バルク単価が0円（貴社支給）のためバルクラインは表示しません"}。{resultPrintingMethod === "digital" ? "デジタルはフィルムm単価（380〜480円/mの帯）を先に確定し、目標合計からの残額を充填・加工へ配分します" : "グラビアはフィルムm単価を90〜220円/mの帯に制限し、帯による差額を充填・加工へ配分します"}。適用単価 {formatCurrency(quotationPreview.display.fillingUnit, 1)} /枚（小数第1位へ切り上げ）
+                  充填・加工単価（バルク除く）：1連基準加工原価 {formatCurrency(resultShown.singleConnectedProcessingCostPerPiece, 2)} /枚 × {form.connected}連（室数）＝基本額 {formatCurrency(D(resultShown.singleConnectedProcessingCostPerPiece).times(D(form.connected)).toString(), 2)} /枚、さらに連結加算 {formatNumber(Number(resultShown.connectedFillingSurchargeRate) * 100, 0)}% を乗じて ÷ (1−利益率) ＝ 見積基準 {formatCurrency(D(resultShown.singleConnectedProcessingCostPerPiece).times(D(form.connected)).times(D(1).plus(D(resultShown.connectedFillingSurchargeRate))).div(D(1).minus(effectiveMargin)).toString(), 2)} /枚。{D(resultShown.costPerPieceComponents.bulk).gt(0) ? `バルクは別ライン：使用量 ${formatNumber(quotationPreview.bulkUsage.toString())}g × 原価 ＝ ${formatCurrency(resultShown.bulkCost)}円、これに1.4を乗じて表示単価 ${formatCurrency(quotationPreview.display.bulkUnit, 1)}円/g` : "バルク単価が0円（貴社支給）のためバルクラインは表示しません"}。{resultPrintingMethod === "digital" ? "デジタルはフィルムm単価（380〜480円/mの帯）を先に確定し、バルクを除く目標合計からの残額を充填・加工へ配分します" : "グラビアはフィルムm単価を90〜220円/mの帯に制限し、バルクを除く帯による差額を充填・加工へ配分します"}。適用単価 {formatCurrency(quotationPreview.display.fillingUnit, 1)} /枚（小数第1位へ切り上げ）
                 </p>
               ) : null}
               <div className="quote-total"><span>参考税抜金額</span><span data-testid="customer-total">{quotationPreview ? formatCurrency(quotationPreview.subtotal.toString(), 0) : "-"}</span></div>

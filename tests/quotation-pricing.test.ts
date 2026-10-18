@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { calculatePouchCost } from "@/lib/calculation";
 import { CONNECTED_FILLING_SURCHARGE, defaultParameters } from "@/lib/constants";
 import { defaultGravureRollParameters } from "@/lib/gravure-roll";
-import { calculateAutomaticQuotation, clampGravureFilmMeterUnit, COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
+import { BULK_SELLING_MARKUP, calculateAutomaticQuotation, clampGravureFilmMeterUnit, COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
 import { D, Decimal } from "@/lib/decimal";
 import type { PouchSpec } from "@/lib/types";
 
@@ -134,10 +134,10 @@ describe("automatic quotation pricing", () => {
     const sold = calculateAutomaticQuotation(calculatePouchCost({
       spec: spec("0.37"), quantity: "10000", printingMethod: "digital",
     }), "0.4")!;
-    // バルク販売単価＝バルク原価÷(1−0.4)、小数第1位切り上げ。
+    // バルク販売総額＝バルク原価×数量×1.4、販売単価＝総額÷使用量。
     expect(sold.bulkCostPerPiece.gt(0)).toBe(true);
-    expect(sold.display.bulkUnit).toBe(D(sold.bulkCostPerPiece).div("0.6").toDecimalPlaces(1, Decimal.ROUND_UP).toString());
-    expect(sold.display.bulkAmount).toBe(D(sold.display.bulkUnit).times("10000").toString());
+    expect(sold.display.bulkAmount).toBe(D(sold.bulkCostPerPiece).times("10000").times("1.4").toString());
+    expect(sold.display.bulkUnit).toBe(D(sold.display.bulkAmount).div(sold.bulkUsage).toDecimalPlaces(1, Decimal.ROUND_UP).toString());
     // ライン構成：充填・加工＋バルク＋フィルムが小計と一致（別ライン化の検証）。
     expect(sold.subtotal.minus(sold.fillingAmount).minus(sold.bulkAmount).minus(D(sold.display.filmAmount)).toNumber()).toBe(0);
 
@@ -147,5 +147,38 @@ describe("automatic quotation pricing", () => {
     expect(supplied.bulkCostPerPiece.toNumber()).toBe(0);
     expect(supplied.display.bulkUnit).toBe("0");
     expect(supplied.display.bulkAmount).toBe("0");
+  });
+
+  it("multiplies 10-yen/g bulk cost by 1.4 without allocating it to filling or film", () => {
+    const baseSpec = {
+      sizeKey: "round-60x120" as const,
+      fillMlPerChamber: "10",
+      connectedChambers: 2 as const,
+      fillingMethod: "hopper" as const,
+      fillingLanes: 4,
+      isCustom: false,
+      colorCount: 4,
+      skuCount: 1,
+    };
+    const sold = calculateAutomaticQuotation(calculatePouchCost({
+      spec: { ...baseSpec, bulkUnitPrice: "10" },
+      quantity: "10000",
+      printingMethod: "digital",
+    }), "0.4")!;
+    const supplied = calculateAutomaticQuotation(calculatePouchCost({
+      spec: { ...baseSpec, bulkUnitPrice: "0" },
+      quantity: "10000",
+      printingMethod: "digital",
+    }), "0.4")!;
+
+    expect(sold.bulkUsage.gt(0)).toBe(true);
+    expect(sold.bulkCostPerPiece.div(sold.bulkUsage).times("10000").toNumber()).toBe(10);
+    expect(sold.bulkSellingTotal.eq(sold.bulkCostPerPiece.times("10000").times(BULK_SELLING_MARKUP))).toBe(true);
+    expect(sold.bulkSellingUnit.toNumber()).toBe(14);
+    expect(sold.display.bulkUnit).toBe("14");
+    // 同一条件で客給にしても充填・フィルム配分は変わらない＝バルクは配分対象外。
+    expect(sold.display.fillingUnit).toBe(supplied.display.fillingUnit);
+    expect(sold.display.filmUnit).toBe(supplied.display.filmUnit);
+    expect(sold.display.filmAmount).toBe(supplied.display.filmAmount);
   });
 });

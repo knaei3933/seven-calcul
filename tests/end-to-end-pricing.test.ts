@@ -72,16 +72,16 @@ describe("end-to-end pricing integrity", () => {
     // 가공: (1연 가공 5.3 × 2 × 1.2) ÷ 0.6 = 21.2 → 디지털 잔액 배분 36.1.
     expect(result.singleConnectedProcessingCostPerPiece).toBe("5.3");
     expect(quote.fillingSellingUnit.toNumber()).toBeCloseTo(21.2, 6);
-    // 벌크: 원가 9.0 ÷ 0.6 = 15.0 (별도 라인).
+    // 벌크: 원가 9.0 × 10,000 × 1.4 = 126,000 → 242,000g당 0.6원/g.
     expect(result.costPerPieceComponents.bulk).toBe("9");
-    expect(quote.display.bulkUnit).toBe("15");
-    expect(quote.display.bulkAmount).toBe("150000");
-    // 라인 구성: 충진 361,000 + 벌크 150,000 + 필름 360,000 = 871,000.
+    expect(quote.display.bulkUnit).toBe("0.6");
+    expect(quote.display.bulkAmount).toBe("126000");
+    // 라인 구성: 충진 361,000 + 벌크 126,000 + 필름 360,000 = 847,000.
     expect(quote.display.fillingUnit).toBe("36.1");
     expect(quote.display.filmUnit).toBe("450");
-    expect(quote.display.subtotal).toBe("871000");
-    expect(quote.display.tax).toBe("87100");
-    expect(quote.display.grandTotal).toBe("958100");
+    expect(quote.display.subtotal).toBe("847000");
+    expect(quote.display.tax).toBe("84700");
+    expect(quote.display.grandTotal).toBe("931700");
 
     const draft = buildQuotationDraft(result, {
       quotationNumber: "E2E",
@@ -125,13 +125,13 @@ describe("end-to-end pricing integrity", () => {
       grandTotalDisplay: quote.display.grandTotal,
     }));
     expect(analysis.hasSeparatedBulkLine).toBe(true);
-    expect(analysis.bulkUnit.eq("15")).toBe(true);
-    expect(analysis.bulkAmount.eq("150000")).toBe(true);
+    expect(analysis.bulkUnit.eq("0.6")).toBe(true);
+    expect(analysis.bulkAmount.eq("126000")).toBe(true);
     expect(analysis.fillingCostUnit.eq("8.3")).toBe(true);
     expect(analysis.bulkCostUnit.eq("9")).toBe(true);
     expect(analysis.costUnit.eq(D("8.3").plus("9").plus(result.costPerPieceComponents.film))).toBe(true);
-    expect(analysis.subtotal.eq("871000")).toBe(true);
-    expect(analysis.grandTotal.eq("958100")).toBe(true);
+    expect(analysis.subtotal.eq("847000")).toBe(true);
+    expect(analysis.grandTotal.eq("931700")).toBe(true);
   });
 
   it("keeps chamber-specific liquid pricing and checklists consistent", () => {
@@ -146,13 +146,13 @@ describe("end-to-end pricing integrity", () => {
       printingMethod: "digital",
     });
     const quote = calculateAutomaticQuotation(result, "0.4")!;
-    // 액체별: A 48,840엔 + B 53,600엔 = 102,440엔 → 10.3엔/枚 → 17.2엔/枚 판매.
+    // 액체별: A 48,840엔 + B 53,600엔 = 102,440엔 → 10.3엔/枚 → ×1.4로 144,200엔 판매.
     expect(result.liquidCount).toBe(2);
     expect(result.bulkCost).toBe("102440");
     expect(result.costPerPieceComponents.bulk).toBe("10.3");
-    expect(quote.display.bulkUnit).toBe("17.2");
-    expect(quote.display.bulkAmount).toBe("172000");
-    expect(quote.display.subtotal).toBe("892000");
+    expect(quote.display.bulkUnit).toBe("0.8");
+    expect(quote.display.bulkAmount).toBe("144200");
+    expect(quote.display.subtotal).toBe("865200");
     // 속도는 병목(10ml) 기준 80/분 → 2연 2,400枚/h.
     expect(result.baseProductionSpeedPerMinute).toBe("80");
     expect(result.effectiveProductionSpeed).toBe("2400");

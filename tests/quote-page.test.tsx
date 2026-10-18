@@ -133,7 +133,7 @@ describe("quotation page stale draft", () => {
     }));
     render(<QuotePage />);
 
-    expect(screen.getByTestId("bulk-supply-amount")).toHaveTextContent("722,000ml（貴社ご支給ください）");
+    expect(screen.getByTestId("bulk-supply-amount")).toHaveTextContent("722,000g（貴社ご支給ください）");
   });
 
   it("shows a warning and blocks linked quotation actions while the simulator draft is stale", async () => {
@@ -310,12 +310,13 @@ describe("quotation page stale draft", () => {
       calculationVersion: "simulator-linked",
       resultHash: "bulk-line-test",
       calculationFilmTotal: "201000",
+      calculationChecklistSnapshot: { bulkUsageMl: "486000" },
     }));
     render(<QuotePage />);
     await waitFor(() => expect(screen.getByTestId("bulk-line")).toBeVisible());
     expect(screen.getByTestId("bulk-unit-price")).toBeVisible();
-    // バルク原価48.6÷(1−0.4)＝81/枚。
-    expect(screen.getByTestId("bulk-unit-price")).toHaveTextContent("81");
+    // バルク総額48.6×10000×1.4÷486000g＝1.4/g。
+    expect(screen.getByTestId("bulk-unit-price")).toHaveTextContent("1.4");
 
     cleanup();
     sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({

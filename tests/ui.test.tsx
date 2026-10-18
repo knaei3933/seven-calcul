@@ -260,7 +260,7 @@ describe("quotation UI", () => {
         candidates: secondResult.recommendationCandidates ?? [],
       }), { status: 200 }));
     });
-    await waitFor(() => expect(screen.getByTestId("bulk-usage")).toHaveTextContent("722,000 ml"));
+    await waitFor(() => expect(screen.getByTestId("bulk-usage")).toHaveTextContent("722,000 g"));
   });
 
   it("keeps the provisional result when server recalculation fails and reports the failure", async () => {
@@ -334,7 +334,7 @@ describe("quotation UI", () => {
     // 실별 액체 OFF → SKU 충진량(3ml)을 전 실에 적용.
     expect(screen.getByTestId("total-fill")).toHaveTextContent("1枚あたり総充填量（平均）＝3ml × 2＝6 ml");
     expect(screen.getByTestId("connected-preview")).toHaveTextContent("総室数＝10,000枚×2＝20,000 室");
-    expect(screen.getByTestId("connected-preview")).toHaveTextContent("バルク使用量（概算）＝74,000 ml");
+    expect(screen.getByTestId("connected-preview")).toHaveTextContent("バルク使用量（概算）＝74,000 g");
   });
 
   it("calculates gravure roll film and shows the new copper plate separately", async () => {

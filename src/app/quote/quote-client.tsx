@@ -15,7 +15,7 @@ import {
   QUOTATION_RESTORE_KEY,
   SIMULATOR_STALE_STATUS_KEY,
 } from "@/lib/quotation-shared";
-import { clampGravureFilmMeterUnit, COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
+import { BULK_SELLING_MARKUP, clampGravureFilmMeterUnit, COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
 import { fileNameFromContentDisposition } from "@/lib/content-disposition";
 import type { CustomerMaster } from "@/lib/quotation-shared";
 import type { FilmQuotationData } from "@/lib/film-quotation";
@@ -257,7 +257,7 @@ const defaultQuote: QuoteForm = {
   fillingUnitDisplay: "",
   fillingAmountDisplay: "",
   bulkItemName: "バルク費用",
-  bulkItemDescription: "充填液体材料（貴社支給の場合は金額表示なし）",
+  bulkItemDescription: "充填液体材料（原価×1.4／貴社支給の場合は金額表示なし）",
   customItemName: "金型費用",
   customItemDescription: "カスタム金型制作一式（ロット1回）",
   customLotCost: "0",
@@ -991,7 +991,9 @@ export default function PrintableQuotationPage({
     const margin = parsedTargetMargin;
     const taxRate = parsedTaxRatePercent.div(100);
     const fillingSellingUnit = (parsedPricingFillingCost ?? parsedFillingCost).div(D(1).minus(parsedTargetMargin ?? D(0)));
-    const bulkSellingUnit = parsedBulkCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
+    const bulkUsage = parseDecimal(calculationChecklistSnapshot?.bulkUsageMl ?? "0") ?? D(0);
+    const bulkSellingTotal = parsedBulkCost.times(quantity).times(BULK_SELLING_MARKUP);
+    const bulkSellingUnit = bulkUsage.gt(0) ? bulkSellingTotal.div(bulkUsage) : D(0);
     const copperSellingUnit = parsedCopperCost.div(D(1).minus(COPPER_TARGET_MARGIN));
     const filmSellingUnit = parsedFilmCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
     const customLotSaleBase = parsedCustomLotCost
@@ -1001,8 +1003,9 @@ export default function PrintableQuotationPage({
     const customSaleTotal = customSellingUnit.times(parsedCustomQuantity);
     const customSalePerPiece = customSaleTotal.div(quantity);
     const filmMeterDisplayUnit = parsedFilmMeterPrice;
-    // 目標総額にフィルム販売額を含めないと、充填・加工の残額計算が不正になる。
-    const pricePerPiece = fillingSellingUnit.plus(bulkSellingUnit).plus(copperSellingUnit).plus(filmSellingUnit).plus(customSalePerPiece);
+    // 充填・加工の残額配分対象には、別ラインのバルク売上を含めない。
+    const allocationPricePerPiece = fillingSellingUnit.plus(copperSellingUnit).plus(filmSellingUnit).plus(customSalePerPiece);
+    const pricePerPiece = allocationPricePerPiece.plus(bulkSellingTotal.div(quantity));
     const subtotalBeforeAdjustment = pricePerPiece.times(quantity);
     const subtotal = subtotalBeforeAdjustment.floor();
     const roundingAdjustment = subtotal.minus(subtotalBeforeAdjustment);
@@ -1020,6 +1023,8 @@ export default function PrintableQuotationPage({
       roundingAdjustment,
       pricePerPiece,
       fillingAmount: fillingSellingUnit.times(quantity),
+      bulkUsage,
+      bulkSellingTotal,
       bulkSellingUnit,
       copperAmount: copperSellingUnit.times(quantity),
       subtotal,
@@ -1034,7 +1039,9 @@ export default function PrintableQuotationPage({
     // 見積単価（充填・加工／フィルムm単価）は小数第1位で切り上げる。
     const roundUnit = (value: typeof totals.pricePerPiece) => value.toDecimalPlaces(1, Decimal.ROUND_UP);
     const totalPriceInput = parseDecimal(form.pricePerPieceDisplay) ?? totals.pricePerPiece;
-    const targetTotal = totalPriceInput.times(totals.quantity);
+    const bulkUnit = parseDecimal(form.bulkUnitDisplay) ?? roundUnit(totals.bulkSellingUnit);
+    const bulkAmount = parseDecimal(form.bulkAmountDisplay) ?? totals.bulkSellingTotal;
+    const targetTotal = Decimal.max(totalPriceInput.times(totals.quantity).minus(bulkAmount), 0);
     const parsedCopperColorCount = parseDecimal(form.copperColorCount);
     const copperColorCount = parsedCopperColorCount && parsedCopperColorCount.gte(0)
       ? parsedCopperColorCount
@@ -1054,9 +1061,6 @@ export default function PrintableQuotationPage({
     const isGravure = form.printingMethod === "gravure";
     let fillingUnit: Decimal;
     let filmMeterUnit: Decimal;
-    // バルク販売単価＝バルク原価÷(1−利益率)。原価0（客給）なら0でライン非表示。
-    const bulkUnit = parseDecimal(form.bulkUnitDisplay) ?? roundUnit(totals.bulkSellingUnit);
-    const bulkAmount = parseDecimal(form.bulkAmountDisplay) ?? bulkUnit.times(totals.quantity);
     if (isGravure) {
       // グラビアの客提示フィルムm単価は90〜220円の帯に制限する。
       // 帯によって生じた差額は充填・加工単価で補う。
@@ -1064,7 +1068,7 @@ export default function PrintableQuotationPage({
         .div(D(1).minus(parsedTargetMargin ?? D(0)));
       const provisionalFillingAmount = provisionalFillingUnit.times(totals.quantity);
       const residualFilmAmount = Decimal.max(
-        targetTotal.minus(provisionalFillingAmount).minus(bulkAmount).minus(copperAmount),
+        targetTotal.minus(provisionalFillingAmount).minus(copperAmount),
         0,
       );
       const residualMeterUnit = totals.filmOrderLength.gt(0)
@@ -1075,14 +1079,14 @@ export default function PrintableQuotationPage({
       const bandedFilmAmount = filmMeterUnit.times(totals.filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
       fillingUnit = parseDecimal(form.fillingUnitDisplay)
         ?? (totals.quantity.gt(0)
-          ? roundUnit(Decimal.max(targetTotal.minus(bandedFilmAmount).minus(bulkAmount).minus(copperAmount), 0).div(totals.quantity))
+          ? roundUnit(Decimal.max(targetTotal.minus(bandedFilmAmount).minus(copperAmount), 0).div(totals.quantity))
           : D(0));
     } else {
       const requestedFilmMeterUnit = parseDecimal(form.filmUnitDisplay)
         ?? recommendedFilmMeterUnit(form.filmOrderLengthM);
       filmMeterUnit = clampFilmMeterUnit(requestedFilmMeterUnit);
       const filmAmount = filmMeterUnit.times(totals.filmOrderLength);
-      const remainingFillingAmount = Decimal.max(targetTotal.minus(filmAmount).minus(bulkAmount).minus(copperAmount), 0);
+      const remainingFillingAmount = Decimal.max(targetTotal.minus(filmAmount).minus(copperAmount), 0);
       fillingUnit = parseDecimal(form.fillingUnitDisplay)
         ?? (totals.quantity.gt(0)
           ? roundUnit(remainingFillingAmount.div(totals.quantity))
@@ -1247,7 +1251,8 @@ export default function PrintableQuotationPage({
     const filmPouchUnit = clampedFilmAmount.div(quantity);
     const copperUnit = copperAmount.div(quantity);
     const customUnit = customQuantity.gt(0) ? customAmount.div(customQuantity) : D(0);
-    const bulkUnit = quantity.gt(0) ? (bulkAmount ?? D(0)).div(quantity) : D(0);
+    const bulkUsage = parseDecimal(calculationChecklistSnapshot?.bulkUsageMl ?? "0") ?? D(0);
+    const bulkUnit = bulkUsage.gt(0) ? (bulkAmount ?? D(0)).div(bulkUsage) : D(0);
     const lineTotal = fillingAmount.plus(bulkAmount ?? D(0)).plus(clampedFilmAmount).plus(copperAmount).plus(customAmount);
     const price = lineTotal.div(quantity);
     const subtotal = lineTotal;
@@ -1293,13 +1298,13 @@ export default function PrintableQuotationPage({
   };
 
   const commitBulkUnit = (raw: string, node: HTMLElement) => {
-    const quantity = parseDecimal(form.quantity);
+    const bulkUsage = parseDecimal(calculationChecklistSnapshot?.bulkUsageMl ?? "0");
     const unit = parseDisplayedNumber(raw);
-    if (!shownTotals || !quantity || !quantity.gt(0) || unit === null || unit.lt(0)) {
+    if (!shownTotals || !bulkUsage || !bulkUsage.gt(0) || unit === null || unit.lt(0)) {
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.bulkUnit ?? "0", undefined, 2));
       return;
     }
-    applyLineTotals(D(shownTotals.fillingUnit), D(shownTotals.filmAmount), D(shownTotals.copperAmount), D(shownTotals.customAmount), unit.times(quantity));
+    applyLineTotals(D(shownTotals.fillingUnit), D(shownTotals.filmAmount), D(shownTotals.copperAmount), D(shownTotals.customAmount), unit.times(bulkUsage));
   };
 
   const commitBulkAmount = (raw: string, node: HTMLElement) => {
@@ -1757,7 +1762,7 @@ export default function PrintableQuotationPage({
                 <div>
                   <dt>バルク量</dt>
                   <dd data-testid="bulk-supply-amount">
-                    {formatNumber(calculationChecklistSnapshot?.bulkUsageMl ?? "0")}ml（貴社ご支給ください）
+                    {formatNumber(calculationChecklistSnapshot?.bulkUsageMl ?? "0")}g（貴社ご支給ください）
                   </dd>
                 </div>
               ) : null}
@@ -1815,8 +1820,8 @@ export default function PrintableQuotationPage({
                         <strong><EditableText value={form.bulkItemName} label="バルク項目名" onCommit={(next) => update("bulkItemName", next.trim())} /></strong>
                         <small><EditableText value={form.bulkItemDescription} label="バルク説明" multiline onCommit={(next) => update("bulkItemDescription", next)} /></small>
                       </td>
-                      <td data-testid="bulk-unit-price"><EditableText value={moneyDisplay(shownTotals.bulkUnit, form.bulkUnitDisplay, 2)} label="バルク販売単価" className="money" onCommit={commitBulkUnit} /> /枚</td>
-                      <td><EditableText value={numberDisplay(form.quantity)} label="バルク数量" className="money" onCommit={commitQuantity} /> 枚</td>
+                      <td data-testid="bulk-unit-price"><EditableText value={moneyDisplay(shownTotals.bulkUnit, form.bulkUnitDisplay, 2)} label="バルク販売単価" className="money" onCommit={commitBulkUnit} /> /g</td>
+                      <td data-testid="bulk-usage">{formatNumber(calculationChecklistSnapshot?.bulkUsageMl ?? "0")} g</td>
                       <td><EditableText value={moneyDisplay(shownTotals.bulkAmount, form.bulkAmountDisplay)} label="バルク金額" className="money" onCommit={commitBulkAmount} /></td>
                     </tr>
                   ) : null}
