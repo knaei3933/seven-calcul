@@ -105,6 +105,7 @@ describe("film order store", () => {
   it("walks the full workflow with mails recorded in dry-run mode", async () => {
     const marked = await runFilmOrderAction(orderId, "mark-ordered", {}, "kanei@kanei-trade.co.jp");
     expect(marked.order.status).toBe("ordered");
+    await runFilmOrderAction(orderId, "set-customer-design-not-required", { reason: "既存フロー回帰テスト" }, "kanei@kanei-trade.co.jp");
     await expect(runFilmOrderAction(orderId, "register-proof", { fileName: "x" }, "kanei@kanei-trade.co.jp"))
       .rejects.toThrow("invalid_status_transition");
 
@@ -211,6 +212,8 @@ describe("film order store", () => {
     const yOrder = orders.find((order) => order.quotation_number === "S7-FILM-STORE-003")!;
     await runFilmOrderAction(kOrder.id, "mark-ordered", {}, "seven@727.co.jp");
     await runFilmOrderAction(yOrder.id, "mark-ordered", {}, "seven@727.co.jp");
+    await runFilmOrderAction(kOrder.id, "set-customer-design-not-required", { reason: "K regression" }, "kanei@kanei-trade.co.jp");
+    await runFilmOrderAction(yOrder.id, "set-customer-design-not-required", { reason: "Y regression" }, "kanei@kanei-trade.co.jp");
 
     const kResult = await runFilmOrderAction(kOrder.id, "register-receiving", { aiFileName: "K用.ai" }, "seven@727.co.jp");
     console.log("K-MAILS:", JSON.stringify(kResult.mails?.map((mail) => ({ to: mail.to, error: mail.error }))));

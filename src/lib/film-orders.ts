@@ -1319,6 +1319,69 @@ async function sendSampleBulkAdjustmentMail(order: FilmOrder): Promise<MailSendR
   return sendMail({ to: destination.to, subject, text });
 }
 
+async function sendCustomerDesignRequestMail(order: FilmOrderView, uploadUrl: string): Promise<MailSendResult> {
+  const destination = await customerDestinationFor(order);
+  if (!destination.to) throw new Error("customer_email_required");
+  const greeting = destination.contact ? `${destination.name}\n${destination.contact} 様` : `${destination.name} 御中`;
+  const subject = `【デザインデータご入稿のお願い】${order.order_number} ${order.product_name || ""}`.trim();
+  const text = [
+    greeting,
+    "",
+    "いつも大変お世話になっております。パッケージラボでございます。",
+    "",
+    "パウチ製作に使用するデザインデータを、下記専用ページよりご入稿ください。",
+    "",
+    "【案件情報】",
+    ...sampleBulkMailBase(order),
+    "",
+    "【ご入稿ページ】",
+    uploadUrl,
+    "",
+    "【対応形式】",
+    "AI / PDF / PSD / EPS / INDD / ZIP / PNG / JPG",
+    "【ファイルサイズ】",
+    `${Math.floor(customerDesignMaxBytes() / 1024 / 1024)}MBまで`,
+    "",
+    "ご入稿いただいたデータは製作担当者が確認します。内容によっては追加修正をお願いすることがあります。",
+    "本メールに心当たりがない場合は、お手数ですが本メールを削除してください。",
+    "",
+    "--",
+    "パッケージラボ",
+    "shapepouch@package-lab.com",
+  ].join("\n");
+  return sendMail({ to: destination.to, subject, text });
+}
+
+async function sendCustomerDesignCorrectionMail(order: FilmOrderView, reason: string, uploadUrl: string): Promise<MailSendResult> {
+  const destination = await customerDestinationFor(order);
+  if (!destination.to) throw new Error("customer_email_required");
+  const greeting = destination.contact ? `${destination.name}\n${destination.contact} 様` : `${destination.name} 御中`;
+  const subject = `【デザインデータ修正のお願い】${order.order_number} ${order.product_name || ""}`.trim();
+  const text = [
+    greeting,
+    "",
+    "いつも大変お世話になっております。パッケージラボでございます。",
+    "",
+    "ご入稿いただいたデザインデータを確認いたしました。製作条件に合わせて、下記内容のご修正をお願いいたします。",
+    "",
+    "【案件情報】",
+    ...sampleBulkMailBase(order),
+    "",
+    "【修正内容】",
+    reason,
+    "",
+    "【再入稿ページ】",
+    uploadUrl,
+    "",
+    "ご不明な点がございましたら、お気軽にお問い合わせください。",
+    "",
+    "--",
+    "パッケージラボ",
+    "shapepouch@package-lab.com",
+  ].join("\n");
+  return sendMail({ to: destination.to, subject, text });
+}
+
 async function logMailEvents(
   db: SqlClient,
   orderId: number,
@@ -1572,7 +1635,8 @@ export async function runFilmOrderAction(
     return { order: result, mails };
   } else if (action === "confirm-customer-design") {
     if (order.customerDesign.status !== "received") throw new Error("invalid_status_transition");
-    if (!order.files.some((file) => file.category === "customer_design")) throw new Error("customer_design_file_required");
+    const current = await getFilmOrder(id);
+    if (!current?.files.some((file) => file.category === "customer_design")) throw new Error("customer_design_file_required");
     await db.run(`
       UPDATE film_orders
       SET customer_design_status = 'confirmed', customer_design_confirmed_at = ?, updated_at = ?, updated_by_email = ?
@@ -1648,6 +1712,95 @@ export async function filmOrderExistsForQuotation(quotationId: number): Promise<
   const db = await getDatabase();
   const row = await db.get<{ id: number }>("SELECT id FROM film_orders WHERE quotation_id = ?", [quotationId]);
   return Boolean(row);
+}
+
+export async function getFilmOrderForCustomerDesign(token: string): Promise<FilmOrderView> {
+  const db = await getDatabase();
+  const resolved = await resolveExternalToken(db, token, "customer_design");
+  if (!resolved) throw new Error("invalid_customer_design_token");
+  await markExternalTokenUse(db, resolved.token);
+  const order = await getFilmOrder(resolved.orderId);
+  if (!order || !["requested","received","correction_requested"].includes(order.customerDesign.status)) {
+    throw new Error("invalid_customer_design_token");
+  }
+  return order;
+}
+
+export function nextCustomerDesignFileName(
+  order: FilmOrderView,
+  originalFileName: string,
+): string {
+  const version = order.files.filter((file) => file.category === "customer_design").length + 1;
+  const normalized = validFileName(originalFileName);
+  if (!normalized) throw new Error("invalid_file_name");
+  const dot = normalized.lastIndexOf(".");
+  const extension = dot > -1 ? normalized.slice(dot).toLowerCase() : "";
+  const base = (dot > -1 ? normalized.slice(0, dot) : normalized)
+    .replace(/[\\/:*?"<>|\r\n\t]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 80) || "design";
+  return `${order.order_number}_design_v${version}_${base}${extension}`;
+}
+
+export async function registerCustomerDesignFromUploadToken(params: {
+  token: string;
+  fileName: string;
+  fileUrl: string;
+  uploader?: string;
+  note?: string;
+  metadata?: UploadFileMetadata;
+}): Promise<FilmOrderView> {
+  const db = await getDatabase();
+  const resolved = await resolveExternalToken(db, params.token, "customer_design");
+  if (!resolved) throw new Error("invalid_customer_design_token");
+  const orderId = resolved.orderId;
+  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [orderId]);
+  if (!row) throw new Error("film_order_not_found");
+  const order = mapOrder(row);
+  assertCustomerDesignUploadPolicy(order, params.fileName);
+  const fileName = validFileName(params.fileName);
+  if (!fileName) throw new Error("invalid_file_name");
+  const fileUrl = validFileUrl(params.fileUrl);
+  const actor = params.uploader?.slice(0, 200) || "customer";
+  const file = await addFile(
+    db,
+    orderId,
+    "customer_design",
+    fileName,
+    fileUrl,
+    params.note?.slice(0, 1000) ?? "",
+    actor,
+    { ...params.metadata, uploadedVia: params.metadata?.uploadedVia ?? "customer_design" },
+  );
+  const now = new Date().toISOString();
+  await db.run(`
+    UPDATE film_orders
+    SET customer_design_status = 'received', customer_design_received_at = ?, updated_at = ?, updated_by_email = ?
+    WHERE id = ? AND customer_design_status IN ('requested','correction_requested')
+  `, [now, now, actor, orderId]);
+  await addEvent(db, orderId, "customer_design", `顧客デザイン入稿: ${fileName} (v${file.version})`, actor);
+  const refreshed = await getFilmOrder(orderId);
+  if (refreshed) {
+    const mails = [
+      await sendMail({
+        to: externalTo(refreshed.seven_contact_email),
+        subject: `【顧客デザイン入稿】${refreshed.order_number} ${refreshed.product_name || ""}`.trim(),
+        text: [
+          "顧客からデザインデータが入稿されました。",
+          "",
+          mailBodyBase(refreshed),
+          "",
+          `ファイル名: ${fileName}`,
+          `バージョン: v${file.version}`,
+          params.note ? `備考: ${params.note}` : "",
+        ].filter(Boolean).join("\n"),
+      }),
+    ];
+    await logMailEvents(db, orderId, mails, "顧客デザイン受領", actor);
+  }
+  const result = await getFilmOrder(orderId);
+  if (!result) throw new Error("film_order_update_failed");
+  return result;
 }
 
 export async function registerProofFromUploadToken(params: {

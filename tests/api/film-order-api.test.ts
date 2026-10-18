@@ -121,6 +121,15 @@ describe("film order API permissions and workflow", () => {
   });
 
   it("keeps receiving for Seven and proof for Kanei", async () => {
+    await actionRoute(
+      request(`http://localhost/api/film-orders/${orderId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "set-customer-design-not-required", reason: "API regression" }),
+      }, kaneiToken),
+      { params: Promise.resolve({ id: String(orderId) }) } as never,
+    );
+
     const kaneiReceiving = await actionRoute(
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",

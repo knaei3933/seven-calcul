@@ -22,6 +22,10 @@ function statusForError(message: string): number {
     || message === "sample_bulk_quantity_required"
     || message === "sample_bulk_quantity_mismatch"
     || message === "sample_bulk_adjustment_reason_required"
+    || message === "customer_design_confirmation_required"
+    || message === "customer_design_file_required"
+    || message === "customer_design_correction_reason_required"
+    || message === "customer_design_not_required_reason_required"
   ) return 400;
   return 500;
 }

@@ -22,6 +22,9 @@ const {
   getFilmOrderForProofUpload,
   listFilmOrders,
   recordSupplierProofDownload,
+  getFilmOrderForCustomerDesign,
+  nextCustomerDesignFileName,
+  registerCustomerDesignFromUploadToken,
   runFilmOrderAction,
   syncFilmOrdersFromQuotations,
 } = await import("@/lib/film-orders");
@@ -100,6 +103,7 @@ describe("film order external token hardening", () => {
     const order = (await listFilmOrders("kanei@kanei-trade.co.jp")).find((item) => item.quotation_number === input.quotationNumber)!;
     orderId = order.id;
     await runFilmOrderAction(orderId, "mark-ordered", {}, "kanei@kanei-trade.co.jp");
+    await runFilmOrderAction(orderId, "set-customer-design-not-required", { reason: "既存フロー回帰テスト" }, "kanei@kanei-trade.co.jp");
     const receiving = await runFilmOrderAction(orderId, "register-receiving", {
       aiFileName: "トークン検証パウチ.ai",
       aiFileUrl: "https://drive.google.com/file/d/receivingfile1/view",
@@ -181,5 +185,88 @@ describe("film order external token hardening", () => {
     await expect(getFilmOrderForProofUpload(supplierToken)).rejects.toThrow("invalid_proof_token");
     await expect(getFilmOrderForProofUpload(nextToken)).resolves.toMatchObject({ id: orderId });
     supplierToken = nextToken;
+  });
+});
+
+describe("customer design upload gate", () => {
+  let designOrderId = 0;
+  let designToken = "";
+
+  it("requests, receives, corrects, receives again, and confirms customer design", async () => {
+    const {
+      approveQuotationGate,
+    } = await import("@/lib/quotation-store");
+    const { registerCustomerDesignFromUploadToken } = await import("@/lib/film-orders");
+    const adminId = await ensureAdministratorSeed();
+    const quotation = await saveQuotation({
+      ...input,
+      quotationNumber: "S7-EXTERNAL-TOKEN-002",
+      payload: {
+        ...input.payload,
+        customerEmail: "design-customer@example.test",
+      },
+    }, adminId, "admin");
+    void quotation;
+    await syncFilmOrdersFromQuotations("kanei@kanei-trade.co.jp");
+    const orders = await listFilmOrders("kanei@kanei-trade.co.jp");
+    const order = orders.find((item) => item.quotation_number === "S7-EXTERNAL-TOKEN-002")!;
+    designOrderId = order.id;
+    await runFilmOrderAction(designOrderId, "mark-ordered", {}, "kanei@kanei-trade.co.jp");
+    await expect(runFilmOrderAction(designOrderId, "register-receiving", { aiFileName: "early.ai" }, "seven@727.co.jp"))
+      .rejects.toThrow("customer_design_confirmation_required");
+
+    const requested = await runFilmOrderAction(designOrderId, "request-customer-design-upload", {
+      note: "元デザインをご入稿ください",
+      origin: "http://localhost:3000",
+    }, "kanei@kanei-trade.co.jp");
+    expect(requested.order.customerDesign.status).toBe("requested");
+    expect(requested.mails?.[0]?.to).toBe("design-customer@example.test");
+    expect(requested.mails?.[0]?.subject).toContain("デザインデータご入稿のお願い");
+    const firstToken = requested.mails?.[0]?.text?.match(/\/film-orders\/design-upload\/([^\s"]+)/u)?.[1] ?? "";
+    expect(firstToken).not.toBe("");
+
+    const before = await getFilmOrderForCustomerDesign(firstToken);
+    const firstFileName = nextCustomerDesignFileName(before!, "original design.psd");
+    const uploaded = await registerCustomerDesignFromUploadToken({
+      token: firstToken,
+      fileName: firstFileName,
+      fileUrl: "https://drive.google.com/file/d/customerdesign1/view",
+      uploader: "design customer",
+      note: "v1",
+      metadata: { fileSizeBytes: 1000, contentType: "image/vnd.adobe.photoshop", driveFileId: "customerdesign1" },
+    });
+    expect(uploaded.customerDesign.status).toBe("received");
+    expect(uploaded.files.filter((file) => file.category === "customer_design")).toHaveLength(1);
+    expect(uploaded.files.at(-1)?.file_name).toContain("_design_v1_");
+
+    const corrected = await runFilmOrderAction(designOrderId, "request-customer-design-correction", {
+      reason: "解像度と抜き幅を修正してください",
+      origin: "http://localhost:3000",
+    }, "kanei@kanei-trade.co.jp");
+    expect(corrected.order.customerDesign.status).toBe("correction_requested");
+    expect(corrected.order.customerDesign.correctionCount).toBe(1);
+    expect(corrected.mails?.[0]?.text).toContain("解像度と抜き幅を修正してください");
+    const secondToken = corrected.mails?.[0]?.text?.match(/\/film-orders\/design-upload\/([^\s"]+)/u)?.[1] ?? "";
+    expect(secondToken).not.toBe(firstToken);
+
+    const before2 = await getFilmOrderForCustomerDesign(secondToken);
+    const secondFileName = nextCustomerDesignFileName(before2!, "original design fixed.psd");
+    const uploaded2 = await registerCustomerDesignFromUploadToken({
+      token: secondToken,
+      fileName: secondFileName,
+      fileUrl: "https://drive.google.com/file/d/customerdesign2/view",
+      metadata: { fileSizeBytes: 1200, contentType: "image/vnd.adobe.photoshop", driveFileId: "customerdesign2" },
+    });
+    expect(uploaded2.customerDesign.status).toBe("received");
+    expect(uploaded2.files.filter((file) => file.category === "customer_design")).toHaveLength(2);
+    expect(uploaded2.files.at(-1)?.file_name).toContain("_design_v2_");
+
+    const confirmed = await runFilmOrderAction(designOrderId, "confirm-customer-design", {}, "kanei@kanei-trade.co.jp");
+    expect(confirmed.order.customerDesign.status).toBe("confirmed");
+    const receiving = await runFilmOrderAction(designOrderId, "register-receiving", {
+      aiFileName: "confirmed.ai",
+      aiFileUrl: "https://drive.google.com/file/d/confirmedai/view",
+    }, "seven@727.co.jp");
+    expect(receiving.order.status).toBe("receiving_registered");
   });
 });

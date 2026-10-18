@@ -7,6 +7,7 @@ import {
   buildFilmOrderFileName,
   DEFAULT_FILM_PROOF_EMAIL,
   filmOrderStatusLabels,
+  customerDesignStatusLabels,
   sampleBulkStatusLabels,
   type FilmOrderStatus,
   type FilmOrderView,
@@ -298,7 +299,7 @@ function OrderCard({
       const response = await fetch(`/api/film-orders/${order.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ origin: window.location.origin, ...body }),
       });
       const payload = await response.json();
       if (!response.ok || !payload.order) throw new Error(payload.error ?? "failed");
@@ -390,6 +391,7 @@ function OrderCard({
           </div>
 
           <SampleBulkPanel order={order} isKanei={isKanei} busy={busy} onRun={run} />
+          <CustomerDesignPanel order={order} isKanei={isKanei} busy={busy} onRun={run} />
 
           <section className="film-order-section">
             <h3>入稿・校正データ履歴</h3>
@@ -617,6 +619,87 @@ function NextStepPanel({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function CustomerDesignPanel({
+  order,
+  isKanei,
+  busy,
+  onRun,
+}: {
+  order: FilmOrderView;
+  isKanei: boolean;
+  busy: boolean;
+  onRun: (body: Record<string, unknown>, ok: string) => Promise<void>;
+}) {
+  const design = order.customerDesign;
+  const files = order.files.filter((file) => file.category === "customer_design");
+  return (
+    <section className="film-order-section" aria-label="顧客デザイン管理" data-testid="customer-design-panel">
+      <h3>顧客デザイン管理</h3>
+      <div className="film-order-columns">
+        <dl>
+          <div><dt>状態</dt><dd data-testid="customer-design-status">{customerDesignStatusLabels[design.status]}</dd></div>
+          <div><dt>依頼日時</dt><dd>{design.requestedAt ? new Date(design.requestedAt).toLocaleString("ja-JP") : "-"}</dd></div>
+          <div><dt>受領日時</dt><dd>{design.receivedAt ? new Date(design.receivedAt).toLocaleString("ja-JP") : "-"}</dd></div>
+          <div><dt>確定日時</dt><dd>{design.confirmedAt ? new Date(design.confirmedAt).toLocaleString("ja-JP") : "-"}</dd></div>
+          {design.correctionReason ? <div><dt>修正理由</dt><dd>{design.correctionReason}</dd></div> : null}
+        </dl>
+        <div className="film-order-inline-actions">
+          {files.length ? (
+            <ul>
+              {files.map((file) => <li key={file.id}>v{file.version} / {file.file_name}</li>)}
+            </ul>
+          ) : <p>まだアップロードはありません。</p>}
+          {isKanei && design.status === "pending" ? (
+            <CustomerDesignRequestForm busy={busy} onSubmit={(note) => void onRun({ action: "request-customer-design-upload", note }, "顧客デザイン依頼を送信しました。")} />
+          ) : null}
+          {isKanei && design.status === "received" ? (
+            <>
+              <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "confirm-customer-design" }, "顧客デザインを確定しました。")}>確定する</button>
+              <CustomerDesignCorrectionForm busy={busy} onSubmit={(reason) => void onRun({ action: "request-customer-design-correction", reason }, "顧客修正依頼を送信しました。")} />
+            </>
+          ) : null}
+          {isKanei && ["pending","requested","received","correction_requested"].includes(design.status) ? (
+            <CustomerDesignNotRequiredForm busy={busy} onSubmit={(reason) => void onRun({ action: "set-customer-design-not-required", reason }, "顧客デザインを不要に設定しました。")} />
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CustomerDesignRequestForm({ busy, onSubmit }: { busy: boolean; onSubmit: (note: string) => void }) {
+  const [note, setNote] = useState("");
+  return (
+    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(note.trim()); }}>
+      <label>依頼メモ（任意）<textarea value={note} rows={2} onChange={(event) => setNote(event.target.value)} /></label>
+      <button className="button" type="submit" disabled={busy}>{busy ? "送信中..." : "顧客にアップロード依頼"}</button>
+    </form>
+  );
+}
+
+function CustomerDesignCorrectionForm({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: string) => void }) {
+  const [reason, setReason] = useState("");
+  return (
+    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(reason.trim()); }}>
+      <label>修正依頼内容<textarea value={reason} rows={2} onChange={(event) => setReason(event.target.value)} required /></label>
+      <button className="button secondary" type="submit" disabled={busy}>{busy ? "送信中..." : "修正を依頼"}</button>
+    </form>
+  );
+}
+
+function CustomerDesignNotRequiredForm({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: string) => void }) {
+  const [reason, setReason] = useState("");
+  return (
+    <details>
+      <summary className="button secondary small">顧客デザイン不要にする</summary>
+      <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(reason.trim()); }}>
+        <label>理由<textarea value={reason} rows={2} onChange={(event) => setReason(event.target.value)} required /></label>
+        <button className="button danger" type="submit" disabled={busy}>設定</button>
+      </form>
+    </details>
   );
 }
 

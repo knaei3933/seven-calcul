@@ -8,7 +8,8 @@ function isPublicPath(pathname: string): boolean {
     || pathname === "/oauth/callback"
     || pathname === "/privacy"
     || pathname.startsWith("/quote-approvals/")
-    || pathname.startsWith("/film-orders/upload/");
+    || pathname.startsWith("/film-orders/upload/")
+    || pathname.startsWith("/film-orders/design-upload/");
 }
 
 export function proxy(request: NextRequest) {
