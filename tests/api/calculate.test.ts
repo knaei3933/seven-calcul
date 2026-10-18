@@ -12,6 +12,16 @@ const { POST } = await import("@/app/api/calculate/route");
 const { createUser, createSession } = await import("@/lib/auth-store");
 const user = await createUser({ email: "user@kanei-trade.co.jp", name: "Calculate User", password: "user-calculate-password", role: "admin" });
 const session = await createSession(user.id);
+const normalUser = await createUser({ email: "normal@example.com", name: "Normal Calculate User", password: "normal-calculate-password", role: "user" });
+const normalSession = await createSession(normalUser.id);
+
+function normalRequest(url: string, body: string): Request {
+  return new Request(url, {
+    method: "POST",
+    body,
+    headers: { "content-type": "application/json", cookie: `pouch_session=${normalSession.token}` },
+  });
+}
 
 function authenticatedRequest(url: string, body: string): Request {
   return new Request(url, {
@@ -143,6 +153,52 @@ describe("calculate API recommendations", () => {
 
 	    expect(Number(payload.result.film.filmTotal)).toBe(Number(list[0].filmTotalYen));
 	  });
+
+  it("switches redacted K candidates from the preserved input basis", async () => {
+    const input = {
+      spec: {
+        sizeKey: "tube-50x90",
+        customWidthMm: "50",
+        customLengthMm: "90",
+        fillMlPerChamber: "3",
+        connectedChambers: 1,
+        fillingMethod: "hopper",
+        fillingLanes: 4,
+        isCustom: false,
+        colorCount: 4,
+        bulkUnitPrice: "0",
+        skuCount: 1,
+        skuQuantities: ["524000"],
+        skuColorCounts: ["4"],
+      },
+      quantity: "524000",
+      printingMethod: "digital",
+      targetMargins: ["0.3", "0.35", "0.4"],
+      recommendationMode: true,
+    };
+    const first = await POST(authenticatedRequest("http://localhost/api/calculate", JSON.stringify(input)));
+    const candidates = (await first.json()).candidates as Array<{
+      id: string;
+      adjustedQuantity: string;
+    }>;
+    const k2 = candidates.find((candidate) => candidate.id === "K-2-825000-exact");
+    const k1 = candidates.find((candidate) => candidate.id === "K-1-412500");
+    expect(k2).toBeDefined();
+    expect(k1).toBeDefined();
+
+    const switched = await POST(normalRequest("http://localhost/api/calculate", JSON.stringify({
+      ...input,
+      // Candidate IDs are minted from the input basis; the selected candidate
+      // supplies its own adjusted quantity in the returned projection.
+      selectedCandidateId: k1!.id,
+      selectedCandidateTargetMargins: ["0.2", "0.25", "0.3"],
+    })));
+
+    expect(switched.status).toBe(200);
+    const projection = await switched.json();
+    expect(projection.selectedCandidateId).toBe(k1!.id);
+    expect(projection.quantity).toBe(k1!.adjustedQuantity);
+  });
 
   it("rejects an unknown selected candidate", async () => {
     const response = await POST(authenticatedRequest("http://localhost/api/calculate", JSON.stringify({

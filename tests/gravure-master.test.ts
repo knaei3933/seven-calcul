@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -78,6 +79,17 @@ const gravureRequest: CalculationInput = {
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
 });
+
+function quotationIssuanceRequest(payload: unknown, token: string): Request {
+  const formData = new FormData();
+  formData.set("payload", JSON.stringify(payload));
+  formData.set("pdf", new Blob([new TextEncoder().encode("%PDF-canonical")], { type: "application/pdf" }), "quotation.pdf");
+  return new Request("http://localhost/api/quotations", {
+    method: "POST",
+    body: formData,
+    headers: { cookie: `pouch_session=${token}` },
+  });
+}
 
 describe("gravure master foundation", () => {
   it("sorts canonical keys by Unicode code unit and normalizes decimals recursively", () => {
@@ -463,15 +475,11 @@ describe("gravure master foundation", () => {
     };
     const previousFlag = process.env.GRAVURE_SNAPSHOT_ISSUANCE_ENABLED;
     process.env.GRAVURE_SNAPSHOT_ISSUANCE_ENABLED = "false";
-    const disabled = await quotationPost(new Request("http://localhost/api/quotations", {
-      method: "POST", body: JSON.stringify(quotation), headers: { cookie: `pouch_session=${userSession.token}` },
-    }));
+    const disabled = await quotationPost(quotationIssuanceRequest(quotation, userSession.token));
     expect(disabled.status).toBe(503);
     await expect(disabled.json()).resolves.toEqual({ error: "gravure_snapshot_issuance_disabled" });
     process.env.GRAVURE_SNAPSHOT_ISSUANCE_ENABLED = previousFlag ?? "true";
-    const issued = await quotationPost(new Request("http://localhost/api/quotations", {
-      method: "POST", body: JSON.stringify(quotation), headers: { cookie: `pouch_session=${userSession.token}` },
-    }));
+    const issued = await quotationPost(quotationIssuanceRequest(quotation, userSession.token));
     expect(issued.status).toBe(201);
     const record = (await issued.json()).record;
     expect(record.resultHash).toBe(userPayload.resultHash);
@@ -496,9 +504,7 @@ describe("gravure master foundation", () => {
         publicProjection: adminPayload.returnedProjection,
       },
     };
-    const kanaiIssued = await quotationPost(new Request("http://localhost/api/quotations", {
-      method: "POST", body: JSON.stringify(kanaiQuotation), headers: { cookie: `pouch_session=${adminSession.token}` },
-    }));
+    const kanaiIssued = await quotationPost(quotationIssuanceRequest(kanaiQuotation, adminSession.token));
     expect(kanaiIssued.status).toBe(201);
     const kanaiRecord = (await kanaiIssued.json()).record;
     expect(kanaiRecord.payload.pricingSnapshot.id).toBe(adminPayload.pricingSnapshot.id);
@@ -519,9 +525,7 @@ describe("gravure master foundation", () => {
       pricingSnapshot: undefined,
       calculationRequest: { ...gravureRequest, gravureYRows: [] },
     };
-    const oldBypassResponse = await quotationPost(new Request("http://localhost/api/quotations", {
-      method: "POST", body: JSON.stringify(oldBypass), headers: { cookie: `pouch_session=${userSession.token}` },
-    }));
+    const oldBypassResponse = await quotationPost(quotationIssuanceRequest(oldBypass, userSession.token));
     expect(oldBypassResponse.status).toBe(400);
     await expect(oldBypassResponse.json()).resolves.toEqual({ error: "pricing_snapshot_required" });
 
@@ -534,9 +538,7 @@ describe("gravure master foundation", () => {
         publicProjection: tamperedProjection,
       },
     };
-    const rejected = await quotationPost(new Request("http://localhost/api/quotations", {
-      method: "POST", body: JSON.stringify(tampered), headers: { cookie: `pouch_session=${userSession.token}` },
-    }));
+    const rejected = await quotationPost(quotationIssuanceRequest(tampered, userSession.token));
     expect(rejected.status).toBe(400);
     await expect(rejected.json()).resolves.toEqual({ error: "pricing_snapshot_invalid" });
   });

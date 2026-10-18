@@ -76,6 +76,9 @@ type ServerCalculation = {
 
 type RedactedCalculation = {
   projection: ReturnedPublicProjection;
+  originalRequest: CalculationInput;
+  originalTargetMargin: string;
+  originalTargetMarginMode: TargetMarginMode;
   request: CalculationInput;
   selectedCandidateId: string;
 };
@@ -1429,6 +1432,9 @@ export default function QuotationPage({
         if (requestOrder !== requestOrderRef.current) return;
         setRedactedCalculation({
           projection: returnedProjection,
+          originalRequest: serverResult.originalCalculationRequest ?? calculationInput,
+          originalTargetMargin,
+          originalTargetMarginMode,
           request: calculationRequest,
           selectedCandidateId: candidate.id,
         });
@@ -1612,16 +1618,32 @@ export default function QuotationPage({
     setSelecting(true);
     setSelectionError(null);
     try {
-      const base = redactedCalculation.request;
+      // Candidate IDs are minted from the customer's input basis. After the
+      // first redacted candidate is selected, its adjusted quantity/SKU plan
+      // must not become the search basis for a different candidate.
+      const base = redactedCalculation.originalRequest;
       const adjusted = candidate.adjustedSkuQuantities;
       const quantity = adjusted.reduce<Decimal>((total, value) => total.plus(D(value)), D(0)).toString();
+      const candidatePrintingMethod: PrintingMethod = candidate.printingMethod === "gravure" ? "gravure" : "digital";
+      const candidateUsesOriginalBasis = candidatePrintingMethod === INPUT_PRINTING_METHOD;
+      const candidateTargetMargin = candidateUsesOriginalBasis
+        ? redactedCalculation.originalTargetMargin
+        : MARGIN_OPTIONS[candidatePrintingMethod][0];
+      const basisTargetMargins = targetMarginsForPrintingMethod(
+        INPUT_PRINTING_METHOD,
+        redactedCalculation.originalTargetMargin,
+      );
+      const candidateTargetMargins = targetMarginsForPrintingMethod(
+        candidatePrintingMethod,
+        candidateTargetMargin,
+      );
       const request: CalculationInput = {
         ...base,
-        quantity,
-        spec: { ...base.spec, skuQuantities: adjusted },
+        printingMethod: INPUT_PRINTING_METHOD,
+        targetMargins: basisTargetMargins,
         recommendationMode: true,
         selectedCandidateId: candidate.id,
-        selectedCandidateTargetMargins: base.targetMargins,
+        selectedCandidateTargetMargins: candidateTargetMargins,
       };
       const { response, payload } = await postCalculationWithTimeout(request);
       if (!response.ok) throw new Error(payload.error ?? "candidate_calculation_failed");
@@ -1631,6 +1653,9 @@ export default function QuotationPage({
       }
       setRedactedCalculation({
         projection,
+        originalRequest: base,
+        originalTargetMargin: redactedCalculation.originalTargetMargin,
+        originalTargetMarginMode: redactedCalculation.originalTargetMarginMode,
         request,
         selectedCandidateId: candidate.id,
       });
@@ -1693,6 +1718,9 @@ export default function QuotationPage({
         setCalculationError(null);
         setRedactedCalculation({
           projection,
+          originalRequest: calculationRequest,
+          originalTargetMargin: requestedTargetMargin,
+          originalTargetMarginMode: requestedTargetMarginMode,
           request: calculationRequest,
           selectedCandidateId: projection.selectedCandidateId,
         });

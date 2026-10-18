@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -210,12 +211,19 @@ function quotationBody(
   };
 }
 
-async function post(body: unknown): Promise<Response> {
-  return POST(new Request("http://localhost/api/quotations", {
+function issuanceRequest(body: unknown): Request {
+  const formData = new FormData();
+  formData.set("payload", JSON.stringify(body));
+  formData.set("pdf", new Blob([new TextEncoder().encode("%PDF-atomic")], { type: "application/pdf" }), "quotation.pdf");
+  return new Request("http://localhost/api/quotations", {
     method: "POST",
-    body: JSON.stringify(body),
+    body: formData,
     headers: { cookie: `pouch_session=${authorSession.token}` },
-  }));
+  });
+}
+
+async function post(body: unknown): Promise<Response> {
+  return POST(issuanceRequest(body));
 }
 
 describe("quotation calculation provenance", () => {

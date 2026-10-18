@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import {
-  createChecklistsForQuotation,
+  InvalidQuotationPdfError,
   listQuotations,
+  MAX_QUOTATION_PDF_BYTES,
   QuotationOwnershipConflictError,
-  saveQuotation,
+  QuotationCanonicalPdfExistsError,
+  saveIssuedQuotation,
   validateQuotationInput,
 } from "@/lib/quotation-store";
 import { readCalculationChecklistSnapshot, type CalculationChecklistSnapshot } from "@/lib/calculation-checklist";
@@ -332,7 +334,49 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     const user = await getSessionUser(request);
     if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
-    const input = validateQuotationInput(await request.json());
+    const contentType = request.headers.get("content-type") ?? "";
+    const jsonIssuance = contentType.toLowerCase().includes("application/json");
+    let pdfData: Buffer | null = null;
+    let rawPayload: unknown;
+    if (jsonIssuance) {
+      rawPayload = await request.json();
+    } else {
+      let formData: FormData;
+      try {
+        formData = await request.formData();
+      } catch {
+        return NextResponse.json({
+          error: "canonical_pdf_required",
+          message: "発行にはA4 PDF（10MB以内）を含めて送信してください。",
+        }, { status: 400 });
+      }
+      const pdfBlob = formData.get("pdf");
+      if (!(pdfBlob instanceof File)) {
+        return NextResponse.json({
+          error: "pdf_required",
+          message: "発行にはA4 PDF（10MB以内）を添付してください。",
+        }, { status: 400 });
+      }
+      if (pdfBlob.size > MAX_QUOTATION_PDF_BYTES) {
+        return NextResponse.json({
+          error: "pdf_too_large",
+          message: "PDFが大きすぎます。10MB以内のPDFを添付してください。",
+        }, { status: 413 });
+      }
+      pdfData = Buffer.from(await pdfBlob.arrayBuffer());
+      if (!pdfData.subarray(0, 5).equals(Buffer.from("%PDF-")) || pdfData.length > MAX_QUOTATION_PDF_BYTES) {
+        return NextResponse.json({
+          error: "invalid_pdf",
+          message: "PDFが不正です。A4形式のPDF（10MB以内）を添付してください。",
+        }, { status: 400 });
+      }
+      try {
+        rawPayload = JSON.parse(String(formData.get("payload") ?? ""));
+      } catch {
+        return NextResponse.json({ error: "invalid_quotation" }, { status: 400 });
+      }
+    }
+    const input = validateQuotationInput(rawPayload);
     if (!input) return NextResponse.json({ error: "invalid_quotation" }, { status: 400 });
     const existing = await getQuotationByNumber(input.quotationNumber);
     if (existing && !canManageQuotation(user, existing.createdBy.id)) {
@@ -389,15 +433,39 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (filmQuotation) {
       input.payload = { ...input.payload, filmQuotation };
     }
-    const record = await saveQuotation(input, user.id, user.role);
     const snapshot = readCalculationChecklistSnapshot(input.payload.calculationChecklistSnapshot);
-    if (snapshot) {
-      await createChecklistsForQuotation(record, snapshot);
+    if (!pdfData) {
+      return NextResponse.json({
+        error: "canonical_pdf_required",
+        message: "発行にはA4 PDF（10MB以内）を含めて送信してください。",
+      }, { status: 400 });
     }
-    return NextResponse.json({ record }, { status: 201 });
+    const fileName = `${input.quotationNumber}.pdf`;
+    const issued = await saveIssuedQuotation(
+      input,
+      user.id,
+      user.role,
+      pdfData,
+      fileName,
+      snapshot,
+    );
+    return NextResponse.json({
+      record: issued.record,
+      created: issued.created,
+      pdf: { saved: true, sha256: issued.pdfSha256, size: pdfData.byteLength },
+    }, { status: 201 });
   } catch (error) {
     if (error instanceof QuotationOwnershipConflictError) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+    if (error instanceof QuotationCanonicalPdfExistsError) {
+      return NextResponse.json({
+        error: "canonical_pdf_already_exists",
+        message: "この見積番号のPDFは既に確定しています。修正見積は別の見積番号で発行してください。",
+      }, { status: 409 });
+    }
+    if (error instanceof InvalidQuotationPdfError) {
+      return NextResponse.json({ error: "invalid_pdf", message: error.message }, { status: 400 });
     }
     return NextResponse.json({ error: "quotation_save_failed" }, { status: 500 });
   }

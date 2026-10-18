@@ -14,7 +14,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "backup:quotation-domain": "node scripts/backup-quotation-domain.ts",
+    "backup:quotation-domain:production": "node scripts/backup-quotation-domain.ts",
+    "cleanup:quotation-domain:local": "node scripts/cleanup-quotation-domain.ts",
+    "cleanup:quotation-domain:production": "node scripts/production-cleanup-quotation-domain.ts",
+    "cleanup:quotation-domain:production:phase1": "node scripts/production-cleanup-quotation-domain.ts",
+    "cleanup:quotation-domain:production:phase2": "node scripts/production-cleanup-quotation-domain.ts"
   },
   "devDependencies": {
     "@eslint/eslintrc": "3.3.0",

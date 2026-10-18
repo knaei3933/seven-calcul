@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { QUOTATION_DRAFT_KEY } from "../../src/lib/quotation-draft";
 
 const longText = "LongProductName検証".repeat(6);
@@ -73,6 +74,29 @@ test.describe("quote PDF single-page fit", () => {
     expect(printFit).not.toBeNull();
     expect(printFit!.footerBottom).toBeLessThanOrEqual(printFit!.sheetBottom + 0.5);
     await page.emulateMedia({ media: null });
+  });
+
+  test("long-note canonical issuance PDF remains one A4 page", async ({ page }) => {
+    const draft = JSON.stringify({
+      customerName: "Long Issuance E2E KK",
+      customerAddress: `東京都千代田区非常に長い住所検証 ${longText}`,
+    });
+    await page.addInitScript(([key, value]) => {
+      window.sessionStorage.setItem(key!, value!);
+    }, [QUOTATION_DRAFT_KEY, draft]);
+    await page.goto("/quote");
+    await page.getByTestId("fill-test-data").click();
+    await page.locator('[aria-label="備考"]').fill(`備考検証。`.repeat(40));
+    await expect(page.getByTestId("save-history")).toBeEnabled();
+    await page.getByTestId("save-history").click();
+    await expect(page.getByTestId("issue-success")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => Boolean(document.getElementById("quote-pdf-capture-host")))).toBe(false);
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByTestId("print-pdf").click();
+    const download = await downloadPromise;
+    const issuedPdf = readFileSync(await download.path());
+    expect(countPdfPages(issuedPdf)).toBe(1);
   });
 });
 

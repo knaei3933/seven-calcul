@@ -69,7 +69,8 @@ preMigration.exec(`
 `);
 preMigration.close();
 
-const { getQuotation, listQuotations } = await import("@/lib/quotation-store");
+const { getDatabaseForTest, getQuotation, getQuotationPdf, listQuotations, saveQuotationPdf } =
+  await import("@/lib/quotation-store");
 
 afterAll(async () => {
   const { closeDatabaseForTest } = await import("@/lib/auth-store");
@@ -88,5 +89,20 @@ describe("quotation ownership migration", () => {
     expect(legacy?.createdBy.email).toBe("legacy-admin@migration.test");
     expect(legacy?.createdBy.name).toBe("Legacy Admin");
     expect(legacy?.updatedBy).toBeNull();
+
+    const db = await getDatabaseForTest();
+    const columns = await db.all<{ name: string; type: string }>("PRAGMA table_info(quotations)");
+    const pdfColumns = new Map(columns.map((column) => [column.name, column.type]));
+    expect(pdfColumns.get("pdf_data")).toBe("BLOB");
+    expect(pdfColumns.get("pdf_file_name")).toBe("TEXT");
+    expect(pdfColumns.get("pdf_uploaded_at")).toBe("TEXT");
+    expect(pdfColumns.get("pdf_sha256")).toBe("TEXT");
+
+    const expectedPdf = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x00, 0xff]);
+    expect(await saveQuotationPdf(legacy!.id, expectedPdf, "S7-LEGACY-001.pdf")).toBe(true);
+    const storedPdf = await getQuotationPdf(legacy!.id);
+    expect(storedPdf?.fileName).toBe("S7-LEGACY-001.pdf");
+    expect(storedPdf?.data.equals(expectedPdf)).toBe(true);
+    expect(await getQuotationPdf(999_999)).toBeNull();
   });
 });

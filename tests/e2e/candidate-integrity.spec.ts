@@ -86,3 +86,29 @@ test("selected redacted plan hands the authoritative projection to the quotation
   await expect(page.locator("#quote-preview")).toContainText("グラビア印刷");
   await expect(page.getByTestId("issue-required-fields")).toContainText("連携済み");
 });
+
+test("switches redacted Korean patterns from the original input basis", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("サイズ").selectOption("tube-50x90");
+  await page.getByLabel("発注数量 (枚)").fill("524000");
+  await page.getByTestId("calculate-desktop").click();
+
+  const result = page.getByTestId("server-result");
+  await expect(result).toHaveAttribute("data-state", "calculated");
+  const modal = page.getByTestId("recommendation-modal-overlay");
+  await expect(modal).toBeVisible();
+  await modal.locator(".recommendation-card")
+    .filter({ hasText: "K / 韓国輸入" })
+    .filter({ hasText: "パターン 2" })
+    .first()
+    .click();
+
+  await expect(result).toHaveAttribute("data-state", "redacted_calculated");
+  await expect(page.locator('[data-testid="redacted-candidate-K"].selected')).toContainText("パターン 2");
+
+  await page.locator('[data-testid="redacted-candidate-K"]:not(.selected) button').first().click();
+
+  await expect(page.locator('[data-testid="redacted-candidate-K"].selected')).toContainText("パターン 1");
+  await expect(page.getByTestId("candidate-selection-error")).toHaveCount(0);
+  await expect(page.getByTestId("continue-redacted-quote")).toBeEnabled();
+});

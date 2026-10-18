@@ -16,6 +16,7 @@ import {
   SIMULATOR_STALE_STATUS_KEY,
 } from "@/lib/quotation-shared";
 import { clampGravureFilmMeterUnit, COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
+import { fileNameFromContentDisposition } from "@/lib/content-disposition";
 import type { CustomerMaster } from "@/lib/quotation-shared";
 import type { FilmQuotationData } from "@/lib/film-quotation";
 
@@ -110,6 +111,109 @@ type QuoteForm = {
   calculationRequestJson: string;
   pricingSnapshotJson: string;
 };
+
+class QuotationPdfError extends Error {}
+
+async function generateQuotationPdf(element: HTMLElement): Promise<Blob> {
+  const html2pdf = (await import("html2pdf.js")).default;
+  return await html2pdf().from(element).set({
+    margin: [0, 0, 0, 0],
+    // The jsPDF name is only a browser-side default; persistence always uses
+    // the canonical quotation-number filename accepted by the PDF API.
+    filename: "quotation.pdf",
+    image: { type: "jpeg", quality: 0.98 },
+    html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+    jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+  }).outputPdf("blob") as Blob;
+}
+
+function createQuotePdfCapture(sheet: HTMLElement | null): {
+  element: HTMLElement;
+  restore: () => void;
+} {
+  if (!sheet) {
+    throw new QuotationPdfError("見積書のA4 PDFを作成できませんでした。もう一度お試しください。");
+  }
+
+  // html2canvas does not consistently map CSS zoom to element geometry. Keep
+  // the capture source at exact A4 dimensions and scale only its contents with
+  // a transform so text positions remain layout-stable.
+  const host = document.createElement("div");
+  host.id = "quote-pdf-capture-host";
+  host.setAttribute("aria-hidden", "true");
+  document.body.dataset.quotePdfCapture = "1";
+  document.body.append(host);
+  const clone = sheet.cloneNode(true) as HTMLElement;
+  clone.removeAttribute("id");
+  clone.style.width = "210mm";
+  clone.style.height = "296mm";
+  clone.style.minHeight = "296mm";
+  clone.style.overflow = "hidden";
+  host.replaceChildren(clone);
+
+  const cloneFit = clone.querySelector<HTMLElement>(".quote-a4-fit");
+  const cloneStyle = getComputedStyle(clone);
+  const reserved = (["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"] as const)
+    .reduce((total, key) => total + (Number.parseFloat(cloneStyle[key]) || 0), 0);
+  const budgetPx = 296 * (96 / 25.4) - reserved;
+  const measuredPx = cloneFit ? Math.max(cloneFit.scrollHeight, cloneFit.offsetHeight) : 0;
+  const scale = measuredPx > budgetPx && budgetPx > 0 ? budgetPx / measuredPx : 1;
+
+  if (cloneFit) {
+    cloneFit.style.setProperty("--quote-a4-fit-scale", scale.toFixed(5));
+    cloneFit.style.transform = `scale(${scale.toFixed(5)})`;
+    cloneFit.style.transformOrigin = "top left";
+  }
+
+  return {
+    element: clone,
+    restore: () => {
+      host.replaceChildren();
+      host.remove();
+      delete document.body.dataset.quotePdfCapture;
+    },
+  };
+}
+
+async function getStoredQuotationPdf(
+  recordId: number,
+  fallbackFileName: string,
+): Promise<{ blob: Blob; fileName: string }> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/quotations/${recordId}/pdf`, { cache: "no-store" });
+  } catch {
+    throw new QuotationPdfError("発行済みPDFを取得できませんでした。もう一度お試しください。");
+  }
+  if (response.status === 404) {
+    throw new QuotationPdfError("発行済みPDFが見つかりません。見積書を再度発行してください。");
+  }
+  if (!response.ok) {
+    throw new QuotationPdfError("発行済みPDFを取得できませんでした。もう一度お試しください。");
+  }
+  const blob = await response.blob().catch(() => null);
+  if (!blob || blob.size === 0) {
+    throw new QuotationPdfError("発行済みPDFを取得できませんでした。もう一度お試しください。");
+  }
+  return {
+    blob,
+    fileName: fileNameFromContentDisposition(
+      response.headers.get("Content-Disposition") ?? "",
+      fallbackFileName,
+    ),
+  };
+}
+
+function downloadPdfBlob(blob: Blob, fileName: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
 
 const defaultQuote: QuoteForm = {
   quotationNumber: "",
@@ -293,6 +397,7 @@ export default function PrintableQuotationPage() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState("");
   const [savedRecordId, setSavedRecordId] = useState<number | null>(null);
+  const [savedQuotationNumber, setSavedQuotationNumber] = useState("");
   const [checklistUrl, setChecklistUrl] = useState("");
   const [checklistOpening, setChecklistOpening] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -310,6 +415,9 @@ export default function PrintableQuotationPage() {
   const [customerSearchTerm, setCustomerSearchTerm] = useState("");
   const [customerSearchResults, setCustomerSearchResults] = useState<CustomerMaster[]>([]);
   const customerSearchRef = useRef<HTMLFormElement | null>(null);
+  const issuanceInFlightRef = useRef(false);
+  const pdfDownloadInFlightRef = useRef(false);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
   const [customerSearchStatus, setCustomerSearchStatus] = useState<"idle" | "loading" | "error">("idle");
 
   const searchCustomerMaster = async (query: string) => {
@@ -425,6 +533,8 @@ export default function PrintableQuotationPage() {
     const suffix = "0001";
     setForm((old) => ({
       ...old,
+      // E2E issuance helpers need independent immutable quotation identities.
+      quotationNumber: `S7-${Date.now().toString(36).toUpperCase()}`,
       customerCode: `TEST-${suffix}`,
       customerName: `テスト顧客株式会社 ${suffix}`,
       customerPostalCode: `10${suffix.slice(0, 2)}-0001`,
@@ -440,40 +550,32 @@ export default function PrintableQuotationPage() {
   };
 
   useEffect(() => {
-    const MM_TO_PX = 96 / 25.4;
-    const PRINT_SHEET_HEIGHT_MM = 296;
-    const ensureMeasureHost = () => {
-      let host = document.querySelector<HTMLElement>("#quote-print-measure-host");
-      if (!host) {
-        host = document.createElement("div");
-        host.id = "quote-print-measure-host";
-        host.setAttribute("aria-hidden", "true");
-        document.body.appendChild(host);
-      }
-      return host;
-    };
     const fitForPrint = () => {
       const content = quoteFitRef.current;
       const sheet = content?.closest<HTMLElement>(".a4-sheet");
       if (!content || !sheet) return;
-      content.style.removeProperty("--quote-a4-fit-scale");
-      // 인쇄 CSS 적용 시점이 브라우저마다 달라도 같은 결과가 나오도록,
-      // 실제 인쇄 폭(209mm)으로 클론을 렌더링해 높이를 측정한다.
-      const host = ensureMeasureHost();
+
+      const host = document.createElement("div");
+      host.id = "quote-print-measure-host";
+      host.setAttribute("aria-hidden", "true");
       document.body.dataset.quotePrintMeasure = "1";
+      document.body.append(host);
       const clone = sheet.cloneNode(true) as HTMLElement;
       clone.removeAttribute("id");
       clone.style.removeProperty("--quote-a4-fit-scale");
       host.replaceChildren(clone);
+
       const cloneFit = clone.querySelector<HTMLElement>(".quote-a4-fit");
       const cloneStyle = getComputedStyle(clone);
       const reserved = (["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"] as const)
         .reduce((total, key) => total + (Number.parseFloat(cloneStyle[key]) || 0), 0);
-      const budgetPx = PRINT_SHEET_HEIGHT_MM * MM_TO_PX - reserved;
+      const budgetPx = 296 * (96 / 25.4) - reserved;
       const measuredPx = cloneFit ? Math.max(cloneFit.scrollHeight, cloneFit.offsetHeight) : 0;
       const scale = measuredPx > budgetPx && budgetPx > 0 ? budgetPx / measuredPx : 1;
+
       content.style.setProperty("--quote-a4-fit-scale", scale.toFixed(5));
       host.replaceChildren();
+      host.remove();
       delete document.body.dataset.quotePrintMeasure;
     };
     const resetFit = () => quoteFitRef.current?.style.removeProperty("--quote-a4-fit-scale");
@@ -613,6 +715,7 @@ export default function PrintableQuotationPage() {
   });
 
   const saveToHistory = async (): Promise<string | false> => {
+    if (issuanceInFlightRef.current) return false;
     if (!totals) return false;
     if (!shownTotals) return false;
     if (!issueReady) {
@@ -621,6 +724,16 @@ export default function PrintableQuotationPage() {
     }
     setSaving(true);
     setSaveError("");
+    setSavedAt("");
+    setIssueSuccessMessage("");
+    // A new attempt invalidates the previous success immediately. If this
+    // issuance fails, the old canonical PDF must not be downloadable as the
+    // record produced by the failed attempt.
+    setSavedRecordId(null);
+    setSavedQuotationNumber("");
+    setChecklistUrl("");
+    sessionStorage.removeItem(LAST_CHECKLIST_URL_KEY);
+    issuanceInFlightRef.current = true;
     try {
       const savedPurchaseOrder = purchaseOrder
         ? {
@@ -662,10 +775,19 @@ export default function PrintableQuotationPage() {
         totalProfit: profitUnit.times(totals.quantity).toString(),
         recordedAt: new Date().toISOString(),
       };
-      const response = await fetch("/api/quotations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const previewElement = document.getElementById("quote-preview");
+      if (!previewElement) {
+        throw new QuotationPdfError("見積書のA4 PDFを作成できませんでした。もう一度お試しください。");
+      }
+      const quotePdfCapture = createQuotePdfCapture(
+        previewElement.matches(".a4-sheet") ? previewElement : previewElement.querySelector<HTMLElement>(".a4-sheet"),
+      );
+      const pdfBlob = await generateQuotationPdf(quotePdfCapture.element).finally(quotePdfCapture.restore).catch((error: unknown) => {
+        console.error("[quotation-pdf] PDF generation failed", error);
+        throw new QuotationPdfError("見積書のA4 PDFを作成できませんでした。もう一度お試しください。");
+      });
+
+      const issuancePayload = {
           ...form,
           status: "draft",
           productName: form.skuNames.filter((name) => name.trim()).join(" / ") || form.productName,
@@ -706,42 +828,58 @@ export default function PrintableQuotationPage() {
             resultHash: sourceVersion,
             profitAudit,
           },
-        }),
+      };
+      const formData = new FormData();
+      formData.append("payload", JSON.stringify(issuancePayload));
+      formData.append("pdf", pdfBlob, `${form.quotationNumber}.pdf`);
+      const response = await fetch("/api/quotations", {
+        method: "POST",
+        body: formData,
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "save_failed");
-      const checklistUrl = `/checklists/${payload.record.id}`;
-      setSavedRecordId(Number(payload.record.id));
+      const payload = await response.json() as {
+        error?: string;
+        message?: string;
+        record?: {
+          id?: number | string;
+          quotationNumber?: unknown;
+          payload?: { filmQuotation?: { quotationNumber?: unknown } };
+        };
+        created?: boolean;
+      };
+      if (!response.ok) throw new Error(payload.message ?? payload.error ?? "save_failed");
+      const savedRecord = payload.record;
+      const quotationId = Number(savedRecord?.id);
+      const quotationNumber = typeof savedRecord?.quotationNumber === "string"
+        ? savedRecord.quotationNumber
+        : "";
+      if (
+        !savedRecord
+        || !Number.isInteger(quotationId)
+        || quotationId <= 0
+        || !quotationNumber
+      ) {
+        throw new Error("invalid_quotation_save_response");
+      }
+      const checklistUrl = `/checklists/${quotationId}`;
+      setSavedRecordId(quotationId);
+      setSavedQuotationNumber(quotationNumber);
       setChecklistUrl(checklistUrl);
       sessionStorage.setItem(LAST_CHECKLIST_URL_KEY, checklistUrl);
-      try {
-        const element = document.getElementById("quote-preview");
-        if (element) {
-          const html2pdf = (await import("html2pdf.js")).default;
-          const pdfBlob = await html2pdf().from(element).set({
-            margin: [0, 0, 0, 0],
-            filename: `${payload.record.quotationNumber}.pdf`,
-            image: { type: "jpeg", quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-            jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-          }).outputPdf("blob");
-          const fd = new FormData();
-          fd.append("pdf", pdfBlob, `${payload.record.quotationNumber}.pdf`);
-          await fetch(`/api/quotations/${payload.record.id}/pdf`, { method: "POST", body: fd });
-        }
-      } catch {}
       setSavedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
-      const filmQuoteNum = payload.record.payload?.filmQuotation?.quotationNumber;
+      const filmQuoteNum = savedRecord.payload?.filmQuotation?.quotationNumber;
       setIssueSuccessMessage(
-        `見積書を発行しました（${form.quotationNumber || payload.record.quotationNumber}）` +
+        `見積書を発行しました（${form.quotationNumber || quotationNumber}）` +
         (filmQuoteNum ? `。フィルム見積書 ${filmQuoteNum} も自動発行されました。` : "。") +
         " 履歴からPDF出力・メール作成ができます。"
       );
       return checklistUrl;
-    } catch {
-      setSaveError("履歴DBに保存できませんでした。テスト環境ではデータが保持されない場合があります。");
+    } catch (error: unknown) {
+      setSaveError(error instanceof Error && error.message
+        ? error.message
+        : "見積書を発行できませんでした。もう一度お試しください。");
       return false;
     } finally {
+      issuanceInFlightRef.current = false;
       setSaving(false);
     }
   };
@@ -755,15 +893,28 @@ export default function PrintableQuotationPage() {
   };
 
   const printPdf = async () => {
-    // テスト環境では履歴DBが一時的な場合があるため、PDF出力は保存結果に依存させない。
-    void saveToHistory();
-    // フォント置換による折り返し変化を避け、印刷フィット測定を正確にする。
-    try {
-      await document.fonts.ready;
-    } catch {
-      // fonts API 未対応環境ではそのまま印刷する。
+    if (pdfDownloadInFlightRef.current) return;
+    if (savedRecordId === null) {
+      setSaveError("PDFは発行後に保存されます。先に「見積書を発行」してください。");
+      return;
     }
-    window.print();
+    pdfDownloadInFlightRef.current = true;
+    setPdfDownloading(true);
+    setSaveError("");
+    try {
+      const storedPdf = await getStoredQuotationPdf(
+        savedRecordId,
+        `${savedQuotationNumber || form.quotationNumber}.pdf`,
+      );
+      downloadPdfBlob(storedPdf.blob, storedPdf.fileName);
+    } catch (error) {
+      setSaveError(error instanceof QuotationPdfError
+        ? error.message
+        : "発行済みPDFを取得できませんでした。もう一度お試しください。");
+    } finally {
+      pdfDownloadInFlightRef.current = false;
+      setPdfDownloading(false);
+    }
   };
 
   const parsedQuantity = parseDecimal(form.quantity);
@@ -1371,7 +1522,15 @@ export default function PrintableQuotationPage() {
               <button className="btn-issue" type="button" data-testid="save-history" disabled={issueButtonDisabled} onClick={() => void saveToHistory()}>
                 {saving ? "発行中..." : savedAt ? `発行済 ${savedAt}` : "見積書を発行"}
               </button>
-              <button className="button" type="button" data-testid="print-pdf" disabled={linkedQuoteActionsDisabled} onClick={() => void printPdf()}>PDF出力（A4）</button>
+              <button
+                className="button"
+                type="button"
+                data-testid="print-pdf"
+                disabled={linkedQuoteActionsDisabled || pdfDownloading}
+                onClick={() => void printPdf()}
+              >
+                {pdfDownloading ? "出力中..." : "PDF出力（A4）"}
+              </button>
               <button className="button secondary" type="button" disabled={linkedQuoteActionsDisabled || checklistOpening} title="現在の見積内容を保存し、計算確認チェックリストを開きます" data-testid="open-checklist" onClick={() => void openChecklist()}>
                 {checklistOpening ? "作成中..." : "計算確認チェックリスト"}
               </button>

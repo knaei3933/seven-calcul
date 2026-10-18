@@ -45,6 +45,70 @@ npm run dev
   PostgreSQL に見積履歴・顧客マスタ・チェックリストを保存します。
 - 本番（Vercel）での共有DB設定手順は [docs/NEON_SETUP.md](docs/NEON_SETUP.md) を参照してください。
 
+### 見積ドメイン バックアップ
+
+```bash
+npm run backup:quotation-domain
+```
+
+- 既定ターゲットはローカル SQLite `.data/quotations.db` です。
+- `quotations`、`quotation_checklists`、`film_orders`、`film_order_files`、`film_order_events`
+  をバイナリ安全な JSONL として検証付きで保存し、`manifest.json` にターゲット証明・行数・
+  レコード数・SHA-256 を記録します。
+- バックアップは既定で `.omx/backups/` に作成され、Git には含まれません。
+- PostgreSQL の本番バックアップは誤接続を防ぐため既定になりません。明示的な
+  `--target production` に加えて、正確な `--confirm-host` / `--confirm-database` と
+  `--confirm-production-read-only-backup` が必要です。コマンドは読み取り専用トランザクションで実行されます。
+- `--target postgres-test` は自動検証専用の内部経路です。`POUCH_TEST_POSTGRESQL_URL`
+  が localhost の `*test*` database と isolated schema を指す場合のみ許可し、
+  host / database / schema の一致確認が必要です。本番接続には使用しません。
+- 本番削除は 2 フェーズ固定です。Phase 1 は読み取り専用接続で対象証明・FK グラフ・行数・
+  保持テーブル identity を検証し、バイナリ安全な backup を作成した後、`authorization.json`
+  と `authorization.challenge` を作成します。Phase 1 は削除しません。
+
+### 見積ドメイン ローカル削除
+
+```bash
+npm run cleanup:quotation-domain:local
+```
+
+- ローカル削除は検証済み backup を必要とし、rollback 可能な検証はすべて `COMMIT` 前に
+  行います。`COMMIT` 後の検証や外部顧客 DB 比較に失敗した場合は削除が確定済みであることを
+  示す `committed_with_post_commit_warning` と exit code 3 を返します。通常失敗は exit code 1 です。
+- 削除証明用の一時 SQLite snapshot は owner-only（directory `0700` / file `0600`）の
+  一時 directory に作成し、成功・失敗とも処理後に directory ごと削除します。
+
+```bash
+npm run cleanup:quotation-domain:production:phase1 -- \
+  --target production --confirm-production-read-only-backup \
+  --confirm-host <exact-host> --confirm-database <exact-database> \
+  --confirm-schema public \
+  --confirm-domain-tables film_order_events,film_order_files,film_orders,quotation_checklists,quotations \
+  --output-dir <verified-ignored-output-directory>
+
+# operator inspection happens here
+
+npm run cleanup:quotation-domain:production:phase2 -- \
+  --target production --confirm-production-deletion \
+  --confirm-host <exact-host> --confirm-database <exact-database> \
+  --confirm-schema public \
+  --confirm-domain-tables film_order_events,film_order_files,film_orders,quotation_checklists,quotations \
+  --backup-manifest <phase-1-output>/manifest.json \
+  --authorization-file <phase-1-output>/authorization.json \
+  --challenge-file <phase-1-output>/authorization.challenge
+```
+
+- authorization evidence は target / manifest SHA-256 / table counts / binary totals /
+  nonce / 作成・失効時刻 / tool version を記録します。raw challenge は evidence に書かず、
+  token SHA-256 と evidence HMAC のみで束縛します。Phase 2 は `--challenge-file` または
+  exact token 引数のどちらか一方だけを受け付けます。失効は既定 15 分（30〜3600 秒）です。
+- Phase 2 は challenge / evidence / manifest / 現在 target / FK graph / backup 内容 /
+  count / binary totals / retained identity を再検証した後、対象 table に
+  `ACCESS EXCLUSIVE` lock を取得し、`READ COMMITTED` で post-challenge commit を隠さない
+  状態でもう一度現在行を検証してから、1 transaction で FK-safe 順に削除します。
+  COMMIT 後の既定処理は fallible な検証を行いません。明示的な post-commit 検証 API が
+  失敗した場合は `committed_with_post_commit_warning` と exit code 3 を返します。
+
 ## 検証
 
 ```bash

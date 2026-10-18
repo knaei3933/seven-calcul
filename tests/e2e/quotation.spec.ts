@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
 
 test("Japanese quotation UI calculates, validates, and separates customer output", async ({ page }) => {
@@ -36,7 +38,7 @@ test("Japanese quotation UI calculates, validates, and separates customer output
   // regions, so user-facing horizontal scrolling is checked on the root.
 });
 
-test("A4 quotation page imports simulator costs and prepares PDF printing", async ({ page }) => {
+test("A4 quotation page issues once and downloads the canonical PDF", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("customer-total")).toHaveText("-");
   await page.getByTestId("calculate-desktop").click();
@@ -50,16 +52,17 @@ test("A4 quotation page imports simulator costs and prepares PDF printing", asyn
   await page.getByTestId("fill-test-data").click();
   await page.getByPlaceholder("株式会社◯◯").fill("E2E株式会社");
   await expect(page.getByTestId("save-history")).toBeEnabled();
+  await page.getByTestId("save-history").click();
+  await expect(page.getByTestId("issue-success")).toBeVisible();
 
-  await page.evaluate(() => {
-    (window as Window & { printCalls?: number }).printCalls = 0;
-    window.print = () => {
-      const scopedWindow = window as Window & { printCalls?: number };
-      scopedWindow.printCalls = (scopedWindow.printCalls ?? 0) + 1;
-    };
-  });
+  await page.getByPlaceholder("株式会社◯◯").fill("E2E編集後株式会社");
+  const downloadPromise = page.waitForEvent("download");
   await page.getByTestId("print-pdf").click();
-  await expect.poll(() => page.evaluate(() => (window as Window & { printCalls?: number }).printCalls)).toBe(1);
+  const download = await downloadPromise;
+  const storedQuotationNumber = download.suggestedFilename().replace(/\.pdf$/u, "");
+  expect(storedQuotationNumber).toMatch(/^S7-[A-Z0-9]+$/u);
+  const issuedPdf = readFileSync(await download.path());
+  expect(countPdfPages(issuedPdf)).toBe(1);
 
   await expect(page.getByTestId("quote-price-per-piece")).toContainText("￥");
     await expect(page.getByTestId("film-meter-price")).toContainText("/m");
@@ -94,18 +97,51 @@ test("A4 quotation page imports simulator costs and prepares PDF printing", asyn
   await expect(page.getByTestId("history-table")).toContainText("税込合計");
 });
 
-test("PDF output continues when test history storage fails", async ({ page }) => {
+test("PDF output requires an issued canonical PDF when history storage fails", async ({ page }) => {
   await page.route("**/api/quotations", (route) => route.abort());
   await page.goto("/quote");
   await page.getByTestId("fill-test-data").click();
-  await page.evaluate(() => {
-    (window as Window & { printCalls?: number }).printCalls = 0;
-    window.print = () => {
-      const scopedWindow = window as Window & { printCalls?: number };
-      scopedWindow.printCalls = (scopedWindow.printCalls ?? 0) + 1;
-    };
-  });
   await page.getByTestId("print-pdf").click();
-  await expect.poll(() => page.evaluate(() => (window as Window & { printCalls?: number }).printCalls)).toBe(1);
-  await expect(page.getByTestId("save-error")).toContainText("テスト環境ではデータが保持されない場合があります");
+  await expect(page.getByTestId("save-error")).toContainText("PDFは発行後に保存されます");
 });
+
+test("quote and history download the same canonical PDF bytes", async ({ page }) => {
+  const customerName = `Cross-UI E2E ${Date.now()}`;
+  await page.goto("/quote");
+  await page.getByTestId("fill-test-data").click();
+  await page.getByPlaceholder("株式会社◯◯").fill(customerName);
+  await expect(page.getByTestId("save-history")).toBeEnabled();
+  await page.getByTestId("save-history").click();
+  await expect(page.getByTestId("issue-success")).toBeVisible();
+
+  const quoteDownloadPromise = page.waitForEvent("download");
+  await page.getByTestId("print-pdf").click();
+  const quoteDownload = await quoteDownloadPromise;
+  const quotationNumber = quoteDownload.suggestedFilename().replace(/\.pdf$/u, "");
+  expect(quotationNumber).toMatch(/^S7-[A-Z0-9]+$/u);
+  const quotePdf = readFileSync(await quoteDownload.path());
+  expect(quotePdf.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+
+  await page.getByRole("link", { name: "見積履歴" }).click();
+  await page.getByTestId("history-search").fill(customerName);
+  await expect(page.getByTestId("history-table")).toContainText(customerName);
+  await page.getByRole("button", { name: "詳細" }).first().click();
+  const historyDownloadPromise = page.waitForEvent("download");
+  await page.getByTestId("detail-download-current").click();
+  const historyDownload = await historyDownloadPromise;
+  const historyPdf = readFileSync(await historyDownload.path());
+
+  const sha256 = (value: Buffer) => createHash("sha256").update(value).digest("hex");
+  const quotePdfSha256 = sha256(quotePdf);
+  const historyPdfSha256 = sha256(historyPdf);
+  expect(historyPdfSha256).toBe(quotePdfSha256);
+  console.info("cross-ui canonical PDF identity", {
+    quotationNumber,
+    sha256: quotePdfSha256,
+    byteLength: quotePdf.byteLength,
+  });
+});
+
+function countPdfPages(pdf: Buffer): number {
+  return pdf.toString("latin1").match(/\/Type\s*\/Page(?![s/])/g)?.length ?? 0;
+}

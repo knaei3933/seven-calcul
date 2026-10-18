@@ -30,6 +30,13 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
       DROP TABLE IF EXISTS sessions CASCADE;
       DROP TABLE IF EXISTS users CASCADE;
       DROP TABLE IF EXISTS customers CASCADE;
+      DO $$
+      BEGIN
+        IF to_regclass('gravure_y_supplier_prices') IS NOT NULL THEN
+          TRUNCATE TABLE gravure_y_supplier_prices;
+        END IF;
+      END
+      $$;
     `);
   });
 

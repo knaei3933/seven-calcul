@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api-auth", async () => {
@@ -41,9 +42,8 @@ describe("gravure infrastructure errors", () => {
   });
 
   it("returns a detail-free 503 from quotations", async () => {
-    const response = await quotationPost(new Request("http://localhost/api/quotations", {
-      method: "POST",
-      body: JSON.stringify({
+    const formData = new FormData();
+    formData.set("payload", JSON.stringify({
         quotationNumber: "INFRA-1",
         status: "draft",
         issueDate: "2026-10-13",
@@ -71,7 +71,11 @@ describe("gravure infrastructure errors", () => {
         payload: {
           pricingSnapshot: { id: "snapshot", sha256: "hash" },
         },
-      }),
+      }));
+    formData.set("pdf", new Blob([new TextEncoder().encode("%PDF-canonical")], { type: "application/pdf" }), "quotation.pdf");
+    const response = await quotationPost(new Request("http://localhost/api/quotations", {
+      method: "POST",
+      body: formData,
     }));
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({ error: "gravure_master_unavailable" });

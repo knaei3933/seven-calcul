@@ -1,5 +1,6 @@
 import type { SqlClient } from "./db";
 import { getSqlClient } from "./db";
+import { createHash } from "node:crypto";
 import { quotationStatuses, type QuotationStatus } from "./quotation-shared";
 import { QUOTATION_RESTORE_KEY } from "./quotation-shared";
 import { D } from "./decimal";
@@ -64,6 +65,45 @@ export class QuotationOwnershipConflictError extends Error {
   }
 }
 
+export class QuotationCanonicalPdfExistsError extends Error {
+  constructor() {
+    super("quotation_canonical_pdf_exists");
+    this.name = "QuotationCanonicalPdfExistsError";
+  }
+}
+
+export class InvalidQuotationPdfError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidQuotationPdfError";
+  }
+}
+
+export class QuotationPdfIntegrityError extends Error {
+  constructor() {
+    super("quotation_pdf_integrity_failed");
+    this.name = "QuotationPdfIntegrityError";
+  }
+}
+
+export const MAX_QUOTATION_PDF_BYTES = 10 * 1024 * 1024;
+
+function sha256Pdf(pdfData: Buffer): string {
+  return createHash("sha256").update(pdfData).digest("hex");
+}
+
+function validateCanonicalPdf(pdfData: Buffer, fileName: string): void {
+  if (pdfData.length === 0 || !pdfData.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+    throw new InvalidQuotationPdfError("PDFが不正です。A4形式のPDF（10MB以内）を添付してください。");
+  }
+  if (pdfData.length > MAX_QUOTATION_PDF_BYTES) {
+    throw new InvalidQuotationPdfError("PDFが大きすぎます。10MB以内のPDFを添付してください。");
+  }
+  if (!fileName.trim()) {
+    throw new InvalidQuotationPdfError("PDFファイル名が不正です。");
+  }
+}
+
 async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
     // users テーブルと環境変数管理者のFK参照を先に保証する。
@@ -71,6 +111,8 @@ async function getDatabase(): Promise<SqlClient> {
     const db = await getSqlClient("quotations");
     await db.exec(db.dialect === "postgres" ? POSTGRES_SCHEMA : SQLITE_SCHEMA);
     await migrateOwnershipColumns(db, administratorId);
+    await migratePdfColumns(db);
+    await backfillPdfDigests(db);
     // 社名表記を「金井貿易株式会社」へ統一する（旧default・既存DB値を含む）。
     await db.exec(CHECKLIST_COMPANY_NAME_NORMALIZATION);
     return db;
@@ -128,6 +170,10 @@ const SQLITE_SCHEMA = `
       payload_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      pdf_data BLOB,
+      pdf_file_name TEXT,
+      pdf_uploaded_at TEXT,
+      pdf_sha256 TEXT,
       created_by INTEGER NOT NULL REFERENCES users(id),
       updated_by INTEGER REFERENCES users(id)
     );
@@ -178,6 +224,10 @@ const POSTGRES_SCHEMA = `
       payload_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      pdf_data BYTEA,
+      pdf_file_name TEXT,
+      pdf_uploaded_at TEXT,
+      pdf_sha256 TEXT,
       created_by INTEGER NOT NULL REFERENCES users(id),
       updated_by INTEGER REFERENCES users(id)
     );
@@ -210,6 +260,45 @@ async function migrateOwnershipColumns(db: SqlClient, administratorId: number): 
     }
   }
   await db.run("UPDATE quotations SET created_by = ? WHERE created_by IS NULL", [administratorId]);
+}
+
+async function migratePdfColumns(db: SqlClient): Promise<void> {
+  if (db.dialect === "sqlite") {
+    const columns = await db.all<{ name: string }>("PRAGMA table_info(quotations)");
+    const columnNames = new Set(columns.map((column) => column.name));
+    if (!columnNames.has("pdf_data")) {
+      await db.exec("ALTER TABLE quotations ADD COLUMN pdf_data BLOB");
+    }
+    if (!columnNames.has("pdf_file_name")) {
+      await db.exec("ALTER TABLE quotations ADD COLUMN pdf_file_name TEXT");
+    }
+    if (!columnNames.has("pdf_uploaded_at")) {
+      await db.exec("ALTER TABLE quotations ADD COLUMN pdf_uploaded_at TEXT");
+    }
+    if (!columnNames.has("pdf_sha256")) {
+      await db.exec("ALTER TABLE quotations ADD COLUMN pdf_sha256 TEXT");
+    }
+    return;
+  }
+
+  // PostgreSQL supports idempotent additions for databases created before PDF storage.
+  await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS pdf_data BYTEA");
+  await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS pdf_file_name TEXT");
+  await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS pdf_uploaded_at TEXT");
+  await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS pdf_sha256 TEXT");
+}
+
+async function backfillPdfDigests(db: SqlClient): Promise<void> {
+  const rows = await db.all<{ id: number; pdf_data: Uint8Array }>(
+    "SELECT id, pdf_data FROM quotations WHERE pdf_data IS NOT NULL AND (pdf_sha256 IS NULL OR pdf_sha256 = '')",
+  );
+  for (const row of rows) {
+    if (!row.pdf_data?.byteLength) continue;
+    await db.run("UPDATE quotations SET pdf_sha256 = ? WHERE id = ?", [
+      sha256Pdf(Buffer.from(row.pdf_data)),
+      row.id,
+    ]);
+  }
 }
 
 function isNonNegativeNumber(value: unknown): value is string {
@@ -346,6 +435,136 @@ export async function saveQuotation(
     throw new QuotationOwnershipConflictError();
   }
   return record;
+}
+
+export interface IssuedQuotationResult {
+  record: QuotationRecord;
+  created: boolean;
+  pdfSha256: string;
+}
+
+export async function saveIssuedQuotation(
+  value: QuotationRecordInput,
+  actorId: number,
+  actorRole: UserRole,
+  pdfData: Buffer,
+  fileName: string,
+  checklistSnapshot: CalculationChecklistSnapshot | null,
+): Promise<IssuedQuotationResult> {
+  validateCanonicalPdf(pdfData, fileName);
+  const db = await getDatabase();
+  const pdfSha256 = sha256Pdf(pdfData);
+  const payloadJson = JSON.stringify(value.payload);
+  return db.transaction(async (tx) => {
+    if (tx.dialect === "postgres") {
+      await tx.run("SELECT pg_advisory_xact_lock(hashtext(?))", [value.quotationNumber]);
+    }
+    const now = new Date().toISOString();
+    const existing = await tx.get<{ id: number; created_by: number; has_pdf: number | boolean }>(
+      "SELECT id, created_by, (pdf_data IS NOT NULL) AS has_pdf FROM quotations WHERE quotation_number = ?",
+      [value.quotationNumber],
+    );
+    const created = !existing;
+    if (existing && actorRole !== "admin" && Number(existing.created_by) !== actorId) {
+      throw new QuotationOwnershipConflictError();
+    }
+    if (existing && existing.has_pdf) {
+      throw new QuotationCanonicalPdfExistsError();
+    }
+
+    let recordId: number;
+    if (existing) {
+      const result = await tx.run(`
+        UPDATE quotations SET
+          status=?, issue_date=?, valid_until=?, customer_name=?, customer_contact=?, product_name=?,
+          size_summary=?, quantity=?, filling_cost_per_piece=?, film_cost_per_piece=?, film_meter_price=?,
+          film_order_length_m=?, target_margin=?, tax_rate_percent=?, price_per_piece=?, subtotal=?, tax=?,
+          grand_total=?, delivery_date=?, payment_terms=?, notes=?, calculation_version=?, result_hash=?,
+          payload_json=?, updated_at=?, updated_by=?
+        WHERE id=? AND pdf_data IS NULL
+      `, [
+        value.status, value.issueDate, value.validUntil, value.customerName, value.customerContact,
+        value.productName, value.sizeSummary, value.quantity, value.fillingCostPerPiece, value.filmCostPerPiece,
+        value.filmMeterPrice, value.filmOrderLengthM, value.targetMargin, value.taxRatePercent,
+        value.pricePerPiece, value.subtotal, value.tax, value.grandTotal, value.deliveryDate, value.paymentTerms,
+        value.notes, value.calculationVersion, value.resultHash, payloadJson, now, actorId, existing.id,
+      ]);
+      if (result.changes !== 1) throw new QuotationCanonicalPdfExistsError();
+      recordId = existing.id;
+    } else {
+      const insertSql = `
+        INSERT INTO quotations (
+          quotation_number,status,issue_date,valid_until,customer_name,customer_contact,product_name,size_summary,
+          quantity,filling_cost_per_piece,film_cost_per_piece,film_meter_price,film_order_length_m,target_margin,
+          tax_rate_percent,price_per_piece,subtotal,tax,grand_total,delivery_date,payment_terms,notes,
+          calculation_version,result_hash,payload_json,created_at,updated_at,created_by,updated_by
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)${tx.dialect === "postgres" ? " RETURNING id" : ""}
+      `;
+      const insertionValues = [
+        value.quotationNumber,
+        value.status,
+        value.issueDate,
+        value.validUntil,
+        value.customerName,
+        value.customerContact,
+        value.productName,
+        value.sizeSummary,
+        value.quantity,
+        value.fillingCostPerPiece,
+        value.filmCostPerPiece,
+        value.filmMeterPrice,
+        value.filmOrderLengthM,
+        value.targetMargin,
+        value.taxRatePercent,
+        value.pricePerPiece,
+        value.subtotal,
+        value.tax,
+        value.grandTotal,
+        value.deliveryDate,
+        value.paymentTerms,
+        value.notes,
+        value.calculationVersion,
+        value.resultHash,
+        payloadJson,
+        now,
+        now,
+        actorId,
+        actorId,
+      ];
+      if (tx.dialect === "postgres") {
+        const inserted = await tx.get<{ id: number }>(insertSql, insertionValues);
+        if (!inserted?.id) throw new Error("quotation_save_failed");
+        recordId = inserted.id;
+      } else {
+        const result = await tx.run(insertSql, insertionValues);
+        if (result.lastInsertRowid == null) throw new Error("quotation_save_failed");
+        recordId = result.lastInsertRowid;
+      }
+    }
+
+    if (checklistSnapshot) {
+      const provisionalRecord: QuotationRecord = {
+        ...value,
+        id: recordId,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: { id: actorId, email: "", name: "" },
+        updatedBy: null,
+      };
+      await createChecklistsInTransaction(tx, provisionalRecord, checklistSnapshot);
+    }
+
+    const canonicalResult = await tx.run(`
+      UPDATE quotations
+      SET pdf_data=?, pdf_file_name=?, pdf_uploaded_at=?, pdf_sha256=?
+      WHERE id=? AND pdf_data IS NULL
+    `, [pdfData, fileName, now, pdfSha256, recordId]);
+    if (canonicalResult.changes !== 1) throw new QuotationCanonicalPdfExistsError();
+
+    const saved = await selectRecordById(tx, recordId);
+    if (!saved) throw new Error("quotation_save_failed");
+    return { record: mapRow(saved), created, pdfSha256 };
+  });
 }
 
 export async function getDatabaseForTest(): Promise<SqlClient> {
@@ -486,8 +705,11 @@ function calculateChecklistProgress(items: import("./calculation-checklist").Che
   };
 }
 
-export async function createChecklistsForQuotation(record: QuotationRecord, snapshot: CalculationChecklistSnapshot): Promise<ChecklistRecord[]> {
-  const db = await getDatabase();
+async function createChecklistsInTransaction(
+  db: SqlClient,
+  record: QuotationRecord,
+  snapshot: CalculationChecklistSnapshot,
+): Promise<ChecklistRecord[]> {
   const existing = await db.all<{ checklist_version: string; snapshot_json: string }>(
     "SELECT checklist_version,snapshot_json FROM quotation_checklists WHERE quotation_id = ?",
     [record.id],
@@ -533,6 +755,14 @@ export async function createChecklistsForQuotation(record: QuotationRecord, snap
     [record.id],
   );
   return rows.map(mapChecklistRow);
+}
+
+export async function createChecklistsForQuotation(
+  record: QuotationRecord,
+  snapshot: CalculationChecklistSnapshot,
+): Promise<ChecklistRecord[]> {
+  const db = await getDatabase();
+  return createChecklistsInTransaction(db, record, snapshot);
 }
 
 export async function createLegacyChecklistsForQuotation(
@@ -631,20 +861,29 @@ export async function updateChecklistItem(
 }
 
 export async function saveQuotationPdf(quotationId: number, pdfData: Buffer, fileName: string): Promise<boolean> {
+  if (!Number.isInteger(quotationId) || quotationId <= 0) return false;
+  validateCanonicalPdf(pdfData, fileName);
   const db = await getDatabase();
+  const pdfSha256 = sha256Pdf(pdfData);
   const result = await db.run(
-    "UPDATE quotations SET pdf_data = ?, pdf_file_name = ?, pdf_uploaded_at = ? WHERE id = ?",
-    [pdfData, fileName, new Date().toISOString(), quotationId],
+    "UPDATE quotations SET pdf_data = ?, pdf_file_name = ?, pdf_uploaded_at = ?, pdf_sha256 = ? WHERE id = ? AND pdf_data IS NULL",
+    [pdfData, fileName, new Date().toISOString(), pdfSha256, quotationId],
   );
   return result.changes > 0;
 }
 
 export async function getQuotationPdf(quotationId: number): Promise<{ data: Buffer; fileName: string } | null> {
+  if (!Number.isInteger(quotationId) || quotationId <= 0) return null;
   const db = await getDatabase();
-  const row = await db.get<{ pdf_data: Buffer; pdf_file_name: string }>(
-    "SELECT pdf_data, pdf_file_name FROM quotations WHERE id = ? AND pdf_data IS NOT NULL",
+  const row = await db.get<{ pdf_data: Uint8Array; pdf_file_name: string | null; pdf_sha256: string | null }>(
+    "SELECT pdf_data, pdf_file_name, pdf_sha256 FROM quotations WHERE id = ? AND pdf_data IS NOT NULL",
     [quotationId],
   );
-  if (!row?.pdf_data) return null;
-  return { data: row.pdf_data, fileName: row.pdf_file_name };
+  if (!row?.pdf_data || row.pdf_data.byteLength === 0) return null;
+  const data = Buffer.from(row.pdf_data);
+  const expectedDigest = row.pdf_sha256?.trim();
+  if (!expectedDigest || sha256Pdf(data) !== expectedDigest) {
+    throw new QuotationPdfIntegrityError();
+  }
+  return { data, fileName: row.pdf_file_name ?? "" };
 }

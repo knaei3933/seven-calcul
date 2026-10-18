@@ -7,6 +7,7 @@ import { CALCULATION_VERSION, sizeMaster } from "@/lib/constants";
 import { buildFilmQuotationFromRecord, kaneiTrade } from "@/lib/film-quotation";
 import { D, Decimal } from "@/lib/decimal";
 import { analyzeQuotation, filmCompositionOf, printingMethodOf } from "@/lib/quotation-history";
+import { fileNameFromContentDisposition } from "@/lib/content-disposition";
 import {
   DEFAULT_FILM_COMPOSITION,
   QUOTATION_RESTORE_KEY,
@@ -248,7 +249,14 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
 
       {selectedRecord ? (
         <>
-          <QuotationDetailModal record={selectedRecord} onClose={() => setSelectedId(null)} onStatusChange={(record, nextStatus) => { void changeStatus(record, nextStatus); }} onSendEmail={(record) => { void sendQuotationEmail(record); }} sendingEmail={sendingEmail} />
+          <QuotationDetailModal
+            key={selectedRecord.id}
+            record={selectedRecord}
+            onClose={() => setSelectedId(null)}
+            onStatusChange={(record, nextStatus) => { void changeStatus(record, nextStatus); }}
+            onSendEmail={(record) => { void sendQuotationEmail(record); }}
+            sendingEmail={sendingEmail}
+          />
           {emailMessage ? <p className="help" role="status" data-testid="email-message" style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 999, background: "white", padding: "8px 16px", borderRadius: 8, border: "1px solid #cbd5e1" }}>{emailMessage}</p> : null}
         </>
       ) : null}
@@ -256,9 +264,35 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   );
 }
 
+class StoredQuotationPdfUnavailableError extends Error {}
+
+async function fetchStoredQuotationPdf(
+  recordId: number,
+  fallbackFileName: string,
+): Promise<{ blob: Blob; fileName: string }> {
+  const response = await fetch(`/api/quotations/${recordId}/pdf`, { cache: "no-store" });
+  if (response.status === 404) {
+    throw new StoredQuotationPdfUnavailableError("見積書PDFが見つかりません。");
+  }
+  if (!response.ok) throw new Error("pdf_request_failed");
+  const blob = await response.blob();
+  if (blob.size === 0) throw new Error("empty_pdf");
+  return {
+    blob,
+    fileName: fileNameFromContentDisposition(
+      response.headers.get("Content-Disposition") ?? "",
+      fallbackFileName,
+    ),
+  };
+}
+
 function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, sendingEmail }: { record: QuotationRecord; onClose: () => void; onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void; onSendEmail: (record: QuotationRecord) => void; sendingEmail: boolean }) {
   const [detailTab, setDetailTab] = useState<"document" | "film" | "data">("document");
-  const [savedPdfUrl, setSavedPdfUrl] = useState<string | null>(null);
+  const [storedPdf, setStoredPdf] = useState<{ url: string; blob: Blob; fileName: string } | null>(null);
+  const [storedPdfStatus, setStoredPdfStatus] = useState<"loading" | "available" | "unavailable">("loading");
+  const [storedPdfError, setStoredPdfError] = useState("");
+  const [storedPdfPopupBlocked, setStoredPdfPopupBlocked] = useState(false);
+  const storedPdfBusyRef = useRef(false);
   const analysis = analyzeQuotation(record);
   // 발행 시 자동 생성된 필름 견적서(payload 저장분)를 우선 사용, 없으면 조회 시 생성
   const storedFilmQuotation = record.payload.filmQuotation as import("@/lib/film-quotation").FilmQuotationData | undefined;
@@ -359,9 +393,28 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
 
   useEffect(() => {
     if (!record.id) return;
-    fetch(`/api/quotations/${record.id}/pdf`)
-      .then((res) => { if (res.ok) setSavedPdfUrl(`/api/quotations/${record.id}/pdf`); })
-      .catch(() => {});
+    let active = true;
+    let objectUrl: string | null = null;
+    const loadStoredPdf = async () => {
+      try {
+        const pdf = await fetchStoredQuotationPdf(record.id, `${record.quotationNumber}.pdf`);
+        if (!active) return;
+        objectUrl = URL.createObjectURL(pdf.blob);
+        setStoredPdf({
+          blob: pdf.blob,
+          fileName: pdf.fileName,
+          url: objectUrl,
+        });
+        setStoredPdfStatus("available");
+      } catch (error) {
+        if (!active) return;
+        setStoredPdfStatus("unavailable");
+        setStoredPdfError(error instanceof StoredQuotationPdfUnavailableError
+          ? error.message
+          : "見積書PDFを取得できませんでした。");
+      }
+    };
+    void loadStoredPdf();
     const fitForPrint = () => {
       for (const content of fitContentRefs.current) {
         if (!content) continue;
@@ -388,11 +441,60 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
     window.addEventListener("afterprint", resetFit);
     printMedia.addEventListener("change", handleMediaChange);
     return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
       window.removeEventListener("beforeprint", fitForPrint);
       window.removeEventListener("afterprint", resetFit);
       printMedia.removeEventListener("change", handleMediaChange);
     };
-  }, [record.id]);
+  }, [record.id, record.quotationNumber]);
+
+  const loadStoredQuotationPdf = async (): Promise<{ blob: Blob; fileName: string } | null> => {
+    if (storedPdfBusyRef.current) return null;
+    storedPdfBusyRef.current = true;
+    setStoredPdfError("");
+    try {
+      return await fetchStoredQuotationPdf(record.id, `${record.quotationNumber}.pdf`);
+    } catch (error) {
+      setStoredPdfStatus("unavailable");
+      setStoredPdfError(error instanceof StoredQuotationPdfUnavailableError
+        ? error.message
+        : "見積書PDFを取得できませんでした。");
+      return null;
+    } finally {
+      storedPdfBusyRef.current = false;
+    }
+  };
+
+  const downloadStoredPdf = async () => {
+    const pdf = await loadStoredQuotationPdf();
+    if (!pdf) return;
+    const objectUrl = URL.createObjectURL(pdf.blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = pdf.fileName;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  };
+
+  // Opening the already-fetched blob in a dedicated PDF viewer avoids
+  // window.print() falling back to a page snapshot or another history tab.
+  const printStoredPdf = () => {
+    if (!storedPdf) return;
+    setStoredPdfPopupBlocked(false);
+    // Some browsers return null for successful opens when window features are
+    // supplied. Keep a normal tab and detach opener instead, so a null result
+    // remains a trustworthy popup-block signal.
+    const viewer = window.open(storedPdf.url, "_blank");
+    if (!viewer) {
+      setStoredPdfError("ポップアップがブロックされました。PDFをダウンロードして印刷してください。");
+      setStoredPdfPopupBlocked(true);
+      return;
+    }
+    viewer.opener = null;
+  };
 
   const printCurrentDocument = async () => {
     // ブランド印などのAPI画像は印刷直後に空白になることがあるため、描画完了を待つ。
@@ -434,8 +536,26 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
             <p data-testid="history-film-composition">{record.customerName || "得意先未設定"} / {record.productName} / フィルム構成 {composition || DEFAULT_FILM_COMPOSITION}</p>
           </div>
           <div className="detail-header-actions">
-            <button className="button small" type="button" onClick={() => void printCurrentDocument()} data-testid="detail-print-current">
-              {detailTab === "document" ? "見積書PDF"
+            {detailTab === "document" ? (
+              <button
+                className="button small"
+                type="button"
+                onClick={downloadStoredPdf}
+                data-testid="detail-download-current"
+                disabled={storedPdfStatus !== "available"}
+              >PDFダウンロード</button>
+            ) : null}
+            <button
+              className="button small"
+              type="button"
+              onClick={() => {
+                if (detailTab === "document") printStoredPdf();
+                else void printCurrentDocument();
+              }}
+              data-testid="detail-print-current"
+              disabled={detailTab === "document" && storedPdfStatus !== "available"}
+            >
+              {detailTab === "document" ? "PDFを開いて印刷"
                 : detailTab === "film" ? "フィルム見積書PDF"
                   : "詳細データPDF"}
             </button>
@@ -621,64 +741,24 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
           ) : null}
 
           {detailTab === "document" ? (
-          savedPdfUrl ? (
-            <iframe src={savedPdfUrl} className="history-pdf-frame" title="見積書PDF" style={{ width: "100%", height: "800px", border: "1px solid #d7deea", borderRadius: 8, background: "white" }} />
+          storedPdfPopupBlocked ? (
+            <p className="empty" role="alert" data-testid="stored-quotation-pdf-error">
+              {storedPdfError}
+            </p>
+          ) : null) : null}
+          {detailTab === "document" ? (
+          storedPdf ? (
+            <iframe
+              src={storedPdf.url}
+              className="history-pdf-frame"
+              title="見積書PDF"
+              data-testid="stored-quotation-pdf"
+              style={{ width: "100%", height: "800px", border: "1px solid #d7deea", borderRadius: 8, background: "white" }}
+            />
           ) : (
-            <article className="a4-sheet history-a4" aria-label="見積書A4">
-              <div className="history-a4-fit" ref={(element) => { fitContentRefs.current[0] = element; }}>
-                <header className="sheet-header">
-                  <div className="issuer">
-                    <div className="issuer-logo">
-                      <span className="logo-mark large" aria-hidden="true">7</span>
-                      <div>
-                        <strong>{issuerName}</strong>
-                        <small>{issuerEnglishName}</small>
-                      </div>
-                    </div>
-                    <address>
-                      {issuerRepresentative}<br />
-                      {issuerPostalCode} {issuerAddress}<br />
-                      {issuerTelephone} / {issuerWebsite}
-                    </address>
-                  </div>
-                  <div className="document-title">
-                    <p className="english">QUOTATION</p>
-                    <h2>お見積書</h2>
-                    <dl>
-                      <div><dt>見積番号</dt><dd>{record.quotationNumber}</dd></div>
-                      <div><dt>発行日</dt><dd>{record.issueDate}</dd></div>
-                    </dl>
-                  </div>
-                </header>
-                <section className="recipient-block">
-                  <p className="customer">{record.customerName || "得意先未設定"}</p>
-                  <p>{record.customerContact ? `${record.customerContact} 御中` : "御中"}</p>
-                </section>
-                <section className="price-highlight">
-                  <div><span>お見積単価</span><strong>{formatCurrency(analysis.sellingUnit.toNumber(), 2)}</strong></div>
-                  <div><span>数量</span><strong>{formatNumber(analysis.quantity.toNumber(), 0)}</strong></div>
-                  <div><span>税込合計</span><strong>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</strong></div>
-                </section>
-                <table className="quote-table">
-                  <thead><tr><th>品名・仕様</th><th>単価</th><th>数量</th><th>金額</th></tr></thead>
-                  <tbody>
-                    <tr><td>充填・加工費</td><td>{formatCurrency(analysis.fillingUnit.toNumber(), 2)}</td><td>{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td>{formatCurrency(analysis.fillingAmount.toNumber(), 0)}</td></tr>
-                    <tr><td>フィルム費用</td><td>{analysis.displayedFilmMeterUnit ? formatCurrency(analysis.displayedFilmMeterUnit.toNumber(), 2) : "-"} /m</td><td>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</td><td>{formatCurrency(analysis.filmAmount.toNumber(), 0)}</td></tr>
-                  </tbody>
-                  <tfoot>
-                    <tr><th colSpan={3}>小計</th><td>{formatCurrency(analysis.subtotal.toFixed(0), 0)}</td></tr>
-                    <tr><th colSpan={3}>税込合計</th><td>{formatCurrency(analysis.grandTotal.toFixed(0), 0)}</td></tr>
-                  </tfoot>
-                </table>
-                <section className="terms">
-                  <dl>
-                    <div><dt>納期</dt><dd>{record.deliveryDate || "-"}</dd></div>
-                    <div><dt>お支払条件</dt><dd>{record.paymentTerms || "-"}</dd></div>
-                    <div><dt>見積有効期限</dt><dd>{record.validUntil || "-"}</dd></div>
-                  </dl>
-                </section>
-              </div>
-            </article>
+            <p className="empty" role="alert" data-testid="stored-quotation-pdf-error">
+              {storedPdfStatus === "loading" ? "PDFを読み込んでいます..." : storedPdfError}
+            </p>
           )
           ) : null}
           {detailTab === "data" ? (
@@ -1002,4 +1082,3 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
     </div>
   );
 }
-

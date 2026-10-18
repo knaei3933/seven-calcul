@@ -1,12 +1,47 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import QuotePage from "@/app/quote/quote-client";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
+
+vi.mock("html2pdf.js", () => ({
+  default: vi.fn(),
+}));
+
+const issuancePdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+
+async function mockSuccessfulPdfCapture(): Promise<Mock> {
+  const pdfModule = await import("html2pdf.js") as unknown as { default: Mock };
+  const html2pdf = vi.mocked(pdfModule.default);
+  html2pdf.mockImplementation(() => ({
+    from: () => ({
+      set: () => ({
+        outputPdf: () => Promise.resolve(Object.assign(
+          new Blob([issuancePdfBytes], { type: "application/pdf" }),
+          { arrayBuffer: async () => issuancePdfBytes.buffer },
+        )),
+      }),
+    }),
+  }));
+  return html2pdf;
+}
+
+function atomicIssuanceResponse(record: Record<string, unknown>): Response {
+  return new Response(JSON.stringify({
+    record,
+    created: true,
+    pdf: { saved: true, sha256: "a".repeat(64), size: issuancePdfBytes.byteLength },
+  }), { status: 201, headers: { "Content-Type": "application/json" } });
+}
+
+function issuancePayload(init?: RequestInit): { payload: Record<string, unknown> } & Record<string, unknown> {
+  expect(init?.body).toBeInstanceOf(FormData);
+  return JSON.parse(String((init?.body as FormData).get("payload")));
+}
 
 describe("quotation page stale draft", () => {
   beforeEach(() => {
@@ -128,10 +163,10 @@ describe("quotation page stale draft", () => {
 
   it("stores a manually edited filling unit and its recalculated totals into history", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ record: { id: 71 } }), {
-      status: 201,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(url)).toBe("/api/quotations");
+      return atomicIssuanceResponse({ id: 71, quotationNumber: "S7-MANUAL-EDIT" });
+    });
     vi.stubGlobal("fetch", fetchMock);
     sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
       productSummary: "充填物1",
@@ -164,9 +199,11 @@ describe("quotation page stale draft", () => {
     expect(screen.getByLabelText("充填・加工金額")).toHaveTextContent("900,000");
     expect(screen.getByLabelText("税込合計")).toHaveTextContent("1,237,500");
 
+    await mockSuccessfulPdfCapture();
     await user.click(screen.getByTestId("save-history"));
+    await waitFor(() => expect(screen.getByTestId("issue-success")).toBeVisible());
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const body = issuancePayload(fetchMock.mock.calls[0]?.[1]);
     expect(body.payload.fillingUnitDisplay).toBe("90");
     expect(body.payload.fillingAmountDisplay).toBe("900000");
     expect(body.payload.filmAmountDisplay).toBe("225000");
@@ -179,9 +216,14 @@ describe("quotation page stale draft", () => {
 
   it("carries simulator SKU product names into the quotation and history record", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
-      record: { id: 81, productName: "レモン琺瑯 / 充填物2" },
-    }), { status: 201, headers: { "Content-Type": "application/json" } }));
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(url)).toBe("/api/quotations");
+      return atomicIssuanceResponse({
+        id: 81,
+        quotationNumber: "S7-SKU-NAME",
+        productName: "レモン琺瑯 / 充填物2",
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
     sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
       productSummary: "レモン琺瑯 / 充填物2",
@@ -210,9 +252,11 @@ describe("quotation page stale draft", () => {
     expect(screen.getByTestId("quote-spec")).toHaveTextContent("レモン琺瑯 / 充填物2");
 
     await waitFor(() => expect(screen.getByTestId("save-history")).toBeEnabled());
+    await mockSuccessfulPdfCapture();
     await user.click(screen.getByTestId("save-history"));
+    await waitFor(() => expect(screen.getByTestId("issue-success")).toBeVisible());
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const body = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
+    const body = issuancePayload(fetchMock.mock.calls[0]?.[1]);
     expect(body.productName).toBe("レモン琺瑯 / 充填物2");
     expect(body.payload.skuNames).toEqual(["レモン琺瑯", "充填物2"]);
   });
