@@ -1910,11 +1910,13 @@ export default function PrintableQuotationPage({
           </section>
 
           <footer className="sheet-footer">
-            <p><EditableText value={form.footerNote} label="フッター文言" multiline onCommit={(next) => update("footerNote", next)} /></p>
-            <div className="footer-contact" data-testid="issuer-contact">
-              <strong>{issuerContact.contactName || issuerContact.companyName}</strong>
-              <span>{issuerContact.email}</span>
-              <span>{issuerContact.telephone}</span>
+            <div className="footer-top">
+              <p><EditableText value={form.footerNote} label="フッター文言" multiline onCommit={(next) => update("footerNote", next)} /></p>
+              <div className="footer-contact" data-testid="issuer-contact">
+                <span>{issuerContact.companyName}</span>
+                <span>{issuerContact.email}</span>
+                <span>{issuerContact.telephone}</span>
+              </div>
             </div>
             <div className="approval">
               <span><EditableText value={form.issuerName} label="承認発行者名" onCommit={(next) => update("issuerName", next.trim())} /></span>

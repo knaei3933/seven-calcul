@@ -365,7 +365,7 @@ it("renders issuer contact details for the authenticated issuing company", () =>
   />);
 
   const contact = screen.getByTestId("issuer-contact");
-  expect(contact).toHaveTextContent("Kim Admin");
+  expect(contact).toHaveTextContent("金井貿易株式会社");
   expect(contact).toHaveTextContent("kim@kanei-trade.co.jp");
   expect(contact).toHaveTextContent("TEL 050-3613-9673");
 });
