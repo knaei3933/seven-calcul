@@ -769,6 +769,13 @@ export default function PrintableQuotationPage({
       const savedPurchaseOrder = purchaseOrder
         ? {
           ...purchaseOrder,
+          filmComposition: form.filmComposition || purchaseOrder.filmComposition,
+          printingMethod: form.printingMethod === "gravure" ? "gravure" : "digital",
+          pouchQuantity: form.quantity,
+          skuOrderDetails: purchaseOrder.skuOrderDetails.map((sku, index) => ({
+            ...sku,
+            name: form.skuNames[index]?.trim() || sku.name,
+          })),
           customMold: D(form.customLotCost).gt(0)
             ? { quantity: form.customQuantity, costYen: form.customLotCost }
             : undefined,

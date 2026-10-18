@@ -1,18 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   FILM_ORDER_STATUSES,
   buildFilmOrderFileName,
+  DEFAULT_FILM_PROOF_EMAIL,
   filmOrderStatusLabels,
+  sampleBulkStatusLabels,
   type FilmOrderStatus,
   type FilmOrderView,
 } from "@/lib/film-order-shared";
 import {
+  buyerDomainOf,
   isKaneiTradeUser,
   isSevenChemicalUser,
 } from "@/lib/film-order-access";
 import { D } from "@/lib/decimal";
+import { filmQuotationNumberFor } from "@/lib/film-quotation";
 
 interface MailResult {
   to: string;
@@ -40,36 +45,57 @@ const STATUS_HINTS: Record<FilmOrderStatus, string> = {
   final_approved: "ワークフロー完了です。",
 };
 
-const STATUS_STEP_ROLE: Record<FilmOrderStatus, "seven" | "kanei" | "none"> = {
-  pending: "seven",
-  ordered: "seven",
-  receiving_registered: "kanei",
-  proof_registered: "seven",
-  re_proof_requested: "kanei",
-  final_approved: "none",
-};
+type FilmOrderCompany = "seven" | "kanei";
+
+function buyerCompanyOf(order: Pick<FilmOrderView, "buyer_domain" | "created_by_email">): FilmOrderCompany {
+  if (order.buyer_domain === "727.co.jp") return "seven";
+  if (order.buyer_domain === "kanei-trade.co.jp") return "kanei";
+  return buyerDomainOf(order.created_by_email);
+}
+
+function companyLabel(company: FilmOrderCompany): string {
+  return company === "seven" ? "セブン化学" : "金井貿易";
+}
+
+function canOperate(company: FilmOrderCompany, isSeven: boolean, isKanei: boolean): boolean {
+  return company === "seven" ? isSeven : isKanei;
+}
+
+export function filmOrderStepRole(
+  order: Pick<FilmOrderView, "buyer_domain" | "created_by_email">,
+  status: FilmOrderStatus,
+): FilmOrderCompany | "none" {
+  const buyer = buyerCompanyOf(order);
+  if (status === "pending" || status === "ordered" || status === "proof_registered") return buyer;
+  if (status === "receiving_registered" || status === "re_proof_requested") return "kanei";
+  return "none";
+}
 
 type NextAction =
   | { kind: "run"; label: string; body: Record<string, unknown>; ok: string }
   | { kind: "form"; label: string; form: "receiving" | "proof" }
   | { kind: "none"; label: string };
 
-function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: boolean): NextAction {
+export function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: boolean): NextAction {
+  const buyer = buyerCompanyOf(order);
+  const buyerCanOperate = canOperate(buyer, isSeven, isKanei);
   switch (order.status) {
     case "pending":
-      return { kind: "run", label: "発注書送信済みにする", body: { action: "mark-ordered" }, ok: "発注書送信済みにしました。" };
+      return buyerCanOperate
+        ? { kind: "run", label: "発注書送信済みにする", body: { action: "mark-ordered" }, ok: "発注書送信済みにしました。" }
+        : { kind: "none", label: `${companyLabel(buyer)}の発注書送信待ち` };
     case "ordered":
-      return isSeven
+      return buyerCanOperate
         ? { kind: "form", label: "入稿データを登録", form: "receiving" }
-        : { kind: "none", label: "セブン化学の入稿登録待ち" };
+        : { kind: "none", label: `${companyLabel(buyer)}の入稿登録待ち` };
     case "receiving_registered":
       return isKanei
         ? { kind: "form", label: "校正データを登録", form: "proof" }
         : { kind: "none", label: "金井貿易の校正データ登録待ち" };
     case "proof_registered":
-      return isSeven
+      return buyerCanOperate
         ? { kind: "run", label: "校正を承認する", body: { action: "approve" }, ok: "校正を承認しました。" }
-        : { kind: "none", label: "セブン化学の承認待ち" };
+        : { kind: "none", label: `${companyLabel(buyer)}の承認待ち` };
     case "re_proof_requested":
       return isKanei
         ? { kind: "form", label: "再校正データを登録", form: "proof" }
@@ -325,7 +351,7 @@ function OrderCard({
         </div>
       </div>
 
-      <OrderSteps status={order.status} reProofCount={order.re_proof_count} poSent={Boolean(order.po_sent_at)} etaDate={order.eta_date} />
+      <OrderSteps order={order} status={order.status} reProofCount={order.re_proof_count} poSent={Boolean(order.po_sent_at)} etaDate={order.eta_date} />
       {order.eta_date ? (
         <div className="film-order-eta-row">
           <span className="film-order-eta-badge">納期見込み {order.eta_date}</span>
@@ -362,6 +388,8 @@ function OrderCard({
               {isKanei ? <SupplierEditor order={order} busy={busy} onSave={(body) => run(body, "仕入先情報を保存しました。")} /> : null}
             </div>
           </div>
+
+          <SampleBulkPanel order={order} isKanei={isKanei} busy={busy} onRun={run} />
 
           <section className="film-order-section">
             <h3>入稿・校正データ履歴</h3>
@@ -405,11 +433,13 @@ function OrderCard({
 }
 
 function OrderSteps({
+  order,
   status,
   reProofCount,
   poSent,
   etaDate,
 }: {
+  order: FilmOrderView;
   status: FilmOrderStatus;
   reProofCount: number;
   poSent: boolean;
@@ -419,7 +449,7 @@ function OrderSteps({
   const activeIndex = status === "re_proof_requested"
     ? STEP_DEFS.findIndex((step) => step.key === "proof_registered")
     : STEP_DEFS.findIndex((step) => step.key === effective);
-  const nextRole = STATUS_STEP_ROLE[status];
+  const nextRole = filmOrderStepRole(order, status);
   return (
     <div className="film-order-steps" aria-label="進捗">
       {STEP_DEFS.map((step, index) => (
@@ -478,7 +508,7 @@ function NextStepPanel({
         <div className="next-step-wait">
           <p>{next.label}</p>
           <button className="button small" type="button" disabled title="担当部署のみ操作できます">
-            {STATUS_STEP_ROLE[order.status] === "seven" ? "入稿・承認操作（セブン化学）" : "校正データ操作（金井貿易）"}
+            {filmOrderStepRole(order, order.status) === "seven" ? "入稿・承認操作（セブン化学）" : "校正データ操作（金井貿易）"}
           </button>
         </div>
       ) : null}
@@ -497,7 +527,7 @@ function NextStepPanel({
             void onRun({ action: "register-receiving", aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note }, "入稿データを登録し、デザイン宛てに連絡しました。")}
         />
       ) : null}
-      {order.status === "receiving_registered" && isSeven ? (
+      {order.status === "receiving_registered" && buyerCompanyOf(order) === "seven" && isSeven ? (
         <details className="film-order-additional">
           <summary>入稿データを追加する</summary>
           <FileActionForm
@@ -535,7 +565,7 @@ function NextStepPanel({
           />
         </div>
       ) : null}
-      {order.status === "proof_registered" && isSeven ? (
+      {order.status === "proof_registered" && canOperate(buyerCompanyOf(order), isSeven, isKanei) ? (
         <div className="film-order-inline-actions">
           {(() => {
             const proofs = order.files.filter((f) => f.category === "proof").sort((a, b) => b.version - a.version);
@@ -597,17 +627,29 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
   const moldTotal = po?.customMold ? D(po.customMold.costYen) : D(0);
   const orderTotal = filmTotal.plus(copperTotal).plus(moldTotal);
   const yen = (value: ReturnType<typeof D>) => `￥${Number(value.toFixed(0)).toLocaleString("ja-JP")}`;
+  const filmQuotationNumber = filmQuotationNumberFor(order.quotation_number, order.created_at);
   return (
     <section className="film-order-section film-order-sheet" aria-label="発注内容">
       <div className="no-print film-order-sheet-head">
         <h3>発注内容（フィルム仕様）</h3>
-        <button className="button secondary small" type="button" onClick={() => window.print()}>発注書を印刷</button>
+        <div className="film-order-sheet-actions">
+          <Link
+            className="button secondary small"
+            href={`/history?record=${order.quotation_id}&tab=film`}
+            target="_blank"
+            data-testid="open-film-quotation"
+          >
+            フィルム見積書
+          </Link>
+          <button className="button secondary small" type="button" onClick={() => window.print()}>発注書を印刷</button>
+        </div>
       </div>
       <div className="film-order-sheet-body">
         <h2>フィルム発注書</h2>
         <dl>
           <div><dt>発注番号</dt><dd>{order.order_number}</dd></div>
           <div><dt>見積番号</dt><dd>{order.quotation_number}</dd></div>
+          <div><dt>フィルム見積番号</dt><dd>{filmQuotationNumber}</dd></div>
           <div><dt>商品名</dt><dd>{order.product_name || "-"}</dd></div>
           <div><dt>印刷方式</dt><dd>{order.printing_method === "gravure" ? "グラビア印刷" : order.printing_method === "digital" ? "デジタル印刷" : "-"}</dd></div>
           <div><dt>フィルム構成</dt><dd>{order.film_composition || "-"}</dd></div>
@@ -648,6 +690,128 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
   );
 }
 
+function SampleBulkPanel({
+  order,
+  isKanei,
+  busy,
+  onRun,
+}: {
+  order: FilmOrderView;
+  isKanei: boolean;
+  busy: boolean;
+  onRun: (body: Record<string, unknown>, ok: string) => Promise<void>;
+}) {
+  const bulk = order.sampleBulk;
+  const ml = (value: string | null | undefined) => value
+    ? `${Number(value).toLocaleString("ja-JP")}ml`
+    : "-";
+  return (
+    <section className="film-order-section" aria-label="バルクサンプル管理" data-testid="sample-bulk-panel">
+      <h3>バルクサンプル管理</h3>
+      <div className="film-order-columns">
+        <dl>
+          <div><dt>状態</dt><dd data-testid="sample-bulk-status">{sampleBulkStatusLabels[bulk.status]}</dd></div>
+          <div><dt>依頼量</dt><dd>{ml(bulk.requiredMl)}</dd></div>
+          <div><dt>受領量</dt><dd>{ml(bulk.receivedMl)}</dd></div>
+          {bulk.adjustedMl ? <div><dt>変更希望量</dt><dd>{ml(bulk.adjustedMl)}</dd></div> : null}
+          <div><dt>送付先</dt><dd>{bulk.recipientName}<br />{bulk.recipientPostalCode} {bulk.recipientAddress}</dd></div>
+          {bulk.adjustmentReason ? <div><dt>変更理由</dt><dd>{bulk.adjustmentReason}</dd></div> : null}
+        </dl>
+
+        <div className="film-order-inline-actions">
+          {bulk.status === "pending" && isKanei ? (
+            <SampleBulkRequestForm busy={busy} onSubmit={(note) => void onRun({ action: "request-sample-bulk", note }, "バルクサンプル送付依頼を送信しました。")} />
+          ) : null}
+
+          {(bulk.status === "requested" || bulk.status === "adjustment_requested") && isKanei ? (
+            <SampleBulkReceiveForm
+              busy={busy}
+              expectedMl={bulk.adjustedMl ?? bulk.requiredMl}
+              onSubmit={(receivedMl, note) => void onRun({ action: "register-sample-bulk", receivedMl, note }, "バルクサンプルを受領登録しました。")}
+            />
+          ) : null}
+
+          {bulk.status === "received" && isKanei ? (
+            <>
+              <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "confirm-sample-bulk" }, "バルク量を確認しました。")}>
+                数量OKとして確認
+              </button>
+              <SampleBulkAdjustmentForm
+                busy={busy}
+                receivedMl={bulk.receivedMl}
+                onSubmit={(adjustedMl, reason) => void onRun({ action: "request-sample-bulk-adjustment", adjustedMl, reason }, "バルク量変更依頼を送信しました。")}
+              />
+            </>
+          ) : null}
+
+          {bulk.status === "confirmed" ? <p className="film-order-final">バルク量は確認済みです。</p> : null}
+          {bulk.status === "not_required" ? <p className="film-order-final">この案件はバルク支給が不要です。</p> : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SampleBulkRequestForm({ busy, onSubmit }: { busy: boolean; onSubmit: (note: string) => void }) {
+  const [note, setNote] = useState("");
+  return (
+    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(note.trim()); }}>
+      <label>依頼メモ（任意）
+        <textarea value={note} rows={2} onChange={(event) => setNote(event.target.value)} />
+      </label>
+      <button className="button" type="submit" disabled={busy}>{busy ? "送信中..." : "バルク送付を依頼"}</button>
+    </form>
+  );
+}
+
+function SampleBulkReceiveForm({
+  busy,
+  expectedMl,
+  onSubmit,
+}: {
+  busy: boolean;
+  expectedMl: string;
+  onSubmit: (receivedMl: string, note: string) => void;
+}) {
+  const [receivedMl, setReceivedMl] = useState(expectedMl);
+  const [note, setNote] = useState("");
+  return (
+    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(receivedMl.trim(), note.trim()); }}>
+      <label>受領量 (ml)
+        <input value={receivedMl} inputMode="decimal" onChange={(event) => setReceivedMl(event.target.value)} required />
+      </label>
+      <label>受領メモ（任意）
+        <textarea value={note} rows={2} onChange={(event) => setNote(event.target.value)} />
+      </label>
+      <button className="button" type="submit" disabled={busy}>{busy ? "登録中..." : "受領を登録"}</button>
+    </form>
+  );
+}
+
+function SampleBulkAdjustmentForm({
+  busy,
+  receivedMl,
+  onSubmit,
+}: {
+  busy: boolean;
+  receivedMl: string | null;
+  onSubmit: (adjustedMl: string, reason: string) => void;
+}) {
+  const [adjustedMl, setAdjustedMl] = useState(receivedMl ?? "");
+  const [reason, setReason] = useState("");
+  return (
+    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(adjustedMl.trim(), reason.trim()); }}>
+      <label>変更希望量 (ml)
+        <input value={adjustedMl} inputMode="decimal" onChange={(event) => setAdjustedMl(event.target.value)} required />
+      </label>
+      <label>変更理由
+        <textarea value={reason} rows={2} onChange={(event) => setReason(event.target.value)} required />
+      </label>
+      <button className="button secondary" type="submit" disabled={busy}>{busy ? "送信中..." : "変更依頼を送信"}</button>
+    </form>
+  );
+}
+
 function openPreview(url: string, fileName: string): void {
   const fileId = url.split("/d/")[1]?.split("/")[0];
   if (!fileId) return;
@@ -660,7 +824,12 @@ function isPreviewable(fileName: string): boolean {
 
 function SupplierEditor({ order, busy, onSave }: { order: FilmOrderView; busy: boolean; onSave: (body: Record<string, unknown>) => void }) {
   const [name, setName] = useState(order.supplier_name);
-  const [email, setEmail] = useState(order.supplier_email);
+  // 旧データは見積作成者メールを初期値として持つため、未編集の初期値だけ新しい既定値に置き換える。
+  const [email, setEmail] = useState(
+    order.supplier_email && order.supplier_email !== order.seven_contact_email
+      ? order.supplier_email
+      : DEFAULT_FILM_PROOF_EMAIL,
+  );
   return (
     <section className="film-order-section">
       <h3>仕入先・校正担当</h3>

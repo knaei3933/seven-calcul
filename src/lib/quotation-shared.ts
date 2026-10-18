@@ -6,6 +6,13 @@ export type QuotationStatus = "draft" | "sent" | "approved" | "rejected" | "expi
 
 export const quotationStatuses: QuotationStatus[] = ["draft", "sent", "approved", "rejected", "expired"];
 
+export interface QuotationApprovalSnapshot {
+  approvedAt: string;
+  approvedBy: UserSummary | null;
+  customerIpHash?: string | null;
+  userAgent?: string | null;
+}
+
 export interface QuotationRecordInput {
   quotationNumber: string;
   status: QuotationStatus;
@@ -40,6 +47,8 @@ export interface QuotationRecord extends QuotationRecordInput {
   updatedAt: string;
   createdBy: UserSummary;
   updatedBy: UserSummary | null;
+  internalApproval: QuotationApprovalSnapshot | null;
+  customerApproval: QuotationApprovalSnapshot | null;
 }
 
 export interface UserSummary {

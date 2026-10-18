@@ -15,7 +15,12 @@ const { GET: getQuotation } = await import("@/app/api/quotations/[id]/route");
 const { PATCH: patchQuotation } = await import("@/app/api/quotations/[id]/route");
 const { DELETE: deleteQuotation } = await import("@/app/api/quotations/[id]/route");
 const { createUser } = await import("@/lib/auth-store");
-const { saveQuotation } = await import("@/lib/quotation-store");
+const {
+  approveQuotationGate,
+  saveQuotation,
+  updateQuotationStatus,
+} = await import("@/lib/quotation-store");
+const { syncFilmOrdersFromQuotations } = await import("@/lib/film-orders");
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
@@ -102,18 +107,22 @@ describe("quotation ownership permissions", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status: "sent" }),
     }, ownerToken), context);
-    expect(ownerPatch.status).toBe(200);
-    const payload = await ownerPatch.json();
-    expect(payload.record.status).toBe("sent");
-    expect(payload.record.createdBy.id).toBe(owner.id);
-    expect(payload.record.updatedBy.id).toBe(owner.id);
+    expect(ownerPatch.status).toBe(409);
+    await expect(ownerPatch.json()).resolves.toEqual({ error: "invalid_status_transition" });
 
     const adminPatch = await patchQuotation(request("http://localhost/api/quotations/1", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status: "approved" }),
     }, adminToken), context);
-    expect(adminPatch.status).toBe(200);
+    expect(adminPatch.status).toBe(409);
+
+    // Send and customer-approval gates are tested separately; establish approved
+    // state to verify approved quotations remain deletion-protected.
+    await approveQuotationGate(record.id, "internal", owner.id);
+    await updateQuotationStatus(record.id, "sent", owner.id);
+    await approveQuotationGate(record.id, "customerApproval", owner.id);
+    await syncFilmOrdersFromQuotations(owner.email);
 
     const readerDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, readerToken), context);
     expect(readerDelete.status).toBe(403);

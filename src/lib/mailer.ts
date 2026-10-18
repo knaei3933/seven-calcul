@@ -1,3 +1,5 @@
+import { resolveMailRoute } from "./mail-routing";
+
 export interface MailInput {
   to: string;
   subject: string;
@@ -10,6 +12,9 @@ export interface MailSendResult {
   dryRun: boolean;
   messageId?: string;
   error?: string;
+  text?: string;
+  requestedTo?: string;
+  recipientOverridden?: boolean;
 }
 
 export function mailDryRun(): boolean {
@@ -21,10 +26,16 @@ export function mailDryRun(): boolean {
  * MAIL_DRY_RUN=true の場合は実際に送信せず、結果オブジェクトだけ返す（テスト用）。
  */
 export async function sendMail(input: MailInput): Promise<MailSendResult> {
-  const base = { to: input.to, subject: input.subject };
+  const route = resolveMailRoute(input.to);
+  const base = {
+    to: route.to,
+    requestedTo: route.overridden ? input.to : undefined,
+    recipientOverridden: route.overridden,
+    subject: input.subject,
+  };
   if (mailDryRun()) {
     console.log("[mail:dry-run]", JSON.stringify(base));
-    return { ...base, dryRun: true };
+    return { ...base, dryRun: true, text: input.text };
   }
   const host = process.env.SMTP_HOST ?? "sv12515.xserver.jp";
   const port = Number(process.env.SMTP_PORT ?? 465);
@@ -43,11 +54,11 @@ export async function sendMail(input: MailInput): Promise<MailSendResult> {
     });
     const info = await transporter.sendMail({
       from: process.env.MAIL_FROM ?? user,
-      to: input.to,
+      to: route.to,
       subject: input.subject,
       text: input.text,
     });
-    return { ...base, dryRun: false, messageId: info.messageId };
+    return { ...base, dryRun: false, messageId: info.messageId, text: input.text };
   } catch (error) {
     return { ...base, dryRun: false, error: error instanceof Error ? error.message : "smtp_error" };
   }

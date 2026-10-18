@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { CALCULATION_VERSION, sizeMaster } from "@/lib/constants";
-import { buildFilmQuotationFromRecord, kaneiTrade } from "@/lib/film-quotation";
+import { buildFilmQuotationFromRecord, filmQuotationNumberFor, kaneiTrade } from "@/lib/film-quotation";
 import { D, Decimal } from "@/lib/decimal";
 import { analyzeQuotation, filmCompositionOf, printingMethodOf } from "@/lib/quotation-history";
 import { fileNameFromContentDisposition } from "@/lib/content-disposition";
@@ -26,6 +27,21 @@ const statusLabels: Record<QuotationStatus, string> = {
   expired: "期限切れ",
 };
 
+type HistoryDetailTab = "document" | "film" | "data";
+type QuotationApprovalGate = "internal" | "customerApproval";
+
+function requestedHistoryRecordId(): number | null {
+  if (typeof window === "undefined") return null;
+  const recordId = Number(new URLSearchParams(window.location.search).get("record"));
+  return Number.isInteger(recordId) && recordId > 0 ? recordId : null;
+}
+
+function requestedHistoryDetailTab(): HistoryDetailTab {
+  if (typeof window === "undefined") return "document";
+  const tab = new URLSearchParams(window.location.search).get("tab");
+  return tab === "film" || tab === "data" ? tab : "document";
+}
+
 export default function HistoryClient({ currentUser }: { currentUser: AuthenticatedUser }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -35,11 +51,13 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   const [creatorOptions, setCreatorOptions] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(requestedHistoryRecordId);
+  const [initialDetailTab, setInitialDetailTab] = useState<HistoryDetailTab>(requestedHistoryDetailTab);
   const requestOrder = useRef(0);
   const selectedRecord = records.find((record) => record.id === selectedId) ?? null;
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailMessage, setEmailMessage] = useState("");
+  const [approvingGateId, setApprovingGateId] = useState<number | null>(null);
 
   const load = useCallback(async (search: string, statusFilter: string, creatorFilter: string) => {
     const order = ++requestOrder.current;
@@ -102,6 +120,11 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
     router.push("/quote");
   };
 
+  const openDetail = (recordId: number, tab: HistoryDetailTab = "document") => {
+    setInitialDetailTab(tab);
+    setSelectedId(recordId);
+  };
+
   const changeStatus = async (record: QuotationRecord, nextStatus: QuotationStatus) => {
     const response = await fetch(`/api/quotations/${record.id}`, {
       method: "PATCH",
@@ -111,6 +134,38 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
     if (response.ok) {
       const payload = await response.json();
       setRecords((old) => old.map((item) => (item.id === record.id ? payload.record as QuotationRecord : item)));
+    }
+  };
+
+  const approveGate = async (record: QuotationRecord, gate: QuotationApprovalGate) => {
+    if (gate === "internal" && currentUser.email.trim().toLowerCase() !== "kim@kanei-trade.co.jp") return;
+    setApprovingGateId(record.id);
+    setEmailMessage("");
+    try {
+      const response = await fetch(`/api/quotations/${record.id}/approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gate }),
+      });
+      const payload = await response.json();
+      if (response.ok) {
+        const approved = payload.record as QuotationRecord;
+        setRecords((old) => old.map((item) => (item.id === record.id ? approved : item)));
+        if (selectedRecord?.id === record.id) setSelectedId(record.id);
+        setEmailMessage(gate === "internal"
+          ? `${record.quotationNumber} を内部承認しました。`
+          : `${record.quotationNumber} の顧客承認を記録しました。`);
+      } else if (payload.error === "internal_approval_forbidden") {
+        setEmailMessage("内部承認はKimのみ実行できます。");
+      } else if (payload.error === "invalid_approval_transition") {
+        setEmailMessage("現在の状態では承認できません。");
+      } else {
+        setEmailMessage("承認処理に失敗しました。");
+      }
+    } catch {
+      setEmailMessage("承認処理に失敗しました。");
+    } finally {
+      setApprovingGateId(null);
     }
   };
 
@@ -133,6 +188,10 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
         setEmailMessage("SMTPが設定されていません。.env に SMTP_HOST / SMTP_USER / SMTP_PASS を設定してください。");
       } else if (payload.error === "customer_email_required") {
         setEmailMessage("得意先のメールアドレスが登録されていません。");
+      } else if (payload.error === "quotation_pdf_not_found") {
+        setEmailMessage("添付できる見積書PDFがありません。先にPDFを発行してください。");
+      } else if (payload.error === "quotation_pdf_integrity_failed") {
+        setEmailMessage("保存済みPDFの整合性確認に失敗しました。送信を中止しました。");
       } else {
         setEmailMessage("送信に失敗しました。");
       }
@@ -222,11 +281,14 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
                       title={canManage(record) ? undefined : "作成者または管理者のみ変更できます"}
                       onChange={(event) => void changeStatus(record, event.target.value as QuotationStatus)}
                     >
-                      {quotationStatuses.map((item) => <option key={item} value={item}>{statusLabels[item]}</option>)}
+                      {MANUAL_STATUS_OPTIONS[record.status].map((item) => <option key={item} value={item}>{statusLabels[item]}</option>)}
                     </select>
                   </td>
                   <td className="history-actions">
-                    <button className="button small" type="button" onClick={() => setSelectedId(record.id)}>詳細</button>
+                    <button className="button small" type="button" onClick={() => openDetail(record.id)}>詳細</button>
+                    <button className="button secondary small" type="button" onClick={() => openDetail(record.id, "film")}>
+                      フィルム見積書
+                    </button>
                     <button className="button secondary small" type="button" onClick={() => restore(record)}>復元</button>
                     <button
                       className="button danger small"
@@ -250,11 +312,15 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
       {selectedRecord ? (
         <>
           <QuotationDetailModal
-            key={selectedRecord.id}
+            key={`${selectedRecord.id}-${initialDetailTab}`}
             record={selectedRecord}
+            initialTab={initialDetailTab}
             onClose={() => setSelectedId(null)}
             onStatusChange={(record, nextStatus) => { void changeStatus(record, nextStatus); }}
             onSendEmail={(record) => { void sendQuotationEmail(record); }}
+            onApproveGate={(record, gate) => { void approveGate(record, gate); }}
+            approvingGate={approvingGateId === selectedRecord.id}
+            canApproveInternally={currentUser.email.trim().toLowerCase() === "kim@kanei-trade.co.jp"}
             sendingEmail={sendingEmail}
           />
           {emailMessage ? <p className="help" role="status" data-testid="email-message" style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 999, background: "white", padding: "8px 16px", borderRadius: 8, border: "1px solid #cbd5e1" }}>{emailMessage}</p> : null}
@@ -286,8 +352,35 @@ async function fetchStoredQuotationPdf(
   };
 }
 
-function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, sendingEmail }: { record: QuotationRecord; onClose: () => void; onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void; onSendEmail: (record: QuotationRecord) => void; sendingEmail: boolean }) {
-  const [detailTab, setDetailTab] = useState<"document" | "film" | "data">("document");
+const MANUAL_STATUS_OPTIONS: Record<QuotationStatus, QuotationStatus[]> = {
+  draft: ["draft", "rejected", "expired"],
+  sent: ["sent", "rejected", "expired"],
+  approved: ["approved"],
+  rejected: ["rejected"],
+  expired: ["expired"],
+};
+
+function QuotationDetailModal({
+  record,
+  initialTab = "document",
+  onClose,
+  onStatusChange,
+  onSendEmail,
+  onApproveGate,
+  approvingGate,
+  canApproveInternally,
+  sendingEmail,
+}: {
+  record: QuotationRecord;
+  initialTab?: "document" | "film" | "data";
+  onClose: () => void;
+  onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void;
+  onSendEmail: (record: QuotationRecord) => void;
+  onApproveGate: (record: QuotationRecord, gate: QuotationApprovalGate) => void;
+  approvingGate: boolean;
+  canApproveInternally: boolean;
+  sendingEmail: boolean;
+}) {
   const [storedPdf, setStoredPdf] = useState<{ url: string; blob: Blob; fileName: string } | null>(null);
   const [storedPdfStatus, setStoredPdfStatus] = useState<"loading" | "available" | "unavailable">("loading");
   const [storedPdfError, setStoredPdfError] = useState("");
@@ -296,16 +389,21 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
   const analysis = analyzeQuotation(record);
   // 발행 시 자동 생성된 필름 견적서(payload 저장분)를 우선 사용, 없으면 조회 시 생성
   const storedFilmQuotation = record.payload.filmQuotation as import("@/lib/film-quotation").FilmQuotationData | undefined;
+  const expectedFilmQuotationNumber = filmQuotationNumberFor(record.quotationNumber, record.issueDate);
   const legacyFilmQuotation = !storedFilmQuotation
     || !storedFilmQuotation.endCustomerName
     || !storedFilmQuotation.filmComposition
     || !storedFilmQuotation.printingMethodLabel
     || !storedFilmQuotation.colorCountLabel
     || !storedFilmQuotation.items[0]?.specification
-    || !/^K-\d{6}-\d{3,}-F$/.test(storedFilmQuotation.quotationNumber);
+    || storedFilmQuotation.pouchQuotationNumber !== record.quotationNumber
+    || storedFilmQuotation.quotationNumber !== expectedFilmQuotationNumber;
   const filmQuotation = legacyFilmQuotation
     ? buildFilmQuotationFromRecord(record)
     : storedFilmQuotation;
+  const [detailTab, setDetailTab] = useState<"document" | "film" | "data">(
+    initialTab === "film" && !filmQuotation ? "document" : initialTab,
+  );
   const calculationChecklistSnapshot = record.payload.calculationChecklistSnapshot as {
     fillMlPerChamber?: string;
     connectedChambers?: number;
@@ -432,20 +530,20 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
     const resetFit = () => {
       for (const content of fitContentRefs.current) content?.style.removeProperty("--history-a4-fit-scale");
     };
-    const printMedia = window.matchMedia("print");
+    const printMedia = typeof window.matchMedia === "function" ? window.matchMedia("print") : null;
     const handleMediaChange = (event: MediaQueryListEvent) => {
       if (event.matches) fitForPrint();
       else resetFit();
     };
     window.addEventListener("beforeprint", fitForPrint);
     window.addEventListener("afterprint", resetFit);
-    printMedia.addEventListener("change", handleMediaChange);
+    printMedia?.addEventListener("change", handleMediaChange);
     return () => {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       window.removeEventListener("beforeprint", fitForPrint);
       window.removeEventListener("afterprint", resetFit);
-      printMedia.removeEventListener("change", handleMediaChange);
+      printMedia?.removeEventListener("change", handleMediaChange);
     };
   }, [record.id, record.quotationNumber]);
 
@@ -534,6 +632,11 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
             <span className="side-kicker">QUOTATION DETAIL</span>
             <h2 id="history-detail-title">{record.quotationNumber}</h2>
             <p data-testid="history-film-composition">{record.customerName || "得意先未設定"} / {record.productName} / フィルム構成 {composition || DEFAULT_FILM_COMPOSITION}</p>
+            <p className="help" data-testid="approval-gate-state">
+              {record.internalApproval ? `内部承認済み（${new Date(record.internalApproval.approvedAt).toLocaleString("ja-JP")}）` : "内部承認待ち"}
+              {" / "}
+              {record.customerApproval ? `顧客承認済み（${new Date(record.customerApproval.approvedAt).toLocaleString("ja-JP")}）` : "顧客承認待ち"}
+            </p>
           </div>
           <div className="detail-header-actions">
             {detailTab === "document" ? (
@@ -562,15 +665,28 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
             {mailtoLink ? (
               <a className="button small" href={mailtoLink} data-testid="history-mail-link">メール作成</a>
             ) : null}
-            {record.status === "draft" && typeof record.payload.customerEmail === "string" && record.payload.customerEmail.trim() ? (
-              <button className="button small" type="button" disabled={sendingEmail} onClick={() => onSendEmail(record)} data-testid="history-auto-send">
-                <span title="保存済みの顧客メールアドレスへ見積案内メールを送信し、状態を送付済みにします。PDFは添付されません。">
-                  {sendingEmail ? "送信中..." : "メール送信（PDFなし）"}
-                </span>
-              </button>
+            {record.status === "draft" && !record.internalApproval && canApproveInternally ? (
+              <button
+                className="button small"
+                type="button"
+                disabled={approvingGate}
+                onClick={() => onApproveGate(record, "internal")}
+                data-testid="history-internal-approve"
+              >{approvingGate ? "承認中..." : "内部承認する"}</button>
             ) : null}
-            {record.status === "draft" ? (
-              <button className="button small" type="button" onClick={() => onStatusChange(record, "sent")} data-testid="history-send-status">送付済みにする</button>
+            {record.status === "draft" && typeof record.payload.customerEmail === "string" && record.payload.customerEmail.trim() ? (
+              <button
+                className="button small"
+                type="button"
+                disabled={sendingEmail || !record.internalApproval}
+                title={record.internalApproval
+                  ? "保存済み見積書PDFを添付して送信し、状態を送付済みにします。テスト設定では宛先が強制変更される場合があります。"
+                  : "送信前に内部承認が必要です。"}
+                onClick={() => onSendEmail(record)}
+                data-testid="history-auto-send"
+              >
+                {sendingEmail ? "送信中..." : "メール送信（PDF添付）"}
+              </button>
             ) : null}
             <button className="button secondary small" type="button" onClick={onClose}>閉じる</button>
           </div>
@@ -643,6 +759,7 @@ function QuotationDetailModal({ record, onClose, onStatusChange, onSendEmail, se
                     <h2>お見積書</h2>
                     <dl>
                       <div><dt>見積番号</dt><dd>{filmQuotation.quotationNumber}</dd></div>
+                      <div><dt>パウチ見積番号</dt><dd>{filmQuotation.pouchQuotationNumber}</dd></div>
                       <div><dt>発行日</dt><dd>{filmQuotation.issueDate}</dd></div>
                       <div><dt>有効期限</dt><dd>{filmQuotation.validUntil}</dd></div>
                     </dl>

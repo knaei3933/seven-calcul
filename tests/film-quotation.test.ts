@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFilmQuotationFromRecord } from "@/lib/film-quotation";
+import { buildFilmQuotationFromRecord, filmQuotationNumberFor } from "@/lib/film-quotation";
 
 describe("film quotation linkage", () => {
   it("creates a paired film number and shows the product and film printing specification", () => {
@@ -35,5 +35,16 @@ describe("film quotation linkage", () => {
     expect(quotation?.colorCountLabel).toBe("4色");
     expect(quotation?.subtotal).toBe("141001");
     expect(quotation?.grandTotal).toBe("155102");
+  });
+});
+
+describe("film quotation numbering", () => {
+  it("keeps legacy sequential numbers paired", () => {
+    expect(filmQuotationNumberFor("S7-202610-073", "2026-10-10")).toBe("K-202610-073-F");
+  });
+
+  it("derives random-source numbers deterministically from the pouch quotation", () => {
+    expect(filmQuotationNumberFor("S7-MVDJSIND", "2026-10-18")).toBe("K-MVDJSIND-F");
+    expect(filmQuotationNumberFor("S7-MVDJSIND", "2027-03-01")).toBe("K-MVDJSIND-F");
   });
 });

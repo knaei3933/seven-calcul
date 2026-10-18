@@ -10,3 +10,4 @@ next-env.d.ts
 .omx-state-locks
 .env*.local
 .env
+.verification/

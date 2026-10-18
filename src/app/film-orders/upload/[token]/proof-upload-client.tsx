@@ -5,8 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 interface UploadOrderInfo {
   order_number: string;
   product_name: string;
-  files: Array<{ name: string; url: string }>;
-  proofs: Array<{ name: string; version: number; url: string }>;
+  files: Array<{ name: string; fileId: string }>;
+  proofs: Array<{ name: string; version: number; fileId: string }>;
   status: string;
 }
 
@@ -125,8 +125,8 @@ export default function ProofUploadClient({
             {info.files.map((item) => (
               <li key={item.name}>
                 {item.name}
-                {item.url ? (
-                  <a href={`/api/film-orders/proof-download/${encodeURIComponent(token)}?fileId=${encodeURIComponent(item.url.split("/d/")[1]?.split("/")[0] ?? "")}`} target="_blank" rel="noreferrer">ダウンロード</a>
+                {item.fileId ? (
+                  <a href={`/api/film-orders/proof-download/${encodeURIComponent(token)}?fileId=${encodeURIComponent(item.fileId)}`} target="_blank" rel="noreferrer">ダウンロード</a>
                 ) : null}
               </li>
             ))}

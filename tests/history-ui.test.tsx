@@ -55,6 +55,8 @@ function record(id: number, number: string, creator: { id: number; email: string
     updatedAt: "2026-09-20T00:00:00.000Z",
     createdBy: creator,
     updatedBy: null,
+    internalApproval: null,
+    customerApproval: null,
   };
 }
 
@@ -126,6 +128,32 @@ describe("quotation history ownership UI", () => {
     await user.click(screen.getByTestId("detail-print-current"));
     await waitFor(() => expect(printSpy).toHaveBeenCalledTimes(1));
     printSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it("opens the linked film quotation directly from URL parameters", async () => {
+    window.history.replaceState({}, "", "/history?record=1&tab=film");
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => (
+      String(input).endsWith("/pdf")
+        ? Response.json({ error: "pdf_not_found" }, { status: 404 })
+        : Response.json({ records: [adminRecord] }, { status: 200 })
+    )));
+
+    render(<HistoryClient currentUser={currentUser} />);
+
+    await screen.findByText(/異形パウチ専用フィルム/);
+    expect(screen.getByText("K-HISTORY-ADMIN-F")).toBeInTheDocument();
+    expect(screen.getAllByText("S7-HISTORY-ADMIN").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("film-quote-tab")).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("article", { name: "フィルム見積書A4" })).toBeVisible();
+
+    window.history.replaceState({}, "", "/history");
     vi.unstubAllGlobals();
   });
 

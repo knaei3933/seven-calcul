@@ -9,6 +9,14 @@ export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ id: string }> };
 
+const MANUAL_STATUS_TRANSITIONS: Record<QuotationStatus, QuotationStatus[]> = {
+  draft: ["draft", "rejected", "expired"],
+  sent: ["sent", "rejected", "expired"],
+  approved: ["approved"],
+  rejected: ["rejected"],
+  expired: ["expired"],
+};
+
 export async function GET(request: Request, context: Context): Promise<NextResponse> {
   const { id } = await context.params;
   try {
@@ -34,6 +42,9 @@ export async function PATCH(request: Request, context: Context): Promise<NextRes
     if (!existing) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
     if (!canManageQuotation(user, existing.createdBy.id)) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+    if (!MANUAL_STATUS_TRANSITIONS[existing.status]?.includes(status)) {
+      return NextResponse.json({ error: "invalid_status_transition" }, { status: 409 });
     }
     const record = await updateQuotationStatus(Number(id), status, user.id);
     if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });

@@ -31,6 +31,18 @@ export interface FilmQuotationData {
   notes: string[];
 }
 
+export function filmQuotationNumberFor(
+  pouchQuotationNumber: string,
+  issuedAt: string | Date = new Date(),
+): string {
+  const source = pouchQuotationNumber.trim();
+  const legacyMatch = /^S7-(\d{6})-(\d+)$/u.exec(source);
+  if (legacyMatch) return `K-${legacyMatch[1]}-${legacyMatch[2].padStart(3, "0")}-F`;
+
+  const sourceId = source.replace(/^S7-/u, "").replace(/[^A-Za-z0-9_-]/gu, "").slice(0, 32);
+  return `K-${sourceId || Date.now().toString(36).toUpperCase()}-F`;
+}
+
 export function buildFilmQuotationFromRecord(record: {
   quotationNumber: string;
   customerName?: string;
@@ -44,6 +56,7 @@ export function buildFilmQuotationFromRecord(record: {
 }): FilmQuotationData | null {
   const payload = record.payload as {
     filmOrderLengthM?: string;
+    filmComposition?: string;
     printingMethod?: string;
     calculationFilmTotal?: string;
     filmUnitDisplay?: string;
@@ -72,7 +85,9 @@ export function buildFilmQuotationFromRecord(record: {
       ? D(unitPrice).times(D(orderLength)).toDecimalPlaces(0, Decimal.ROUND_CEIL).toString()
       : "0");
   const webWidth = String(payload.purchaseOrder?.webWidthMm ?? snapshot?.materialWidthMm ?? "");
-  const composition = payload.purchaseOrder?.filmComposition ?? "PET12+AL7+PET12+LLDPE50μ";
+  const composition = (typeof payload.filmComposition === "string" && payload.filmComposition.trim())
+    || payload.purchaseOrder?.filmComposition
+    || "PET12+AL7+PET12+LLDPE50μ";
   const skuNames = [
     ...(payload.purchaseOrder?.skuOrderDetails ?? []).map((sku) => sku.name),
     ...(snapshot?.skus ?? []).map((sku) => sku.name),
@@ -101,21 +116,12 @@ export function buildFilmQuotationFromRecord(record: {
       ? `${uniqueColorValues[0]}色`
       : `SKU別（${uniqueColorValues.map((count) => `${count}色`).join("・")}）`;
 
-  const now = new Date(record.issueDate);
-  const yy = String(now.getFullYear()).slice(2);
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-
   const subtotalD = D(filmTotal).toDecimalPlaces(0, Decimal.ROUND_CEIL);
   const taxD = subtotalD.times("0.1").toDecimalPlaces(0, Decimal.ROUND_CEIL);
   const grandD = subtotalD.plus(taxD);
 
-  const pouchMatch = /^S7-(\d{6})-(\d+)/.exec(record.quotationNumber.trim());
-  const quotationNumber = pouchMatch
-    ? `K-${pouchMatch[1]}-${pouchMatch[2].padStart(3, "0")}-F`
-    : `K-${yy}${mm}-${Date.now().toString(36).toUpperCase()}-F`;
-
   return {
-    quotationNumber,
+    quotationNumber: filmQuotationNumberFor(record.quotationNumber, record.issueDate),
     pouchQuotationNumber: record.quotationNumber,
     endCustomerName,
     productName: productLabel,

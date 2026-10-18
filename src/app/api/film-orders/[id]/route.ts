@@ -14,7 +14,15 @@ type Context = { params: Promise<{ id: string }> };
 function statusForError(message: string): number {
   if (message === "film_order_not_found") return 404;
   if (message === "invalid_status_transition") return 409;
-  if (message.startsWith("invalid_") || message === "re_proof_comment_required" || message === "unknown_action") return 400;
+  if (
+    message.startsWith("invalid_")
+    || message === "re_proof_comment_required"
+    || message === "unknown_action"
+    || message === "sample_bulk_not_required"
+    || message === "sample_bulk_quantity_required"
+    || message === "sample_bulk_quantity_mismatch"
+    || message === "sample_bulk_adjustment_reason_required"
+  ) return 400;
   return 500;
 }
 

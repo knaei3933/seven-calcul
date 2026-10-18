@@ -54,6 +54,12 @@ export function proofFolderId(): string {
   return process.env.FILM_PROOF_FOLDER_ID ?? "1EP8faGx8z-tLUfdpStN74O9-oIuBSO0K";
 }
 
+export function customerDesignFolderId(): string {
+  const folderId = process.env.FILM_CUSTOMER_DESIGN_FOLDER_ID?.trim();
+  if (!folderId) throw new Error("customer_design_folder_not_configured");
+  return folderId;
+}
+
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
 function base64url(input: string | Buffer): string {
@@ -144,16 +150,46 @@ export async function findFileUrl(params: {
   fileName: string;
   folderId: string;
 }): Promise<string | null> {
+  const files = await findDriveFiles(params);
+  const file = files[0];
+  return file ? `https://drive.google.com/file/d/${file.id}/view` : null;
+}
+
+export async function findDriveFiles(params: {
+  fileName: string;
+  folderId: string;
+}): Promise<Array<{
+  id: string;
+  name: string;
+  mimeType: string | null;
+  checksum: string | null;
+  sizeBytes: number | null;
+  parentFolderIds: string[];
+}>> {
   const token = await getAccessToken();
   const query = encodeURIComponent(`name = '${params.fileName.replace(/'/g, "\\'")}' and '${params.folderId}' in parents and trashed = false`);
   const response = await fetch(
-    `https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name)&q=${query}`,
+    `https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,mimeType,md5Checksum,size,parents)&q=${query}`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
   if (!response.ok) throw new Error(`drive_find_failed:${response.status}`);
-  const payload = await response.json() as { files?: Array<{ id: string }> };
-  const fileId = payload.files?.[0]?.id;
-  return fileId ? `https://drive.google.com/file/d/${fileId}/view` : null;
+  const payload = await response.json() as {
+    files?: Array<{ id?: unknown; name?: unknown; mimeType?: unknown; md5Checksum?: unknown; size?: unknown; parents?: unknown }>;
+  };
+  return (payload.files ?? []).flatMap((file) => {
+    if (typeof file.id !== "string" || typeof file.name !== "string") return [];
+    const sizeBytes = Number(file.size);
+    return [{
+      id: file.id,
+      name: file.name,
+      mimeType: typeof file.mimeType === "string" ? file.mimeType : null,
+      checksum: typeof file.md5Checksum === "string" ? file.md5Checksum : null,
+      sizeBytes: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : null,
+      parentFolderIds: Array.isArray(file.parents)
+        ? file.parents.filter((parent): parent is string => typeof parent === "string")
+        : [],
+    }];
+  });
 }
 
 export async function downloadFile(fileId: string): Promise<Response> {

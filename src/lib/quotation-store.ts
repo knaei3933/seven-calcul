@@ -2,6 +2,7 @@ import type { SqlClient } from "./db";
 import { getSqlClient } from "./db";
 import { createHash } from "node:crypto";
 import { quotationStatuses, type QuotationStatus } from "./quotation-shared";
+import { verifyCustomerApprovalToken } from "./quotation-approval-token";
 import { QUOTATION_RESTORE_KEY } from "./quotation-shared";
 import { D } from "./decimal";
 import { ensureAdministratorSeed, type UserRole } from "./auth-store";
@@ -54,6 +55,16 @@ interface DatabaseRow {
   creator_email: string | null;
   updater_name: string | null;
   updater_email: string | null;
+  internal_approved_at: string | null;
+  internal_approved_by: number | null;
+  internal_approver_name: string | null;
+  internal_approver_email: string | null;
+  customer_approved_at: string | null;
+  customer_approved_by: number | null;
+  customer_approver_name: string | null;
+  customer_approver_email: string | null;
+  customer_approval_ip_hash: string | null;
+  customer_approval_user_agent: string | null;
 }
 
 let schemaReady: Promise<SqlClient> | null = null;
@@ -112,6 +123,7 @@ async function getDatabase(): Promise<SqlClient> {
     await db.exec(db.dialect === "postgres" ? POSTGRES_SCHEMA : SQLITE_SCHEMA);
     await migrateOwnershipColumns(db, administratorId);
     await migratePdfColumns(db);
+    await migrateApprovalColumns(db);
     await backfillPdfDigests(db);
     // 社名表記を「金井貿易株式会社」へ統一する（旧default・既存DB値を含む）。
     await db.exec(CHECKLIST_COMPANY_NAME_NORMALIZATION);
@@ -174,6 +186,12 @@ const SQLITE_SCHEMA = `
       pdf_file_name TEXT,
       pdf_uploaded_at TEXT,
       pdf_sha256 TEXT,
+      internal_approved_at TEXT,
+      internal_approved_by INTEGER REFERENCES users(id),
+      customer_approved_at TEXT,
+      customer_approved_by INTEGER REFERENCES users(id),
+      customer_approval_ip_hash TEXT,
+      customer_approval_user_agent TEXT,
       created_by INTEGER NOT NULL REFERENCES users(id),
       updated_by INTEGER REFERENCES users(id)
     );
@@ -228,6 +246,12 @@ const POSTGRES_SCHEMA = `
       pdf_file_name TEXT,
       pdf_uploaded_at TEXT,
       pdf_sha256 TEXT,
+      internal_approved_at TEXT,
+      internal_approved_by INTEGER REFERENCES users(id),
+      customer_approved_at TEXT,
+      customer_approved_by INTEGER REFERENCES users(id),
+      customer_approval_ip_hash TEXT,
+      customer_approval_user_agent TEXT,
       created_by INTEGER NOT NULL REFERENCES users(id),
       updated_by INTEGER REFERENCES users(id)
     );
@@ -286,6 +310,39 @@ async function migratePdfColumns(db: SqlClient): Promise<void> {
   await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS pdf_file_name TEXT");
   await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS pdf_uploaded_at TEXT");
   await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS pdf_sha256 TEXT");
+}
+
+async function migrateApprovalColumns(db: SqlClient): Promise<void> {
+  if (db.dialect === "sqlite") {
+    const columns = await db.all<{ name: string }>("PRAGMA table_info(quotations)");
+    const columnNames = new Set(columns.map((column) => column.name));
+    if (!columnNames.has("internal_approved_at")) {
+      await db.exec("ALTER TABLE quotations ADD COLUMN internal_approved_at TEXT");
+    }
+    if (!columnNames.has("internal_approved_by")) {
+      await db.exec("ALTER TABLE quotations ADD COLUMN internal_approved_by INTEGER REFERENCES users(id)");
+    }
+    if (!columnNames.has("customer_approved_at")) {
+      await db.exec("ALTER TABLE quotations ADD COLUMN customer_approved_at TEXT");
+    }
+    if (!columnNames.has("customer_approved_by")) {
+      await db.exec("ALTER TABLE quotations ADD COLUMN customer_approved_by INTEGER REFERENCES users(id)");
+    }
+    if (!columnNames.has("customer_approval_ip_hash")) {
+      await db.exec("ALTER TABLE quotations ADD COLUMN customer_approval_ip_hash TEXT");
+    }
+    if (!columnNames.has("customer_approval_user_agent")) {
+      await db.exec("ALTER TABLE quotations ADD COLUMN customer_approval_user_agent TEXT");
+    }
+    return;
+  }
+
+  await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS internal_approved_at TEXT");
+  await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS internal_approved_by INTEGER REFERENCES users(id)");
+  await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS customer_approved_at TEXT");
+  await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS customer_approved_by INTEGER REFERENCES users(id)");
+  await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS customer_approval_ip_hash TEXT");
+  await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS customer_approval_user_agent TEXT");
 }
 
 async function backfillPdfDigests(db: SqlClient): Promise<void> {
@@ -391,6 +448,24 @@ function mapRow(row: DatabaseRow): QuotationRecord {
       email: row.updater_email ?? "",
       name: row.updater_name ?? "",
     },
+    internalApproval: row.internal_approved_at ? {
+      approvedAt: row.internal_approved_at,
+      approvedBy: row.internal_approved_by == null ? null : {
+        id: Number(row.internal_approved_by),
+        email: row.internal_approver_email ?? "",
+        name: row.internal_approver_name ?? "",
+      },
+    } : null,
+    customerApproval: row.customer_approved_at ? {
+      approvedAt: row.customer_approved_at,
+      approvedBy: row.customer_approved_by == null ? null : {
+        id: Number(row.customer_approved_by),
+        email: row.customer_approver_email ?? "",
+        name: row.customer_approver_name ?? "",
+      },
+      customerIpHash: row.customer_approval_ip_hash,
+      userAgent: row.customer_approval_user_agent,
+    } : null,
   };
 }
 
@@ -550,6 +625,8 @@ export async function saveIssuedQuotation(
         updatedAt: now,
         createdBy: { id: actorId, email: "", name: "" },
         updatedBy: null,
+        internalApproval: null,
+        customerApproval: null,
       };
       await createChecklistsInTransaction(tx, provisionalRecord, checklistSnapshot);
     }
@@ -585,10 +662,14 @@ export async function listQuotations({
   const ownershipArguments: Array<string | number | null> = ownershipFilter ? [creatorId ?? 0] : [];
   const baseSelect = `
         SELECT quotations.*, creator.name AS creator_name, creator.email AS creator_email,
-               updater.name AS updater_name, updater.email AS updater_email
+               updater.name AS updater_name, updater.email AS updater_email,
+               internal_approver.name AS internal_approver_name, internal_approver.email AS internal_approver_email,
+               customer_approver.name AS customer_approver_name, customer_approver.email AS customer_approver_email
         FROM quotations
         JOIN users AS creator ON creator.id = quotations.created_by
         LEFT JOIN users AS updater ON updater.id = quotations.updated_by
+        LEFT JOIN users AS internal_approver ON internal_approver.id = quotations.internal_approved_by
+        LEFT JOIN users AS customer_approver ON customer_approver.id = quotations.customer_approved_by
   `;
   const rows = statusFilter
     ? await db.all<DatabaseRow>(`
@@ -630,13 +711,124 @@ export async function updateQuotationStatus(id: number, status: QuotationStatus,
   return getQuotation(id);
 }
 
+export type QuotationApprovalGate = "internal" | "customerApproval";
+
+export class QuotationApprovalTransitionError extends Error {
+  constructor() {
+    super("invalid_approval_transition");
+    this.name = "QuotationApprovalTransitionError";
+  }
+}
+
+export class CustomerApprovalTokenError extends Error {
+  constructor() {
+    super("invalid_customer_approval_token");
+    this.name = "CustomerApprovalTokenError";
+  }
+}
+
+export class CustomerApprovalExpiredError extends Error {
+  constructor() {
+    super("customer_approval_expired");
+    this.name = "CustomerApprovalExpiredError";
+  }
+}
+
+export async function approveQuotationGate(
+  id: number,
+  gate: QuotationApprovalGate,
+  actorId: number,
+): Promise<QuotationRecord> {
+  if (!Number.isInteger(id) || id <= 0) throw new QuotationApprovalTransitionError();
+  const db = await getDatabase();
+  const now = new Date().toISOString();
+
+  if (gate === "internal") {
+    const result = await db.run(`
+      UPDATE quotations
+      SET internal_approved_at = ?, internal_approved_by = ?, updated_by = ?, updated_at = ?
+      WHERE id = ? AND status = 'draft' AND internal_approved_at IS NULL
+    `, [now, actorId, actorId, now, id]);
+    if (Number(result.changes) !== 1) throw new QuotationApprovalTransitionError();
+  } else {
+    const result = await db.run(`
+      UPDATE quotations
+      SET status = 'approved', customer_approved_at = ?, customer_approved_by = ?,
+          updated_by = ?, updated_at = ?
+      WHERE id = ? AND status = 'sent'
+        AND internal_approved_at IS NOT NULL AND customer_approved_at IS NULL
+    `, [now, actorId, actorId, now, id]);
+    if (Number(result.changes) !== 1) throw new QuotationApprovalTransitionError();
+  }
+
+  const record = await getQuotation(id);
+  if (!record) throw new QuotationApprovalTransitionError();
+  return record;
+}
+
+function customerApprovalExpired(record: QuotationRecord): boolean {
+  const date = record.validUntil.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) return false;
+  const todayJapan = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  return todayJapan > date;
+}
+
+async function quotationForCustomerApprovalToken(token: string): Promise<QuotationRecord> {
+  const payload = verifyCustomerApprovalToken(token);
+  if (!payload) throw new CustomerApprovalTokenError();
+  const record = await getQuotation(payload.qid);
+  if (
+    !record
+    || record.quotationNumber !== payload.qno
+    || record.resultHash !== payload.resultHash
+    || record.validUntil !== payload.validUntil
+    || record.internalApproval?.approvedAt !== payload.internalApprovedAt
+    || (typeof record.payload.customerEmail === "string" ? record.payload.customerEmail.trim() : "") !== payload.email
+    || !record.internalApproval
+    || !["sent", "approved"].includes(record.status)
+  ) throw new CustomerApprovalTokenError();
+  if (record.status === "sent" && customerApprovalExpired(record)) throw new CustomerApprovalExpiredError();
+  return record;
+}
+
+export async function getQuotationForCustomerApproval(token: string): Promise<QuotationRecord> {
+  return quotationForCustomerApprovalToken(token);
+}
+
+export async function approveQuotationByCustomerToken(
+  token: string,
+  approvalMetadata: { customerIpHash?: string | null; userAgent?: string | null } = {},
+): Promise<QuotationRecord> {
+  const record = await quotationForCustomerApprovalToken(token);
+  if (record.customerApproval) return record;
+  if (record.status !== "sent") throw new QuotationApprovalTransitionError();
+
+  const db = await getDatabase();
+  const now = new Date().toISOString();
+  const result = await db.run(`
+    UPDATE quotations
+    SET status = 'approved', customer_approved_at = ?, customer_approved_by = NULL, updated_at = ?,
+      customer_approval_ip_hash = ?, customer_approval_user_agent = ?
+    WHERE id = ? AND status = 'sent'
+      AND internal_approved_at IS NOT NULL AND customer_approved_at IS NULL
+  `, [now, now, approvalMetadata.customerIpHash ?? null, approvalMetadata.userAgent?.slice(0, 500) ?? null, record.id]);
+  if (Number(result.changes) !== 1) throw new QuotationApprovalTransitionError();
+  const approved = await getQuotation(record.id);
+  if (!approved) throw new QuotationApprovalTransitionError();
+  return approved;
+}
+
 async function selectRecordById(db: SqlClient, id: number): Promise<DatabaseRow | undefined> {
   return db.get<DatabaseRow>(`
     SELECT quotations.*, creator.name AS creator_name, creator.email AS creator_email,
-           updater.name AS updater_name, updater.email AS updater_email
+           updater.name AS updater_name, updater.email AS updater_email,
+           internal_approver.name AS internal_approver_name, internal_approver.email AS internal_approver_email,
+           customer_approver.name AS customer_approver_name, customer_approver.email AS customer_approver_email
     FROM quotations
     JOIN users AS creator ON creator.id = quotations.created_by
     LEFT JOIN users AS updater ON updater.id = quotations.updated_by
+    LEFT JOIN users AS internal_approver ON internal_approver.id = quotations.internal_approved_by
+    LEFT JOIN users AS customer_approver ON customer_approver.id = quotations.customer_approved_by
     WHERE quotations.id = ?
   `, [id]);
 }
@@ -645,10 +837,14 @@ async function selectRecordByNumber(db: SqlClient, quotationNumber: string): Pro
   if (!quotationNumber.trim()) return undefined;
   return db.get<DatabaseRow>(`
     SELECT quotations.*, creator.name AS creator_name, creator.email AS creator_email,
-           updater.name AS updater_name, updater.email AS updater_email
+           updater.name AS updater_name, updater.email AS updater_email,
+           internal_approver.name AS internal_approver_name, internal_approver.email AS internal_approver_email,
+           customer_approver.name AS customer_approver_name, customer_approver.email AS customer_approver_email
     FROM quotations
     JOIN users AS creator ON creator.id = quotations.created_by
     LEFT JOIN users AS updater ON updater.id = quotations.updated_by
+    LEFT JOIN users AS internal_approver ON internal_approver.id = quotations.internal_approved_by
+    LEFT JOIN users AS customer_approver ON customer_approver.id = quotations.customer_approved_by
     WHERE quotations.quotation_number = ?
   `, [quotationNumber]);
 }

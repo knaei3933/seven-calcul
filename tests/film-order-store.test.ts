@@ -97,7 +97,7 @@ describe("film order store", () => {
     expect(orders[0]!.status).toBe("pending");
     expect(orders[0]!.order_number).toMatch(/^F-\d{6}-001$/u);
     expect(orders[0]!.purchaseOrder?.procurementRoute).toBe("Y");
-    expect(orders[0]!.supplier_email).toBe("seven@727.co.jp");
+    expect(orders[0]!.supplier_email).toBe("design@package-lab.com");
     expect(orders[0]!.seven_contact_email).toBe("seven@727.co.jp");
     expect(orders[0]!.events.some((event) => event.type === "created")).toBe(true);
   });
@@ -130,10 +130,13 @@ describe("film order store", () => {
     const notice = await runFilmOrderAction(orderId, "send-proof-notice", { origin: "http://localhost:3000" }, "kanei@kanei-trade.co.jp");
     expect(notice.mails?.[0]?.to).toBe("supplier@example.co.kr");
 
+    const proofNoticeText = String(notice.mails?.[0]?.text ?? "");
+    const supplierToken = proofNoticeText.match(/\/film-orders\/upload\/([^\s"]+)/u)?.[1];
+    expect(supplierToken).toBeTruthy();
     const receivingOrder = await getFilmOrder(orderId);
-    expect(receivingOrder?.proof_upload_token).toBeTruthy();
+    expect(receivingOrder?.proof_upload_token).toBeNull();
     const supplierUpload = await registerProofFromUploadToken({
-      token: receivingOrder!.proof_upload_token!,
+      token: supplierToken!,
       fileName: `発注検証パウチ_${receivingOrder!.order_number}_校正_20261008.ai`,
       fileUrl: "https://drive.google.com/file/d/supplier1/view",
       uploader: "韓国メーカー担当",
@@ -141,7 +144,7 @@ describe("film order store", () => {
     expect(supplierUpload.status).toBe("proof_registered");
     expect(supplierUpload.files.some((file) => file.file_name.includes("韓国") === false && file.file_name.includes(orderNumberSafe(supplierUpload)))).toBe(true);
     await expect(registerProofFromUploadToken({
-      token: receivingOrder!.proof_upload_token!,
+      token: supplierToken!,
       fileName: `x_${receivingOrder!.order_number}.ai`,
       fileUrl: "https://drive.google.com/file/d/supplier2/view",
     })).rejects.toThrow("invalid_status_transition");
@@ -215,6 +218,66 @@ describe("film order store", () => {
     const yResult = await runFilmOrderAction(yOrder.id, "register-receiving", { aiFileName: "Y用.ai" }, "seven@727.co.jp");
     console.log("Y-MAILS:", JSON.stringify(yResult.mails?.map((m) => ({ to: m.to, error: m.error }))));
     expect((await getFilmOrder(yOrder.id))?.events.some((event) => event.detail.includes("校正データ返却のお願い"))).toBe(false);
+  });
+
+  it("manages customer bulk-sample supply and adjustment loop", async () => {
+    const sampleRecord = await saveQuotation({
+      ...input,
+      quotationNumber: "S7-FILM-STORE-004",
+      payload: {
+        ...input.payload,
+        customerEmail: "customer@example.test",
+        calculationChecklistSnapshot: { bulkUsageMl: "7000" },
+      },
+    }, 1, "admin");
+    void sampleRecord;
+    await syncFilmOrdersFromQuotations("seven@727.co.jp");
+    const sampleBulkOrderId = (await listFilmOrders()).find((order) => order.quotation_number === "S7-FILM-STORE-004")!.id;
+    const created = await getFilmOrder(sampleBulkOrderId);
+    expect(created?.sampleBulk.status).toBe("pending");
+    expect(created?.sampleBulk.requiredMl).toBe("7000");
+
+    const requested = await runFilmOrderAction(sampleBulkOrderId, "request-sample-bulk", {
+      note: "初回製作用",
+    }, "kanei@kanei-trade.co.jp");
+    expect(requested.order.sampleBulk.status).toBe("requested");
+    expect(requested.mails?.[0]?.to).toBe("customer@example.test");
+    expect(requested.mails?.[0]?.subject).toContain("バルクサンプル");
+    expect(requested.mails?.[0]?.subject).toContain("ご送付のお願い");
+    expect(requested.mails?.[0]?.text).toContain("株式会社セブン化学 責任技術者：福井　健二");
+    expect(requested.mails?.[0]?.text).toContain("7,000ml");
+
+    await expect(runFilmOrderAction(sampleBulkOrderId, "confirm-sample-bulk", {}, "kanei@kanei-trade.co.jp"))
+      .rejects.toThrow("invalid_status_transition");
+    const received = await runFilmOrderAction(sampleBulkOrderId, "register-sample-bulk", {
+      receivedMl: "6500",
+      note: "第一便",
+    }, "kanei@kanei-trade.co.jp");
+    expect(received.order.sampleBulk.status).toBe("received");
+    expect(received.order.sampleBulk.receivedMl).toBe("6500");
+    await expect(runFilmOrderAction(sampleBulkOrderId, "confirm-sample-bulk", {}, "kanei@kanei-trade.co.jp"))
+      .rejects.toThrow("sample_bulk_quantity_mismatch");
+
+    const adjusted = await runFilmOrderAction(sampleBulkOrderId, "request-sample-bulk-adjustment", {
+      adjustedMl: "7200",
+      reason: "実充填結果により必要量が増加",
+    }, "kanei@kanei-trade.co.jp");
+    expect(adjusted.order.sampleBulk.status).toBe("adjustment_requested");
+    expect(adjusted.order.sampleBulk.adjustedMl).toBe("7200");
+    expect(adjusted.mails?.[0]?.subject).toContain("バルク量変更のお願い");
+    expect(adjusted.mails?.[0]?.text).toContain("7,200ml");
+    expect(adjusted.mails?.[0]?.text).toContain("実充填結果により必要量が増加");
+
+    const replacement = await runFilmOrderAction(sampleBulkOrderId, "register-sample-bulk", {
+      receivedMl: "7200",
+      note: "追加支給",
+    }, "kanei@kanei-trade.co.jp");
+    expect(replacement.order.sampleBulk.status).toBe("received");
+    const confirmed = await runFilmOrderAction(sampleBulkOrderId, "confirm-sample-bulk", {}, "kanei@kanei-trade.co.jp");
+    expect(confirmed.order.sampleBulk.status).toBe("confirmed");
+    expect(confirmed.order.sampleBulk.receivedMl).toBe("7200");
+    expect(confirmed.order.sampleBulk.adjustmentCount).toBe(1);
+    expect(confirmed.order.events.some((event) => event.type === "sample_bulk")).toBe(true);
   });
 
   it("builds human-readable file names containing the order number", () => {

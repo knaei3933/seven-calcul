@@ -1933,6 +1933,7 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 
 .film-order-sheet { border-top: 3px solid var(--primary); }
 .film-order-sheet-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.film-order-sheet-actions { display: inline-flex; align-items: center; gap: 8px; }
 .film-order-sheet-body { display: block; }
 .film-order-sheet-body h2 { margin: 0 0 8px; font-size: 17px; }
 .film-order-sheet-body dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 14px; margin: 0; }

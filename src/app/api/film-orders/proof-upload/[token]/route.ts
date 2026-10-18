@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import {
+  assertSupplierProofUploadPolicy,
+  externalClientIpHash,
   getFilmOrderForProofUpload,
   registerProofFromUploadToken,
 } from "@/lib/film-orders";
 import {
   createResumableSession,
   driveConfigured,
-  findFileUrl,
+  findDriveFiles,
   proofFolderId,
 } from "@/lib/google-drive";
 
@@ -16,6 +18,7 @@ export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ token: string }> };
 
 function orderSummary(order: Awaited<ReturnType<typeof getFilmOrderForProofUpload>>) {
+  const fileIdOf = (url: string): string => url.split("/d/")[1]?.split("/")[0] ?? "";
   return {
     order_number: order?.order_number ?? "",
     product_name: order?.product_name ?? "",
@@ -26,11 +29,26 @@ function orderSummary(order: Awaited<ReturnType<typeof getFilmOrderForProofUploa
     status: order?.status ?? "",
     files: (order?.files ?? [])
       .filter((file) => file.category === "receiving")
-      .map((file) => ({ name: file.file_name, url: file.url })),
+      .map((file) => ({ name: file.file_name, fileId: fileIdOf(file.url) })),
     proofs: (order?.files ?? [])
       .filter((file) => file.category === "proof")
-      .map((file) => ({ name: file.file_name, version: file.version, url: file.url })),
+      .map((file) => ({ name: file.file_name, version: file.version, fileId: fileIdOf(file.url) })),
   };
+}
+
+function publicErrorStatus(message: string): number {
+  if (message === "invalid_status_transition") return 409;
+  if (message === "file_too_large") return 413;
+  if (message === "uploaded_file_not_found") return 404;
+  if (message === "ambiguous_uploaded_file") return 409;
+  if (
+    message === "invalid_file_name"
+    || message === "unsupported_file_type"
+    || message === "invalid_upload_request"
+    || message === "uploaded_file_mismatch"
+  ) return 400;
+  if (message === "invalid_proof_token") return 403;
+  return 502;
 }
 
 export async function GET(request: Request, context: Context): Promise<NextResponse> {
@@ -54,62 +72,75 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       contentType?: unknown;
       uploader?: unknown;
       note?: unknown;
-      fileUrl?: unknown;
     };
     const action = typeof body.action === "string" ? body.action : "";
     const fileName = typeof body.fileName === "string" ? body.fileName.trim() : "";
     const order = await getFilmOrderForProofUpload(token);
     if (!order) return NextResponse.json({ error: "proof_order_not_found" }, { status: 404 });
 
+    if (action !== "session" && action !== "complete") {
+      return NextResponse.json({ error: "unknown_action" }, { status: 400 });
+    }
+    const declaredSize = action === "session"
+      ? typeof body.sizeBytes === "number" ? body.sizeBytes : undefined
+      : undefined;
+    try {
+      assertSupplierProofUploadPolicy(order, fileName, declaredSize);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "invalid_upload_request";
+      return NextResponse.json({ error: message }, { status: publicErrorStatus(message) });
+    }
+    if (!driveConfigured()) return NextResponse.json({ error: "drive_not_configured" }, { status: 503 });
+
     if (action === "session") {
-      if (!fileName || fileName.length > 200 || fileName.includes("/") || fileName.includes("\\")) {
-        return NextResponse.json({ error: "invalid_upload_request" }, { status: 400 });
-      }
-      if (!fileName.includes(order.order_number)) {
-        return NextResponse.json({ error: "file_name_must_include_order_number" }, { status: 400 });
-      }
-      if (!/\.(ai|pdf|zip|eps|psd|indd)$/iu.test(fileName)) {
-        return NextResponse.json({ error: "unsupported_file_type" }, { status: 400 });
-      }
-      const size = Number(body.sizeBytes);
-      if (Number.isFinite(size) && size > 15 * 1024 * 1024) {
-        return NextResponse.json({ error: "file_too_large" }, { status: 413 });
-      }
-      if (!driveConfigured()) return NextResponse.json({ error: "drive_not_configured" }, { status: 503 });
       const sessionUri = await createResumableSession({
         fileName,
         folderId: proofFolderId(),
         contentType: typeof body.contentType === "string" ? body.contentType : undefined,
-        sizeBytes: Number.isFinite(Number(body.sizeBytes)) ? Number(body.sizeBytes) : undefined,
+        sizeBytes: typeof body.sizeBytes === "number" ? body.sizeBytes : undefined,
       });
       return NextResponse.json({ sessionUri });
     }
 
-    if (action === "complete") {
-      if (!fileName) return NextResponse.json({ error: "invalid_upload_request" }, { status: 400 });
-      if (!driveConfigured()) return NextResponse.json({ error: "drive_not_configured" }, { status: 503 });
-      let url: string | null = null;
-      for (let attempt = 0; attempt < 3 && !url; attempt += 1) {
-        url = await findFileUrl({ fileName, folderId: proofFolderId() });
-        if (!url) await new Promise((resolve) => setTimeout(resolve, 800));
-      }
-      if (!url) return NextResponse.json({ error: "uploaded_file_not_found" }, { status: 404 });
-      const updated = await registerProofFromUploadToken({
-        token,
-        fileName,
-        fileUrl: url,
-        uploader: typeof body.uploader === "string" ? body.uploader : undefined,
-        note: typeof body.note === "string" ? body.note : undefined,
-      });
-      return NextResponse.json({ order: orderSummary(updated), url });
+    let candidates = await findDriveFiles({ fileName, folderId: proofFolderId() });
+    for (let attempt = 1; candidates.length === 0 && attempt < 3; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      candidates = await findDriveFiles({ fileName, folderId: proofFolderId() });
     }
-
-    return NextResponse.json({ error: "unknown_action" }, { status: 400 });
+    if (candidates.length === 0) return NextResponse.json({ error: "uploaded_file_not_found" }, { status: 404 });
+    if (candidates.length > 1) return NextResponse.json({ error: "ambiguous_uploaded_file" }, { status: 409 });
+    const candidate = candidates[0]!;
+    if (!candidate.parentFolderIds.includes(proofFolderId())) {
+      return NextResponse.json({ error: "uploaded_file_mismatch" }, { status: 400 });
+    }
+    const extension = fileName.slice(fileName.lastIndexOf(".")).toLowerCase();
+    if (!candidate.name.toLowerCase().endsWith(extension)) {
+      return NextResponse.json({ error: "uploaded_file_mismatch" }, { status: 400 });
+    }
+    if (candidate.sizeBytes == null || candidate.sizeBytes <= 0 || candidate.sizeBytes > 15 * 1024 * 1024) {
+      return NextResponse.json({ error: "file_too_large" }, { status: 413 });
+    }
+    const url = `https://drive.google.com/file/d/${candidate.id}/view`;
+    const updated = await registerProofFromUploadToken({
+      token,
+      fileName,
+      fileUrl: url,
+      uploader: typeof body.uploader === "string" ? body.uploader : undefined,
+      note: typeof body.note === "string" ? body.note : undefined,
+      metadata: {
+        fileSizeBytes: candidate.sizeBytes,
+        contentType: candidate.mimeType,
+        checksum: candidate.checksum,
+        checksumAlgorithm: candidate.checksum ? "md5" : null,
+        driveFileId: candidate.id,
+        uploadedVia: "supplier_proof",
+        clientIpHash: externalClientIpHash(request),
+        userAgent: request.headers.get("user-agent"),
+      },
+    });
+    return NextResponse.json({ order: orderSummary(updated), url });
   } catch (error) {
     const message = error instanceof Error ? error.message : "proof_upload_failed";
-    const status = message === "invalid_status_transition" ? 409
-      : message === "invalid_file_name" || message === "invalid_upload_request" ? 400
-      : message === "invalid_proof_token" ? 403 : 502;
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: message }, { status: publicErrorStatus(message) });
   }
 }
