@@ -65,7 +65,7 @@ function errorStatus(message: string): number {
 export async function GET(request: Request, context: Context): Promise<NextResponse> {
   const { token } = await context.params;
   try {
-    const order = await getFilmOrderForCustomerDesign(token);
+    const order = await getFilmOrderForCustomerDesign(token, request);
     return NextResponse.json(designSummary(order));
   } catch (error) {
     const message = error instanceof Error ? error.message : "customer_design_load_failed";
@@ -86,7 +86,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       note?: unknown;
     };
     const action = typeof body.action === "string" ? body.action : "";
-    const order = await getFilmOrderForCustomerDesign(token);
+    const order = await getFilmOrderForCustomerDesign(token, request);
     const originalFileName = typeof body.originalFileName === "string" && body.originalFileName.trim()
       ? body.originalFileName.trim()
       : typeof body.fileName === "string" ? body.fileName.trim() : "";

@@ -1714,11 +1714,14 @@ export async function filmOrderExistsForQuotation(quotationId: number): Promise<
   return Boolean(row);
 }
 
-export async function getFilmOrderForCustomerDesign(token: string): Promise<FilmOrderView> {
+export async function getFilmOrderForCustomerDesign(
+  token: string,
+  request?: { headers: { get(name: string): string | null } },
+): Promise<FilmOrderView> {
   const db = await getDatabase();
   const resolved = await resolveExternalToken(db, token, "customer_design");
   if (!resolved) throw new Error("invalid_customer_design_token");
-  await markExternalTokenUse(db, resolved.token);
+  await markExternalTokenUse(db, resolved.token, request);
   const order = await getFilmOrder(resolved.orderId);
   if (!order || !["requested","received","correction_requested"].includes(order.customerDesign.status)) {
     throw new Error("invalid_customer_design_token");
