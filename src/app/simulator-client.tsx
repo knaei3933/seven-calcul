@@ -1382,6 +1382,25 @@ export default function QuotationPage({
     localStorage.setItem("pouch-current-checklist-snapshot-persistent-v1", checklistSnapshotJson);
   }, [effectiveParameters, effectiveSize, form.bulkPrice, form.lengthMm, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate]);
 
+  const continueWithRedactedProjection = (projection: ReturnedPublicProjection) => {
+    try {
+      sessionStorage.setItem(
+        QUOTATION_DRAFT_KEY,
+        JSON.stringify(buildRedactedQuotationDraft(projection, {
+          productSummary: form.skus.map((sku) => sku.name.trim() || "充填物").join(" / "),
+          sizeSummary: `${form.widthMm}×${form.lengthMm}mm / ${form.connected}連`,
+          targetMargin: effectiveMargin,
+        })),
+      );
+      sessionStorage.removeItem(SIMULATOR_STALE_STATUS_KEY);
+      // Session-scoped quotation handoff intentionally reloads the app.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign("/quote");
+    } catch {
+      setCalculationError({ code: "quotation_draft_failed", message: "見積書ドラフトを作成できませんでした。" });
+    }
+  };
+
   const selectCandidate = async (candidate: PrintCandidate) => {
     if (!serverResult || pending || selecting) return;
     if (serverResult.selectedCandidateId === candidate.id) {
@@ -1447,6 +1466,7 @@ export default function QuotationPage({
               ?.adjustedSkuQuantities[index] ?? returnedProjection.quantity,
           })),
         }));
+        continueWithRedactedProjection(returnedProjection);
         return;
       }
       if (requestOrder !== requestOrderRef.current) return;
@@ -1661,9 +1681,10 @@ export default function QuotationPage({
       });
       setForm((old) => ({
         ...old,
-        quantity,
-        skus: old.skus.map((sku, index) => ({ ...sku, quantity: adjusted[index] ?? quantity })),
-      }));
+              quantity,
+              skus: old.skus.map((sku, index) => ({ ...sku, quantity: adjusted[index] ?? quantity })),
+            }));
+      continueWithRedactedProjection(projection);
     } catch (error) {
       const mapped = calculationErrorFor(error, "candidate_calculation_failed");
       setSelectionError(mapped);
