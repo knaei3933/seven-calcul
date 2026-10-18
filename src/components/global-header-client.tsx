@@ -26,11 +26,8 @@ export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
   return (
     <div className="global-header-inner">
       <Link href="/" className="menu-brand" aria-label="セブン化学 Quotation Suite ホーム">
-        <span className="logo-mark" aria-hidden="true">7</span>
-        <span>
-          セブン化学
-          <small>Quotation Suite</small>
-        </span>
+        {/* eslint-disable-next-line @next/next/no-img-element -- The brand SVG is a fixed-height identity mark shared by all pages. */}
+        <img className="menu-brand-logo" src="/seven-chemical-logo.svg" alt="" />
       </Link>
 
       <nav className="global-menu" aria-label="メインメニュー">

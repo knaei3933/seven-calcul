@@ -115,6 +115,15 @@ class QuotationPdfError extends Error {}
 
 async function generateQuotationPdf(element: HTMLElement): Promise<Blob> {
   const html2pdf = (await import("html2pdf.js")).default;
+  // html2canvas can capture a cloned SVG before its intrinsic box is ready.
+  await Promise.all(Array.from(element.querySelectorAll("img"), (image) => (
+    image.complete
+      ? Promise.resolve()
+      : typeof image.decode === "function"
+        ? image.decode().catch(() => undefined)
+        : Promise.resolve()
+  )));
+  if ("fonts" in document) await document.fonts.ready;
   return await html2pdf().from(element).set({
     margin: [0, 0, 0, 0],
     // The jsPDF name is only a browser-side default; persistence always uses
@@ -162,6 +171,13 @@ function createQuotePdfCapture(sheet: HTMLElement | null): {
     cloneFit.style.setProperty("--quote-a4-fit-scale", scale.toFixed(5));
     cloneFit.style.transform = `scale(${scale.toFixed(5)})`;
     cloneFit.style.transformOrigin = "top left";
+    // Uniform downscaling would otherwise leave blank space on the right.
+    // Lay the content out in the enlarged pre-transform box, then scale it
+    // back so the visible result still occupies the full A4 width.
+    if (scale < 1) {
+      cloneFit.style.width = `${100 / scale}%`;
+      cloneFit.style.height = `${100 / scale}%`;
+    }
   }
 
   return {
@@ -1669,11 +1685,12 @@ export default function PrintableQuotationPage({
           <header className="sheet-header">
             <div className="issuer">
 	            <div className="issuer-logo">
-	                {/* eslint-disable-next-line @next/next/no-img-element -- A4 capture/print uses an ordinary img so html2canvas preserves the exact SVG size. */}
+	                {/* eslint-disable-next-line @next/next/no-img-element -- A4 capture/print uses an ordinary img so html2canvas preserves the exact rendered size. */}
 	                <img
-	                  // A4 capture/print uses an ordinary img so html2canvas preserves the exact SVG size.
 	                  className="issuer-brand-logo"
-                  src="/api/brand-assets/seven-chemical-logo.svg"
+                  src="/seven-chemical-logo.png"
+                  width={100}
+                  height={45}
                   alt="セブン化學ロゴ"
                 />
                 <div>
@@ -1884,8 +1901,10 @@ export default function PrintableQuotationPage({
             <div className="approval">
               <span><EditableText value={form.issuerName} label="承認発行者名" onCommit={(next) => update("issuerName", next.trim())} /></span>
               <div className="approval-seal-group">
-                {approverName.trim() ? <span className="approver-name">{approverName}</span> : null}
-                <span className="seal" aria-hidden="true"><EditableText value={form.sealText} label="社内判文言" onCommit={(next) => update("sealText", next.trim())} /></span>
+                <span className="seal" aria-hidden="true">
+                  {approverName.trim() ? <span className="seal-name">{approverName}</span> : null}
+                  <EditableText value={form.sealText} label="社内判文言" onCommit={(next) => update("sealText", next.trim())} />
+                </span>
               </div>
             </div>
           </footer>
