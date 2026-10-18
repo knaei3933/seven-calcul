@@ -9,6 +9,14 @@ export type IssuerContact = {
 };
 
 export function issuerContactForUser(user: { email: string; name: string }): IssuerContact {
+  if (user.email.trim().toLowerCase() === "kim@kanei-trade.co.jp") {
+    return {
+      companyName: "",
+      contactName: user.name,
+      email: "shapepouch@package-lab.com",
+      telephone: "TEL 050-3613-9673",
+    };
+  }
   if (isKaneiTradeUser(user.email)) {
     return {
       companyName: "金井貿易株式会社",

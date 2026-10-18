@@ -1913,9 +1913,9 @@ export default function PrintableQuotationPage({
             <div className="footer-top">
               <p><EditableText value={form.footerNote} label="フッター文言" multiline onCommit={(next) => update("footerNote", next)} /></p>
               <div className="footer-contact" data-testid="issuer-contact">
-                <span>{issuerContact.companyName}</span>
-                <span>{issuerContact.email}</span>
-                <span>{issuerContact.telephone}</span>
+                {issuerContact.companyName ? <span>{issuerContact.companyName}</span> : null}
+                {issuerContact.email ? <span>{issuerContact.email}</span> : null}
+                {issuerContact.telephone ? <span>{issuerContact.telephone}</span> : null}
               </div>
             </div>
             <div className="approval">
