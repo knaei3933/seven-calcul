@@ -404,8 +404,20 @@ function EditableText({ value, label, className, multiline = false, onCommit }: 
 
 export default function PrintableQuotationPage({
   approverName = "",
+  issuerContact = {
+    companyName: sevenChemical.name,
+    contactName: "",
+    email: "",
+    telephone: "TEL 072-971-0726",
+  },
 }: {
   approverName?: string;
+  issuerContact?: {
+    companyName: string;
+    contactName: string;
+    email: string;
+    telephone: string;
+  };
 } = {}) {
   const router = useRouter();
   const quoteFitRef = useRef<HTMLDivElement | null>(null);
@@ -835,6 +847,7 @@ export default function PrintableQuotationPage({
             pricingSnapshot: form.pricingSnapshotJson ? JSON.parse(form.pricingSnapshotJson) : undefined,
             purchaseOrder: savedPurchaseOrder,
             calculationChecklistSnapshot: calculationChecklistSnapshot,
+            footerContact: issuerContact,
             filmUnitDisplay: shownTotals.filmUnit,
             filmPouchUnitDisplay: shownTotals.filmPouchUnit,
             filmAmountDisplay: shownTotals.filmAmount,
@@ -1898,6 +1911,11 @@ export default function PrintableQuotationPage({
 
           <footer className="sheet-footer">
             <p><EditableText value={form.footerNote} label="フッター文言" multiline onCommit={(next) => update("footerNote", next)} /></p>
+            <div className="footer-contact" data-testid="issuer-contact">
+              <strong>{issuerContact.contactName || issuerContact.companyName}</strong>
+              <span>{issuerContact.email}</span>
+              <span>{issuerContact.telephone}</span>
+            </div>
             <div className="approval">
               <span><EditableText value={form.issuerName} label="承認発行者名" onCommit={(next) => update("issuerName", next.trim())} /></span>
               <div className="approval-seal-group">

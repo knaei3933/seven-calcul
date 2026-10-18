@@ -821,8 +821,10 @@ header .version-badge { display: none; }
 .terms dt { flex: 0 0 24mm; color: #4b5563; font-weight: 700; }
 .terms dd { margin: 0; }
 .terms .notes { margin: 2mm 0 0; padding-top: 1.6mm; border-top: 1px solid #d8dfe9; color: #374151; font-size: 8.6pt; }
-.sheet-footer { margin-top: auto; display: flex; justify-content: space-between; align-items: end; gap: 8mm; border-top: 1px solid #8b96a6; padding-top: 3.5mm; color: #4b5563; font-size: 8.2pt; }
+.sheet-footer { margin-top: auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6mm; align-items: end; border-top: 1px solid #8b96a6; padding-top: 3.5mm; color: #4b5563; font-size: 8.2pt; }
 .sheet-footer p { max-width: 82mm; margin: 0; line-height: 1.42; }
+.footer-contact { display: grid; gap: .6mm; justify-items: end; font-size: 8.2pt; line-height: 1.25; color: #374151; }
+.footer-contact strong { color: #111827; }
 /* 인쇄 시 적용되는 footer 여백을 오프스크린 측정 클론에도 동일하게 반영한다. */
 body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 #quote-print-measure-host {

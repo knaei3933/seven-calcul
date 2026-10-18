@@ -344,9 +344,28 @@ describe("quotation page stale draft", () => {
 });
 
 it("shows the authenticated approver directly above the internal review seal", () => {
+  cleanup();
   render(<QuotePage approverName="石井" />);
 
   const approval = screen.getByText("石井").closest<HTMLElement>(".approval-seal-group");
   expect(approval).not.toBeNull();
   expect(within(approval!).getByText("検討済")).toBeVisible();
+});
+
+it("renders issuer contact details for the authenticated issuing company", () => {
+  cleanup();
+  render(<QuotePage
+    approverName="石井"
+    issuerContact={{
+      companyName: "金井貿易株式会社",
+      contactName: "Kim Admin",
+      email: "kim@kanei-trade.co.jp",
+      telephone: "TEL 050-3613-9673",
+    }}
+  />);
+
+  const contact = screen.getByTestId("issuer-contact");
+  expect(contact).toHaveTextContent("Kim Admin");
+  expect(contact).toHaveTextContent("kim@kanei-trade.co.jp");
+  expect(contact).toHaveTextContent("TEL 050-3613-9673");
 });

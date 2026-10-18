@@ -11,7 +11,9 @@ const scrypt = promisify(scryptCallback) as (
 
 export const SESSION_COOKIE_NAME = "pouch_session";
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
-const ENV_AUTH_MODE = process.env.VERCEL === "1" || process.env.AUTH_MODE === "env";
+// Vercel uses the durable quotations database by default. Set AUTH_MODE=env
+// only for stateless emergency-boot environments.
+const ENV_AUTH_MODE = process.env.AUTH_MODE === "env";
 const SCRYPT_PARAMETERS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 } as const;
 const PASSWORD_KEY_LENGTH = 64;
 
