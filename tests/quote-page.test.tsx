@@ -102,6 +102,38 @@ describe("quotation page stale draft", () => {
     expect(sheet.getAllByText(/【出来高について】/).length).toBeGreaterThan(0);
     expect(sheet.getAllByText(/±10%程度の過不足/).length).toBeGreaterThan(0);
     expect(sheet.getAllByText(/超過分×充填単価/).length).toBeGreaterThan(0);
+    const terms = within(document.getElementById("quote-preview")!);
+    expect(terms.getByText("データ校了後約２か月")).toBeVisible();
+    expect(terms.getByText("先払い")).toBeVisible();
+    expect(sheet.getAllByText(/初回製作時は、バルクサンプルを株式会社セブン化学/).length).toBeGreaterThan(0);
+    expect(sheet.getAllByText(/責任技術者：福井/).length).toBeGreaterThan(0);
+  });
+
+  it("shows the calculated bulk amount as a customer-supplied quantity", () => {
+    sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
+      productSummary: "バルク支給品",
+      sizeSummary: "50×60mm / 1連",
+      quantity: "10000",
+      targetMargin: "0.4",
+      fillingCostPerPiece: "0",
+      filmCostPerPiece: "10",
+      filmMeterPrice: "400",
+      filmOrderLengthM: "500",
+      totalCostPerPiece: "10",
+      calculationVersion: "simulator-linked",
+      resultHash: "bulk-usage-check",
+      calculationFilmTotal: "200000",
+      calculationChecklistSnapshot: {
+        bulkUsageMl: "722000",
+        fillMlPerChamber: "3",
+        connectedChambers: 1,
+        totalFillMlPerPouch: "3",
+        fillingMethod: "hopper",
+      },
+    }));
+    render(<QuotePage />);
+
+    expect(screen.getByTestId("bulk-supply-amount")).toHaveTextContent("722,000ml（貴社ご支給ください）");
   });
 
   it("shows a warning and blocks linked quotation actions while the simulator draft is stale", async () => {

@@ -306,9 +306,10 @@ const defaultQuote: QuoteForm = {
   calculationFilmTotal: "0",
   targetMargin: "0.4",
   taxRatePercent: "10",
-  deliveryDate: "ご注文後の別途ご相談",
-  paymentTerms: "御見積時にお相談いたします",
+  deliveryDate: "データ校了後約２か月",
+  paymentTerms: "先払い",
   notes: [
+    "初回製作時は、バルクサンプルを株式会社セブン化学 責任技術者：福井　健二 宛にご送付ください。",
     "上記金額には充填・加工費・フィルム費用および該当する初期費用（銅版・金型）を含みます。仕様変更時は再度お見積りいたします。",
     "ご入金およびデータ入稿後に正式受注処理となります。",
     "バルク支給時の容器処分費用が発生する場合は実費を請求いたします。",
@@ -1752,6 +1753,14 @@ export default function PrintableQuotationPage({
                   ? `${calculationChecklistSnapshot.chambers.map((chamber) => `${chamber.position}室:${chamber.liquidName} ${formatNumber(chamber.fillMl)}ml`).join("／")} ＝ ${formatNumber(calculationChecklistSnapshot.totalFillMlPerPouch)}ml/枚（${calculationChecklistSnapshot.fillingMethod === "pressure" ? "加圧充填" : "ホッパ充填"}）`
                   : `${formatNumber(calculationChecklistSnapshot.fillMlPerChamber)}ml/室 × ${calculationChecklistSnapshot.connectedChambers}室 ＝ ${formatNumber(calculationChecklistSnapshot.totalFillMlPerPouch)}ml/枚（${calculationChecklistSnapshot.fillingMethod === "pressure" ? "加圧充填" : "ホッパ充填"}）`)
                 : "-"}</dd></div>
+              {D(calculationChecklistSnapshot?.bulkUsageMl ?? "0").gt(0) ? (
+                <div>
+                  <dt>バルク量</dt>
+                  <dd data-testid="bulk-supply-amount">
+                    {formatNumber(calculationChecklistSnapshot?.bulkUsageMl ?? "0")}ml（貴社ご支給ください）
+                  </dd>
+                </div>
+              ) : null}
               <div><dt>フィルム構成</dt><dd><EditableText value={form.filmComposition || DEFAULT_FILM_COMPOSITION} label="フィルム構成" onCommit={(next) => update("filmComposition", next.trim())} /></dd></div>
               {calculationChecklistSnapshot?.skus?.length ? (
                 <div><dt>SKU</dt><dd>{calculationChecklistSnapshot.skus.map((sku, index) => `${form.skuNames[index]?.trim() || sku.name} ／ ${formatNumber(sku.quantity)}枚`).join("　")}</dd></div>
@@ -1903,7 +1912,7 @@ export default function PrintableQuotationPage({
           <section className="terms">
             <dl>
               <div><dt>納期</dt><dd><EditableText value={form.deliveryDate || "-"} label="納期" onCommit={(next) => update("deliveryDate", next.trim())} /></dd></div>
-              <div><dt>お支払条件</dt><dd><EditableText value={form.paymentTerms || "-"} label="お支払条件" onCommit={(next) => update("paymentTerms", next.trim())} /></dd></div>
+              <div><dt>お支払い条件</dt><dd><EditableText value={form.paymentTerms || "-"} label="お支払い条件" onCommit={(next) => update("paymentTerms", next.trim())} /></dd></div>
               <div><dt>見積有効期限</dt><dd><EditableText value={form.validUntil || "-"} label="見積有効期限" onCommit={(next) => update("validUntil", next.trim())} /></dd></div>
             </dl>
             <p className="notes"><strong>備考</strong><EditableText value={form.notes ? ` ${form.notes}` : ""} label="備考" multiline onCommit={(next) => update("notes", next)} /></p>
