@@ -1455,6 +1455,53 @@ export default function QuotationPage({
         redactedHandoffRef.current = true;
         // Do not commit redacted state: committing it renders the intermediate
         // plan page for one frame before the quotation navigation completes.
+        try {
+          const savedSimulatorRaw = sessionStorage.getItem(SIMULATOR_STATE_KEY);
+          const savedSimulator = savedSimulatorRaw ? JSON.parse(savedSimulatorRaw) as Record<string, unknown> : {};
+          const candidateSpec = { ...basisCalculationInput.spec, skuQuantities: candidate.adjustedSkuQuantities };
+          const { skuQuantities: _basisSkuQuantities, ...basisSpecRest } = basisCalculationInput.spec;
+          const candidateRequestNonQuantityJson = JSON.stringify({
+            ...basisCalculationInput,
+            spec: basisSpecRest,
+          });
+          const hasFullResult = isCostResult(payload.result)
+            && isCostResult(payload.originalResult)
+            && Array.isArray(payload.candidates);
+          sessionStorage.setItem(SIMULATOR_STATE_KEY, JSON.stringify({
+            ...savedSimulator,
+            form: {
+              ...(savedSimulator.form as object | undefined),
+              quantity: returnedProjection.quantity,
+              targetMargin: candidateTargetMarginMode === "custom" ? "custom" : candidateTargetMargin,
+              customMargin: candidateTargetMarginMode === "custom" ? candidateTargetMargin : form.customMargin,
+              skus: form.skus.map((sku, index) => ({
+                ...sku,
+                quantity: candidate.adjustedSkuQuantities[index] ?? returnedProjection.quantity,
+              })),
+            },
+            serverResult: hasFullResult ? {
+              result: payload.result,
+              originalResult: payload.originalResult,
+              candidates: payload.candidates,
+              inputJson: JSON.stringify(basisCalculationInput),
+              requestNonQuantityJson: candidateRequestNonQuantityJson,
+              selectedCandidateId: candidate.id,
+              originalQuantity: serverResult.originalQuantity ?? form.quantity,
+              originalSkuQuantities: serverResult.originalSkuQuantities ?? form.skus.map((sku) => sku.quantity),
+              originalInputJson: serverResult.originalInputJson ?? serverResult.inputJson,
+              originalRequestNonQuantityJson: serverResult.originalRequestNonQuantityJson ?? serverResult.requestNonQuantityJson,
+              originalPrintingMethod,
+              originalTargetMargin,
+              originalTargetMarginMode,
+              calculationRequest,
+              originalCalculationRequest: serverResult.originalCalculationRequest ?? serverResult.calculationRequest,
+            } : undefined,
+            calculatedAt: new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+          }));
+        } catch {
+          // The quotation handoff remains valid even when simulator persistence
+          // cannot be updated.
+        }
         continueWithRedactedProjection(returnedProjection);
         return;
       }
