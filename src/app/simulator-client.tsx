@@ -1449,23 +1449,8 @@ export default function QuotationPage({
       const returnedProjection = returnedProjectionFrom(payload);
       if (returnedProjection) {
         if (requestOrder !== requestOrderRef.current) return;
-        setRedactedCalculation({
-          projection: returnedProjection,
-          originalRequest: serverResult.originalCalculationRequest ?? calculationInput,
-          originalTargetMargin,
-          originalTargetMarginMode,
-          request: calculationRequest,
-          selectedCandidateId: candidate.id,
-        });
-        setForm((old) => ({
-          ...old,
-          quantity: returnedProjection.quantity,
-          skus: old.skus.map((sku, index) => ({
-            ...sku,
-            quantity: returnedProjection.candidates.find((item) => item.id === candidate.id)
-              ?.adjustedSkuQuantities[index] ?? returnedProjection.quantity,
-          })),
-        }));
+        // Do not commit redacted state: committing it renders the intermediate
+        // plan page for one frame before the quotation navigation completes.
         continueWithRedactedProjection(returnedProjection);
         return;
       }
