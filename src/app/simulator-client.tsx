@@ -53,6 +53,7 @@ type CalculationPayload = {
   originalResult?: unknown;
   candidates?: unknown;
   projection?: unknown;
+  returnedProjection?: unknown;
   error?: string;
 };
 
@@ -141,7 +142,8 @@ function calculationErrorFor(error: unknown, fallbackCode: string): { code: stri
 
 function returnedProjectionFrom(payload: CalculationPayload): ReturnedPublicProjection | null {
   if (isReturnedPublicProjection(payload)) return payload;
-  return isReturnedPublicProjection(payload.projection) ? payload.projection : null;
+  if (isReturnedPublicProjection(payload.projection)) return payload.projection;
+  return isReturnedPublicProjection(payload.returnedProjection) ? payload.returnedProjection : null;
 }
 
 function candidateSelectionErrorMessage(code: string): string {
