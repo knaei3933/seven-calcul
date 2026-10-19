@@ -22,10 +22,10 @@ async function selectRedactedGravureCandidate(page: Page, sizeKey = "tube-50x90"
   await expect(page).toHaveURL(/\/(\?|$)/);
   await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "redacted_calculated");
   await expect(page.getByTestId("redacted-snapshot")).toBeVisible();
-  await expect(page.getByTestId("redacted-candidate-Y")).toContainText("選択中");
+  await expect(page.locator('[data-testid^="redacted-candidate-"].selected')).toContainText("選択中");
   await expectNoFullResultLeak(page);
 
-  const selectedCandidate = page.getByTestId("redacted-candidate-Y");
+  const selectedCandidate = page.locator('[data-testid^="redacted-candidate-"].selected');
   const orderLengthM = numericText(await selectedCandidate.locator("dd").nth(1).innerText());
   const filmTotal = numericText(await selectedCandidate.locator("dd").nth(2).innerText());
   expect(Number(orderLengthM)).toBeGreaterThan(0);

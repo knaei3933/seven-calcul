@@ -19,7 +19,7 @@ export default defineConfig({
     },
     {
       name: "ordinary-chromium",
-      testMatch: /(candidate-integrity|gravure-master)\.spec\.ts/,
+      testMatch: /(candidate-integrity|gravure-master|gravure-selection-routing)\.spec\.ts/,
       testIgnore: /auth\.setup\.ts/,
       dependencies: ["setup"],
       use: { ...devices["Desktop Chrome"], storageState: ordinaryStatePath },
@@ -33,7 +33,7 @@ export default defineConfig({
     },
     {
       name: "kanai-chromium",
-      testIgnore: /(candidate-integrity|gravure-master)\.spec\.ts|auth\.setup\.ts/,
+    testIgnore: /(candidate-integrity|gravure-master)\.spec\.ts|auth\.setup\.ts/,
       dependencies: ["setup"],
       use: { ...devices["Desktop Chrome"], storageState: kanaiStatePath },
     },

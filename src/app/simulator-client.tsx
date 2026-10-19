@@ -1386,6 +1386,8 @@ export default function QuotationPage({
 
   const selectCandidate = async (candidate: PrintCandidate) => {
     if (!serverResult || pending || selecting) return;
+    // Candidate selection is a review step. Navigation to /quote is always
+    // explicit; both full and redacted responses must remain on this route.
     if (serverResult.selectedCandidateId === candidate.id) {
       setRecommendationModalOpen(false);
       return;
@@ -1622,6 +1624,8 @@ export default function QuotationPage({
 
   const selectRedactedCandidate = async (candidate: ReturnedPublicProjection["candidates"][number]) => {
     if (!redactedCalculation || selecting) return;
+    // Redacted plans stay on their calculation review page until the user
+    // presses 見積書へ進む. Never auto-navigate from a candidate click.
     const requestOrder = ++requestOrderRef.current;
     setSelecting(true);
     setSelectionError(null);
@@ -2047,7 +2051,7 @@ export default function QuotationPage({
             {selectionError ? <p className="error" role="alert" data-testid="candidate-selection-error">{selectionError.message}</p> : null}
             <div className="recommendation-list">
               {projection.candidates.map((candidate) => (
-                <article key={candidate.id} data-testid={`redacted-candidate-${candidate.route}`} className={candidate.id === projection.selectedCandidateId ? "recommendation-card selected" : "recommendation-card"}>
+                <article key={candidate.id} data-testid={`redacted-candidate-${candidate.id}`} className={candidate.id === projection.selectedCandidateId ? "recommendation-card selected" : "recommendation-card"}>
                   <h3>{candidate.detailLabel ?? `${candidate.route} route`}</h3>
                   <p>{candidate.materialText ?? ""} {candidate.colorText ?? ""}</p>
                   <dl>
