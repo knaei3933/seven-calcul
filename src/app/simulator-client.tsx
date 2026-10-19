@@ -1981,7 +1981,7 @@ export default function QuotationPage({
 
 
   useEffect(() => {
-    if (!simulatorStateLoaded) return;
+    if (!simulatorStateLoaded || redactedHandoffRef.current) return;
     const simulatorStateJson = JSON.stringify({
       version: 1,
       form,
