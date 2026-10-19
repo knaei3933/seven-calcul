@@ -405,6 +405,7 @@ function EditableText({ value, label, className, multiline = false, onCommit }: 
 
 export default function PrintableQuotationPage({
   approverName = "",
+  initialQuotationNumber = "",
   issuerContact = {
     companyName: sevenChemical.name,
     contactName: "",
@@ -413,6 +414,7 @@ export default function PrintableQuotationPage({
   },
 }: {
   approverName?: string;
+  initialQuotationNumber?: string;
   issuerContact?: {
     companyName: string;
     contactName: string;
@@ -642,6 +644,7 @@ export default function PrintableQuotationPage({
         if (Array.isArray(restored.skuNames) && restored.skuNames.every((name) => typeof name === "string")) {
           restoredForm.skuNames = restored.skuNames as string[];
         }
+        restoredForm.quotationNumber = restoredForm.quotationNumber || initialQuotationNumber;
         restoredForm.calculationRequestJson = restored.calculationRequest
           ? JSON.stringify(restored.calculationRequest)
           : "";
@@ -716,10 +719,11 @@ export default function PrintableQuotationPage({
       ...old,
       issueDate: old.issueDate || isoDate(now),
       validUntil: old.validUntil || isoDate(valid),
-      quotationNumber: old.quotationNumber || `S7-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-001`,
+      quotationNumber: old.quotationNumber || initialQuotationNumber
+        || `S7-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-001`,
     }));
     setStorageLoaded(true);
-  }, []);
+  }, [initialQuotationNumber]);
 
   const update = <K extends keyof QuoteForm>(key: K, value: QuoteForm[K]) =>
     setForm((old) => ({ ...old, [key]: value }));

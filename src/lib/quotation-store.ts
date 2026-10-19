@@ -518,6 +518,25 @@ export interface IssuedQuotationResult {
   pdfSha256: string;
 }
 
+export async function getNextQuotationNumber(now = new Date()): Promise<string> {
+  const jstDateString = now.toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" });
+  const [year, month] = jstDateString.split("-");
+  const prefix = `S7-${year}${month}-`;
+  const db = await getDatabase();
+  const rows = await db.all<{ quotation_number: string }>(
+    "SELECT quotation_number FROM quotations WHERE quotation_number LIKE ?",
+    [`${prefix}%`],
+  );
+  const usedSuffixes = new Set(rows.map((row) => {
+    const match = /^S7-\d{6}-(\d+)$/.exec(row.quotation_number);
+    return match ? Number(match[1]) : 0;
+  }).filter((suffix) => suffix > 0));
+
+  let suffix = 1;
+  while (usedSuffixes.has(suffix)) suffix += 1;
+  return `${prefix}${String(suffix).padStart(3, "0")}`;
+}
+
 export async function saveIssuedQuotation(
   value: QuotationRecordInput,
   actorId: number,

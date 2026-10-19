@@ -60,6 +60,12 @@ describe("quotation page stale draft", () => {
     vi.unstubAllGlobals();
   });
 
+  it("uses the server-provided next quotation number", async () => {
+    render(<QuotePage initialQuotationNumber="S7-202610-007" />);
+    await waitFor(() => expect(screen.getByTestId("quote-spec")).toBeVisible());
+    expect(document.getElementById("quote-preview")?.textContent).toContain("S7-202610-007");
+  });
+
   it("keeps direct manual entry actions available when no stale marker exists", async () => {
     render(<QuotePage />);
 

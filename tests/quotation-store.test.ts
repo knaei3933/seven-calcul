@@ -12,7 +12,7 @@ import type { QuotationRecordInput } from "@/lib/quotation-shared";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-store-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
-const { createChecklistsForQuotation, createLegacyChecklistsForQuotation, deleteQuotation, getChecklistsForQuotation, getQuotation, saveQuotation, updateChecklistItem } = await import("@/lib/quotation-store");
+const { createChecklistsForQuotation, createLegacyChecklistsForQuotation, deleteQuotation, getChecklistsForQuotation, getNextQuotationNumber, getQuotation, saveQuotation, updateChecklistItem } = await import("@/lib/quotation-store");
 const { createUser } = await import("@/lib/auth-store");
 
 process.env.ADMIN_EMAIL = "admin@quotation-store.test";
@@ -25,6 +25,42 @@ afterAll(async () => {
 });
 
 describe("quotation persistence with a manually edited selling price", () => {
+  it("generates the next monthly number without reusing an existing quotation number", async () => {
+    const first = await getNextQuotationNumber(new Date("2026-10-19T00:00:00Z"));
+    expect(first).toMatch(/^S7-202610-\d{3}$/);
+
+    await saveQuotation({
+      quotationNumber: first,
+      status: "draft",
+      issueDate: "2026-10-19",
+      validUntil: "2026-11-19",
+      customerName: "連番テスト株式会社",
+      customerContact: "",
+      productName: "連番テスト",
+      sizeSummary: "50×60mm / 1連",
+      quantity: "10000",
+      fillingCostPerPiece: "0",
+      filmCostPerPiece: "0",
+      filmMeterPrice: "0",
+      filmOrderLengthM: "0",
+      targetMargin: "0.4",
+      taxRatePercent: "10",
+      pricePerPiece: "0",
+      subtotal: "0",
+      tax: "0",
+      grandTotal: "0",
+      deliveryDate: "",
+      paymentTerms: "",
+      notes: "",
+      calculationVersion: "sequence-test",
+      resultHash: "sequence-test-hash",
+      payload: {},
+    }, actor.id, "user");
+
+    const second = await getNextQuotationNumber(new Date("2026-10-19T00:00:00Z"));
+    expect(Number(second.slice(-3))).toBe(Number(first.slice(-3)) + 1);
+  });
+
   it("stores simulator cost, displayed price, and reverse-calculated profit", async () => {
     const input: QuotationRecordInput = {
       quotationNumber: "S7-TEST-EDIT-001",
