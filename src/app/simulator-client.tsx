@@ -1041,6 +1041,7 @@ export default function QuotationPage({
   const [kMasterUnavailable, setKMasterUnavailable] = useState(false);
   const [shortagePlansOpen, setShortagePlansOpen] = useState(false);
   const requestOrderRef = useRef(0);
+  const redactedHandoffRef = useRef(false);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
   const [productionSpeedManual, setProductionSpeedManual] = useState(false);
   const [liquidMaster, setLiquidMaster] = useState<LiquidMasterItem[]>([]);
@@ -1451,6 +1452,7 @@ export default function QuotationPage({
       const returnedProjection = returnedProjectionFrom(payload);
       if (returnedProjection) {
         if (requestOrder !== requestOrderRef.current) return;
+        redactedHandoffRef.current = true;
         // Do not commit redacted state: committing it renders the intermediate
         // plan page for one frame before the quotation navigation completes.
         continueWithRedactedProjection(returnedProjection);
@@ -1688,6 +1690,7 @@ export default function QuotationPage({
     setCalculationError(null);
     setServerResult(null);
     setRedactedCalculation(null);
+    redactedHandoffRef.current = false;
     try {
       const shouldRestoreInputMargin = Boolean(serverResult?.selectedCandidateId);
       // The explicit recalculation button always returns to the customer's
@@ -1865,6 +1868,7 @@ export default function QuotationPage({
 
   useEffect(() => {
     if (!serverResult || !quotationDraftResult) return;
+    if (redactedHandoffRef.current) return;
     const draftSkus = form.skus.map((sku, index) => {
       const quantity = D(selectedRecommendation?.adjustedSkuQuantities[index] ?? sku.quantity);
       const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate, Number(form.connected));
