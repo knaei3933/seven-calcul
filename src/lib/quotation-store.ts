@@ -730,6 +730,42 @@ export async function updateQuotationStatus(id: number, status: QuotationStatus,
   return getQuotation(id);
 }
 
+export async function updateQuotationCustomerEmail(
+  id: number,
+  email: string,
+  actorId: number,
+): Promise<QuotationRecord | null> {
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return null;
+
+  const db = await getDatabase();
+  return db.transaction(async (tx) => {
+    const current = await tx.get<{ id: number; status: QuotationStatus; payload_json: string }>(
+      "SELECT id, status, payload_json FROM quotations WHERE id = ?",
+      [id],
+    );
+    if (!current || !["draft", "sent"].includes(current.status)) return null;
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(current.payload_json) as Record<string, unknown>;
+    } catch {
+      payload = {};
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) payload = {};
+    payload.customerEmail = normalizedEmail;
+
+    const now = new Date().toISOString();
+    await tx.run(
+      "UPDATE quotations SET payload_json = ?, updated_by = ?, updated_at = ? WHERE id = ? AND status IN ('draft','sent')",
+      [JSON.stringify(payload), actorId, now, id],
+    );
+    const saved = await selectRecordById(tx, id);
+    return saved ? mapRow(saved) : null;
+  });
+}
+
 export type QuotationApprovalGate = "internal" | "customerApproval";
 
 export class QuotationApprovalTransitionError extends Error {

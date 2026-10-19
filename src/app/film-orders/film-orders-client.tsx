@@ -5,9 +5,9 @@ import Link from "next/link";
 import {
   FILM_ORDER_STATUSES,
   buildFilmOrderFileName,
-  DEFAULT_FILM_PROOF_EMAIL,
   filmOrderStatusLabels,
   customerDesignStatusLabels,
+  customerProofStatusLabels,
   sampleBulkStatusLabels,
   type FilmOrderStatus,
   type FilmOrderView,
@@ -16,6 +16,7 @@ import {
   buyerDomainOf,
   isKaneiTradeUser,
   isSevenChemicalUser,
+  supplierLocaleFor,
 } from "@/lib/film-order-access";
 import { D } from "@/lib/decimal";
 import { filmQuotationNumberFor } from "@/lib/film-quotation";
@@ -307,8 +308,16 @@ function OrderCard({
       setMails((payload.mails ?? []) as MailResult[]);
       setMessage(okMessage);
     } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "failed";
+      const humanMessages: Record<string, string> = {
+        invalid_ai_file: "AIファイルが必要です。.ai ファイルを選択してください。",
+        invalid_pdf_file: "PDFファイル名が不正です。.pdf ファイルをアップロードするか、PDFチェックを外してください。",
+        invalid_pdf_file_url: "PDFのDriveアップロードが完了していません。完了後に登録してください。",
+        invalid_ai_file_url: "AIのDriveアップロードが完了していません。完了後に登録してください。",
+        invalid_file_url: "ファイルURLが正しくありません。",
+      };
       setMessage(error instanceof Error && error.message !== "failed"
-        ? `失敗しました（${error.message}）`
+        ? `失敗しました（${humanMessages[error.message] ?? error.message}）`
         : "失敗しました。");
     } finally {
       setBusy(false);
@@ -386,12 +395,12 @@ function OrderCard({
                 onExpandWithForm={onExpandWithForm}
                 driveReady={driveReady}
               />
-              {isKanei ? <SupplierEditor order={order} busy={busy} onSave={(body) => run(body, "仕入先情報を保存しました。")} /> : null}
             </div>
           </div>
 
-          <SampleBulkPanel order={order} isKanei={isKanei} busy={busy} onRun={run} />
+          <SampleBulkPanel order={order} isSeven={isSeven} isKanei={isKanei} busy={busy} onRun={run} />
           <CustomerDesignPanel order={order} isKanei={isKanei} busy={busy} onRun={run} />
+          <CustomerProofPanel order={order} isKanei={isKanei} busy={busy} onRun={run} />
 
           <section className="film-order-section">
             <h3>入稿・校正データ履歴</h3>
@@ -487,7 +496,8 @@ function NextStepPanel({
   driveReady: boolean;
 }) {
   const next = nextActionOf(order, isSeven, isKanei);
-  const proofVersion = (order.files.filter((file) => file.category === "proof").length ?? 0) + 1;
+  const proofFileCount = order.files.filter((file) => file.category === "proof").length;
+  const proofVersion = Math.floor(proofFileCount / 2) + 1;
   return (
     <section className={`film-order-section next-step ${next.kind === "none" ? "waiting" : "mine"}`}>
       <p className="next-step-kicker">{next.kind === "none" ? "WAITING" : "NEXT STEP"}</p>
@@ -555,15 +565,15 @@ function NextStepPanel({
               校正アップロード案内を送信
             </button>
           ) : null}
-          <FileActionForm
+          <ProofRegistrationForm
             title={order.status === "re_proof_requested" ? "再校正データ登録" : "校正データ登録"}
-            defaultFileName={buildFilmOrderFileName(order, "proof", proofVersion)}
             autofocus={focused === "proof"}
             driveReady={driveReady}
-            orderId={order.id}
-            category="proof"
+            order={order}
+            version={proofVersion}
             submitLabel={order.status === "re_proof_requested" ? "再校正データを登録" : "校正データを登録"}
-            onSubmit={(fileName, note, fileUrl) => void onRun({ action: "register-proof", fileName, fileUrl, note }, "校正データを登録しました。")}
+            onSubmit={(aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note) =>
+              void onRun({ action: "register-proof", aiFileName, aiFileUrl, pdfFileName, pdfFileUrl, note }, "校正データを登録しました。")}
           />
         </div>
       ) : null}
@@ -605,7 +615,11 @@ function NextStepPanel({
           <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "approve" }, "校正を承認しました。")}>
             校正を承認する
           </button>
-          <ReProofForm busy={busy} onSubmit={(comment) => void onRun({ action: "request-re-proof", comment }, "再校正を依頼しました。")} />
+          <ReProofForm
+            order={order}
+            busy={busy}
+            onSubmit={({ internalComment, supplierMessage }) => void onRun({ action: "request-re-proof", comment: internalComment, supplierMessage }, "再校正を依頼しました。")}
+          />
         </div>
       ) : null}
       {order.status === "final_approved" ? (
@@ -658,7 +672,7 @@ function CustomerDesignPanel({
           {isKanei && design.status === "received" ? (
             <>
               <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "confirm-customer-design" }, "顧客デザインを確定しました。")}>確定する</button>
-              <CustomerDesignCorrectionForm busy={busy} onSubmit={(reason) => void onRun({ action: "request-customer-design-correction", reason }, "顧客修正依頼を送信しました。")} />
+              <CustomerDesignCorrectionForm busy={busy} onSubmit={({ internalReason, customerMessage }) => void onRun({ action: "request-customer-design-correction", reason: internalReason, customerMessage }, "顧客修正依頼を送信しました。")} />
             </>
           ) : null}
           {isKanei && ["pending","requested","received","correction_requested"].includes(design.status) ? (
@@ -680,11 +694,13 @@ function CustomerDesignRequestForm({ busy, onSubmit }: { busy: boolean; onSubmit
   );
 }
 
-function CustomerDesignCorrectionForm({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: string) => void }) {
-  const [reason, setReason] = useState("");
+function CustomerDesignCorrectionForm({ busy, onSubmit }: { busy: boolean; onSubmit: (values: { internalReason: string; customerMessage: string }) => void }) {
+  const [internalReason, setInternalReason] = useState("");
+  const [customerMessage, setCustomerMessage] = useState("");
   return (
-    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(reason.trim()); }}>
-      <label>修正依頼内容<textarea value={reason} rows={2} onChange={(event) => setReason(event.target.value)} required /></label>
+    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit({ internalReason: internalReason.trim(), customerMessage: customerMessage.trim() }); }}>
+      <label>内部確認メモ（任意）<textarea value={internalReason} rows={2} onChange={(event) => setInternalReason(event.target.value)} /></label>
+      <label>顧客向けメッセージ（日本語推奨・한국어も可）<textarea value={customerMessage} rows={3} onChange={(event) => setCustomerMessage(event.target.value)} required /></label>
       <button className="button secondary" type="submit" disabled={busy}>{busy ? "送信中..." : "修正を依頼"}</button>
     </form>
   );
@@ -698,6 +714,77 @@ function CustomerDesignNotRequiredForm({ busy, onSubmit }: { busy: boolean; onSu
       <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(reason.trim()); }}>
         <label>理由<textarea value={reason} rows={2} onChange={(event) => setReason(event.target.value)} required /></label>
         <button className="button danger" type="submit" disabled={busy}>設定</button>
+      </form>
+    </details>
+  );
+}
+
+function CustomerProofPanel({
+  order,
+  isKanei,
+  busy,
+  onRun,
+}: {
+  order: FilmOrderView;
+  isKanei: boolean;
+  busy: boolean;
+  onRun: (body: Record<string, unknown>, ok: string) => Promise<void>;
+}) {
+  const review = order.customerProof;
+  const latestProof = order.files
+    .filter((file) => file.category === "proof" && file.file_name.toLowerCase().endsWith(".pdf"))
+    .at(-1);
+  return (
+    <section className="film-order-section" aria-label="顧客校正レビュー" data-testid="customer-proof-panel">
+      <h3>顧客校正レビュー</h3>
+      <div className="film-order-columns">
+        <dl>
+          <div><dt>状態</dt><dd data-testid="customer-proof-status">{customerProofStatusLabels[review.status]}</dd></div>
+          <div><dt>依頼日時</dt><dd>{review.requestedAt ? new Date(review.requestedAt).toLocaleString("ja-JP") : "-"}</dd></div>
+          <div><dt>承認日時</dt><dd>{review.approvedAt ? new Date(review.approvedAt).toLocaleString("ja-JP") : "-"}</dd></div>
+          <div><dt>最新校正</dt><dd>{latestProof ? `v${latestProof.version} / ${latestProof.file_name}` : "-"}</dd></div>
+          {review.correctionReason ? <div><dt>顧客修正依頼</dt><dd>{review.correctionReason}</dd></div> : null}
+        </dl>
+        <div className="film-order-inline-actions">
+          {isKanei && order.status === "proof_registered" && latestProof && ["pending","requested","correction_requested"].includes(review.status) ? (
+            <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "send-customer-proof-review" }, "顧客校正レビュー依頼を送信しました。")}>
+              顧客レビューリンク送信
+            </button>
+          ) : null}
+          {isKanei && ["receiving_registered","re_proof_requested"].includes(order.status) ? (
+            <button
+              className="button secondary"
+              type="button"
+              disabled={busy}
+              title="기존 업로드 링크를 폐기하고 새 링크로 재안내합니다."
+              onClick={() => void onRun({ action: "rotate-supplier-proof-token" }, "업로드 링크를 강제 재발급하고 재안내했습니다.")}
+            >
+              업로드 링크 강제 재발급
+            </button>
+          ) : null}
+          {isKanei && order.status === "proof_registered" && ["pending","requested"].includes(review.status) ? (
+            <CustomerProofOfflineForm busy={busy} onSubmit={(approverName, evidence) => void onRun({ action: "record-customer-proof-approval", approverName, evidence }, "オフライン承認を記録しました。")} />
+          ) : null}
+          {review.status === "approved" ? <p className="film-order-final">顧客承認済み。Seven最終承認に進めます。</p> : null}
+          {order.status === "proof_registered" && ["pending","requested","correction_requested"].includes(review.status) ? (
+            <p className="film-order-final">顧客承認前に最終承認はできません。</p>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CustomerProofOfflineForm({ busy, onSubmit }: { busy: boolean; onSubmit: (approverName: string, evidence: string) => void }) {
+  const [approverName, setApproverName] = useState("");
+  const [evidence, setEvidence] = useState("");
+  return (
+    <details>
+      <summary className="button secondary small">オフライン承認を記録</summary>
+      <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(approverName.trim(), evidence.trim()); }}>
+        <label>承認者<input value={approverName} onChange={(event) => setApproverName(event.target.value)} required /></label>
+        <label>証拠・経緯<textarea value={evidence} rows={3} onChange={(event) => setEvidence(event.target.value)} required /></label>
+        <button className="button" type="submit" disabled={busy}>記録</button>
       </form>
     </details>
   );
@@ -775,11 +862,13 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
 
 function SampleBulkPanel({
   order,
+  isSeven,
   isKanei,
   busy,
   onRun,
 }: {
   order: FilmOrderView;
+  isSeven: boolean;
   isKanei: boolean;
   busy: boolean;
   onRun: (body: Record<string, unknown>, ok: string) => Promise<void>;
@@ -789,60 +878,65 @@ function SampleBulkPanel({
     ? `${Number(value).toLocaleString("ja-JP")}ml`
     : "-";
   return (
-    <section className="film-order-section" aria-label="バルクサンプル管理" data-testid="sample-bulk-panel">
-      <h3>バルクサンプル管理</h3>
+    <section className="film-order-section" aria-label="サンプルバルク支給管理" data-testid="sample-bulk-panel">
+      <h3>サンプルバルク支給管理</h3>
       <div className="film-order-columns">
         <dl>
           <div><dt>状態</dt><dd data-testid="sample-bulk-status">{sampleBulkStatusLabels[bulk.status]}</dd></div>
-          <div><dt>依頼量</dt><dd>{ml(bulk.requiredMl)}</dd></div>
-          <div><dt>受領量</dt><dd>{ml(bulk.receivedMl)}</dd></div>
-          {bulk.adjustedMl ? <div><dt>変更希望量</dt><dd>{ml(bulk.adjustedMl)}</dd></div> : null}
+          {Number(bulk.productionBulkUsageMl || 0) > 0 ? <div><dt>本生産用バルク量（参考）</dt><dd>{ml(bulk.productionBulkUsageMl)}</dd></div> : null}
+          <div><dt>サンプル依頼量</dt><dd>{ml(bulk.sampleQuantityMl)}</dd></div>
+          <div><dt>サンプル受領量</dt><dd>{ml(bulk.sampleReceivedMl)}</dd></div>
+          {bulk.sampleAdjustedMl ? <div><dt>変更希望サンプル量</dt><dd>{ml(bulk.sampleAdjustedMl)}</dd></div> : null}
           <div><dt>送付先</dt><dd>{bulk.recipientName}<br />{bulk.recipientPostalCode} {bulk.recipientAddress}</dd></div>
           {bulk.adjustmentReason ? <div><dt>変更理由</dt><dd>{bulk.adjustmentReason}</dd></div> : null}
         </dl>
 
         <div className="film-order-inline-actions">
           {bulk.status === "pending" && isKanei ? (
-            <SampleBulkRequestForm busy={busy} onSubmit={(note) => void onRun({ action: "request-sample-bulk", note }, "バルクサンプル送付依頼を送信しました。")} />
+            <SampleBulkRequestForm busy={busy} onSubmit={(sampleQuantityMl, note) => void onRun({ action: "request-sample-bulk", sampleQuantityMl, note }, "サンプルバルク送付依頼を送信しました。")} />
           ) : null}
 
-          {(bulk.status === "requested" || bulk.status === "adjustment_requested") && isKanei ? (
+          {(bulk.status === "requested" || bulk.status === "adjustment_requested") && isSeven ? (
             <SampleBulkReceiveForm
               busy={busy}
-              expectedMl={bulk.adjustedMl ?? bulk.requiredMl}
+              expectedMl={bulk.sampleAdjustedMl ?? bulk.sampleQuantityMl ?? ""}
               onSubmit={(receivedMl, note) => void onRun({ action: "register-sample-bulk", receivedMl, note }, "バルクサンプルを受領登録しました。")}
             />
           ) : null}
 
           {bulk.status === "received" && isKanei ? (
             <>
-              <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "confirm-sample-bulk" }, "バルク量を確認しました。")}>
-                数量OKとして確認
+              <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "confirm-sample-bulk" }, "サンプル量を確認しました。")}>
+                サンプル量OKとして確認
               </button>
               <SampleBulkAdjustmentForm
                 busy={busy}
-                receivedMl={bulk.receivedMl}
-                onSubmit={(adjustedMl, reason) => void onRun({ action: "request-sample-bulk-adjustment", adjustedMl, reason }, "バルク量変更依頼を送信しました。")}
+                receivedMl={bulk.sampleReceivedMl}
+                onSubmit={({ adjustedMl, internalReason, customerMessage }) => void onRun({ action: "request-sample-bulk-adjustment", adjustedMl, reason: internalReason, customerMessage }, "サンプル量変更依頼を送信しました。")}
               />
             </>
           ) : null}
 
-          {bulk.status === "confirmed" ? <p className="film-order-final">バルク量は確認済みです。</p> : null}
-          {bulk.status === "not_required" ? <p className="film-order-final">この案件はバルク支給が不要です。</p> : null}
+          {bulk.status === "confirmed" ? <p className="film-order-final">サンプル量は確認済みです。</p> : null}
+          {bulk.status === "not_required" ? <p className="film-order-final">この案件はサンプルバルク支給が不要です。</p> : null}
         </div>
       </div>
     </section>
   );
 }
 
-function SampleBulkRequestForm({ busy, onSubmit }: { busy: boolean; onSubmit: (note: string) => void }) {
+function SampleBulkRequestForm({ busy, onSubmit }: { busy: boolean; onSubmit: (sampleQuantityMl: string, note: string) => void }) {
+  const [sampleQuantityMl, setSampleQuantityMl] = useState("");
   const [note, setNote] = useState("");
   return (
-    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(note.trim()); }}>
+    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(sampleQuantityMl.trim(), note.trim()); }}>
+      <label>サンプル支給量 (ml)
+        <input value={sampleQuantityMl} inputMode="decimal" onChange={(event) => setSampleQuantityMl(event.target.value)} required />
+      </label>
       <label>依頼メモ（任意）
         <textarea value={note} rows={2} onChange={(event) => setNote(event.target.value)} />
       </label>
-      <button className="button" type="submit" disabled={busy}>{busy ? "送信中..." : "バルク送付を依頼"}</button>
+      <button className="button" type="submit" disabled={busy}>{busy ? "送信中..." : "サンプル送付を依頼"}</button>
     </form>
   );
 }
@@ -878,18 +972,18 @@ function SampleBulkAdjustmentForm({
 }: {
   busy: boolean;
   receivedMl: string | null;
-  onSubmit: (adjustedMl: string, reason: string) => void;
+  onSubmit: (values: { adjustedMl: string; internalReason: string; customerMessage: string }) => void;
 }) {
   const [adjustedMl, setAdjustedMl] = useState(receivedMl ?? "");
-  const [reason, setReason] = useState("");
+  const [internalReason, setInternalReason] = useState("");
+  const [customerMessage, setCustomerMessage] = useState("");
   return (
-    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(adjustedMl.trim(), reason.trim()); }}>
+    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit({ adjustedMl: adjustedMl.trim(), internalReason: internalReason.trim(), customerMessage: customerMessage.trim() }); }}>
       <label>変更希望量 (ml)
         <input value={adjustedMl} inputMode="decimal" onChange={(event) => setAdjustedMl(event.target.value)} required />
       </label>
-      <label>変更理由
-        <textarea value={reason} rows={2} onChange={(event) => setReason(event.target.value)} required />
-      </label>
+      <label>内部確認メモ（任意）<textarea value={internalReason} rows={2} onChange={(event) => setInternalReason(event.target.value)} /></label>
+      <label>顧客向けメッセージ（日本語推奨・한국어も可）<textarea value={customerMessage} rows={3} onChange={(event) => setCustomerMessage(event.target.value)} required /></label>
       <button className="button secondary" type="submit" disabled={busy}>{busy ? "送信中..." : "変更依頼を送信"}</button>
     </form>
   );
@@ -903,33 +997,6 @@ function openPreview(url: string, fileName: string): void {
 
 function isPreviewable(fileName: string): boolean {
   return /\.(pdf|png|jpe?g|gif|svg)$/iu.test(fileName);
-}
-
-function SupplierEditor({ order, busy, onSave }: { order: FilmOrderView; busy: boolean; onSave: (body: Record<string, unknown>) => void }) {
-  const [name, setName] = useState(order.supplier_name);
-  // 旧データは見積作成者メールを初期値として持つため、未編集の初期値だけ新しい既定値に置き換える。
-  const [email, setEmail] = useState(
-    order.supplier_email && order.supplier_email !== order.seven_contact_email
-      ? order.supplier_email
-      : DEFAULT_FILM_PROOF_EMAIL,
-  );
-  return (
-    <section className="film-order-section">
-      <h3>仕入先・校正担当</h3>
-      <div className="film-order-supplier">
-        <label>仕入先名<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label>校正データ送付先メール<input value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-        <button
-          className="button small"
-          type="button"
-          disabled={busy}
-          onClick={() => onSave({ action: "set-supplier", supplierName: name, supplierEmail: email })}
-        >
-          保存
-        </button>
-      </div>
-    </section>
-  );
 }
 
 function ReceivingForm({
@@ -948,10 +1015,31 @@ function ReceivingForm({
   const baseName = buildFilmOrderFileName(order, "receiving", 1);
   const [aiFileName, setAiFileName] = useState(`${baseName}.ai`);
   const [aiFileUrl, setAiFileUrl] = useState("");
+  const [aiUploaded, setAiUploaded] = useState(false);
   const [pdfFileName, setPdfFileName] = useState(`${baseName}.pdf`);
   const [pdfFileUrl, setPdfFileUrl] = useState("");
+  const [pdfUploaded, setPdfUploaded] = useState(false);
   const [withPdf, setWithPdf] = useState(true);
   const [note, setNote] = useState("");
+  const [formError, setFormError] = useState("");
+  const isHttpUrl = (value: string) => /^https?:\/\//iu.test(value.trim());
+  const aiReady = driveReady ? aiUploaded : isHttpUrl(aiFileUrl);
+  const pdfReady = driveReady ? pdfUploaded : isHttpUrl(pdfFileUrl);
+  const receivingReady = aiFileName.trim().toLowerCase().endsWith(".ai")
+    && aiReady
+    && (!withPdf || (pdfFileName.trim().toLowerCase().endsWith(".pdf") && pdfReady));
+  const submitReceiving = () => {
+    if (!receivingReady) {
+      setFormError(
+        driveReady
+          ? "AIファイルはDriveへアップロードしてください。PDFを含める場合はPDFのアップロードも完了させてください。"
+          : "AIファイルのDrive URLは必須です。PDFを含める場合はPDFのURLも入力してください。",
+      );
+      return;
+    }
+    setFormError("");
+    onSubmit(aiFileName.trim(), aiFileUrl.trim(), withPdf ? pdfFileName.trim() : "", withPdf ? pdfFileUrl.trim() : "", note);
+  };
   return (
     <div className="film-order-file-form">
       <strong>入稿データ登録（フィルム製作用）</strong>
@@ -964,10 +1052,10 @@ function ReceivingForm({
         onFileNameChange={setAiFileName}
         url={aiFileUrl}
         onUrlChange={setAiFileUrl}
+        onUploadedChange={setAiUploaded}
         accept=".ai"
-        required
         autofocus={autofocus}
-        driveReady={driveReady}
+        driveReady={driveReady === true}
       />
       <label className="film-order-pdf-toggle">
         <input type="checkbox" checked={withPdf} onChange={(event) => setWithPdf(event.target.checked)} />
@@ -982,8 +1070,105 @@ function ReceivingForm({
           onFileNameChange={setPdfFileName}
           url={pdfFileUrl}
           onUrlChange={setPdfFileUrl}
+          onUploadedChange={setPdfUploaded}
           accept=".pdf"
-          driveReady={driveReady}
+          driveReady={driveReady === true}
+        />
+      ) : null}
+      <label>メモ<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="任意" /></label>
+      {formError ? <p className="film-order-upload-error" role="alert">{formError}</p> : null}
+      <button
+        className="button"
+        type="button"
+        disabled={busy || !receivingReady}
+        onClick={submitReceiving}
+      >
+        入稿してデザインへ連絡
+      </button>
+    </div>
+  );
+}
+
+function ProofRegistrationForm({
+  order,
+  version,
+  autofocus,
+  busy,
+  driveReady,
+  title,
+  submitLabel,
+  onSubmit,
+}: {
+  order: FilmOrderView;
+  version: number;
+  autofocus?: boolean;
+  busy?: boolean;
+  driveReady?: boolean;
+  title: string;
+  submitLabel: string;
+  onSubmit: (aiFileName: string, aiFileUrl: string, pdfFileName: string, pdfFileUrl: string, note: string) => void;
+}) {
+  const baseName = buildFilmOrderFileName(order, "proof", version);
+  const [aiFileName, setAiFileName] = useState(`${baseName}.ai`);
+  const [aiFileUrl, setAiFileUrl] = useState("");
+  const [aiUploaded, setAiUploaded] = useState(false);
+  const [pdfFileName, setPdfFileName] = useState(`${baseName}.pdf`);
+  const [pdfFileUrl, setPdfFileUrl] = useState("");
+  const [pdfUploaded, setPdfUploaded] = useState(false);
+  const [withPdf, setWithPdf] = useState(true);
+  const [note, setNote] = useState("");
+  const [formError, setFormError] = useState("");
+  const isHttpUrl = (value: string) => /^https?:\/\//iu.test(value.trim());
+  const aiReady = driveReady ? aiUploaded : isHttpUrl(aiFileUrl);
+  const pdfReady = driveReady ? pdfUploaded : isHttpUrl(pdfFileUrl);
+  const proofReady = aiFileName.trim().toLowerCase().endsWith(".ai")
+    && aiReady
+    && (!withPdf || (pdfFileName.trim().toLowerCase().endsWith(".pdf") && pdfReady));
+  const submitProof = () => {
+    if (!proofReady) {
+      setFormError(
+        driveReady
+          ? "AIファイルはDriveへアップロードしてください。PDFを含める場合はPDFのアップロードも完了させてください。"
+          : "AIファイルのDrive URLは必須です。PDFを含める場合はPDFのURLも入力してください。",
+      );
+      return;
+    }
+    setFormError("");
+    onSubmit(aiFileName.trim(), aiFileUrl.trim(), withPdf ? pdfFileName.trim() : "", pdfFileUrl.trim(), note);
+  };
+  return (
+    <div className="film-order-file-form">
+      <strong>{title}</strong>
+      {!driveReady ? <p className="film-order-upload-hint">直接アップロードは未設定です。Driveへ手動アップロード後、URLを入力してください。</p> : null}
+      <DriveFileField
+        label="AIファイル（必須）"
+        orderId={order.id}
+        category="proof"
+        fileName={aiFileName}
+        onFileNameChange={setAiFileName}
+        url={aiFileUrl}
+        onUrlChange={setAiFileUrl}
+        onUploadedChange={setAiUploaded}
+        accept=".ai"
+        autofocus={autofocus}
+        driveReady={driveReady === true}
+      />
+      <label className="film-order-pdf-toggle">
+        <input type="checkbox" checked={withPdf} onChange={(event) => setWithPdf(event.target.checked)} />
+        PDFも登録する（任意）
+      </label>
+      {withPdf ? (
+        <DriveFileField
+          label="PDFファイル"
+          orderId={order.id}
+          category="proof"
+          fileName={pdfFileName}
+          onFileNameChange={setPdfFileName}
+          url={pdfFileUrl}
+          onUrlChange={setPdfFileUrl}
+          onUploadedChange={setPdfUploaded}
+          accept=".pdf"
+          driveReady={driveReady === true}
         />
       ) : null}
       <label>メモ<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="任意" /></label>
@@ -993,7 +1178,7 @@ function ReceivingForm({
         disabled={busy || !aiFileName.trim().toLowerCase().endsWith(".ai")}
         onClick={() => onSubmit(aiFileName.trim(), aiFileUrl.trim(), withPdf ? pdfFileName.trim() : "", withPdf ? pdfFileUrl.trim() : "", note)}
       >
-        入稿してデザインへ連絡
+        {submitLabel}
       </button>
     </div>
   );
@@ -1023,6 +1208,18 @@ function FileActionForm({
   const [fileName, setFileName] = useState(defaultFileName);
   const [fileUrl, setFileUrl] = useState("");
   const [note, setNote] = useState("");
+  const [fileUploaded, setFileUploaded] = useState(false);
+  const [formError, setFormError] = useState("");
+  const isHttpUrl = (value: string) => /^https?:\/\//iu.test(value.trim());
+  const fileReady = driveReady ? fileUploaded : isHttpUrl(fileUrl);
+  const submitFile = () => {
+    if (!fileReady) {
+      setFormError(driveReady ? "ファイルをDriveへアップロードしてください。" : "ファイルのDrive URLを入力してください。");
+      return;
+    }
+    setFormError("");
+    onSubmit(fileName.trim(), note, fileUrl.trim());
+  };
   return (
     <div className="film-order-file-form">
       <strong>{title}</strong>
@@ -1035,6 +1232,7 @@ function FileActionForm({
           onFileNameChange={setFileName}
           url={fileUrl}
           onUrlChange={setFileUrl}
+          onUploadedChange={setFileUploaded}
           driveReady={driveReady === true}
           autofocus={autofocus}
         />
@@ -1049,7 +1247,8 @@ function FileActionForm({
         </>
       )}
       <label>メモ<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="任意" /></label>
-      <button className="button" type="button" disabled={busy || !fileName.trim()} onClick={() => onSubmit(fileName.trim(), note, fileUrl.trim())}>
+      {formError ? <p className="film-order-upload-error" role="alert">{formError}</p> : null}
+      <button className="button" type="button" disabled={busy || !fileName.trim() || !fileReady} onClick={submitFile}>
         {submitLabel}
       </button>
     </div>
@@ -1064,8 +1263,8 @@ function DriveFileField({
   onFileNameChange,
   url,
   onUrlChange,
+  onUploadedChange,
   accept,
-  required,
   autofocus,
   driveReady,
 }: {
@@ -1076,8 +1275,8 @@ function DriveFileField({
   onFileNameChange: (value: string) => void;
   url: string;
   onUrlChange: (value: string) => void;
+  onUploadedChange?: (uploaded: boolean) => void;
   accept?: string;
-  required?: boolean;
   autofocus?: boolean;
   driveReady: boolean;
 }) {
@@ -1089,22 +1288,40 @@ function DriveFileField({
   const pickFile = (selected: File | null) => {
     setFile(selected);
     setUploaded(false);
+    onUploadedChange?.(false);
     setError("");
-    if (selected && selected.size > 15 * 1024 * 1024) {
-      setError(`ファイルサイズが15MBを超えています（${(selected.size / 1024 / 1024).toFixed(1)}MB）。圧縮するか、Driveへ直接アップロードしてURLを登録してください。`);
-      setFile(null);
-      return;
-    }
     if (selected) {
+      if (selected.size <= 0) {
+        setError("ファイルが読み取れませんでした。ローカルに保存したファイルを選択してください。");
+        setFile(null);
+        return;
+      }
+      if (selected.size > 15 * 1024 * 1024) {
+        setError(`ファイルサイズが15MBを超えています（${(selected.size / 1024 / 1024).toFixed(1)}MB）。圧縮するか、Driveへ直接アップロードしてURLを登録してください。`);
+        setFile(null);
+        return;
+      }
+      const extension = selected.name.includes(".") ? selected.name.slice(selected.name.lastIndexOf(".")).toLowerCase() : "";
+      const expectedExtension = accept === ".pdf" ? ".pdf" : accept === ".ai" ? ".ai" : null;
+      const looksLikePdf = extension === ".pdf" || selected.type === "application/pdf";
+      const valid = expectedExtension === ".pdf"
+        ? (extension === ".pdf" || looksLikePdf)
+        : expectedExtension == null || extension === expectedExtension;
+      if (!valid) {
+        setError(`ファイル形式が正しくありません。${expectedExtension} を選択してください（選択: ${selected.name}）。`);
+        setFile(null);
+        return;
+      }
       const dot = fileName.lastIndexOf(".");
-      const extension = selected.name.includes(".") ? selected.name.slice(selected.name.lastIndexOf(".")) : "";
-      onFileNameChange(dot > 0 ? `${fileName.slice(0, dot)}${extension}` : fileName);
+      const normalizedExtension = expectedExtension ?? extension;
+      onFileNameChange(dot > 0 ? `${fileName.slice(0, dot)}${normalizedExtension}` : `${fileName}${normalizedExtension}`);
     }
   };
 
   const upload = async () => {
     if (!file || uploading) return;
     setUploading(true);
+    onUploadedChange?.(false);
     setError("");
     try {
       const sessionResponse = await fetch(`/api/film-orders/${orderId}/upload-session`, {
@@ -1138,7 +1355,9 @@ function DriveFileField({
       if (!completeResponse.ok || !complete.url) throw new Error(complete.error ?? "complete_failed");
       onUrlChange(complete.url);
       setUploaded(true);
+      onUploadedChange?.(true);
     } catch (err) {
+      onUploadedChange?.(false);
       setError(err instanceof Error ? `アップロード失敗: ${err.message}` : "アップロードに失敗しました。");
     } finally {
       setUploading(false);
@@ -1148,7 +1367,7 @@ function DriveFileField({
   return (
     <div className="film-order-drive-field">
       <label>{label}
-        <input value={fileName} onChange={(event) => { onFileNameChange(event.target.value); setUploaded(false); }} autoFocus={autofocus} />
+        <input value={fileName} onChange={(event) => { onFileNameChange(event.target.value); setUploaded(false); onUploadedChange?.(false); }} autoFocus={autofocus} />
       </label>
       <label>ファイル選択
         <input type="file" accept={accept} onChange={(event) => pickFile(event.target.files?.[0] ?? null)} />
@@ -1159,16 +1378,29 @@ function DriveFileField({
         </button>
       ) : null}
       {uploaded && url ? <a href={url} target="_blank" rel="noreferrer">アップロード済みファイルを開く</a> : null}
-      <label>URL（手動入力・{required ? "アップロード時は自動設定" : "任意"}）
-        <input value={url} onChange={(event) => onUrlChange(event.target.value)} placeholder="https://drive.google.com/..." inputMode="url" />
-      </label>
+      {!driveReady ? (
+        <label>URL（Drive手動登録用・任意）
+          <input value={url} onChange={(event) => onUrlChange(event.target.value)} placeholder="https://drive.google.com/..." inputMode="url" />
+        </label>
+      ) : null}
       {error ? <p className="film-order-upload-error">{error}</p> : null}
     </div>
   );
 }
 
-function ReProofForm({ busy, onSubmit }: { busy: boolean; onSubmit: (comment: string) => void }) {
+function ReProofForm({
+  order,
+  busy,
+  onSubmit,
+}: {
+  order: FilmOrderView;
+  busy: boolean;
+  onSubmit: (values: { internalComment: string; supplierMessage: string }) => void;
+}) {
+  const locale = supplierLocaleFor(order);
+  const isKorean = locale === "ko";
   const [comment, setComment] = useState("");
+  const [supplierMessage, setSupplierMessage] = useState("");
   const [open, setOpen] = useState(false);
   if (!open) {
     return (
@@ -1178,10 +1410,19 @@ function ReProofForm({ busy, onSubmit }: { busy: boolean; onSubmit: (comment: st
   return (
     <div className="film-order-file-form">
       <strong>再校正依頼</strong>
-      <label>再校正内容
+      <label>내부 확인용 메모 / 内部確認用メモ
         <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="修正内容を記入してください" />
       </label>
-      <button className="button danger" type="button" disabled={busy || !comment.trim()} onClick={() => onSubmit(comment.trim())}>
+      <label>{isKorean ? "공급사 전달용 한국어 메시지" : "供給先用メッセージ（日本語推奨・한국어も可）"}
+        <textarea
+          value={supplierMessage}
+          onChange={(event) => setSupplierMessage(event.target.value)}
+          rows={3}
+          placeholder={isKorean ? "필름업체에 그대로 전달됩니다. 한국어로 입력하세요." : "フィルムメーカーにそのまま送付されます。日本語で入力してください。"}
+          required
+        />
+      </label>
+      <button className="button danger" type="button" disabled={busy || !comment.trim() || !supplierMessage.trim()} onClick={() => onSubmit({ internalComment: comment.trim(), supplierMessage: supplierMessage.trim() })}>
         再校正依頼を送信
       </button>
       <button className="button secondary small" type="button" disabled={busy} onClick={() => setOpen(false)}>取消</button>

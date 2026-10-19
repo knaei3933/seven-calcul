@@ -47,6 +47,7 @@ const baseInput: QuotationRecordInput = {
     customerPostalCode: "100-0001",
     customerTelephone: "03-0000-0000",
     customerAddress: "Test Address",
+    customerEmail: "customer@pdf-api.test",
   },
 };
 

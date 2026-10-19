@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { DatabaseSync } from "node:sqlite";
 import { getSessionUser } from "@/lib/api-auth";
 import { canViewFilmOrders } from "@/lib/film-order-access";
+import { getRegisteredFilmOrderFile } from "@/lib/film-orders";
 import { downloadFile } from "@/lib/google-drive";
 
 export const runtime = "nodejs";
@@ -30,20 +30,9 @@ export async function GET(request: Request): Promise<NextResponse | Response> {
   }
 
   // このファイルが発注管理に登録済みか確認（他のファイルへのアクセス防止）。
-  const dbPath = process.env.POUCH_QUOTATION_DB
-    ?? (process.env.VERCEL === "1" ? "/tmp/pouch-quotations.db" : "");
-  let urlMatch = false;
-  let fileName = "";
-  if (dbPath) {
-    try {
-      const db = new DatabaseSync(dbPath);
-      const rows = db.prepare("SELECT file_name, url FROM film_order_files WHERE url LIKE ?").all(`%${fileId}%`) as Array<{ file_name: string; url: string }>;
-      db.close();
-      urlMatch = rows.length > 0;
-      if (rows[0]) fileName = rows[0].file_name;
-    } catch { /* fallthrough */ }
-  }
-  if (!urlMatch) return NextResponse.json({ error: "file_not_registered" }, { status: 404 });
+  const registeredFile = await getRegisteredFilmOrderFile(fileId);
+  if (!registeredFile) return NextResponse.json({ error: "file_not_registered" }, { status: 404 });
+  const fileName = registeredFile.fileName;
 
   try {
     const drive = await downloadFile(fileId);

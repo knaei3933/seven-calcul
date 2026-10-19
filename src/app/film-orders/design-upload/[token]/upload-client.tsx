@@ -24,7 +24,8 @@ interface DesignInfo {
 
 export default function CustomerDesignUploadClient({ token }: { token: string }) {
   const [info, setInfo] = useState<DesignInfo | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [aiFile, setAiFile] = useState<File | null>(null);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [uploader, setUploader] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -52,47 +53,57 @@ export default function CustomerDesignUploadClient({ token }: { token: string })
     void load();
   }, [load]);
 
+  const uploadOne = async (file: File) => {
+    const sessionResponse = await fetch(`/api/film-orders/design-upload/${encodeURIComponent(token)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "session",
+        originalFileName: file.name,
+        sizeBytes: file.size,
+        contentType: file.type || "application/octet-stream",
+      }),
+    });
+    const session = await sessionResponse.json();
+    if (!sessionResponse.ok || !session.sessionUri) throw new Error(session.error ?? "session_failed");
+    const put = await fetch(session.sessionUri, {
+      method: "PUT",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    if (!put.ok) throw new Error(`upload_failed:${put.status}`);
+    const completeResponse = await fetch(`/api/film-orders/design-upload/${encodeURIComponent(token)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "complete",
+        originalFileName: file.name,
+        uploader: uploader.trim() || undefined,
+        note: note.trim() || undefined,
+      }),
+    });
+    const complete = await completeResponse.json();
+    if (!completeResponse.ok) throw new Error(complete.error ?? "complete_failed");
+    return complete as DesignInfo;
+  };
+
   const submit = async () => {
-    if (!file || busy || !info?.canUpload) return;
-    if (file.size > info.policy.maxBytes) {
-      setError(`ファイルサイズが上限（${Math.floor(info.policy.maxBytes / 1024 / 1024)}MB）を超えています。`);
+    if (!aiFile || busy || !info?.canUpload) return;
+    if (aiFile.size > info.policy.maxBytes) {
+      setError(`AIファイルサイズが上限（${Math.floor(info.policy.maxBytes / 1024 / 1024)}MB）を超えています。`);
+      return;
+    }
+    if (pdfFile && pdfFile.size > info.policy.maxBytes) {
+      setError(`PDFファイルサイズが上限（${Math.floor(info.policy.maxBytes / 1024 / 1024)}MB）を超えています。`);
       return;
     }
     setBusy(true); setError(""); setMessage("");
     try {
-      const sessionResponse = await fetch(`/api/film-orders/design-upload/${encodeURIComponent(token)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "session",
-          originalFileName: file.name,
-          sizeBytes: file.size,
-          contentType: file.type || "application/octet-stream",
-        }),
-      });
-      const session = await sessionResponse.json();
-      if (!sessionResponse.ok || !session.sessionUri) throw new Error(session.error ?? "session_failed");
-      const put = await fetch(session.sessionUri, {
-        method: "PUT",
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-        body: file,
-      });
-      if (!put.ok) throw new Error(`upload_failed:${put.status}`);
-      const completeResponse = await fetch(`/api/film-orders/design-upload/${encodeURIComponent(token)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "complete",
-          originalFileName: file.name,
-          uploader: uploader.trim() || undefined,
-          note: note.trim() || undefined,
-        }),
-      });
-      const complete = await completeResponse.json();
-      if (!completeResponse.ok) throw new Error(complete.error ?? "complete_failed");
-      setInfo(complete as DesignInfo);
-      setMessage("デザインデータを入稿しました。");
-      setFile(null); setNote("");
+      let latest = await uploadOne(aiFile);
+      if (pdfFile) latest = await uploadOne(pdfFile);
+      setInfo(latest);
+      setMessage("デザインデータを入稿しました。AI原稿を必須とし、確認用PDFも受け付けました。");
+      setAiFile(null); setPdfFile(null); setNote("");
     } catch (cause) {
       setError(cause instanceof Error ? `失敗しました（${cause.message}）` : "アップロードに失敗しました。");
     } finally {
@@ -124,12 +135,15 @@ export default function CustomerDesignUploadClient({ token }: { token: string })
             ) : null}
             {info.canUpload ? (
               <div className="eta-form">
-                <label>デザインファイル
-                  <input type="file" accept={info.policy.allowedExtensions.join(",")} onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+                <label>AIデータ（必須）
+                  <input type="file" accept=".ai" onChange={(event) => setAiFile(event.target.files?.[0] ?? null)} />
+                </label>
+                <label>確認用PDF（任意）
+                  <input type="file" accept=".pdf" onChange={(event) => setPdfFile(event.target.files?.[0] ?? null)} />
                 </label>
                 <label>担当者名（任意）<input value={uploader} onChange={(event) => setUploader(event.target.value)} /></label>
                 <label>備考（任意）<textarea value={note} rows={3} onChange={(event) => setNote(event.target.value)} /></label>
-                <button className="button" type="button" disabled={!file || busy} onClick={() => void submit()}>
+                <button className="button" type="button" disabled={!aiFile || busy} onClick={() => void submit()}>
                   {busy ? "アップロード中..." : "デザインデータを入稿"}
                 </button>
               </div>

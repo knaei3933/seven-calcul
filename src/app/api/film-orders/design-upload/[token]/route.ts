@@ -26,11 +26,12 @@ function designSummary(order: Awaited<ReturnType<typeof getFilmOrderForCustomerD
       productName: order.product_name,
       statusLabel: "design_upload",
       designStatusLabel: order.customerDesign.status,
+      hasAiFile: order.files.some((file) => file.category === "customer_design" && file.file_name.toLowerCase().endsWith(".ai")),
       requestedAt: order.customerDesign.requestedAt,
       note: order.customerDesign.correctionReason || null,
     },
     policy: {
-      allowedExtensions: [".ai", ".pdf", ".psd", ".eps", ".indd", ".zip", ".png", ".jpg", ".jpeg"],
+      allowedExtensions: [".ai", ".pdf"],
       maxBytes: customerDesignMaxBytes(),
     },
     files: order.files
@@ -43,7 +44,7 @@ function designSummary(order: Awaited<ReturnType<typeof getFilmOrderForCustomerD
         sizeBytes: file.file_size_bytes,
         note: file.note || null,
       })),
-    canUpload: ["requested", "correction_requested"].includes(order.customerDesign.status),
+    canUpload: ["requested", "received", "correction_requested"].includes(order.customerDesign.status),
   };
 }
 
@@ -96,7 +97,10 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     const declaredSize = action === "session"
       ? typeof body.sizeBytes === "number" ? body.sizeBytes : undefined
       : undefined;
-    assertCustomerDesignUploadPolicy(order, originalFileName, declaredSize);
+    const hasAiFile = order.files.some((file) =>
+      file.category === "customer_design" && file.file_name.toLowerCase().endsWith(".ai")
+    );
+    assertCustomerDesignUploadPolicy(order, originalFileName, declaredSize, hasAiFile);
     if (!driveConfigured()) return NextResponse.json({ error: "drive_not_configured" }, { status: 503 });
     const folderId = customerDesignFolderId();
     const fileName = nextCustomerDesignFileName(order, originalFileName);

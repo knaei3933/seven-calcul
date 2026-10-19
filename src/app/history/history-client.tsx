@@ -58,6 +58,9 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailMessage, setEmailMessage] = useState("");
   const [approvingGateId, setApprovingGateId] = useState<number | null>(null);
+  const [editingEmailId, setEditingEmailId] = useState<number | null>(null);
+  const [editingEmail, setEditingEmail] = useState("");
+  const [updatingEmail, setUpdatingEmail] = useState(false);
 
   const load = useCallback(async (search: string, statusFilter: string, creatorFilter: string) => {
     const order = ++requestOrder.current;
@@ -202,6 +205,44 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
     }
   };
 
+  const startEmailEdit = (record: QuotationRecord) => {
+    setEditingEmailId(record.id);
+    setEditingEmail(typeof record.payload.customerEmail === "string" ? record.payload.customerEmail.trim() : "");
+    setEmailMessage("");
+  };
+
+  const cancelEmailEdit = () => {
+    setEditingEmailId(null);
+    setEditingEmail("");
+  };
+
+  const saveCustomerEmail = async (record: QuotationRecord) => {
+    setUpdatingEmail(true);
+    setEmailMessage("");
+    try {
+      const response = await fetch(`/api/quotations/${record.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerEmail: editingEmail }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setEmailMessage(payload.error === "invalid_customer_email"
+          ? "メールアドレスの形式が正しくありません。"
+          : "メールアドレスを更新できませんでした。");
+        return;
+      }
+      const updated = payload.record as QuotationRecord;
+      setRecords((old) => old.map((item) => (item.id === updated.id ? updated : item)));
+      cancelEmailEdit();
+      setEmailMessage(`${updated.quotationNumber} の宛先メールを更新しました。`);
+    } catch {
+      setEmailMessage("メールアドレスを更新できませんでした。");
+    } finally {
+      setUpdatingEmail(false);
+    }
+  };
+
   const canManage = (record: QuotationRecord) => currentUser.role === "admin" || currentUser.id === record.createdBy.id;
 
   return (
@@ -319,6 +360,14 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
             onStatusChange={(record, nextStatus) => { void changeStatus(record, nextStatus); }}
             onSendEmail={(record) => { void sendQuotationEmail(record); }}
             onApproveGate={(record, gate) => { void approveGate(record, gate); }}
+            canEditEmail={canManage(selectedRecord) && ["draft", "sent"].includes(selectedRecord.status)}
+            editingEmail={editingEmailId === selectedRecord.id}
+            editingEmailValue={editingEmail}
+            onEditingEmailChange={setEditingEmail}
+            onStartEmailEdit={startEmailEdit}
+            onCancelEmailEdit={cancelEmailEdit}
+            onSaveEmail={(record) => { void saveCustomerEmail(record); }}
+            updatingEmail={updatingEmail}
             approvingGate={approvingGateId === selectedRecord.id}
             canApproveInternally={currentUser.email.trim().toLowerCase() === "kim@kanei-trade.co.jp"}
             sendingEmail={sendingEmail}
@@ -367,6 +416,14 @@ function QuotationDetailModal({
   onStatusChange,
   onSendEmail,
   onApproveGate,
+  canEditEmail,
+  editingEmail,
+  editingEmailValue,
+  onEditingEmailChange,
+  onStartEmailEdit,
+  onCancelEmailEdit,
+  onSaveEmail,
+  updatingEmail,
   approvingGate,
   canApproveInternally,
   sendingEmail,
@@ -377,6 +434,14 @@ function QuotationDetailModal({
   onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void;
   onSendEmail: (record: QuotationRecord) => void;
   onApproveGate: (record: QuotationRecord, gate: QuotationApprovalGate) => void;
+  canEditEmail: boolean;
+  editingEmail: boolean;
+  editingEmailValue: string;
+  onEditingEmailChange: (value: string) => void;
+  onStartEmailEdit: (record: QuotationRecord) => void;
+  onCancelEmailEdit: () => void;
+  onSaveEmail: (record: QuotationRecord) => void;
+  updatingEmail: boolean;
   approvingGate: boolean;
   canApproveInternally: boolean;
   sendingEmail: boolean;
@@ -639,6 +704,45 @@ function QuotationDetailModal({
             </p>
           </div>
           <div className="detail-header-actions">
+            {canEditEmail ? (
+              <div className="history-email-editor">
+                <label>
+                  <span>宛先メール</span>
+                  <input
+                    type="email"
+                    value={editingEmail ? editingEmailValue : typeof customerEmail === "string" ? customerEmail : ""}
+                    readOnly={!editingEmail}
+                    onChange={(event) => onEditingEmailChange(event.target.value)}
+                    placeholder="未登録"
+                    data-testid="history-customer-email"
+                  />
+                </label>
+                {editingEmail ? (
+                  <>
+                    <button
+                      className="button small"
+                      type="button"
+                      disabled={updatingEmail || !editingEmailValue.trim()}
+                      onClick={() => onSaveEmail(record)}
+                      data-testid="history-email-save"
+                    >{updatingEmail ? "保存中..." : "保存"}</button>
+                    <button
+                      className="button secondary small"
+                      type="button"
+                      disabled={updatingEmail}
+                      onClick={onCancelEmailEdit}
+                    >取消</button>
+                  </>
+                ) : (
+                  <button
+                    className="button secondary small"
+                    type="button"
+                    onClick={() => onStartEmailEdit(record)}
+                    data-testid="history-email-edit"
+                  >編集</button>
+                )}
+              </div>
+            ) : null}
             {detailTab === "document" ? (
               <button
                 className="button small"

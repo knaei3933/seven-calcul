@@ -20,6 +20,17 @@ export function isKaneiTradeUser(email: string | null | undefined): boolean {
   return hasDomain(email, KANEI_TRADE_EMAIL_DOMAIN);
 }
 
+export type SupplierLocale = "ko" | "ja";
+
+/**
+ * 原材料調達先の言語。
+ * - digital / K（韓国輸入）→ Korean
+ * - Y（国内調達）        → Japanese
+ */
+export function supplierLocaleFor(order: { procurement_route: string | null | undefined }): SupplierLocale {
+  return order.procurement_route === "Y" ? "ja" : "ko";
+}
+
 export function canViewFilmOrders(email: string | null | undefined): boolean {
   return isSevenChemicalUser(email) || isKaneiTradeUser(email);
 }
@@ -39,15 +50,18 @@ const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
   approve: "buyer",
   "request-re-proof": "buyer",
   "request-sample-bulk": "kanei",
-  "register-sample-bulk": "kanei",
+  "register-sample-bulk": "buyer",
   "confirm-sample-bulk": "kanei",
   "request-sample-bulk-adjustment": "kanei",
   "request-customer-design-upload": "kanei",
   "confirm-customer-design": "kanei",
   "request-customer-design-correction": "kanei",
   "set-customer-design-not-required": "kanei",
+  "send-customer-proof-review": "kanei",
+  "record-customer-proof-approval": "kanei",
   "register-proof": "kanei",
   "send-proof-notice": "kanei",
+  "rotate-supplier-proof-token": "kanei",
   "set-supplier": "kanei",
   "send-po": "kanei",
 };

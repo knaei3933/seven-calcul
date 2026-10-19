@@ -9,7 +9,8 @@ function isPublicPath(pathname: string): boolean {
     || pathname === "/privacy"
     || pathname.startsWith("/quote-approvals/")
     || pathname.startsWith("/film-orders/upload/")
-    || pathname.startsWith("/film-orders/design-upload/");
+    || pathname.startsWith("/film-orders/design-upload/")
+    || pathname.startsWith("/film-orders/proof-review/");
 }
 
 export function proxy(request: NextRequest) {

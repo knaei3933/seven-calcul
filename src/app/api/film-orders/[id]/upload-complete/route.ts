@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
 import { canViewFilmOrders, canPerformFilmOrderAction } from "@/lib/film-order-access";
 import { getFilmOrder } from "@/lib/film-orders";
-import { driveConfigured, findFileUrl, proofFolderId, receivingFolderId } from "@/lib/google-drive";
+import { driveConfigured, findDriveFiles, proofFolderId, receivingFolderId } from "@/lib/google-drive";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,17 +27,26 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       return NextResponse.json({ error: "film_order_action_forbidden" }, { status: 403 });
     }
     if (!driveConfigured()) return NextResponse.json({ error: "drive_not_configured" }, { status: 503 });
-    // アップロード完了は少し遅れて反映されることがあるため短く再試行する。
-    let url: string | null = null;
-    for (let attempt = 0; attempt < 3 && !url; attempt += 1) {
-      url = await findFileUrl({
-        fileName,
-        folderId: category === "receiving" ? receivingFolderId() : proofFolderId(),
-      });
-      if (!url) await new Promise((resolve) => setTimeout(resolve, 800));
+    const folderId = category === "receiving" ? receivingFolderId() : proofFolderId();
+    let candidates = await findDriveFiles({ fileName, folderId });
+    for (let attempt = 1; candidates.length === 0 && attempt < 3; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      candidates = await findDriveFiles({ fileName, folderId });
     }
-    if (!url) return NextResponse.json({ error: "uploaded_file_not_found" }, { status: 404 });
-    return NextResponse.json({ url });
+    if (candidates.length === 0) return NextResponse.json({ error: "uploaded_file_not_found" }, { status: 404 });
+    if (candidates.length > 1) return NextResponse.json({ error: "ambiguous_uploaded_file" }, { status: 409 });
+    const candidate = candidates[0]!;
+    if (!candidate.parentFolderIds.includes(folderId)) {
+      return NextResponse.json({ error: "uploaded_file_mismatch" }, { status: 400 });
+    }
+    return NextResponse.json({
+      url: `https://drive.google.com/file/d/${candidate.id}/view`,
+      fileId: candidate.id,
+      sizeBytes: candidate.sizeBytes,
+      contentType: candidate.mimeType,
+      checksum: candidate.checksum,
+      checksumAlgorithm: candidate.checksum ? "md5" : null,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "upload_complete_failed";
     return NextResponse.json({ error: message }, { status: 502 });

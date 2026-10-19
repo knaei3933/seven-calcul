@@ -327,6 +327,8 @@ const defaultQuote: QuoteForm = {
   pricingSnapshotJson: "",
 };
 
+const CUSTOMER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function isFiniteNumber(value: string) {
   return parseDecimal(value) !== null;
 }
@@ -505,7 +507,15 @@ export default function PrintableQuotationPage({
       if (!response.ok) throw new Error();
       setCustomerMasterStatus({ loading: false, found: false, message: `顧客コード ${code} を削除しました。`, saving: false });
       setCustomerSearchResults((old) => old.filter((c) => c.customerCode !== code));
-      if (form.customerCode === code) applyPatch({ customerCode: "", customerName: "" });
+      if (form.customerCode === code) applyPatch({
+        customerCode: "",
+        customerName: "",
+        customerPostalCode: "",
+        customerAddress: "",
+        customerContact: "",
+        customerTelephone: "",
+        customerEmail: "",
+      });
     } catch {
       setCustomerMasterStatus({ loading: false, found: false, message: "削除できませんでした。", saving: false });
     }
@@ -983,12 +993,15 @@ export default function PrintableQuotationPage({
   && !!parsedCustomQuantity && parsedCustomQuantity.gt(0)
     && !!parsedTargetMargin && parsedTargetMargin.gt(0) && parsedTargetMargin.lt(1)
     && !!parsedTaxRatePercent && parsedTaxRatePercent.gte(0);
-  // 발행 필수: 회사명·우편번호·전화번호·주소 + 전 SKU 제품명.
+  // 発行必須: 顧客名・郵便番号・電話番号・住所・メール + 全SKU品名。
   const missingIssueFields: string[] = [];
   if (!form.customerName.trim()) missingIssueFields.push("会社名");
   if (!form.customerPostalCode.trim()) missingIssueFields.push("郵便番号");
   if (!form.customerTelephone.trim()) missingIssueFields.push("電話番号");
   if (!form.customerAddress.trim()) missingIssueFields.push("住所");
+  const customerEmail = form.customerEmail.trim();
+  if (!customerEmail) missingIssueFields.push("メールアドレス");
+  else if (!CUSTOMER_EMAIL_PATTERN.test(customerEmail)) missingIssueFields.push("メールアドレス（形式）");
   form.skuNames.forEach((name, index) => {
     if (!name.trim()) missingIssueFields.push(`製品名（SKU-${index + 1}）`);
   });
@@ -1688,6 +1701,17 @@ export default function PrintableQuotationPage({
             <label className={form.customerTelephone.trim() ? "filled" : "required"}>
               電話番号 ★
               <input value={form.customerTelephone} onChange={(e) => update("customerTelephone", e.target.value)} placeholder="03-1234-5678" />
+            </label>
+            <label className={form.customerEmail.trim() ? "filled" : "required"}>
+              メールアドレス ★
+              <input
+                type="email"
+                value={form.customerEmail}
+                onChange={(e) => update("customerEmail", e.target.value)}
+                placeholder="purchase@example.co.jp"
+                autoComplete="email"
+                data-testid="customer-email-input"
+              />
             </label>
             <label className={form.customerAddress.trim() ? "filled" : "required wide"}>
               住所 ★

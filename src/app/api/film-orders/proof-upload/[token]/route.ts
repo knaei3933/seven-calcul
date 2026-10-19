@@ -43,6 +43,8 @@ function publicErrorStatus(message: string): number {
   if (message === "ambiguous_uploaded_file") return 409;
   if (
     message === "invalid_file_name"
+    || message === "invalid_ai_file"
+    || message === "invalid_pdf_file"
     || message === "unsupported_file_type"
     || message === "invalid_upload_request"
     || message === "uploaded_file_mismatch"
@@ -68,6 +70,8 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     const body = await request.json() as {
       action?: unknown;
       fileName?: unknown;
+      aiFileName?: unknown;
+      pdfFileName?: unknown;
       sizeBytes?: unknown;
       contentType?: unknown;
       uploader?: unknown;
@@ -75,6 +79,9 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     };
     const action = typeof body.action === "string" ? body.action : "";
     const fileName = typeof body.fileName === "string" ? body.fileName.trim() : "";
+    const aiFileName = typeof body.aiFileName === "string" ? body.aiFileName.trim() : fileName;
+    const pdfFileName = typeof body.pdfFileName === "string" ? body.pdfFileName.trim() : "";
+    const requestFileName = action === "complete" ? aiFileName : fileName;
     const order = await getFilmOrderForProofUpload(token);
     if (!order) return NextResponse.json({ error: "proof_order_not_found" }, { status: 404 });
 
@@ -85,7 +92,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       ? typeof body.sizeBytes === "number" ? body.sizeBytes : undefined
       : undefined;
     try {
-      assertSupplierProofUploadPolicy(order, fileName, declaredSize);
+      assertSupplierProofUploadPolicy(order, requestFileName, declaredSize);
     } catch (error) {
       const message = error instanceof Error ? error.message : "invalid_upload_request";
       return NextResponse.json({ error: message }, { status: publicErrorStatus(message) });
@@ -102,7 +109,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       return NextResponse.json({ sessionUri });
     }
 
-    let candidates = await findDriveFiles({ fileName, folderId: proofFolderId() });
+    let candidates = await findDriveFiles({ fileName: aiFileName, folderId: proofFolderId() });
     for (let attempt = 1; candidates.length === 0 && attempt < 3; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 800));
       candidates = await findDriveFiles({ fileName, folderId: proofFolderId() });
@@ -113,18 +120,51 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     if (!candidate.parentFolderIds.includes(proofFolderId())) {
       return NextResponse.json({ error: "uploaded_file_mismatch" }, { status: 400 });
     }
-    const extension = fileName.slice(fileName.lastIndexOf(".")).toLowerCase();
+    const extension = aiFileName.slice(aiFileName.lastIndexOf(".")).toLowerCase();
     if (!candidate.name.toLowerCase().endsWith(extension)) {
       return NextResponse.json({ error: "uploaded_file_mismatch" }, { status: 400 });
     }
     if (candidate.sizeBytes == null || candidate.sizeBytes <= 0 || candidate.sizeBytes > 15 * 1024 * 1024) {
       return NextResponse.json({ error: "file_too_large" }, { status: 413 });
     }
-    const url = `https://drive.google.com/file/d/${candidate.id}/view`;
+    const aiUrl = `https://drive.google.com/file/d/${candidate.id}/view`;
+    let pdfUrl = "";
+    let pdfCandidate: typeof candidate | null = null;
+    if (pdfFileName) {
+      if (!pdfFileName.toLowerCase().endsWith(".pdf")) {
+        return NextResponse.json({ error: "invalid_pdf_file" }, { status: 400 });
+      }
+      try {
+        assertSupplierProofUploadPolicy(order, pdfFileName, undefined);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "invalid_upload_request";
+        return NextResponse.json({ error: message }, { status: publicErrorStatus(message) });
+      }
+      let pdfCandidates = await findDriveFiles({ fileName: pdfFileName, folderId: proofFolderId() });
+      for (let attempt = 1; pdfCandidates.length === 0 && attempt < 3; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        pdfCandidates = await findDriveFiles({ fileName: pdfFileName, folderId: proofFolderId() });
+      }
+      if (pdfCandidates.length === 0) return NextResponse.json({ error: "uploaded_file_not_found" }, { status: 404 });
+      if (pdfCandidates.length > 1) return NextResponse.json({ error: "ambiguous_uploaded_file" }, { status: 409 });
+      pdfCandidate = pdfCandidates[0]!;
+      if (!pdfCandidate.parentFolderIds.includes(proofFolderId())) {
+        return NextResponse.json({ error: "uploaded_file_mismatch" }, { status: 400 });
+      }
+      if (!pdfCandidate.name.toLowerCase().endsWith(".pdf")) {
+        return NextResponse.json({ error: "uploaded_file_mismatch" }, { status: 400 });
+      }
+      if (pdfCandidate.sizeBytes == null || pdfCandidate.sizeBytes <= 0 || pdfCandidate.sizeBytes > 15 * 1024 * 1024) {
+        return NextResponse.json({ error: "file_too_large" }, { status: 413 });
+      }
+      pdfUrl = `https://drive.google.com/file/d/${pdfCandidate.id}/view`;
+    }
     const updated = await registerProofFromUploadToken({
       token,
-      fileName,
-      fileUrl: url,
+      fileName: aiFileName,
+      fileUrl: aiUrl,
+      pdfFileName: pdfFileName || undefined,
+      pdfFileUrl: pdfUrl || undefined,
       uploader: typeof body.uploader === "string" ? body.uploader : undefined,
       note: typeof body.note === "string" ? body.note : undefined,
       metadata: {
@@ -137,8 +177,18 @@ export async function POST(request: Request, context: Context): Promise<NextResp
         clientIpHash: externalClientIpHash(request),
         userAgent: request.headers.get("user-agent"),
       },
+      pdfMetadata: pdfCandidate ? {
+        fileSizeBytes: pdfCandidate.sizeBytes,
+        contentType: pdfCandidate.mimeType,
+        checksum: pdfCandidate.checksum,
+        checksumAlgorithm: pdfCandidate.checksum ? "md5" : null,
+        driveFileId: pdfCandidate.id,
+        uploadedVia: "supplier_proof",
+        clientIpHash: externalClientIpHash(request),
+        userAgent: request.headers.get("user-agent"),
+      } : undefined,
     });
-    return NextResponse.json({ order: orderSummary(updated), url });
+    return NextResponse.json({ order: orderSummary(updated), url: aiUrl });
   } catch (error) {
     const message = error instanceof Error ? error.message : "proof_upload_failed";
     return NextResponse.json({ error: message }, { status: publicErrorStatus(message) });

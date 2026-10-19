@@ -409,16 +409,22 @@ export async function POST(request: Request): Promise<NextResponse> {
     } else if (!hasValidSimulatorProvenance(input)) {
       return NextResponse.json({ error: "calculation_provenance_invalid" }, { status: 400 });
     }
-    // 発行には顧客の必須情報（会社名・郵便番号・電話番号・住所）が必要。
+    // 発行には顧客の必須情報（会社名・郵便番号・電話番号・住所・メール）が必要。
     const payload = input.payload as Record<string, unknown>;
+    const customerEmail = typeof payload.customerEmail === "string" ? payload.customerEmail.trim() : "";
+    const customerEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const missingIssueFields = [
       !input.customerName.trim() && "customerName",
       !(typeof payload.customerPostalCode === "string" && payload.customerPostalCode.trim()) && "customerPostalCode",
       !(typeof payload.customerTelephone === "string" && payload.customerTelephone.trim()) && "customerTelephone",
       !(typeof payload.customerAddress === "string" && payload.customerAddress.trim()) && "customerAddress",
+      !customerEmail && "customerEmail",
     ].filter(Boolean) as string[];
     if (missingIssueFields.length > 0) {
       return NextResponse.json({ error: "issue_fields_required", missing: missingIssueFields }, { status: 400 });
+    }
+    if (!customerEmailPattern.test(customerEmail)) {
+      return NextResponse.json({ error: "invalid_customer_email" }, { status: 400 });
     }
     // 발행 시 金井貿易→セブン化學 필름 견적서를 자동 생성해 payload에 포함
     const filmQuotation = buildFilmQuotationFromRecord({

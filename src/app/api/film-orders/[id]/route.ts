@@ -26,6 +26,15 @@ function statusForError(message: string): number {
     || message === "customer_design_file_required"
     || message === "customer_design_correction_reason_required"
     || message === "customer_design_not_required_reason_required"
+    || message === "customer_proof_approval_required"
+    || message === "customer_proof_evidence_required"
+    || message === "customer_proof_correction_reason_required"
+    || message === "korean_supplier_message_required"
+    || message === "japanese_supplier_message_required"
+    || message === "japanese_customer_message_required"
+    || message === "customer_proof_file_required"
+    || message === "customer_proof_pdf_required"
+    || message === "sample_bulk_quantity_mismatch"
   ) return 400;
   return 500;
 }

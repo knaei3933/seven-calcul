@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
-import { deleteQuotation, getQuotation, quotationStatuses, updateQuotationStatus, type QuotationStatus } from "@/lib/quotation-store";
+import {
+  deleteQuotation,
+  getQuotation,
+  quotationStatuses,
+  updateQuotationCustomerEmail,
+  updateQuotationStatus,
+  type QuotationStatus,
+} from "@/lib/quotation-store";
 import { getSessionUser } from "@/lib/api-auth";
 import type { AuthenticatedUser } from "@/lib/auth-store";
 import { filmOrderExistsForQuotation, syncFilmOrdersFromQuotations } from "@/lib/film-orders";
@@ -35,14 +42,35 @@ export async function PATCH(request: Request, context: Context): Promise<NextRes
   try {
     const user = await getSessionUser(request);
     if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
-    const body = await request.json() as { status?: unknown };
+    const body = await request.json() as { status?: unknown; customerEmail?: unknown };
+    const emailProvided = body.customerEmail !== undefined;
+    const statusProvided = body.status !== undefined;
+    if (emailProvided && statusProvided) {
+      return NextResponse.json({ error: "combined_email_status_update_unsupported" }, { status: 400 });
+    }
     const status = quotationStatuses.find((item) => item === body.status) as QuotationStatus | undefined;
-    if (!status) return NextResponse.json({ error: "invalid_status" }, { status: 400 });
+    if (!emailProvided && !status) return NextResponse.json({ error: "invalid_status" }, { status: 400 });
     const existing = await getQuotation(Number(id));
     if (!existing) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
     if (!canManageQuotation(user, existing.createdBy.id)) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
+
+    if (emailProvided) {
+      const email = typeof body.customerEmail === "string" ? body.customerEmail.trim().toLowerCase() : "";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return NextResponse.json({ error: "invalid_customer_email" }, { status: 400 });
+      }
+      if (!["draft", "sent"].includes(existing.status)) {
+        return NextResponse.json({ error: "customer_email_update_not_allowed" }, { status: 409 });
+      }
+      const record = await updateQuotationCustomerEmail(Number(id), email, user.id);
+      if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
+      return NextResponse.json({ record });
+    }
+
+    if (!status) return NextResponse.json({ error: "invalid_status" }, { status: 400 });
+
     if (!MANUAL_STATUS_TRANSITIONS[existing.status]?.includes(status)) {
       return NextResponse.json({ error: "invalid_status_transition" }, { status: 409 });
     }

@@ -463,6 +463,30 @@ header .version-badge { display: none; }
 .detail-header-actions .button,
 .detail-header-actions a.button { min-height: 35px; padding: 6px 10px; font-size: 12px; border-radius: 7px; }
 .detail-header-actions [data-testid="detail-print-current"] { min-width: 148px; }
+.history-email-editor {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) auto auto;
+  align-items: end;
+  gap: 5px;
+  min-width: 265px;
+  border: 1px solid #d7dfeb;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 6px;
+}
+.history-email-editor label { display: grid; gap: 3px; min-width: 0; }
+.history-email-editor span { color: #526075; font-size: 10px; font-weight: 850; }
+.history-email-editor input {
+  width: 100%;
+  min-height: 31px;
+  border: 1px solid #c9d5e4;
+  border-radius: 6px;
+  background: white;
+  padding: 4px 7px;
+  font-size: 12px;
+}
+.history-email-editor input[readonly] { background: #f4f7fb; color: #34445a; }
+.history-email-editor .button { min-height: 31px; padding: 4px 8px; font-size: 11px; }
 .data-report-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .data-report-table th,
 .data-report-table td { border: .2mm solid #8b96a6; padding: 1.7mm 1.2mm; font-size: 8.5pt; overflow-wrap: anywhere; }
@@ -1963,9 +1987,6 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-order-event-type.file { background: #dcfce7; color: #166534; }
 .film-order-events small { color: var(--muted); margin-left: auto; font-size: 11.5px; }
 
-.film-order-supplier { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
-.film-order-supplier label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 800; color: var(--muted); min-width: 200px; flex: 1; }
-.film-order-supplier input { border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font: inherit; font-size: 13px; }
 .film-order-file-form { display: flex; flex-direction: column; gap: 7px; border: 1px dashed var(--line); border-radius: 9px; padding: 10px 12px; background: #fbfcfe; }
 .film-order-file-form strong { font-size: 13px; }
 .film-order-file-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 800; color: var(--muted); }

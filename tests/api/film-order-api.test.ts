@@ -134,7 +134,7 @@ describe("film order API permissions and workflow", () => {
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", pdfFileName: "API検証パウチ.pdf" }),
+        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", aiFileUrl: "https://drive.google.com/file/d/api-ai/view", pdfFileName: "API検証パウチ.pdf", pdfFileUrl: "https://drive.google.com/file/d/api-pdf/view" }),
       }, kaneiToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
@@ -144,7 +144,7 @@ describe("film order API permissions and workflow", () => {
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", pdfFileName: "API検証パウチ.pdf" }),
+        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", aiFileUrl: "https://drive.google.com/file/d/api-ai/view", pdfFileName: "API検証パウチ.pdf", pdfFileUrl: "https://drive.google.com/file/d/api-pdf/view" }),
       }, sevenToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
@@ -178,7 +178,7 @@ describe("film order API permissions and workflow", () => {
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "request-re-proof", comment: "色を調整" }),
+        body: JSON.stringify({ action: "request-re-proof", comment: "色を調整", supplierMessage: "색상과 배치를 조정해서 다시 제출해 주십시오." }),
       }, sevenToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );

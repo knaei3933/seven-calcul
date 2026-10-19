@@ -466,6 +466,7 @@ describe("gravure master foundation", () => {
         customerPostalCode: "1234567",
         customerTelephone: "0000000000",
         customerAddress: "Osaka",
+        customerEmail: "customer@gravure.test",
         pricingSnapshot: {
           id: userPayload.pricingSnapshot.id,
           sha256: userPayload.pricingSnapshot.sha256,

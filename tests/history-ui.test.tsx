@@ -68,7 +68,10 @@ describe("quotation history ownership UI", () => {
     push.mockClear();
   });
 
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   it("shows creator identity, filters by creator, and disables unauthorized controls", async () => {
     const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
@@ -129,6 +132,45 @@ describe("quotation history ownership UI", () => {
     await waitFor(() => expect(printSpy).toHaveBeenCalledTimes(1));
     printSpy.mockRestore();
     vi.unstubAllGlobals();
+  });
+
+  it("lets an owner correct a missing customer email on an issued draft", async () => {
+    const noEmailRecord = { ...ownerRecord, payload: {} };
+    const updatedRecord = {
+      ...noEmailRecord,
+      payload: { customerEmail: "legacy@example.test" },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/quotations/2" && init?.method === "PATCH") {
+        expect(JSON.parse(String(init.body))).toEqual({ customerEmail: "legacy@example.test" });
+        return Response.json({ record: updatedRecord }, { status: 200 });
+      }
+      if (target === "/api/quotations/2/pdf") {
+        return Response.json({ error: "pdf_not_found" }, { status: 404 });
+      }
+      if (target === "/api/quotations/2") {
+        return Response.json({ record: noEmailRecord }, { status: 200 });
+      }
+      return Response.json({ records: [noEmailRecord] }, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<HistoryClient currentUser={currentUser} />);
+
+    await screen.findByText("S7-HISTORY-OWNER");
+    await user.click(screen.getByRole("button", { name: "詳細" }));
+    expect(screen.getByTestId("history-customer-email")).toHaveValue("");
+    expect(screen.queryByTestId("history-auto-send")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("history-email-edit"));
+    await user.type(screen.getByTestId("history-customer-email"), "legacy@example.test");
+    await user.click(screen.getByTestId("history-email-save"));
+
+    await waitFor(() => expect(screen.getByTestId("email-message")).toHaveTextContent("宛先メールを更新しました"));
+    expect(screen.getByTestId("history-customer-email")).toHaveValue("legacy@example.test");
+    expect(screen.getByTestId("history-customer-email")).toHaveProperty("readOnly", true);
+    expect(screen.getByTestId("history-auto-send")).toBeInTheDocument();
   });
 
   it("opens the linked film quotation directly from URL parameters", async () => {

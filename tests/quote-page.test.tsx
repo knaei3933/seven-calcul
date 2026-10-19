@@ -69,11 +69,17 @@ describe("quotation page stale draft", () => {
   it("keeps direct manual entry actions available when no stale marker exists", async () => {
     render(<QuotePage />);
 
-    // 発行には会社名・郵便番号・電話番号・住所が必須。
+    // 発行には会社名・郵便番号・電話番号・住所・メールが必須。
     await userEvent.setup().type(screen.getByLabelText("会社名 ★"), "手入力株式会社");
     await userEvent.setup().type(screen.getByLabelText("郵便番号 ★"), "123-4567");
     await userEvent.setup().type(screen.getByLabelText("電話番号 ★"), "03-1234-5678");
     await userEvent.setup().type(screen.getByLabelText("住所 ★"), "東京都千代田区テスト1-1");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("save-history")).toBeDisabled();
+      expect(screen.getByTestId("issue-required-fields")).toHaveTextContent("メールアドレス");
+    });
+    await userEvent.setup().type(screen.getByTestId("customer-email-input"), "purchase@example.co.jp");
 
     await waitFor(() => {
       expect(screen.getByTestId("save-history")).toBeEnabled();
@@ -180,6 +186,7 @@ describe("quotation page stale draft", () => {
     await user.type(screen.getByLabelText("郵便番号 ★"), "100-0001");
     await user.type(screen.getByLabelText("電話番号 ★"), "06-1234-5678");
     await user.type(screen.getByLabelText("住所 ★"), "大阪府テスト市1-2-3");
+    await user.type(screen.getByTestId("customer-email-input"), "adjusted@example.co.jp");
 
     await waitFor(() => expect(screen.getByTestId("shortage-quote-warning")).toBeVisible());
     expect(screen.getByTestId("shortage-quote-warning")).toHaveTextContent("数量調整プラン");
@@ -228,6 +235,7 @@ describe("quotation page stale draft", () => {
     await user.type(screen.getByLabelText("郵便番号 ★"), "530-0001");
     await user.type(screen.getByLabelText("電話番号 ★"), "06-9999-9999");
     await user.type(screen.getByLabelText("住所 ★"), "大阪府修正市テスト3-4");
+    await user.type(screen.getByTestId("customer-email-input"), "manual@example.co.jp");
 
     await waitFor(() => expect(screen.getByTestId("save-history")).toBeEnabled());
     const fillingUnit = screen.getByLabelText("充填・加工単価");
@@ -286,6 +294,7 @@ describe("quotation page stale draft", () => {
     await user.type(screen.getByLabelText("郵便番号 ★"), "650-0001");
     await user.type(screen.getByLabelText("電話番号 ★"), "078-000-0000");
     await user.type(screen.getByLabelText("住所 ★"), "兵庫県神戸市テスト1-2-3");
+    await user.type(screen.getByTestId("customer-email-input"), "sku@example.co.jp");
 
     expect(screen.getByLabelText("製品名（SKU-1）★")).toHaveValue("レモン琺瑯");
     expect(screen.getByLabelText("製品名（SKU-2）★")).toHaveValue("充填物2");
@@ -374,6 +383,7 @@ describe("quotation page stale draft", () => {
     await user.click(screen.getByRole("button", { name: /既存顧客株式会社/ }));
     expect(screen.getByLabelText("会社名 ★")).toHaveValue("既存顧客株式会社");
     expect(screen.getByLabelText("住所 ★")).toHaveValue("兵庫県神戸市テスト1-2-3");
+    expect(screen.getByTestId("customer-email-input")).toHaveValue("existing@example.co.jp");
 
     await user.click(screen.getByTestId("fill-test-data"));
     expect((screen.getByLabelText("会社名 ★") as HTMLInputElement).value).toMatch("テスト顧客株式会社");

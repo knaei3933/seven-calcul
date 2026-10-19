@@ -25,6 +25,8 @@ const {
   getFilmOrderForCustomerDesign,
   nextCustomerDesignFileName,
   registerCustomerDesignFromUploadToken,
+  decideCustomerProofReview,
+  getFilmOrderForCustomerProofReview,
   runFilmOrderAction,
   syncFilmOrdersFromQuotations,
 } = await import("@/lib/film-orders");
@@ -178,12 +180,13 @@ describe("film order external token hardening", () => {
     expect(() => assertSupplierProofUploadPolicy(ordered, `${input.quotationNumber}.pdf`, 15 * 1024 * 1024)).not.toThrow();
   });
 
-  it("rotates the active supplier token when a new notice is issued", async () => {
+  it("reuses the stable supplier token when a new notice is issued", async () => {
     const notice = await runFilmOrderAction(orderId, "send-proof-notice", { origin: "http://localhost:3000" }, "kanei@kanei-trade.co.jp");
     const nextToken = String(notice.mails?.[0]?.text ?? "").match(/\/film-orders\/upload\/([^\s"]+)/u)?.[1] ?? "";
     expect(nextToken).not.toBe("");
-    await expect(getFilmOrderForProofUpload(supplierToken)).rejects.toThrow("invalid_proof_token");
+    await expect(getFilmOrderForProofUpload(supplierToken)).resolves.toMatchObject({ id: orderId });
     await expect(getFilmOrderForProofUpload(nextToken)).resolves.toMatchObject({ id: orderId });
+    expect(nextToken).toBe(supplierToken);
     supplierToken = nextToken;
   });
 });
@@ -221,41 +224,42 @@ describe("customer design upload gate", () => {
     }, "kanei@kanei-trade.co.jp");
     expect(requested.order.customerDesign.status).toBe("requested");
     expect(requested.mails?.[0]?.to).toBe("design-customer@example.test");
-    expect(requested.mails?.[0]?.subject).toContain("デザインデータご入稿のお願い");
+    expect(requested.mails?.[0]?.subject).toContain("デザイン原稿ご入稿のお願い");
     const firstToken = requested.mails?.[0]?.text?.match(/\/film-orders\/design-upload\/([^\s"]+)/u)?.[1] ?? "";
     expect(firstToken).not.toBe("");
 
     const before = await getFilmOrderForCustomerDesign(firstToken);
-    const firstFileName = nextCustomerDesignFileName(before!, "original design.psd");
+    const firstFileName = nextCustomerDesignFileName(before!, "original design.ai");
     const uploaded = await registerCustomerDesignFromUploadToken({
       token: firstToken,
       fileName: firstFileName,
       fileUrl: "https://drive.google.com/file/d/customerdesign1/view",
       uploader: "design customer",
       note: "v1",
-      metadata: { fileSizeBytes: 1000, contentType: "image/vnd.adobe.photoshop", driveFileId: "customerdesign1" },
+      metadata: { fileSizeBytes: 1000, contentType: "application/postscript", driveFileId: "customerdesign1" },
     });
     expect(uploaded.customerDesign.status).toBe("received");
     expect(uploaded.files.filter((file) => file.category === "customer_design")).toHaveLength(1);
     expect(uploaded.files.at(-1)?.file_name).toContain("_design_v1_");
 
     const corrected = await runFilmOrderAction(designOrderId, "request-customer-design-correction", {
-      reason: "解像度と抜き幅を修正してください",
+      reason: "内部確認: 解像度と抜き幅",
+      customerMessage: "解像度と抜き幅を修正してください。",
       origin: "http://localhost:3000",
     }, "kanei@kanei-trade.co.jp");
     expect(corrected.order.customerDesign.status).toBe("correction_requested");
     expect(corrected.order.customerDesign.correctionCount).toBe(1);
-    expect(corrected.mails?.[0]?.text).toContain("解像度と抜き幅を修正してください");
+    expect(corrected.mails?.[0]?.text).toContain("解像度と抜き幅を修正してください。");
     const secondToken = corrected.mails?.[0]?.text?.match(/\/film-orders\/design-upload\/([^\s"]+)/u)?.[1] ?? "";
     expect(secondToken).not.toBe(firstToken);
 
     const before2 = await getFilmOrderForCustomerDesign(secondToken);
-    const secondFileName = nextCustomerDesignFileName(before2!, "original design fixed.psd");
+    const secondFileName = nextCustomerDesignFileName(before2!, "original design fixed.pdf");
     const uploaded2 = await registerCustomerDesignFromUploadToken({
       token: secondToken,
       fileName: secondFileName,
       fileUrl: "https://drive.google.com/file/d/customerdesign2/view",
-      metadata: { fileSizeBytes: 1200, contentType: "image/vnd.adobe.photoshop", driveFileId: "customerdesign2" },
+      metadata: { fileSizeBytes: 1200, contentType: "application/pdf", driveFileId: "customerdesign2" },
     });
     expect(uploaded2.customerDesign.status).toBe("received");
     expect(uploaded2.files.filter((file) => file.category === "customer_design")).toHaveLength(2);
@@ -268,5 +272,36 @@ describe("customer design upload gate", () => {
       aiFileUrl: "https://drive.google.com/file/d/confirmedai/view",
     }, "seven@727.co.jp");
     expect(receiving.order.status).toBe("receiving_registered");
+
+    const proof = await runFilmOrderAction(designOrderId, "register-proof", {
+      aiFileName: `${designOrderId}_proof_v1.ai`,
+      aiFileUrl: "https://drive.google.com/file/d/customerproof1/view",
+      pdfFileName: `${designOrderId}_proof_v1.pdf`,
+      pdfFileUrl: "https://drive.google.com/file/d/customerproofpdf1/view",
+    }, "kanei@kanei-trade.co.jp");
+    expect(proof.order.status).toBe("proof_registered");
+    expect(proof.order.customerProof.status).toBe("pending");
+    await expect(runFilmOrderAction(designOrderId, "approve", {}, "seven@727.co.jp"))
+      .rejects.toThrow("customer_proof_approval_required");
+
+    const review = await runFilmOrderAction(designOrderId, "send-customer-proof-review", {
+      origin: "http://localhost:3000",
+    }, "kanei@kanei-trade.co.jp");
+    expect(review.order.customerProof.status).toBe("requested");
+    expect(review.mails?.[0]?.subject).toContain("校正ご確認のお願い");
+    expect(review.mails?.[0]?.text).toContain("ロゴ・商品名・表記に誤字・脱字がないか");
+    const reviewToken = review.mails?.[0]?.text?.match(/\/film-orders\/proof-review\/([^\s"]+)/u)?.[1] ?? "";
+    expect(reviewToken).not.toBe("");
+    const reviewPage = await getFilmOrderForCustomerProofReview(reviewToken);
+    expect(reviewPage.files.filter((file) => file.category === "proof" && file.file_name.toLowerCase().endsWith(".pdf")).at(-1)?.version).toBe(2);
+
+    const approvedReview = await decideCustomerProofReview({
+      token: reviewToken,
+      decision: "approve",
+      request: requestHeaders("198.51.100.9"),
+    });
+    expect(approvedReview.customerProof.status).toBe("approved");
+    const finalApproved = await runFilmOrderAction(designOrderId, "approve", { fileName: "final.pdf", fileUrl: "https://drive.google.com/file/d/finalproof/view" }, "seven@727.co.jp");
+    expect(finalApproved.order.status).toBe("final_approved");
   });
 });

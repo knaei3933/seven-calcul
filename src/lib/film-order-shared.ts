@@ -32,12 +32,12 @@ export const SAMPLE_BULK_STATUSES = [
 export type SampleBulkStatus = typeof SAMPLE_BULK_STATUSES[number];
 
 export const sampleBulkStatusLabels: Record<SampleBulkStatus, string> = {
-  not_required: "バルク支給不要",
-  pending: "バルク依頼準備中",
-  requested: "バルク送付依頼済み",
-  received: "バルク受領済み",
-  confirmed: "バルク量確認済み",
-  adjustment_requested: "バルク量変更依頼中",
+  not_required: "サンプル支給不要",
+  pending: "サンプル依頼準備中",
+  requested: "サンプル送付依頼済み",
+  received: "サンプル受領済み",
+  confirmed: "サンプル量確認済み",
+  adjustment_requested: "サンプル量変更依頼中",
 };
 
 export const CUSTOMER_DESIGN_STATUSES = [
@@ -59,6 +59,24 @@ export const customerDesignStatusLabels: Record<CustomerDesignStatus, string> = 
   correction_requested: "顧客修正依頼中",
   confirmed: "顧客デザイン確定",
   not_required: "顧客デザイン不要",
+  legacy_exempt: "既存案件（対象外）",
+};
+
+export const CUSTOMER_PROOF_STATUSES = [
+  "pending",
+  "requested",
+  "approved",
+  "correction_requested",
+  "legacy_exempt",
+] as const;
+
+export type CustomerProofStatus = typeof CUSTOMER_PROOF_STATUSES[number];
+
+export const customerProofStatusLabels: Record<CustomerProofStatus, string> = {
+  pending: "顧客校正確認待ち",
+  requested: "顧客レビュー依頼済み",
+  approved: "顧客承認済み",
+  correction_requested: "顧客修正依頼中",
   legacy_exempt: "既存案件（対象外）",
 };
 
@@ -138,6 +156,11 @@ export interface FilmOrderRow {
   customer_design_confirmed_at: string | null;
   customer_design_correction_count: number;
   customer_design_correction_reason: string;
+  customer_proof_status: CustomerProofStatus;
+  customer_proof_requested_at: string | null;
+  customer_proof_approved_at: string | null;
+  customer_proof_correction_count: number;
+  customer_proof_correction_reason: string;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -155,17 +178,29 @@ export interface CustomerDesignTracking {
   note: string;
 }
 
+export interface CustomerProofTracking {
+  status: CustomerProofStatus;
+  requestedAt: string | null;
+  approvedAt: string | null;
+  correctionCount: number;
+  correctionReason: string;
+}
+
 export type FilmOrder = FilmOrderRow & {
   purchaseOrder: PurchaseOrderSnapshot | null;
   sampleBulk: SampleBulkTracking;
   customerDesign: CustomerDesignTracking;
+  customerProof: CustomerProofTracking;
 };
 
 export interface SampleBulkTracking {
   status: SampleBulkStatus;
-  requiredMl: string;
-  receivedMl: string | null;
-  adjustedMl: string | null;
+  /** 見積計算上の本生産バルク使用量。サンプル支給量ではない。 */
+  productionBulkUsageMl: string;
+  /** 実際に依頼するサンプル支給量。 */
+  sampleQuantityMl: string | null;
+  sampleReceivedMl: string | null;
+  sampleAdjustedMl: string | null;
   adjustmentCount: number;
   recipientName: string;
   recipientPostalCode: string;
