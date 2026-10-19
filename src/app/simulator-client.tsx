@@ -1041,7 +1041,6 @@ export default function QuotationPage({
   const [kMasterUnavailable, setKMasterUnavailable] = useState(false);
   const [shortagePlansOpen, setShortagePlansOpen] = useState(false);
   const requestOrderRef = useRef(0);
-  const redactedHandoffRef = useRef(false);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
   const [productionSpeedManual, setProductionSpeedManual] = useState(false);
   const [liquidMaster, setLiquidMaster] = useState<LiquidMasterItem[]>([]);
@@ -1385,25 +1384,6 @@ export default function QuotationPage({
     localStorage.setItem("pouch-current-checklist-snapshot-persistent-v1", checklistSnapshotJson);
   }, [effectiveParameters, effectiveSize, form.bulkPrice, form.lengthMm, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate]);
 
-  const continueWithRedactedProjection = (projection: ReturnedPublicProjection) => {
-    try {
-      sessionStorage.setItem(
-        QUOTATION_DRAFT_KEY,
-        JSON.stringify(buildRedactedQuotationDraft(projection, {
-          productSummary: form.skus.map((sku) => sku.name.trim() || "充填物").join(" / "),
-          sizeSummary: `${form.widthMm}×${form.lengthMm}mm / ${form.connected}連`,
-          targetMargin: effectiveMargin,
-        })),
-      );
-      sessionStorage.removeItem(SIMULATOR_STALE_STATUS_KEY);
-      // Session-scoped quotation handoff intentionally reloads the app.
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign("/quote");
-    } catch {
-      setCalculationError({ code: "quotation_draft_failed", message: "見積書ドラフトを作成できませんでした。" });
-    }
-  };
-
   const selectCandidate = async (candidate: PrintCandidate) => {
     if (!serverResult || pending || selecting) return;
     if (serverResult.selectedCandidateId === candidate.id) {
@@ -1450,59 +1430,31 @@ export default function QuotationPage({
       const { response, payload } = await postCalculationWithTimeout(calculationRequest);
       if (!response.ok) throw new Error(payload.error ?? "candidate_calculation_failed");
       const returnedProjection = returnedProjectionFrom(payload);
-      if (returnedProjection) {
+      const hasFullReturnedResult = isCostResult(payload.result)
+        && isCostResult(payload.originalResult)
+        && Array.isArray(payload.candidates);
+      if (returnedProjection && !hasFullReturnedResult) {
         if (requestOrder !== requestOrderRef.current) return;
-        redactedHandoffRef.current = true;
-        // Do not commit redacted state: committing it renders the intermediate
-        // plan page for one frame before the quotation navigation completes.
-        try {
-          const savedSimulatorRaw = sessionStorage.getItem(SIMULATOR_STATE_KEY);
-          const savedSimulator = savedSimulatorRaw ? JSON.parse(savedSimulatorRaw) as Record<string, unknown> : {};
-          const candidateSpec = { ...basisCalculationInput.spec, skuQuantities: candidate.adjustedSkuQuantities };
-          const { skuQuantities: _basisSkuQuantities, ...basisSpecRest } = basisCalculationInput.spec;
-          const candidateRequestNonQuantityJson = JSON.stringify({
-            ...basisCalculationInput,
-            spec: basisSpecRest,
-          });
-          const hasFullResult = isCostResult(payload.result)
-            && isCostResult(payload.originalResult)
-            && Array.isArray(payload.candidates);
-          sessionStorage.setItem(SIMULATOR_STATE_KEY, JSON.stringify({
-            ...savedSimulator,
-            form: {
-              ...(savedSimulator.form as object | undefined),
-              quantity: returnedProjection.quantity,
-              targetMargin: candidateTargetMarginMode === "custom" ? "custom" : candidateTargetMargin,
-              customMargin: candidateTargetMarginMode === "custom" ? candidateTargetMargin : form.customMargin,
-              skus: form.skus.map((sku, index) => ({
-                ...sku,
-                quantity: candidate.adjustedSkuQuantities[index] ?? returnedProjection.quantity,
-              })),
-            },
-            serverResult: hasFullResult ? {
-              result: payload.result,
-              originalResult: payload.originalResult,
-              candidates: payload.candidates,
-              inputJson: JSON.stringify(basisCalculationInput),
-              requestNonQuantityJson: candidateRequestNonQuantityJson,
-              selectedCandidateId: candidate.id,
-              originalQuantity: serverResult.originalQuantity ?? form.quantity,
-              originalSkuQuantities: serverResult.originalSkuQuantities ?? form.skus.map((sku) => sku.quantity),
-              originalInputJson: serverResult.originalInputJson ?? serverResult.inputJson,
-              originalRequestNonQuantityJson: serverResult.originalRequestNonQuantityJson ?? serverResult.requestNonQuantityJson,
-              originalPrintingMethod,
-              originalTargetMargin,
-              originalTargetMarginMode,
-              calculationRequest,
-              originalCalculationRequest: serverResult.originalCalculationRequest ?? serverResult.calculationRequest,
-            } : undefined,
-            calculatedAt: new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-          }));
-        } catch {
-          // The quotation handoff remains valid even when simulator persistence
-          // cannot be updated.
-        }
-        continueWithRedactedProjection(returnedProjection);
+        setRecommendationModalOpen(false);
+        setRedactedCalculation({
+          projection: returnedProjection,
+          originalRequest: basisCalculationInput,
+          originalTargetMargin,
+          originalTargetMarginMode,
+          request: calculationRequest,
+          selectedCandidateId: candidate.id,
+        });
+        setForm((old) => ({
+          ...old,
+          quantity: returnedProjection.quantity,
+          targetMargin: candidateTargetMarginMode === "custom" ? "custom" : candidateTargetMargin,
+          customMargin: candidateTargetMarginMode === "custom" ? candidateTargetMargin : old.customMargin,
+          skus: old.skus.map((sku, index) => ({
+            ...sku,
+            quantity: candidate.adjustedSkuQuantities[index] ?? returnedProjection.quantity,
+          })),
+        }));
+        setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
         return;
       }
       if (requestOrder !== requestOrderRef.current) return;
@@ -1720,7 +1672,7 @@ export default function QuotationPage({
               quantity,
               skus: old.skus.map((sku, index) => ({ ...sku, quantity: adjusted[index] ?? quantity })),
             }));
-      continueWithRedactedProjection(projection);
+      setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (error) {
       const mapped = calculationErrorFor(error, "candidate_calculation_failed");
       setSelectionError(mapped);
@@ -1737,7 +1689,6 @@ export default function QuotationPage({
     setCalculationError(null);
     setServerResult(null);
     setRedactedCalculation(null);
-    redactedHandoffRef.current = false;
     try {
       const shouldRestoreInputMargin = Boolean(serverResult?.selectedCandidateId);
       // The explicit recalculation button always returns to the customer's
@@ -1915,7 +1866,6 @@ export default function QuotationPage({
 
   useEffect(() => {
     if (!serverResult || !quotationDraftResult) return;
-    if (redactedHandoffRef.current) return;
     const draftSkus = form.skus.map((sku, index) => {
       const quantity = D(selectedRecommendation?.adjustedSkuQuantities[index] ?? sku.quantity);
       const requiredLengthM = calculateRequiredProductionLength(effectiveSize, quantity, parameters.lossRate, Number(form.connected));
@@ -1981,7 +1931,7 @@ export default function QuotationPage({
 
 
   useEffect(() => {
-    if (!simulatorStateLoaded || redactedHandoffRef.current) return;
+    if (!simulatorStateLoaded) return;
     const simulatorStateJson = JSON.stringify({
       version: 1,
       form,

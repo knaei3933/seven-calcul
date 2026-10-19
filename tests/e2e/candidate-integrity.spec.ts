@@ -17,17 +17,23 @@ async function selectRedactedGravureCandidate(page: Page, sizeKey = "tube-50x90"
   await expect(modal).toBeVisible();
   await modal.locator(".recommendation-card").filter({ hasText: "Y / 国内調達" }).first().click();
 
-  // The redacted confirmation page is intentionally bypassed: choosing a
-  // candidate from the modal hands the authoritative projection to /quote.
-  await expect(page).toHaveURL(/\/quote$/, { timeout: 30000 });
-  await expect(page.getByTestId("redacted-snapshot")).toHaveCount(0);
-  await expect(page.getByTestId("issue-required-fields")).toContainText("連携済み");
+  // Candidate selection stays in the simulator so the calculated plan can be
+  // reviewed before the user explicitly advances to quotation issuance.
+  await expect(page).toHaveURL(/\/(\?|$)/);
+  await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "redacted_calculated");
+  await expect(page.getByTestId("redacted-snapshot")).toBeVisible();
+  await expect(page.getByTestId("redacted-candidate-Y")).toContainText("選択中");
+  await expectNoFullResultLeak(page);
 
-  const orderLengthM = numericText(await page.getByTestId("film-order-length").innerText());
-  const filmRow = page.getByRole("row").filter({ hasText: "フィルム費用" });
-  const filmTotal = numericText(await filmRow.locator("td").nth(3).innerText());
+  const selectedCandidate = page.getByTestId("redacted-candidate-Y");
+  const orderLengthM = numericText(await selectedCandidate.locator("dd").nth(1).innerText());
+  const filmTotal = numericText(await selectedCandidate.locator("dd").nth(2).innerText());
   expect(Number(orderLengthM)).toBeGreaterThan(0);
   expect(Number(filmTotal)).toBeGreaterThan(0);
+
+  await page.getByTestId("continue-redacted-quote").click();
+  await expect(page).toHaveURL(/\/quote$/, { timeout: 30000 });
+  await expect(page.getByTestId("issue-required-fields")).toContainText("連携済み");
   return { orderLengthM, filmTotal };
 }
 
@@ -40,7 +46,6 @@ async function expectNoFullResultLeak(page: Page): Promise<void> {
 
 test("fresh selected redacted candidate carries film planning and cost into the quotation", async ({ page }) => {
   const { orderLengthM } = await selectRedactedGravureCandidate(page);
-  await expectNoFullResultLeak(page);
 
   await expect(page.getByTestId("film-meter-price")).toContainText(/￥[0-9,.]+\s*\/m/);
   await expect(page.getByTestId("film-pouch-price")).toContainText(/￥[0-9,.]+\s*\/枚/);
@@ -50,9 +55,8 @@ test("fresh selected redacted candidate carries film planning and cost into the 
   await expect(page.getByTestId("issue-required-fields")).toContainText("入力不足");
 });
 
-test("selected redacted plan hands the authoritative projection to the quotation", async ({ page }) => {
+test("selected redacted plan explicitly hands the projection to the quotation", async ({ page }) => {
   await selectRedactedGravureCandidate(page, "round-60x120");
-  await expectNoFullResultLeak(page);
 
   const draft = JSON.parse(await page.evaluate(() => sessionStorage.getItem("pouch-quotation-draft-v1") ?? "{}")) as {
     printingMethod?: string;
