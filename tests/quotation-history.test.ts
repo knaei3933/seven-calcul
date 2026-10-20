@@ -326,6 +326,25 @@ describe("quotation history analysis", () => {
     expect(analysis.copperAmount.toNumber()).toBe(11000);
   });
 
+  it("uses the stored copper cost total for the ten-percent quote reconstruction", () => {
+    const analysis = analyzeQuotation({
+      ...baseRecord,
+      payload: {
+        ...baseRecord.payload,
+        printingMethod: "gravure",
+        copperPlateCostPerPiece: "0.3",
+        copperPlateCostYen: "128000",
+        copperColorCount: "4",
+      },
+    });
+
+    expect(analysis.copperCostUnit.eq("12.8")).toBe(true);
+    expect(analysis.targetCopperColorUnit.eq("35200")).toBe(true);
+    expect(analysis.targetCopperUnit.eq("14.08")).toBe(true);
+    expect(analysis.copperColorUnit.eq("35200")).toBe(true);
+    expect(analysis.copperAmount.eq("140800")).toBe(true);
+  });
+
   it("reconstructs custom mold quantity and unit from the mold-set basis", () => {
     const analysis = analyzeQuotation({
       ...baseRecord,

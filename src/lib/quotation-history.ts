@@ -72,7 +72,14 @@ export function analyzeQuotation(record: QuotationRecord) {
   const processingCostUnit = hasSeparatedBulkLine ? fillingCostUnit : snapshotProcessingCostUnit;
   const bulkCostUnit = separatedBulkCostUnit ?? snapshotBulkCostUnit;
   const filmCostUnit = storedNumber(payload.filmCostPerPiece ?? record.filmCostPerPiece);
-  const copperCostUnit = storedNumber(payload.copperPlateCostPerPiece);
+  const storedCopperCostTotal = storedNumber(payload.copperPlateCostYen);
+  const storedCopperCostUnit = storedNumber(payload.copperPlateCostPerPiece);
+  const copperCostUnit = storedCopperCostTotal.gt(0) && quantity.gt(0)
+    ? storedCopperCostTotal.div(quantity)
+    : storedCopperCostUnit;
+  const copperCostTotal = storedCopperCostTotal.gt(0)
+    ? storedCopperCostTotal
+    : copperCostUnit.times(quantity);
   const customLotCost = storedNumber(payload.customLotCost);
   const customQuantity = positiveNumber(payload.customQuantity) ?? D(1);
   const customCostUnit = customLotCost.div(quantity);
@@ -90,7 +97,7 @@ export function analyzeQuotation(record: QuotationRecord) {
   const pricingFillingCostUnit = editedNumber(payload.pricingFillingCostPerPiece);
   const targetFillingUnit = (pricingFillingCostUnit ?? fillingCostUnit).div(marginDivider);
   const targetFilmUnit = filmCostUnit.div(marginDivider);
-  const targetCopperTotal = copperCostUnit.times(quantity).times(COPPER_SELLING_MARKUP);
+  const targetCopperTotal = copperCostTotal.times(COPPER_SELLING_MARKUP);
   const targetCopperColorUnit = copperColorCount && copperColorCount.gt(0)
     ? Decimal.min(D("38000"), targetCopperTotal.div(copperColorCount).toDecimalPlaces(0, Decimal.ROUND_CEIL))
     : D(0);
@@ -205,6 +212,7 @@ export function analyzeQuotation(record: QuotationRecord) {
     targetFillingUnit,
     targetFilmUnit,
     targetCopperUnit,
+    targetCopperColorUnit,
     targetCustomUnit,
     targetCustomSalePerPiece,
     fillingUnit,

@@ -15,7 +15,7 @@ import {
   QUOTATION_RESTORE_KEY,
   SIMULATOR_STALE_STATUS_KEY,
 } from "@/lib/quotation-shared";
-import { BULK_SELLING_MARKUP, calculateCopperQuotation, clampGravureFilmMeterUnit, COPPER_QUOTE_UNIT_MAX_YEN, COPPER_SELLING_MARKUP } from "@/lib/quotation-pricing";
+import { BULK_SELLING_MARKUP, calculateCopperQuotation, clampGravureFilmMeterUnit, COPPER_QUOTE_UNIT_MAX_YEN, COPPER_SELLING_MARKUP, COPPER_TARGET_MARGIN_RATE } from "@/lib/quotation-pricing";
 import { fileNameFromContentDisposition } from "@/lib/content-disposition";
 import type { CustomerMaster } from "@/lib/quotation-shared";
 import type { FilmQuotationData } from "@/lib/film-quotation";
@@ -799,7 +799,11 @@ export default function PrintableQuotationPage({
         }
         : purchaseOrder;
       const customQuantity = D(form.customQuantity || "1");
-      const costUnit = D(form.fillingCostPerPiece).plus(D(form.bulkCostPerPiece || "0")).plus(form.filmCostPerPiece).plus(form.copperPlateCostPerPiece).plus(D(form.customLotCost).div(customQuantity));
+      const storedCopperCostTotal = parseDecimal(form.copperPlateCostYen);
+      const copperCostUnitAudit = storedCopperCostTotal && totals.quantity.gt(0)
+        ? storedCopperCostTotal.div(totals.quantity)
+        : D(form.copperPlateCostPerPiece);
+      const costUnit = D(form.fillingCostPerPiece).plus(D(form.bulkCostPerPiece || "0")).plus(form.filmCostPerPiece).plus(copperCostUnitAudit).plus(D(form.customLotCost).div(customQuantity));
       const sellingUnit = totals.quantity.gt(0)
         ? D(shownTotals.subtotal).div(totals.quantity)
         : D(shownTotals.pricePerPiece);
@@ -825,7 +829,7 @@ export default function PrintableQuotationPage({
         markupRate: markupRate.toString(),
         targetMarginRate: targetMargin.toString(),
         targetMarginPercent: targetMargin.times(100).toString(),
-        copperTargetMarginRate: COPPER_SELLING_MARKUP.toString(),
+        copperTargetMarginRate: COPPER_TARGET_MARGIN_RATE.toString(),
         totalRevenue: sellingUnit.times(totals.quantity).toString(),
         totalProfit: profitUnit.times(totals.quantity).toString(),
         recordedAt: new Date().toISOString(),

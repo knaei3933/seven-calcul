@@ -8,7 +8,8 @@ const FILM_METER_PRICE_MAX = D(480);
 // 帯によって生じる差額は充填・加工単価で補う。
 export const GRAVURE_FILM_METER_PRICE_MIN = D(90);
 export const GRAVURE_FILM_METER_PRICE_MAX = D(220);
-export const COPPER_SELLING_MARKUP = D("1.10");
+export const COPPER_TARGET_MARGIN_RATE = D("0.10");
+export const COPPER_SELLING_MARKUP = D(1).plus(COPPER_TARGET_MARGIN_RATE);
 export const COPPER_QUOTE_UNIT_MAX_YEN = D("38000");
 export const BULK_SELLING_MARKUP = D("1.4");
 
