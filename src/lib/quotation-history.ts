@@ -1,6 +1,6 @@
 import { D, Decimal, parseDecimal, roundUp1 } from "./decimal";
 import { DEFAULT_FILM_COMPOSITION } from "./quotation-shared";
-import { COPPER_TARGET_MARGIN } from "./quotation-pricing";
+import { COPPER_SELLING_MARKUP } from "./quotation-pricing";
 import type { QuotationRecord } from "./quotation-shared";
 
 const storedNumber = (value: unknown): Decimal => {
@@ -84,13 +84,19 @@ export function analyzeQuotation(record: QuotationRecord) {
 
   const targetMargin = positiveNumber(payload.targetMargin ?? record.targetMargin) ?? D(0);
   const marginDivider = D(1).minus(targetMargin.lt(1) ? targetMargin : D(0));
-  const copperMarginDivider = D(1).minus(COPPER_TARGET_MARGIN);
+  const copperColorCount = positiveNumber(payload.copperColorCount);
   // 신규 견적은「1연 기준 원가×연결수×(1+가산율)」을 가격 기준으로 저장한다.
   // pricingFillingCostPerPiece가 있으면 그것을 우선 사용해 이력 분석이 견적 페이지와 일치하게 한다.
   const pricingFillingCostUnit = editedNumber(payload.pricingFillingCostPerPiece);
   const targetFillingUnit = (pricingFillingCostUnit ?? fillingCostUnit).div(marginDivider);
   const targetFilmUnit = filmCostUnit.div(marginDivider);
-  const targetCopperUnit = copperCostUnit.div(copperMarginDivider);
+  const targetCopperTotal = copperCostUnit.times(quantity).times(COPPER_SELLING_MARKUP);
+  const targetCopperColorUnit = copperColorCount && copperColorCount.gt(0)
+    ? Decimal.min(D("38000"), targetCopperTotal.div(copperColorCount).toDecimalPlaces(0, Decimal.ROUND_CEIL))
+    : D(0);
+  const targetCopperUnit = quantity.gt(0)
+    ? targetCopperColorUnit.times(copperColorCount ?? D(0)).div(quantity)
+    : D(0);
   const targetCustomSaleTotal = Decimal.max(
     customLotCost.div(customQuantity).div(marginDivider).toDecimalPlaces(0, Decimal.ROUND_CEIL).div(1000).ceil().times(1000).times(customQuantity),
     D(0),
@@ -122,11 +128,10 @@ export function analyzeQuotation(record: QuotationRecord) {
   const bulkAmount = editedNumber(payload.bulkAmountDisplay) ?? bulkUnit.times(quantity);
   const filmUnit = editedNumber(payload.filmPouchUnitDisplay)
     ?? (legacyFilmAmount && quantity.gt(0) ? legacyFilmAmount.div(quantity) : targetFilmUnit);
-  const copperColorCount = positiveNumber(payload.copperColorCount);
   const displayedCopperAmount = editedNumber(payload.copperAmountDisplay);
   const displayedCopperUnit = editedNumber(payload.copperUnitDisplay);
   // copperUnitDisplay は新版では色単価。旧データはパウチ単価として扱う。
-  const automaticCopperAmount = copperCostUnit.div(copperMarginDivider).times(quantity);
+  const automaticCopperAmount = targetCopperColorUnit.times(copperColorCount ?? D(0));
   const fallbackCopperColorUnit = copperColorCount && copperColorCount.gt(0)
     ? automaticCopperAmount.div(copperColorCount).toDecimalPlaces(0, Decimal.ROUND_CEIL)
     : null;

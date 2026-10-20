@@ -8,7 +8,8 @@ const FILM_METER_PRICE_MAX = D(480);
 // 帯によって生じる差額は充填・加工単価で補う。
 export const GRAVURE_FILM_METER_PRICE_MIN = D(90);
 export const GRAVURE_FILM_METER_PRICE_MAX = D(220);
-export const COPPER_TARGET_MARGIN = D("0.10");
+export const COPPER_SELLING_MARKUP = D("1.10");
+export const COPPER_QUOTE_UNIT_MAX_YEN = D("38000");
 export const BULK_SELLING_MARKUP = D("1.4");
 
 function recommendedFilmMeterUnit(orderLength: Decimal) {
@@ -55,6 +56,7 @@ export type AutomaticQuotationTotals = {
   fillingAmount: Decimal;
   bulkAmount: Decimal;
   copperAmount: Decimal;
+  copperColorUnit: Decimal;
   subtotal: Decimal;
   tax: Decimal;
   grandTotal: Decimal;
@@ -81,6 +83,33 @@ export type AutomaticQuotationTotals = {
     grandTotal: string;
   };
 };
+
+export function calculateCopperQuotation(input: {
+  copperPlateCostYen: string | number | Decimal;
+  copperColorCount: string | number | Decimal;
+  quantity: string | number | Decimal;
+}): { copperSellingUnit: Decimal; copperColorUnit: Decimal; copperAmount: Decimal; capped: boolean } | null {
+  const quantity = D(input.quantity);
+  const copperColorCount = D(input.copperColorCount);
+  const copperPlateCostYen = D(input.copperPlateCostYen);
+  if (quantity.lte(0) || copperColorCount.lt(0) || copperPlateCostYen.lt(0)) return null;
+  if (copperColorCount.eq(0) || copperPlateCostYen.eq(0)) {
+    return { copperSellingUnit: D(0), copperColorUnit: D(0), copperAmount: D(0), capped: false };
+  }
+  const targetColorUnit = copperPlateCostYen
+    .times(COPPER_SELLING_MARKUP)
+    .div(copperColorCount)
+    .toDecimalPlaces(0, Decimal.ROUND_CEIL);
+  const capped = targetColorUnit.gt(COPPER_QUOTE_UNIT_MAX_YEN);
+  const copperColorUnit = Decimal.min(COPPER_QUOTE_UNIT_MAX_YEN, targetColorUnit);
+  const copperAmount = copperColorUnit.times(copperColorCount);
+  return {
+    copperSellingUnit: copperAmount.div(quantity),
+    copperColorUnit,
+    copperAmount,
+    capped,
+  };
+}
 
 export function calculateAutomaticQuotation(
   result: CostResult,
@@ -124,13 +153,20 @@ export function calculateAutomaticQuotation(
   // バルクは目標利益率による残額配分から独立させ、原価の40%乗（×1.4）で別ライン計上する。
   const bulkSellingTotal = bulkCostPerPiece.times(quantity).times(BULK_SELLING_MARKUP);
   const bulkSellingUnit = bulkUsage.gt(0) ? bulkSellingTotal.div(bulkUsage) : D(0);
-  const copperSellingUnit = copperCostPerPiece.div(D(1).minus(COPPER_TARGET_MARGIN));
   const filmSellingUnit = filmCostPerPiece.div(D(1).minus(margin));
   const customSaleBase = customLotCost.div(customQuantity).div(D(1).minus(margin));
   const customUnit = ceilTo(customSaleBase, 1000);
   const customSaleTotal = customUnit.times(customQuantity);
   const customSalePerPiece = customSaleTotal.div(quantity);
 
+  const copperQuote = calculateCopperQuotation({
+    copperPlateCostYen: result.copperPlateCost,
+    copperColorCount,
+    quantity,
+  });
+  const copperSellingUnit = copperQuote?.copperSellingUnit ?? D(0);
+  const copperColorUnit = copperQuote?.copperColorUnit ?? D(0);
+  const copperAmount = copperQuote?.copperAmount ?? D(0);
   const allocationPricePerPiece = fillingSellingUnit
     .plus(copperSellingUnit)
     .plus(filmSellingUnit)
@@ -144,10 +180,6 @@ export function calculateAutomaticQuotation(
   // 見積単価（充填・加工／フィルムm単価）は小数第1位で切り上げる。
   const roundUnit = (value: Decimal) => value.toDecimalPlaces(1, Decimal.ROUND_UP);
   const targetTotal = allocationSubtotal;
-  const copperColorUnit = copperColorCount.gt(0)
-    ? copperSellingUnit.times(quantity).div(copperColorCount).toDecimalPlaces(0, Decimal.ROUND_CEIL)
-    : D(0);
-  const copperAmount = copperColorUnit.times(copperColorCount);
   const isGravure = Boolean(result.gravure);
 
   let fillingUnit: Decimal;
@@ -211,6 +243,7 @@ export function calculateAutomaticQuotation(
     bulkUsage,
     bulkSellingTotal,
     copperSellingUnit,
+    copperColorUnit,
     filmSellingUnit,
     customUnit,
     pricePerPiece: displayedPricePerPiece,

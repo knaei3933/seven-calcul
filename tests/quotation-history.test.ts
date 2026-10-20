@@ -320,10 +320,10 @@ describe("quotation history analysis", () => {
       },
     });
 
-    expect(analysis.targetCopperUnit.toFixed(10)).toBe("1.1111111111");
-    expect(analysis.copperColorUnit.toNumber()).toBe(2778);
+    expect(analysis.targetCopperUnit.toFixed(10)).toBe("1.1000000000");
+    expect(analysis.copperColorUnit.toNumber()).toBe(2750);
     expect(analysis.copperColorCount.toNumber()).toBe(4);
-    expect(analysis.copperAmount.toNumber()).toBe(11112);
+    expect(analysis.copperAmount.toNumber()).toBe(11000);
   });
 
   it("reconstructs custom mold quantity and unit from the mold-set basis", () => {

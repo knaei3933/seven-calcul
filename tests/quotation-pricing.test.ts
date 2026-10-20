@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { calculatePouchCost } from "@/lib/calculation";
 import { CONNECTED_FILLING_SURCHARGE, defaultParameters } from "@/lib/constants";
 import { defaultGravureRollParameters } from "@/lib/gravure-roll";
-import { BULK_SELLING_MARKUP, calculateAutomaticQuotation, clampGravureFilmMeterUnit, COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
+import { BULK_SELLING_MARKUP, calculateAutomaticQuotation, calculateCopperQuotation, clampGravureFilmMeterUnit, COPPER_SELLING_MARKUP } from "@/lib/quotation-pricing";
 import { D, Decimal } from "@/lib/decimal";
 import type { PouchSpec } from "@/lib/types";
 
@@ -44,9 +44,7 @@ describe("automatic quotation pricing", () => {
     expect(quote!.display.filmAmount).toBe("374000");
     expect(quote!.display.filmPouchUnit).toBe("7.48");
     expect(quote!.copperCostPerPiece.eq(D(selected.copperPlateCostPerPiece))).toBe(true);
-    expect(quote!.copperSellingUnit.eq(
-      D(selected.copperPlateCostPerPiece).div(D(1).minus(COPPER_TARGET_MARGIN)),
-    )).toBe(true);
+    expect(quote!.copperAmount.eq(D(selected.copperPlateCost).times(COPPER_SELLING_MARKUP))).toBe(true);
   });
 
   it("prices connected filling at +20% (2連) and +80% (3連/4連) over the 1連 basis", () => {

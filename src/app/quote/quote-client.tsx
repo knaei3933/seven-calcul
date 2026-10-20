@@ -15,7 +15,7 @@ import {
   QUOTATION_RESTORE_KEY,
   SIMULATOR_STALE_STATUS_KEY,
 } from "@/lib/quotation-shared";
-import { BULK_SELLING_MARKUP, clampGravureFilmMeterUnit, COPPER_TARGET_MARGIN } from "@/lib/quotation-pricing";
+import { BULK_SELLING_MARKUP, calculateCopperQuotation, clampGravureFilmMeterUnit, COPPER_QUOTE_UNIT_MAX_YEN, COPPER_SELLING_MARKUP } from "@/lib/quotation-pricing";
 import { fileNameFromContentDisposition } from "@/lib/content-disposition";
 import type { CustomerMaster } from "@/lib/quotation-shared";
 import type { FilmQuotationData } from "@/lib/film-quotation";
@@ -65,6 +65,7 @@ type QuoteForm = {
   copperUnitDisplay: string;
   copperAmountDisplay: string;
   copperPlateCostPerPiece: string;
+  copperPlateCostYen: string;
   sascheCandidateId: string;
   sascheCandidatesJson: string;
   sascheOverToleranceReason: string;
@@ -270,6 +271,7 @@ const defaultQuote: QuoteForm = {
   copperUnitDisplay: "",
   copperAmountDisplay: "",
   copperPlateCostPerPiece: "0",
+  copperPlateCostYen: "0",
   sascheCandidateId: "",
   sascheCandidatesJson: "[]",
   sascheOverToleranceReason: "",
@@ -699,6 +701,7 @@ export default function PrintableQuotationPage({
           pricingFillingCostPerPiece: draft.pricingFillingCostPerPiece ?? "",
           printingMethod: draft.printingMethod ?? "digital",
           copperPlateCostPerPiece: draft.copperPlateCostPerPiece ?? "0",
+          copperPlateCostYen: draft.copperPlateCostYen ?? "0",
           sascheCandidateId: draft.sascheCandidate?.id ?? "",
           sascheCandidatesJson: JSON.stringify(draft.sascheCandidates ?? []),
           sascheOverToleranceReason: draft.sascheOverToleranceReason ?? "",
@@ -822,7 +825,7 @@ export default function PrintableQuotationPage({
         markupRate: markupRate.toString(),
         targetMarginRate: targetMargin.toString(),
         targetMarginPercent: targetMargin.times(100).toString(),
-        copperTargetMarginRate: COPPER_TARGET_MARGIN.toString(),
+        copperTargetMarginRate: COPPER_SELLING_MARKUP.toString(),
         totalRevenue: sellingUnit.times(totals.quantity).toString(),
         totalProfit: profitUnit.times(totals.quantity).toString(),
         recordedAt: new Date().toISOString(),
@@ -1018,7 +1021,13 @@ export default function PrintableQuotationPage({
     const bulkUsage = parseDecimal(calculationChecklistSnapshot?.bulkUsageMl ?? "0") ?? D(0);
     const bulkSellingTotal = parsedBulkCost.times(quantity).times(BULK_SELLING_MARKUP);
     const bulkSellingUnit = bulkUsage.gt(0) ? bulkSellingTotal.div(bulkUsage) : D(0);
-    const copperSellingUnit = parsedCopperCost.div(D(1).minus(COPPER_TARGET_MARGIN));
+    const copperColorCountRaw = parseDecimal(form.copperColorCount) ?? D(1);
+    const copperQuote = calculateCopperQuotation({
+      copperPlateCostYen: parseDecimal(form.copperPlateCostYen) ?? parsedCopperCost.times(quantity),
+      copperColorCount: copperColorCountRaw,
+      quantity,
+    });
+    const copperSellingUnit = copperQuote?.copperSellingUnit ?? D(0);
     const filmSellingUnit = parsedFilmCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
     const customLotSaleBase = parsedCustomLotCost
       .div(parsedCustomQuantity)
@@ -1050,7 +1059,8 @@ export default function PrintableQuotationPage({
       bulkUsage,
       bulkSellingTotal,
       bulkSellingUnit,
-      copperAmount: copperSellingUnit.times(quantity),
+      copperAmount: copperQuote?.copperAmount ?? D(0),
+      copperColorUnit: copperQuote?.copperColorUnit ?? D(0),
       subtotal,
       tax,
       taxRate,
@@ -1072,10 +1082,8 @@ export default function PrintableQuotationPage({
       : purchaseOrder?.colorCount && purchaseOrder.colorCount > 0
         ? D(purchaseOrder.colorCount)
         : D(1);
-    const copperColorUnit = parseDecimal(form.copperUnitDisplay)
-      ?? (copperColorCount.gt(0)
-        ? totals.copperSellingUnit.times(totals.quantity).div(copperColorCount).toDecimalPlaces(0, Decimal.ROUND_CEIL)
-        : D(0));
+    const automaticCopperColorUnit = totals.copperColorUnit ?? D(0);
+    const copperColorUnit = parseDecimal(form.copperUnitDisplay) ?? automaticCopperColorUnit;
     const copperAmount = parseDecimal(form.copperAmountDisplay) ?? copperColorUnit.times(copperColorCount);
     const copperUnit = totals.quantity.gt(0) ? copperAmount.div(totals.quantity) : D(0);
     const customQuantity = parseDecimal(form.customQuantity) ?? D(1);
@@ -1223,6 +1231,7 @@ export default function PrintableQuotationPage({
       filmMeterPrice: candidate.filmUnitPriceYen,
       filmCostPerPiece: D(candidate.filmTotalYen).div(quantity).toString(),
       copperPlateCostPerPiece: D(candidate.plateTotalYen).div(quantity).toString(),
+      copperPlateCostYen: candidate.plateTotalYen,
       copperColorCount: String(candidate.colorCount),
       fillingCostPerPiece,
       fillingUnitDisplay: "",
@@ -1376,7 +1385,8 @@ export default function PrintableQuotationPage({
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.copperUnit ?? "0", undefined, 2));
       return;
     }
-    const copperAmount = unit.times(quantity);
+    const cappedUnit = Decimal.min(unit, COPPER_QUOTE_UNIT_MAX_YEN);
+    const copperAmount = cappedUnit.times(quantity);
     applyLineTotals(D(shownTotals.fillingUnit), D(shownTotals.filmAmount), copperAmount, D(shownTotals.customAmount), D(shownTotals.bulkAmount));
   };
 
