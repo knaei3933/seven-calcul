@@ -19,7 +19,6 @@ import {
   type SnapshotPublicMetadata,
 } from "@/lib/gravure-price-store";
 import { GravureValidationError } from "@/lib/gravure-price-store";
-import { isKaneiTradeUser } from "@/lib/film-order-access";
 
 export const runtime = "nodejs";
 
@@ -118,18 +117,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "pricing_snapshot_invalid" }, { status: 500 });
     }
 
-    const kanaiAdmin = user.role === "admin" && isKaneiTradeUser(user.email);
-    if (kanaiAdmin) {
-      return NextResponse.json({
-        result,
-        originalResult,
-        candidates: result.recommendationCandidates ?? [],
-        calculationRequest: snapshot.fullAugmentedCalculationRequest,
-        pricingSnapshot: metadata,
-        returnedProjection,
-      });
-    }
-    return NextResponse.json(returnedProjection);
+    // Product decision: every signed-in simulator user follows the same full
+    // result flow. The snapshot and returned projection remain authoritative
+    // for issuance, but candidate selection no longer branches by account.
+    return NextResponse.json({
+      result,
+      originalResult,
+      candidates: result.recommendationCandidates ?? [],
+      calculationRequest: snapshot.fullAugmentedCalculationRequest,
+      pricingSnapshot: metadata,
+      returnedProjection,
+    });
   } catch (error) {
     if (error instanceof GravureDurableDatabaseRequiredError) {
       return NextResponse.json({ error: "gravure_master_unavailable" }, { status: 503 });

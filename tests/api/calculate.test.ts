@@ -154,7 +154,7 @@ describe("calculate API recommendations", () => {
 	    expect(Number(payload.result.film.filmTotal)).toBe(Number(list[0].filmTotalYen));
 	  });
 
-  it("switches redacted K candidates from the preserved input basis", async () => {
+  it("switches K candidates from the preserved input basis for every account", async () => {
     const input = {
       spec: {
         sizeKey: "tube-50x90",
@@ -195,9 +195,11 @@ describe("calculate API recommendations", () => {
     })));
 
     expect(switched.status).toBe(200);
-    const projection = await switched.json();
-    expect(projection.selectedCandidateId).toBe(k1!.id);
-    expect(projection.quantity).toBe(k1!.adjustedQuantity);
+    const payload = await switched.json();
+    expect(payload.result.selectedCandidateId).toBe(k1!.id);
+    expect(payload.result.quantity).toBe(k1!.adjustedQuantity);
+    expect(payload.returnedProjection.selectedCandidateId).toBe(k1!.id);
+    expect(payload.returnedProjection.quantity).toBe(k1!.adjustedQuantity);
   });
 
   it("rejects an unknown selected candidate", async () => {

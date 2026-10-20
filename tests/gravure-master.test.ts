@@ -390,7 +390,14 @@ describe("gravure master foundation", () => {
       password: "seven-user-password",
       role: "user",
     });
+    const sevenAdmin = await createUser({
+      email: "seven-admin@727.co.jp",
+      name: "Seven Admin",
+      password: "seven-admin-password",
+      role: "admin",
+    });
     const adminSession = await createSession(admin.id);
+    const sevenAdminSession = await createSession(sevenAdmin.id);
     const userSession = await createSession(user.id);
     const { POST: calculatePost } = await import("@/app/api/calculate/route");
     const body = JSON.stringify(gravureRequest);
@@ -407,16 +414,26 @@ describe("gravure master foundation", () => {
     expect(adminPayload.returnedProjection.publicProjectionHash).toBeTruthy();
     expect(adminPayload.returnedProjection.pricingSnapshot.id).toBe(adminPayload.pricingSnapshot.id);
 
+    const sevenAdminResponse = await calculatePost(new Request("http://localhost/api/calculate", {
+      method: "POST", body, headers: { cookie: `pouch_session=${sevenAdminSession.token}` },
+    }));
+    expect(sevenAdminResponse.status).toBe(200);
+    const sevenAdminPayload = await sevenAdminResponse.json();
+    expect(sevenAdminPayload.result.audit.calculationVersion).toBe("2026-10.2-gravure-master");
+    expect(sevenAdminPayload.pricingSnapshot.id).toBeTruthy();
+    expect(sevenAdminPayload.calculationRequest.gravureYRows).toHaveLength(12);
+    expect(sevenAdminPayload.returnedProjection.publicProjectionHash).toBeTruthy();
+
     const userResponse = await calculatePost(new Request("http://localhost/api/calculate", {
       method: "POST", body, headers: { cookie: `pouch_session=${userSession.token}` },
     }));
     expect(userResponse.status).toBe(200);
     const userPayload = await userResponse.json();
-    const serialized = JSON.stringify(userPayload);
-    for (const forbidden of ["supplierUnitPriceYenPerM", "sellerMarkup", "plateBaseYenPerColor", "petPriceKrwPerKg", "sourceRows"]) {
-      expect(serialized).not.toContain(forbidden);
-    }
-    expect(userPayload.publicProjectionHash).toBeTruthy();
+    expect(userPayload.result.audit.calculationVersion).toBe("2026-10.2-gravure-master");
+    expect(userPayload.pricingSnapshot.id).toBeTruthy();
+    expect(userPayload.calculationRequest.gravureYRows).toHaveLength(12);
+    expect(userPayload.calculationRequest.gravureParameters.petUnitPriceYenPerKg).toBeTruthy();
+    expect(userPayload.returnedProjection.publicProjectionHash).toBeTruthy();
 
     const snapshot = await getGravureSnapshot(adminPayload.pricingSnapshot.id)!;
     expect(snapshot).toBeTruthy();
@@ -429,13 +446,13 @@ describe("gravure master foundation", () => {
     expect(snapshot!.kDerived.petUnitPriceYenPerKg).toBe("1000");
 
     const { POST: quotationPost } = await import("@/app/api/quotations/route");
-    const projection = { ...userPayload };
-    const publicProjection: Record<string, unknown> = { ...projection };
+    const returnedProjection = { ...userPayload.returnedProjection };
+    const publicProjection: Record<string, unknown> = { ...returnedProjection };
     delete (publicProjection as Record<string, unknown>).publicProjectionHash;
     await (await import("@/lib/gravure-price-store")).verifyGravureSnapshotIssuance({
       snapshotId: userPayload.pricingSnapshot.id,
       snapshotSha256: userPayload.pricingSnapshot.sha256,
-      publicProjection: { ...publicProjection, publicProjectionHash: userPayload.publicProjectionHash },
+      publicProjection: { ...publicProjection, publicProjectionHash: userPayload.returnedProjection.publicProjectionHash },
     });
     const quotation = {
       quotationNumber: "G-SNAPSHOT-1",
@@ -461,7 +478,7 @@ describe("gravure master foundation", () => {
       paymentTerms: "",
       notes: "",
       calculationVersion: "2026-10.2-gravure-master",
-      resultHash: userPayload.resultHash,
+      resultHash: userPayload.result.audit.resultJsonSha256,
       payload: {
         customerPostalCode: "1234567",
         customerTelephone: "0000000000",
@@ -470,7 +487,7 @@ describe("gravure master foundation", () => {
         pricingSnapshot: {
           id: userPayload.pricingSnapshot.id,
           sha256: userPayload.pricingSnapshot.sha256,
-          publicProjection: { ...publicProjection, publicProjectionHash: userPayload.publicProjectionHash },
+          publicProjection: { ...publicProjection, publicProjectionHash: userPayload.returnedProjection.publicProjectionHash },
         },
       },
     };
@@ -481,9 +498,10 @@ describe("gravure master foundation", () => {
     await expect(disabled.json()).resolves.toEqual({ error: "gravure_snapshot_issuance_disabled" });
     process.env.GRAVURE_SNAPSHOT_ISSUANCE_ENABLED = previousFlag ?? "true";
     const issued = await quotationPost(quotationIssuanceRequest(quotation, userSession.token));
+    if (!issued.ok) console.error("user issuance failure", await issued.clone().json());
     expect(issued.status).toBe(201);
     const record = (await issued.json()).record;
-    expect(record.resultHash).toBe(userPayload.resultHash);
+    expect(record.resultHash).toBe(userPayload.result.audit.resultJsonSha256);
     expect(record.payload.pricingSnapshot.id).toBe(userPayload.pricingSnapshot.id);
     expect(record.payload.pricingSnapshot.publicProjection).toEqual(publicProjection);
     expect(record.payload).not.toHaveProperty("calculationRequest");

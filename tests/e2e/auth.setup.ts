@@ -7,17 +7,19 @@ const accounts = [
     email: "admin@pouch-e2e.test",
     name: "E2E Administrator",
     password: "admin-e2e-password",
+    role: "admin" as const,
     statePath: join(tmpdir(), "pouch-playwright-admin-state.json"),
   },
   {
     email: "kanai-admin@kanei-trade.co.jp",
     name: "Kanai E2E Administrator",
     password: "kanai-e2e-password",
+    role: "admin" as const,
     statePath: join(tmpdir(), "pouch-playwright-kanai-state.json"),
   },
 ] as const;
 
-test("signs in ordinary and Kanai administrators and saves isolated browser states", async ({ browser }) => {
+  test("signs in ordinary and privileged users and saves isolated browser states", async ({ browser }) => {
   for (const account of accounts) {
     const context = await (browser as Browser).newContext();
     const page = await context.newPage();
