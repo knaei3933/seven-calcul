@@ -1040,6 +1040,7 @@ export default function QuotationPage({
   const [kMasterApplied, setKMasterApplied] = useState(false);
   const [kMasterUnavailable, setKMasterUnavailable] = useState(false);
   const [shortagePlansOpen, setShortagePlansOpen] = useState(false);
+  const [redactedCompareOpen, setRedactedCompareOpen] = useState(false);
   const requestOrderRef = useRef(0);
   const [simulatorStateLoaded, setSimulatorStateLoaded] = useState(false);
   const [productionSpeedManual, setProductionSpeedManual] = useState(false);
@@ -1438,6 +1439,7 @@ export default function QuotationPage({
       if (returnedProjection && !hasFullReturnedResult) {
         if (requestOrder !== requestOrderRef.current) return;
         setRecommendationModalOpen(false);
+        setRedactedCompareOpen(false);
         setRedactedCalculation({
           projection: returnedProjection,
           originalRequest: basisCalculationInput,
@@ -1629,6 +1631,7 @@ export default function QuotationPage({
     const requestOrder = ++requestOrderRef.current;
     setSelecting(true);
     setSelectionError(null);
+    setRedactedCompareOpen(false);
     try {
       // Candidate IDs are minted from the customer's input basis. After the
       // first redacted candidate is selected, its adjusted quantity/SKU plan
@@ -2030,6 +2033,7 @@ export default function QuotationPage({
 
   if (redactedCalculation) {
     const projection = redactedCalculation.projection;
+    const compareCandidates = redactedCompareOpen || !redactedSelected;
     return (
       <main className="simulator-page">
         <div className="app-shell">
@@ -2049,25 +2053,52 @@ export default function QuotationPage({
             </p>
             {calculationError ? <p className="error" role="alert" data-testid="calculation-error">{calculationError.message}</p> : null}
             {selectionError ? <p className="error" role="alert" data-testid="candidate-selection-error">{selectionError.message}</p> : null}
-            <div className="recommendation-list">
-              {projection.candidates.map((candidate) => (
-                <article key={candidate.id} data-testid={`redacted-candidate-${candidate.id}`} className={candidate.id === projection.selectedCandidateId ? "recommendation-card selected" : "recommendation-card"}>
-                  <h3>{candidate.detailLabel ?? `${candidate.route} route`}</h3>
-                  <p>{candidate.materialText ?? ""} {candidate.colorText ?? ""}</p>
-                  <dl>
-                    <div><dt>数量</dt><dd>{formatNumber(candidate.adjustedQuantity, 0)}枚</dd></div>
-                    <div><dt>発注長</dt><dd>{formatNumber(candidate.orderLengthM, 0)}m</dd></div>
-                    <div><dt>フィルム総額</dt><dd>{formatCurrency(candidate.filmTotalYen, 0)}</dd></div>
-                    <div><dt>フィルム単価</dt><dd>{formatCurrency(candidate.filmCostPerPieceYen, 2)}</dd></div>
-                    {candidate.allInCostPerPieceYen ? <div><dt>総原価単価</dt><dd>{formatCurrency(candidate.allInCostPerPieceYen, 2)}</dd></div> : null}
-                  </dl>
-                  {candidate.id !== projection.selectedCandidateId ? (
-                    <button type="button" disabled={selecting || pending} onClick={() => void selectRedactedCandidate(candidate)}>このプランを選択</button>
-                  ) : <strong>選択中</strong>}
-                </article>
-              ))}
-            </div>
+            {redactedSelected ? (
+              <article className="recommendation-card selected" data-testid="redacted-selected-summary">
+                <h3>{redactedSelected.detailLabel ?? `${redactedSelected.route} route`}</h3>
+                <p>{redactedSelected.materialText ?? ""} {redactedSelected.colorText ?? ""}</p>
+                <dl>
+                  <div><dt>数量</dt><dd>{formatNumber(redactedSelected.adjustedQuantity, 0)}枚</dd></div>
+                  <div><dt>発注長</dt><dd>{formatNumber(redactedSelected.orderLengthM, 0)}m</dd></div>
+                  <div><dt>フィルム総額</dt><dd>{formatCurrency(redactedSelected.filmTotalYen, 0)}</dd></div>
+                  <div><dt>フィルム単価</dt><dd>{formatCurrency(redactedSelected.filmCostPerPieceYen, 2)}</dd></div>
+                  {redactedSelected.allInCostPerPieceYen ? <div><dt>総原価単価</dt><dd>{formatCurrency(redactedSelected.allInCostPerPieceYen, 2)}</dd></div> : null}
+                </dl>
+                <strong>選択中</strong>
+              </article>
+            ) : null}
+            {compareCandidates ? (
+              <div className="recommendation-list">
+                {projection.candidates.map((candidate) => (
+                  <article key={candidate.id} data-testid={`redacted-candidate-${candidate.id}`} className={candidate.id === projection.selectedCandidateId ? "recommendation-card selected" : "recommendation-card"}>
+                    <h3>{candidate.detailLabel ?? `${candidate.route} route`}</h3>
+                    <p>{candidate.materialText ?? ""} {candidate.colorText ?? ""}</p>
+                    <dl>
+                      <div><dt>数量</dt><dd>{formatNumber(candidate.adjustedQuantity, 0)}枚</dd></div>
+                      <div><dt>発注長</dt><dd>{formatNumber(candidate.orderLengthM, 0)}m</dd></div>
+                      <div><dt>フィルム総額</dt><dd>{formatCurrency(candidate.filmTotalYen, 0)}</dd></div>
+                      <div><dt>フィルム単価</dt><dd>{formatCurrency(candidate.filmCostPerPieceYen, 2)}</dd></div>
+                      {candidate.allInCostPerPieceYen ? <div><dt>総原価単価</dt><dd>{formatCurrency(candidate.allInCostPerPieceYen, 2)}</dd></div> : null}
+                    </dl>
+                    {candidate.id !== projection.selectedCandidateId ? (
+                      <button type="button" disabled={selecting || pending} onClick={() => void selectRedactedCandidate(candidate)}>このプランを選択</button>
+                    ) : <strong>選択中</strong>}
+                  </article>
+                ))}
+              </div>
+            ) : null}
             <div className="result-actions">
+              {redactedSelected ? (
+                <button
+                  className="button secondary"
+                  type="button"
+                  data-testid="redacted-compare-toggle"
+                  disabled={selecting || pending}
+                  onClick={() => setRedactedCompareOpen((open) => !open)}
+                >
+                  {redactedCompareOpen ? "候補を閉じる" : "候補を比較"}
+                </button>
+              ) : null}
               <form onSubmit={submit}><button className="btn-primary" type="submit" data-testid="recalculate-redacted" disabled={pending}>{pending ? "計算中..." : "再計算"}</button></form>
               <button className="btn-primary" type="button" data-testid="continue-redacted-quote" disabled={!redactedSelected || pending || selecting} onClick={continueRedactedQuote}>見積書へ進む</button>
             </div>
