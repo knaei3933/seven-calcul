@@ -15,12 +15,14 @@ const { GET: getQuotation } = await import("@/app/api/quotations/[id]/route");
 const { PATCH: patchQuotation } = await import("@/app/api/quotations/[id]/route");
 const { DELETE: deleteQuotation } = await import("@/app/api/quotations/[id]/route");
 const { createUser } = await import("@/lib/auth-store");
+const { POST: postQuotationApproval } = await import("@/app/api/quotations/[id]/approvals/route");
 const {
   approveQuotationGate,
   saveQuotation,
   updateQuotationStatus,
 } = await import("@/lib/quotation-store");
 const { syncFilmOrdersFromQuotations } = await import("@/lib/film-orders");
+const { filmOrderExistsForQuotation } = await import("@/lib/film-orders");
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
@@ -91,6 +93,13 @@ describe("quotation ownership permissions", () => {
     const ownerToken = await loginToken(owner.email, "owner-permission-password");
     const readerToken = await loginToken(reader.email, "reader-permission-password");
     const adminToken = await loginToken("admin@permissions.test", "admin-permissions-password");
+    const kaneiAdmin = await createUser({
+      email: "kanei-approver@kanei-trade.co.jp",
+      name: "Kanei Approver",
+      password: "kanei-approver-password",
+      role: "admin",
+    });
+    const kaneiAdminToken = await loginToken(kaneiAdmin.email, "kanei-approver-password");
     const record = await createRecord("S7-PERMISSION-001", owner.id);
     const context = { params: Promise.resolve({ id: String(record.id) }) };
 
@@ -121,8 +130,18 @@ describe("quotation ownership permissions", () => {
     // state to verify approved quotations remain deletion-protected.
     await approveQuotationGate(record.id, "internal", owner.id);
     await updateQuotationStatus(record.id, "sent", owner.id);
-    await approveQuotationGate(record.id, "customerApproval", owner.id);
-    await syncFilmOrdersFromQuotations(owner.email);
+    const approvalResponse = await postQuotationApproval(request(
+      "http://localhost/api/quotations/1/approvals",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ gate: "customerApproval" }),
+      },
+      kaneiAdminToken,
+    ), context);
+    expect(approvalResponse.status).toBe(200);
+    await expect(approvalResponse.json()).resolves.toMatchObject({ gate: "customerApproval", filmOrderSynced: true });
+    expect(await filmOrderExistsForQuotation(record.id)).toBe(true);
 
     const readerDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, readerToken), context);
     expect(readerDelete.status).toBe(403);

@@ -18,6 +18,7 @@ import {
   type UserSummary,
 } from "@/lib/quotation-shared";
 import type { AuthenticatedUser } from "@/lib/auth-store";
+import { isKaneiTradeUser } from "@/lib/film-order-access";
 
 const statusLabels: Record<QuotationStatus, string> = {
   draft: "下書き",
@@ -370,6 +371,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
             updatingEmail={updatingEmail}
             approvingGate={approvingGateId === selectedRecord.id}
             canApproveInternally={currentUser.email.trim().toLowerCase() === "kim@kanei-trade.co.jp"}
+            canRecordCustomerApproval={isKaneiTradeUser(currentUser.email)}
             sendingEmail={sendingEmail}
           />
           {emailMessage ? <p className="help" role="status" data-testid="email-message" style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 999, background: "white", padding: "8px 16px", borderRadius: 8, border: "1px solid #cbd5e1" }}>{emailMessage}</p> : null}
@@ -426,6 +428,7 @@ function QuotationDetailModal({
   updatingEmail,
   approvingGate,
   canApproveInternally,
+  canRecordCustomerApproval,
   sendingEmail,
 }: {
   record: QuotationRecord;
@@ -444,6 +447,7 @@ function QuotationDetailModal({
   updatingEmail: boolean;
   approvingGate: boolean;
   canApproveInternally: boolean;
+  canRecordCustomerApproval: boolean;
   sendingEmail: boolean;
 }) {
   const [storedPdf, setStoredPdf] = useState<{ url: string; blob: Blob; fileName: string } | null>(null);
@@ -798,6 +802,15 @@ function QuotationDetailModal({
               >
                 {sendingEmail ? "送信中..." : "メール送信（PDF添付）"}
               </button>
+            ) : null}
+            {record.status === "sent" && record.internalApproval && canRecordCustomerApproval ? (
+              <button
+                className="button small"
+                type="button"
+                disabled={approvingGate}
+                onClick={() => onApproveGate(record, "customerApproval")}
+                data-testid="history-customer-approval-record"
+              >{approvingGate ? "承認中..." : "顧客承認を記録して成約"}</button>
             ) : null}
             <button className="button secondary small" type="button" onClick={onClose}>閉じる</button>
           </div>

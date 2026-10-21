@@ -6,6 +6,7 @@ import {
   QuotationApprovalTransitionError,
   type QuotationApprovalGate,
 } from "@/lib/quotation-store";
+import { syncFilmOrdersFromQuotations } from "@/lib/film-orders";
 import {
   canRecordCustomerApproval,
   isInternalQuotationApprover,
@@ -46,7 +47,15 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     }
 
     const approved = await approveQuotationGate(quotationId, gate, user.id);
-    return NextResponse.json({ record: approved, gate });
+    let filmOrderSynced = true;
+    if (gate === "customerApproval" && approved.status === "approved") {
+      try {
+        await syncFilmOrdersFromQuotations(user.email);
+      } catch {
+        filmOrderSynced = false;
+      }
+    }
+    return NextResponse.json({ record: approved, gate, filmOrderSynced });
   } catch (error) {
     if (error instanceof QuotationApprovalTransitionError) {
       return NextResponse.json({ error: "invalid_approval_transition" }, { status: 409 });
