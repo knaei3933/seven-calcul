@@ -62,6 +62,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   const [editingEmailId, setEditingEmailId] = useState<number | null>(null);
   const [editingEmail, setEditingEmail] = useState("");
   const [updatingEmail, setUpdatingEmail] = useState(false);
+  const [historyActionError, setHistoryActionError] = useState("");
 
   const load = useCallback(async (search: string, statusFilter: string, creatorFilter: string) => {
     const order = ++requestOrder.current;
@@ -186,8 +187,25 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
 
   const remove = async (record: QuotationRecord) => {
     if (!window.confirm(`${record.quotationNumber} を削除しますか？`)) return;
-    const response = await fetch(`/api/quotations/${record.id}`, { method: "DELETE" });
-    if (response.ok) setRecords((old) => old.filter((item) => item.id !== record.id));
+    setHistoryActionError("");
+    try {
+      const response = await fetch(`/api/quotations/${record.id}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok) {
+        setRecords((old) => old.filter((item) => item.id !== record.id));
+        if (selectedRecord?.id === record.id) setSelectedId(null);
+        return;
+      }
+      if (payload.error === "film_order_exists") {
+        setHistoryActionError(`${record.quotationNumber} はフィルム発注管理に反映済みのため削除できません。`);
+      } else if (response.status === 403) {
+        setHistoryActionError(`${record.quotationNumber} は作成者または管理者のみ削除できます。`);
+      } else {
+        setHistoryActionError(`${record.quotationNumber} を削除できませんでした。`);
+      }
+    } catch {
+      setHistoryActionError(`${record.quotationNumber} の削除に失敗しました。`);
+    }
   };
 
   const sendQuotationEmail = async (record: QuotationRecord) => {
@@ -303,6 +321,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
           <span>{loading ? "読み込み中..." : `${formatNumber(records.length, 0)} 件`}</span>
         </div>
         {error ? <p className="error" role="alert">{error}</p> : null}
+        {historyActionError ? <p className="error" role="alert" data-testid="history-action-error">{historyActionError}</p> : null}
         {!loading && records.length === 0 && !error ? (
           <p className="empty">保存された見積書はありません。見積書画面から保存またはPDF出力してください。</p>
         ) : null}

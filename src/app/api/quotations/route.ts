@@ -224,13 +224,14 @@ function hasValidSimulatorProvenance(input: QuotationRecordInput | null): boolea
 
   try {
     const result = calculatePouchCost(request);
+    if (!purchaseOrder && D(result.customCharge).gt(0)) return false;
     return input.resultHash === result.audit.resultJsonSha256
       && hasValidChecklist(snapshot, result, request)
-      && (!purchaseOrder || hasValidPurchaseOrder(purchaseOrder, result, request))
       && basis.printingMethod === result.printingMethod
       && decimalEquals(basis.quantity, result.quantity)
       && decimalEquals(basis.filmOrderLengthM, result.film.orderLengthM)
-      && decimalEquals(basis.calculationFilmTotal, result.film.filmTotal);
+      && decimalEquals(basis.calculationFilmTotal, result.film.filmTotal)
+      && (!purchaseOrder || hasValidPurchaseOrder(purchaseOrder, result, request));
   } catch {
     return false;
   }
