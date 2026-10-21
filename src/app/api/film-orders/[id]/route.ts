@@ -34,6 +34,9 @@ function statusForError(message: string): number {
     || message === "japanese_customer_message_required"
     || message === "customer_proof_file_required"
     || message === "customer_proof_pdf_required"
+    || message === "delivery_report_required"
+    || message === "shipment_report_required"
+    || message === "invalid_delivery_transition"
     || message === "sample_bulk_quantity_mismatch"
   ) return 400;
   return 500;

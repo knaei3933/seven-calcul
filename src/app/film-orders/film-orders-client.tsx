@@ -625,6 +625,13 @@ function NextStepPanel({
       {order.status === "final_approved" ? (
         <div className="film-order-inline-actions">
           <p className="film-order-final">最終承認済み（金井貿易の最終受注処理が確定）。{order.po_sent_at ? "発注書は送信済みです。" : "発注書をメーカーへ送信してください。"}</p>
+          <div className="film-delivery-summary">
+            <span>出荷: {order.delivery.shippedOn ?? "未報告"}</span>
+            <span>納品: {order.delivery.deliveredOn ?? "未報告"}</span>
+            <span>受領: {order.delivery.receivedAt ? new Date(order.delivery.receivedAt).toLocaleDateString("ja-JP") : "未確認"}</span>
+            {order.delivery.carrier ? <small>{order.delivery.carrier}{order.delivery.trackingNumber ? ` / ${order.delivery.trackingNumber}` : ""}</small> : null}
+            {order.delivery.deliveryDocumentUrl ? <a href={order.delivery.deliveryDocumentUrl} target="_blank" rel="noreferrer">{order.delivery.deliveryDocumentName || "納品書"}</a> : null}
+          </div>
           {isKanei && !order.po_sent_at ? (
             <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "send-po" }, "発注書をメーカーへ送信しました。納期入力フォームを案内しました。")}>
               発注書をメーカーへ送信
@@ -635,9 +642,30 @@ function NextStepPanel({
               発注書URLを再発行して再送
             </button>
           ) : null}
+          {canOperate(buyerCompanyOf(order), isSeven, isKanei) && order.delivery.deliveredOn && !order.delivery.receivedAt ? (
+            <FilmReceiptConfirmForm busy={busy} onSubmit={(note) => void onRun({ action: "confirm-film-receipt", note }, "フィルムの受領を確認しました。")} />
+          ) : null}
         </div>
       ) : null}
     </section>
+  );
+}
+
+function FilmReceiptConfirmForm({
+  busy,
+  onSubmit,
+}: {
+  busy: boolean;
+  onSubmit: (note: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  return (
+    <form className="film-order-form" onSubmit={(event) => { event.preventDefault(); onSubmit(note.trim()); }}>
+      <label>受領メモ（任意）
+        <textarea value={note} rows={2} onChange={(event) => setNote(event.target.value)} />
+      </label>
+      <button className="button" type="submit" disabled={busy}>{busy ? "確認中..." : "フィルムを受領確認する"}</button>
+    </form>
   );
 }
 

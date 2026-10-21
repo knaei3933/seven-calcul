@@ -21,6 +21,7 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
         web_width_mm: order.web_width_mm,
         eta_date: order.eta_date,
         eta_note: order.eta_note,
+        delivery: order.delivery,
       },
     });
   } catch {
@@ -31,11 +32,15 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
 export async function POST(request: Request, context: Context): Promise<NextResponse> {
   const { token } = await context.params;
   try {
-    const body = await request.json() as { etaDate?: unknown; note?: unknown };
+    const body = await request.json() as {
+      etaDate?: unknown;
+      note?: unknown;
+    };
+    let order;
     if (typeof body.etaDate !== "string" || typeof body.note !== "string") {
       return NextResponse.json({ error: "invalid_eta_input" }, { status: 400 });
     }
-    const order = await updateEtaFromToken(token, body.etaDate, body.note.trim().slice(0, 1000));
+    order = await updateEtaFromToken(token, body.etaDate, body.note.trim().slice(0, 1000));
     if (!order) return NextResponse.json({ error: "eta_order_not_found" }, { status: 404 });
     return NextResponse.json({ order: { order_number: order.order_number, eta_date: order.eta_date } });
   } catch (error) {

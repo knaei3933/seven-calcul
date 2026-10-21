@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "film-order-store-test-"));
@@ -10,8 +10,25 @@ process.env.MAIL_DRY_RUN = "true";
 process.env.ADMIN_EMAIL = "seven@727.co.jp";
 process.env.ADMIN_PASSWORD = "seven-store-password";
 process.env.ADMIN_NAME = "Seven Store";
+process.env.FILM_DELIVERY_DOCUMENT_FOLDER_ID = "delivery-folder-test";
+
+const driveMocks = vi.hoisted(() => ({
+  createSession: vi.fn(),
+  findFiles: vi.fn(),
+}));
+
+vi.mock("@/lib/google-drive", () => ({
+  customerDesignFolderId: () => "customer-design-folder",
+  deliveryDocumentFolderId: () => "delivery-folder-test",
+  receivingFolderId: () => "receiving-folder",
+  proofFolderId: () => "proof-folder",
+  driveConfigured: () => true,
+  findDriveFiles: driveMocks.findFiles,
+  createResumableSession: driveMocks.createSession,
+}));
 
 const { saveQuotation } = await import("@/lib/quotation-store");
+const { POST: deliveryUpload } = await import("@/app/api/film-orders/delivery-upload/[token]/route");
 const { ensureAdministratorSeed } = await import("@/lib/auth-store");
 const {
   buildFilmOrderFileName,
@@ -23,6 +40,7 @@ const {
   listFilmOrders,
   runFilmOrderAction,
   syncFilmOrdersFromQuotations,
+  updateFilmDeliveryFromToken,
   updateEtaFromToken,
 } = await import("@/lib/film-orders");
 
@@ -223,6 +241,76 @@ describe("film order store", () => {
     await expect(updateEtaFromToken("1.123.bad", "2026-10-31", "")).rejects.toThrow("invalid_eta_token");
     const afterEta = await getFilmOrder(orderId);
     expect(afterEta?.events.some((event) => event.type === "eta")).toBe(true);
+    await expect(updateFilmDeliveryFromToken(etaToken, { kind: "shipment", date: "2026/10/30" }))
+      .rejects.toThrow("invalid_delivery_date");
+    await expect(updateFilmDeliveryFromToken(etaToken, { kind: "delivery", date: "2026-10-31" }))
+      .rejects.toThrow("shipment_report_required");
+
+    driveMocks.createSession.mockResolvedValueOnce("https://drive.example/upload-session");
+    const sessionResponse = await deliveryUpload(new Request(`http://localhost/api/film-orders/delivery-upload/${etaToken}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "session",
+        originalFileName: "delivery note.pdf",
+        shipmentDate: "2026-10-30",
+        uploadId: "upload12345678",
+        sizeBytes: 1000,
+        contentType: "application/pdf",
+      }),
+    }), { params: Promise.resolve({ token: etaToken }) });
+    expect(sessionResponse.status).toBe(200);
+    const session = await sessionResponse.json();
+    expect(session.fileName).toContain("_delivery_2026-10-30_upload12345678_");
+    expect(driveMocks.createSession).toHaveBeenCalledWith(expect.objectContaining({
+      folderId: "delivery-folder-test",
+      fileName: session.fileName,
+    }));
+
+    driveMocks.findFiles.mockResolvedValueOnce([{
+      id: "delivery-drive-file",
+      name: session.fileName,
+      mimeType: "application/pdf",
+      checksum: "checksum",
+      sizeBytes: 1000,
+      parentFolderIds: ["delivery-folder-test"],
+    }]);
+    const completeResponse = await deliveryUpload(new Request(`http://localhost/api/film-orders/delivery-upload/${etaToken}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "complete",
+        fileName: session.fileName,
+        originalFileName: "delivery note.pdf",
+        shipmentDate: "2026-10-30",
+        uploadId: "upload12345678",
+        carrier: "Test Freight",
+        trackingNumber: "TRACK-001",
+        note: "銅版込みで出荷",
+      }),
+    }), { params: Promise.resolve({ token: etaToken }) });
+    expect(completeResponse.status).toBe(200);
+    const shipped = (await completeResponse.json()).order;
+    expect(shipped.delivery.shippedOn).toBe("2026-10-30");
+    expect(shipped.delivery.carrier).toBe("Test Freight");
+    expect(shipped.delivery.deliveryDocumentUrl).toBe("https://drive.google.com/file/d/delivery-drive-file/view");
+    const shippedStored = await getFilmOrder(orderId);
+    expect(shippedStored?.events.some((event) => event.type === "delivery" && event.detail.includes("メーカー出荷報告"))).toBe(true);
+    const delivered = await updateFilmDeliveryFromToken(etaToken, {
+      kind: "delivery",
+      date: "2026-10-31",
+      note: "現場受領",
+    });
+    expect(delivered.delivery.deliveredOn).toBe("2026-10-31");
+    expect(delivered.events.some((event) => event.type === "delivery" && event.detail.includes("メーカー納品報告"))).toBe(true);
+    const receipt = await runFilmOrderAction(orderId, "confirm-film-receipt", {
+      note: "数量・外観確認済み",
+    }, "seven@727.co.jp");
+    expect(receipt.order.delivery.receivedAt).toBeTruthy();
+    expect(receipt.order.delivery.receivedNote).toBe("数量・外観確認済み");
+    expect(receipt.mails?.map((mail) => mail.to)).toContain("supplier@example.co.kr");
+    await expect(runFilmOrderAction(orderId, "confirm-film-receipt", {}, "seven@727.co.jp"))
+      .rejects.toThrow("invalid_status_transition");
     expect(final?.events.filter((event) => event.type === "email").length ?? 0).toBeGreaterThanOrEqual(1);
   });
 

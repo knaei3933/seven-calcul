@@ -60,6 +60,12 @@ export function customerDesignFolderId(): string {
   return folderId;
 }
 
+export function deliveryDocumentFolderId(): string {
+  const folderId = process.env.FILM_DELIVERY_DOCUMENT_FOLDER_ID?.trim();
+  if (!folderId) throw new Error("delivery_document_folder_not_configured");
+  return folderId;
+}
+
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
 function base64url(input: string | Buffer): string {

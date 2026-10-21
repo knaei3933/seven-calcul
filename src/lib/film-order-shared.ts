@@ -141,6 +141,19 @@ export interface FilmOrderRow {
   eta_date: string | null;
   eta_note: string | null;
   eta_updated_at: string | null;
+  film_shipped_on: string | null;
+  film_shipped_at: string | null;
+  film_carrier: string;
+  film_tracking_number: string;
+  film_shipment_note: string;
+  film_delivery_document_name: string;
+  film_delivery_document_url: string;
+  film_delivered_on: string | null;
+  film_delivered_at: string | null;
+  film_delivery_note: string;
+  film_received_at: string | null;
+  film_received_note: string;
+  film_received_by_email: string;
   proof_upload_token: string | null;
   proof_upload_expires_at: string | null;
   status: FilmOrderStatus;
@@ -186,11 +199,28 @@ export interface CustomerProofTracking {
   correctionReason: string;
 }
 
+export interface FilmDeliveryTracking {
+  shippedOn: string | null;
+  shippedAt: string | null;
+  carrier: string;
+  trackingNumber: string;
+  shipmentNote: string;
+  deliveryDocumentName: string;
+  deliveryDocumentUrl: string;
+  deliveredOn: string | null;
+  deliveredAt: string | null;
+  deliveryNote: string;
+  receivedAt: string | null;
+  receivedNote: string;
+  receivedByEmail: string;
+}
+
 export type FilmOrder = FilmOrderRow & {
   purchaseOrder: PurchaseOrderSnapshot | null;
   sampleBulk: SampleBulkTracking;
   customerDesign: CustomerDesignTracking;
   customerProof: CustomerProofTracking;
+  delivery: FilmDeliveryTracking;
 };
 
 export interface SampleBulkTracking {

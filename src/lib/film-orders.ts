@@ -13,6 +13,7 @@ import {
   type CustomerDesignStatus,
   type CustomerProofStatus,
   type CustomerProofTracking,
+  type FilmDeliveryTracking,
 } from "./film-order-shared";
 import { customerDesignFolderId, findDriveFiles } from "./google-drive";
 
@@ -174,6 +175,7 @@ export type FilmOrderAction =
   | "approve"
   | "request-re-proof"
   | "send-po"
+  | "confirm-film-receipt"
   | "resend-receiving-notice"
   | "register-receiving-extra"
   | "request-sample-bulk"
@@ -214,6 +216,19 @@ const BASE_SCHEMA = `
     eta_date TEXT,
     eta_note TEXT,
     eta_updated_at TEXT,
+    film_shipped_on TEXT,
+    film_shipped_at TEXT,
+    film_carrier TEXT NOT NULL DEFAULT '',
+    film_tracking_number TEXT NOT NULL DEFAULT '',
+    film_shipment_note TEXT NOT NULL DEFAULT '',
+    film_delivery_document_name TEXT NOT NULL DEFAULT '',
+    film_delivery_document_url TEXT NOT NULL DEFAULT '',
+    film_delivered_on TEXT,
+    film_delivered_at TEXT,
+    film_delivery_note TEXT NOT NULL DEFAULT '',
+    film_received_at TEXT,
+    film_received_note TEXT NOT NULL DEFAULT '',
+    film_received_by_email TEXT NOT NULL DEFAULT '',
     proof_upload_token TEXT,
     proof_upload_expires_at TEXT,
     status TEXT NOT NULL CHECK(status IN ('pending','ordered','receiving_registered','proof_registered','re_proof_requested','final_approved')),
@@ -423,6 +438,42 @@ const CUSTOMER_DESIGN_EXTENSIONS = [".ai", ".pdf"] as const;
 export function customerDesignMaxBytes(): number {
   const parsed = Number(process.env.CUSTOMER_DESIGN_MAX_MB ?? 100);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed * 1024 * 1024) : 100 * 1024 * 1024;
+}
+
+export const DELIVERY_DOCUMENT_MAX_BYTES = 15 * 1024 * 1024;
+
+export function assertDeliveryDocumentPolicy(
+  order: FilmOrder,
+  fileName: string,
+  sizeBytes?: number,
+): void {
+  if (order.status !== "final_approved" || !order.po_sent_at || order.delivery.deliveredOn) {
+    throw new Error("invalid_delivery_transition");
+  }
+  const extension = fileName.includes(".") ? fileName.slice(fileName.lastIndexOf(".")).toLowerCase() : "";
+  if (extension !== ".pdf") throw new Error("invalid_delivery_document_type");
+  if (sizeBytes != null && (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > DELIVERY_DOCUMENT_MAX_BYTES)) {
+    throw new Error("file_too_large");
+  }
+}
+
+export function deliveryDocumentFileName(
+  order: FilmOrder,
+  shipmentDate: string,
+  originalFileName: string,
+  uploadId: string,
+): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(shipmentDate)) throw new Error("invalid_delivery_date");
+  if (!/^[A-Za-z0-9_-]{12,64}$/u.test(uploadId)) throw new Error("invalid_upload_request");
+  const withoutExtension = originalFileName.includes(".")
+    ? originalFileName.slice(0, originalFileName.lastIndexOf("."))
+    : originalFileName;
+  const base = withoutExtension
+    .replace(/[\\/:*?"<>|\r\n\t]/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/[^A-Za-z0-9._\-\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/g, "_")
+    .slice(0, 80) || "delivery_note";
+  return `${order.order_number}_delivery_${shipmentDate}_${uploadId}_${base}.pdf`;
 }
 
 function customerDesignAllowed(status: CustomerDesignStatus): boolean {
@@ -708,6 +759,19 @@ async function getDatabase(): Promise<SqlClient> {
       ["film_orders_eta_date", "ALTER TABLE film_orders ADD COLUMN eta_date TEXT"],
       ["film_orders_eta_note", "ALTER TABLE film_orders ADD COLUMN eta_note TEXT"],
       ["film_orders_eta_updated", "ALTER TABLE film_orders ADD COLUMN eta_updated_at TEXT"],
+      ["film_orders_film_shipped_on", "ALTER TABLE film_orders ADD COLUMN film_shipped_on TEXT"],
+      ["film_orders_film_shipped_at", "ALTER TABLE film_orders ADD COLUMN film_shipped_at TEXT"],
+      ["film_orders_film_carrier", "ALTER TABLE film_orders ADD COLUMN film_carrier TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_film_tracking_number", "ALTER TABLE film_orders ADD COLUMN film_tracking_number TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_film_shipment_note", "ALTER TABLE film_orders ADD COLUMN film_shipment_note TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_film_delivery_document_name", "ALTER TABLE film_orders ADD COLUMN film_delivery_document_name TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_film_delivery_document_url", "ALTER TABLE film_orders ADD COLUMN film_delivery_document_url TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_film_delivered_on", "ALTER TABLE film_orders ADD COLUMN film_delivered_on TEXT"],
+      ["film_orders_film_delivered_at", "ALTER TABLE film_orders ADD COLUMN film_delivered_at TEXT"],
+      ["film_orders_film_delivery_note", "ALTER TABLE film_orders ADD COLUMN film_delivery_note TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_film_received_at", "ALTER TABLE film_orders ADD COLUMN film_received_at TEXT"],
+      ["film_orders_film_received_note", "ALTER TABLE film_orders ADD COLUMN film_received_note TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_film_received_by_email", "ALTER TABLE film_orders ADD COLUMN film_received_by_email TEXT NOT NULL DEFAULT ''"],
       ["film_orders_proof_token", "ALTER TABLE film_orders ADD COLUMN proof_upload_token TEXT"],
       ["film_orders_proof_expires", "ALTER TABLE film_orders ADD COLUMN proof_upload_expires_at TEXT"],
       // 既存テーブル（buyer_domain 導入前）向け。新規テーブルでは重複エラーを無視する。
@@ -919,12 +983,28 @@ function mapOrder(row: FilmOrderRow): FilmOrder {
     correctionCount: Number(row.customer_proof_correction_count || 0),
     correctionReason: row.customer_proof_correction_reason,
   };
+  const delivery: FilmDeliveryTracking = {
+    shippedOn: row.film_shipped_on,
+    shippedAt: row.film_shipped_at,
+    carrier: row.film_carrier,
+    trackingNumber: row.film_tracking_number,
+    shipmentNote: row.film_shipment_note,
+    deliveryDocumentName: row.film_delivery_document_name,
+    deliveryDocumentUrl: row.film_delivery_document_url,
+    deliveredOn: row.film_delivered_on,
+    deliveredAt: row.film_delivered_at,
+    deliveryNote: row.film_delivery_note,
+    receivedAt: row.film_received_at,
+    receivedNote: row.film_received_note,
+    receivedByEmail: row.film_received_by_email,
+  };
   return {
     ...rest,
     purchaseOrder: parsePurchaseOrder(purchase_order_json),
     sampleBulk,
     customerDesign,
     customerProof,
+    delivery,
   };
 }
 
@@ -1684,6 +1764,113 @@ export async function getFilmOrderForSupplierPurchaseOrder(
   return refreshed;
 }
 
+async function sendFilmDeliveryNotice(
+  order: FilmOrderView,
+  kind: "shipment" | "delivery",
+): Promise<MailSendResult[]> {
+  if (!order.seven_contact_email) return [];
+  const isShipment = kind === "shipment";
+  const subject = isShipment
+    ? `【フィルム出荷通知】${order.order_number} ${order.product_name || ""}`.trim()
+    : `【フィルム納品完了通知】${order.order_number} ${order.product_name || ""}`.trim();
+  const text = [
+    "株式会社セブン化学 ご担当者様",
+    "",
+    "いつも大変お世話になっております。パッケージラボでございます。",
+    "",
+    isShipment
+      ? "下記フィルムがメーカーより出荷されました。到着まで今しばらくお待ちください。"
+      : "下記フィルムの納品が完了しました。受領確認後、パウチ製作へ進めます。",
+    "",
+    "【案件情報】",
+    mailBodyBase(order),
+    "",
+    isShipment ? "【出荷内容】" : "【納品内容】",
+    `${isShipment ? "出荷日" : "納品日"}：${isShipment ? order.delivery.shippedOn : order.delivery.deliveredOn}`,
+    order.delivery.carrier ? `運送会社：${order.delivery.carrier}` : "",
+    order.delivery.trackingNumber ? `追跡番号：${order.delivery.trackingNumber}` : "",
+    order.delivery.deliveryDocumentUrl ? `納品書URL：${order.delivery.deliveryDocumentUrl}` : "",
+    isShipment ? order.delivery.shipmentNote : order.delivery.deliveryNote,
+    "",
+    "ご不明点がございましたら、担当までお問い合わせください。",
+  ].filter(Boolean).join("\n");
+  const mail = await sendMail({ to: externalTo(order.seven_contact_email), subject, text });
+  return [mail];
+}
+
+export async function updateFilmDeliveryFromToken(
+  token: string,
+  params: {
+    kind: "shipment" | "delivery";
+    date: unknown;
+    carrier?: unknown;
+    trackingNumber?: unknown;
+    note?: unknown;
+    documentName?: unknown;
+    documentUrl?: unknown;
+  },
+): Promise<FilmOrderView> {
+  const orderId = verifyEtaToken(token);
+  if (orderId == null) throw new Error("invalid_eta_token");
+  const db = await getDatabase();
+  const row = await db.get<FilmOrderRow>(
+    "SELECT * FROM film_orders WHERE id = ? AND eta_token = ?",
+    [orderId, token],
+  );
+  if (!row) throw new Error("invalid_eta_token");
+  const order = await getFilmOrder(orderId);
+  if (!order || order.status !== "final_approved" || !order.po_sent_at) {
+    throw new Error("invalid_eta_token");
+  }
+
+  const date = typeof params.date === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(params.date) ? params.date : "";
+  if (!date) throw new Error("invalid_delivery_date");
+  const now = new Date().toISOString();
+
+  if (params.kind === "shipment") {
+    if (order.delivery.deliveredOn) throw new Error("invalid_delivery_transition");
+    const carrier = typeof params.carrier === "string" ? params.carrier.trim().slice(0, 200) : "";
+    const trackingNumber = typeof params.trackingNumber === "string" ? params.trackingNumber.trim().slice(0, 200) : "";
+    const note = typeof params.note === "string" ? params.note.trim().slice(0, 1000) : "";
+    const documentName = typeof params.documentName === "string" ? params.documentName.trim().slice(0, 200) : "";
+    const documentUrl = params.documentUrl ? validFileUrl(params.documentUrl) : "";
+    if (documentUrl && !documentName) throw new Error("delivery_document_name_required");
+    await db.run(`
+      UPDATE film_orders SET
+        film_shipped_on=?, film_shipped_at=?, film_carrier=?, film_tracking_number=?, film_shipment_note=?,
+        film_delivery_document_name=?, film_delivery_document_url=?, updated_at=?, updated_by_email='supplier'
+      WHERE id=?
+    `, [date, now, carrier, trackingNumber, note, documentName, documentUrl, now, orderId]);
+    await addEvent(
+      db,
+      orderId,
+      "delivery",
+      `メーカー出荷報告: ${date}${carrier ? ` / ${carrier}` : ""}${trackingNumber ? ` / ${trackingNumber}` : ""}`,
+      "supplier",
+    );
+  } else if (params.kind === "delivery") {
+    if (!order.delivery.shippedOn) throw new Error("shipment_report_required");
+    if (date < order.delivery.shippedOn) throw new Error("invalid_delivery_date");
+    const note = typeof params.note === "string" ? params.note.trim().slice(0, 1000) : "";
+    await db.run(`
+      UPDATE film_orders SET
+        film_delivered_on=?, film_delivered_at=?, film_delivery_note=?, updated_at=?, updated_by_email='supplier'
+      WHERE id=?
+    `, [date, now, note, now, orderId]);
+    await addEvent(db, orderId, "delivery", `メーカー納品報告: ${date}${note ? ` / ${note}` : ""}`, "supplier");
+  } else {
+    throw new Error("invalid_delivery_kind");
+  }
+
+  const refreshed = await getFilmOrder(orderId);
+  if (!refreshed) throw new Error("film_order_not_found");
+  const mails = await sendFilmDeliveryNotice(refreshed, params.kind);
+  await logMailEvents(db, orderId, mails, params.kind === "shipment" ? "出荷通知" : "納品通知", "supplier");
+  const result = await getFilmOrder(orderId);
+  if (!result) throw new Error("film_order_not_found");
+  return result;
+}
+
 function validFileUrl(value: unknown): string {
   if (typeof value !== "string") return "";
   const trimmed = value.trim();
@@ -2218,6 +2405,68 @@ export async function runFilmOrderAction(
       ? await sendPurchaseOrderMail(refreshed, origin, etaUrl, purchaseOrderUrl)
       : [];
     await logMailEvents(db, id, mails, "発注書送信", actorEmail);
+    const result = await getFilmOrder(id);
+    if (!result) throw new Error("film_order_update_failed");
+    return { order: result, mails };
+  } else if (action === "confirm-film-receipt") {
+    if (order.status !== "final_approved") throw new Error("invalid_status_transition");
+    if (!order.delivery.deliveredOn || !order.delivery.deliveredAt) throw new Error("delivery_report_required");
+    if (order.delivery.receivedAt) throw new Error("invalid_status_transition");
+    const receivedNote = trimParam(params.note, 1000);
+    await db.run(`
+      UPDATE film_orders SET
+        film_received_at=?, film_received_note=?, film_received_by_email=?, updated_at=?, updated_by_email=?
+      WHERE id=? AND film_received_at IS NULL
+    `, [now, receivedNote, actorEmail, now, actorEmail, id]);
+    await addEvent(db, id, "delivery", `フィルム受領確認${receivedNote ? `: ${receivedNote}` : ""}`, actorEmail);
+    const refreshed = await getFilmOrder(id);
+    const mails: MailSendResult[] = [];
+    if (refreshed) {
+      const destination = supplierDestinationFor(refreshed);
+      const locale = supplierLocale(refreshed);
+      const supplierSubject = locale === "ko"
+        ? `【필름 수령 확인】${refreshed.order_number} ${refreshed.product_name || ""}`.trim()
+        : `【フィルム受領確認】${refreshed.order_number} ${refreshed.product_name || ""}`.trim();
+      const supplierText = locale === "ko"
+        ? [
+          "항상 협조해 주셔서 감사합니다. 패키지랩입니다.",
+          "",
+          "아래 필름의 수령을 확인했습니다.",
+          "",
+          `발주번호：${refreshed.order_number}`,
+          `품목：${refreshed.product_name || "-"}`,
+          `납품일：${refreshed.delivery.deliveredOn}`,
+          refreshed.delivery.receivedNote ? `수령 메모：${refreshed.delivery.receivedNote}` : "",
+          "",
+          "이후 파우치 제작을 진행합니다. 협조 감사합니다.",
+        ].filter(Boolean).join("\n")
+        : [
+          "いつも大変お世話になっております。パッケージラボでございます。",
+          "",
+          "下記フィルムを受領いたしました。",
+          "",
+          `発注番号：${refreshed.order_number}`,
+          `品名：${refreshed.product_name || "-"}`,
+          `納品日：${refreshed.delivery.deliveredOn}`,
+          refreshed.delivery.receivedNote ? `受領メモ：${refreshed.delivery.receivedNote}` : "",
+          "",
+          "今後はパウチ製作へ進めさせていただきます。",
+        ].filter(Boolean).join("\n");
+      if (destination.to) mails.push(await sendMail({ to: destination.to, subject: supplierSubject, text: supplierText }));
+      mails.push(await sendMail({
+        to: filmDesignNotificationTo(),
+        subject: `【フィルム受領確認完了】${refreshed.order_number} ${refreshed.product_name || ""}`.trim(),
+        text: [
+          `発注番号：${refreshed.order_number}`,
+          `品名：${refreshed.product_name || "-"}`,
+          `出荷日：${refreshed.delivery.shippedOn ?? "-"}`,
+          `納品日：${refreshed.delivery.deliveredOn}`,
+          `受領者：${actorEmail}`,
+          refreshed.delivery.receivedNote ? `メモ：${refreshed.delivery.receivedNote}` : "",
+        ].filter(Boolean).join("\n"),
+      }));
+    }
+    await logMailEvents(db, id, mails, "フィルム受領確認", actorEmail);
     const result = await getFilmOrder(id);
     if (!result) throw new Error("film_order_update_failed");
     return { order: result, mails };

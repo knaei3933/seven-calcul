@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { FilmDeliveryTracking } from "@/lib/film-order-shared";
 import type { SupplierLocale } from "@/lib/film-order-access";
 
 const TEXT = {
@@ -12,6 +13,19 @@ const TEXT = {
     submitting: "등록 중...",
     complete: "납기 전망을 등록했습니다. 협조 감사합니다.",
     fail: "등록에 실패했습니다",
+    deliveryState: "납품 진행 상태",
+    shipmentTitle: "출하 보고",
+    deliveryTitle: "납품 보고",
+    shipped: "출하 보고 완료",
+    delivered: "납품 보고 완료",
+    notShipped: "미출하",
+    shipmentDate: "출하일(필수)",
+    deliveryDate: "납품일(필수)",
+    carrier: "운송사",
+    tracking: "운송장 번호",
+    document: "납품서 PDF(필수)",
+    report: "보고 등록",
+    shipmentRequired: "납품 보고 전에 출하 보고를 등록해 주십시오.",
   },
   ja: {
     date: "おおよその納期日（必須）",
@@ -21,6 +35,19 @@ const TEXT = {
     submitting: "登録中...",
     complete: "納期見込みを登録しました。ご協力ありがとうございます。",
     fail: "登録に失敗しました",
+    deliveryState: "納品進行状況",
+    shipmentTitle: "出荷報告",
+    deliveryTitle: "納品報告",
+    shipped: "出荷報告済み",
+    delivered: "納品報告済み",
+    notShipped: "未出荷",
+    shipmentDate: "出荷日（必須）",
+    deliveryDate: "納品日（必須）",
+    carrier: "運送会社",
+    tracking: "追跡番号",
+    document: "納品書PDF（必須）",
+    report: "報告を登録",
+    shipmentRequired: "納品報告の前に出荷報告を登録してください。",
   },
 } as const;
 
@@ -28,11 +55,13 @@ export default function EtaFormClient({
   token,
   currentEtaDate,
   currentNote,
+  delivery,
   locale,
 }: {
   token: string;
   currentEtaDate: string;
   currentNote: string;
+  delivery: FilmDeliveryTracking;
   locale: SupplierLocale;
 }) {
   const t = TEXT[locale];
@@ -41,6 +70,105 @@ export default function EtaFormClient({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const [shipmentDate, setShipmentDate] = useState(delivery.shippedOn ?? "");
+  const [carrier, setCarrier] = useState(delivery.carrier);
+  const [trackingNumber, setTrackingNumber] = useState(delivery.trackingNumber);
+  const [shipmentNote, setShipmentNote] = useState(delivery.shipmentNote);
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [driveReady, setDriveReady] = useState(false);
+  const [uploadId, setUploadId] = useState("");
+  const [deliveredDate, setDeliveredDate] = useState(delivery.deliveredOn ?? "");
+  const [deliveryNote, setDeliveryNote] = useState(delivery.deliveryNote);
+
+  const applyDelivery = (next?: FilmDeliveryTracking) => {
+    if (!next) return;
+    setShipmentDate(next.shippedOn ?? "");
+    setCarrier(next.carrier);
+    setTrackingNumber(next.trackingNumber);
+    setShipmentNote(next.shipmentNote);
+    setDeliveredDate(next.deliveredOn ?? "");
+    setDeliveryNote(next.deliveryNote);
+  };
+
+  useEffect(() => {
+    let active = true;
+    void fetch(`/api/film-orders/delivery-upload/${encodeURIComponent(token)}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!active) return;
+        setDriveReady(Boolean(response.ok && payload.driveConfigured && payload.folderConfigured));
+      })
+      .catch(() => { if (active) setDriveReady(false); });
+    return () => { active = false; };
+  }, [token]);
+
+  const uploadShipment = async () => {
+    if (!documentFile || !shipmentDate || busy) return;
+    if (!documentFile.name.toLowerCase().endsWith(".pdf")) throw new Error("invalid_delivery_document_type");
+    if (documentFile.size <= 0 || documentFile.size > 15 * 1024 * 1024) throw new Error("file_too_large");
+    const nextUploadId = uploadId || crypto.randomUUID().replaceAll("-", "");
+    setUploadId(nextUploadId);
+    const sessionResponse = await fetch(`/api/film-orders/delivery-upload/${encodeURIComponent(token)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "session",
+        originalFileName: documentFile.name,
+        shipmentDate,
+        uploadId: nextUploadId,
+        sizeBytes: documentFile.size,
+        contentType: documentFile.type || "application/pdf",
+      }),
+    });
+    const session = await sessionResponse.json();
+    if (!sessionResponse.ok || !session.sessionUri) throw new Error(session.error ?? "session_failed");
+    const put = await fetch(session.sessionUri, {
+      method: "PUT",
+      headers: { "Content-Type": documentFile.type || "application/pdf" },
+      body: documentFile,
+    });
+    if (!put.ok) throw new Error(`upload_failed:${put.status}`);
+    const completeResponse = await fetch(`/api/film-orders/delivery-upload/${encodeURIComponent(token)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "complete",
+        fileName: session.fileName,
+        originalFileName: documentFile.name,
+        shipmentDate,
+        uploadId: nextUploadId,
+        carrier,
+        trackingNumber,
+        note: shipmentNote,
+      }),
+    });
+    const complete = await completeResponse.json();
+    if (!completeResponse.ok) throw new Error(complete.error ?? "complete_failed");
+    applyDelivery(complete.order?.delivery);
+  };
+
+  const submitDeliveryReport = async () => {
+    if (busy || !deliveredDate) return;
+    setBusy(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch(`/api/film-orders/eta/${encodeURIComponent(token)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: deliveredDate, note: deliveryNote }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "failed");
+      applyDelivery(payload.order?.delivery);
+      setMessage("납품 보고를 등록했습니다。 / 納品報告を登録しました。");
+    } catch (err) {
+      setError(err instanceof Error && err.message !== "failed" ? `${t.fail}（${err.message}）` : t.fail);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async () => {
     if (busy || !etaDate) return;
@@ -76,6 +204,59 @@ export default function EtaFormClient({
       </button>
       {message ? <p className="eta-ok" role="status">{message}</p> : null}
       {error ? <p className="eta-error">{error}</p> : null}
+
+      <div className="eta-delivery-state">
+        <strong>{t.deliveryState}</strong>
+        <span>{delivery.deliveredOn ? t.delivered : delivery.shippedOn ? t.shipped : t.notShipped}</span>
+      </div>
+
+      {!delivery.deliveredOn ? (
+        delivery.shippedOn ? (
+          <form className="eta-form eta-delivery-form" onSubmit={(event) => { event.preventDefault(); void submitDeliveryReport(); }}>
+            <strong>{t.deliveryTitle}</strong>
+            <label>{t.deliveryDate}
+              <input type="date" value={deliveredDate} min={delivery.shippedOn ?? undefined} onChange={(event) => setDeliveredDate(event.target.value)} required />
+            </label>
+            <label>메모 / メモ
+              <textarea value={deliveryNote} rows={2} onChange={(event) => setDeliveryNote(event.target.value)} />
+            </label>
+            <button className="button" type="submit" disabled={busy || !deliveredDate}>{busy ? t.submitting : t.report}</button>
+          </form>
+        ) : (
+          <form className="eta-form eta-delivery-form" onSubmit={(event) => {
+            event.preventDefault();
+            setBusy(true); setError(""); setMessage("");
+            uploadShipment().then(() => {
+              setMessage("출하 보고를 등록했습니다. / 出荷報告を登録しました。");
+            }).catch((cause: unknown) => {
+              setError(cause instanceof Error ? `${t.fail}（${cause.message}）` : t.fail);
+            }).finally(() => setBusy(false));
+          }}>
+            <strong>{t.shipmentTitle}</strong>
+            <label>{t.shipmentDate}
+              <input type="date" value={shipmentDate} onChange={(event) => setShipmentDate(event.target.value)} required />
+            </label>
+            <label>{t.carrier}
+              <input value={carrier} onChange={(event) => setCarrier(event.target.value)} />
+            </label>
+            <label>{t.tracking}
+              <input value={trackingNumber} onChange={(event) => setTrackingNumber(event.target.value)} />
+            </label>
+            <label>{t.document}
+              <input type="file" accept=".pdf,application/pdf" onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} />
+            </label>
+            <label>메모 / メモ
+              <textarea value={shipmentNote} rows={2} onChange={(event) => setShipmentNote(event.target.value)} />
+            </label>
+            <button className="button" type="submit" disabled={busy || !shipmentDate || !documentFile || !driveReady}>
+              {busy ? t.submitting : t.report}
+            </button>
+            {!driveReady ? <p className="help">Drive upload is not configured.（Driveアップロード未設定）</p> : null}
+          </form>
+        )
+      ) : (
+        <p className="help">{t.delivered}</p>
+      )}
     </div>
   );
 }

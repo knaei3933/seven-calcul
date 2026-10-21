@@ -53,6 +53,7 @@ export default async function FilmOrderEtaPage({ params }: PageProps) {
           token={token}
           currentEtaDate={order.eta_date ?? ""}
           currentNote={order.eta_note ?? ""}
+          delivery={order.delivery}
           locale={locale}
         />
       </section>
