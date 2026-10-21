@@ -120,7 +120,18 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   }, [selectedRecord]);
 
   const restore = (record: QuotationRecord) => {
-    sessionStorage.setItem(QUOTATION_RESTORE_KEY, JSON.stringify(record.payload));
+    // 発行済みPDFは不変。復元は常に修正見積として新しい見積番号で発行する。
+    const nowJst = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" });
+    const validUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      .toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+    const restoredPayload: Record<string, unknown> = {
+      ...record.payload,
+      revisionOf: record.quotationNumber,
+    };
+    delete restoredPayload.quotationNumber;
+    restoredPayload.issueDate = nowJst;
+    restoredPayload.validUntil = validUntil;
+    sessionStorage.setItem(QUOTATION_RESTORE_KEY, JSON.stringify(restoredPayload));
     router.push("/quote");
   };
 

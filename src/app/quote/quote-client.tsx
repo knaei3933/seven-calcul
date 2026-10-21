@@ -27,6 +27,7 @@ import type { CalculationInput } from "@/lib/calculation";
 
 type QuoteForm = {
   quotationNumber: string;
+  revisionOf: string;
   issueDate: string;
   validUntil: string;
   customerName: string;
@@ -233,6 +234,7 @@ function downloadPdfBlob(blob: Blob, fileName: string): void {
 
 const defaultQuote: QuoteForm = {
   quotationNumber: "",
+  revisionOf: "",
   issueDate: "",
   validUntil: "",
   customerName: "",
@@ -655,6 +657,7 @@ export default function PrintableQuotationPage({
         const checklistUrl = sessionStorage.getItem(LAST_CHECKLIST_URL_KEY) ?? "";
         setChecklistUrl(checklistUrl);
         const restored = JSON.parse(restoreRaw) as Partial<QuoteForm> & {
+          revisionOf?: unknown;
           resultHash?: unknown;
           calculationRequest?: CalculationInput;
           purchaseOrder?: PurchaseOrderSnapshot;
@@ -670,6 +673,7 @@ export default function PrintableQuotationPage({
         if (Array.isArray(restored.skuNames) && restored.skuNames.every((name) => typeof name === "string")) {
           restoredForm.skuNames = restored.skuNames as string[];
         }
+        if (typeof restored.revisionOf === "string") restoredForm.revisionOf = restored.revisionOf;
         restoredForm.quotationNumber = restoredForm.quotationNumber || initialQuotationNumber;
         restoredForm.calculationRequestJson = restored.calculationRequest
           ? JSON.stringify(restored.calculationRequest)
@@ -862,6 +866,7 @@ export default function PrintableQuotationPage({
 
       const issuancePayload = {
           ...form,
+          revisionOf: form.revisionOf || undefined,
           status: "draft",
           productName: form.skuNames.filter((name) => name.trim()).join(" / ") || form.productName,
           filmCostPerPiece: D(form.filmCostPerPiece).plus(form.copperPlateCostPerPiece).toString(),
