@@ -451,6 +451,7 @@ export default function PrintableQuotationPage({
   });
   const [customerSearchTerm, setCustomerSearchTerm] = useState("");
   const [customerSearchResults, setCustomerSearchResults] = useState<CustomerMaster[]>([]);
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const customerSearchRequestRef = useRef(0);
   const customerSearchRef = useRef<HTMLFormElement | null>(null);
   const issuanceInFlightRef = useRef(false);
@@ -1655,21 +1656,23 @@ export default function PrintableQuotationPage({
                   顧客コード・検索
                   <input
                     value={customerSearchTerm}
+                    onFocus={() => {
+                      setCustomerSearchOpen(true);
+                      void searchCustomerMaster(customerSearchTerm.trim());
+                    }}
+                    onBlur={() => {
+                      window.setTimeout(() => setCustomerSearchOpen(false), 150);
+                    }}
                   onChange={(event) => {
                     const value = event.target.value;
                     setCustomerSearchTerm(value);
                     applyPatch({ customerCode: value });
-                    if (!value.trim()) {
-                      customerSearchRequestRef.current += 1;
-                      setCustomerSearchResults([]);
-                      setCustomerSearchStatus("idle");
-                    }
                   }}
                     placeholder="C-001 または 会社名"
                     data-testid="customer-search-input"
                   />
                 </label>
-                {customerSearchResults.length || customerSearchStatus === "loading" ? (
+                {customerSearchOpen && (customerSearchResults.length > 0 || customerSearchStatus === "loading") ? (
                   <div className="customer-search-results" data-testid="customer-search-results">
                     {customerSearchStatus === "loading" ? (
                       <p className="customer-search-count">検索中...</p>

@@ -43,6 +43,10 @@ function issuancePayload(init?: RequestInit): { payload: Record<string, unknown>
   return JSON.parse(String((init?.body as FormData).get("payload")));
 }
 
+function latestIssuanceInit(fetchMock: { mock: { calls: Array<[RequestInfo | URL, RequestInit?]> } }): RequestInit | undefined {
+  return fetchMock.mock.calls.filter(([url]) => String(url) === "/api/quotations").at(-1)?.[1];
+}
+
 describe("quotation page stale draft", () => {
   beforeEach(() => {
     sessionStorage.clear();
@@ -88,7 +92,7 @@ describe("quotation page stale draft", () => {
       expect(screen.getByTestId("open-checklist")).toBeEnabled();
     });
     expect(screen.queryByTestId("stale-quote-warning")).not.toBeInTheDocument();
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(vi.mocked(global.fetch).mock.calls.every(([url]) => String(url).startsWith("/api/customers?"))).toBe(true);
   });
 
   it("shows pouch specifications, film printing method, and standard notes on the A4 sheet", async () => {
@@ -160,7 +164,7 @@ describe("quotation page stale draft", () => {
     expect(screen.getByTestId("save-history")).toBeDisabled();
     expect(screen.getByTestId("print-pdf")).toBeDisabled();
     expect(screen.getByTestId("open-checklist")).toBeDisabled();
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(vi.mocked(global.fetch).mock.calls.every(([url]) => String(url).startsWith("/api/customers?"))).toBe(true);
   });
 
   it("keeps adjusted-plan quotation output available while showing its basis", async () => {
@@ -254,7 +258,7 @@ describe("quotation page stale draft", () => {
     await user.click(screen.getByTestId("save-history"));
     await waitFor(() => expect(screen.getByTestId("issue-success")).toBeVisible());
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const body = issuancePayload(fetchMock.mock.calls[0]?.[1]);
+    const body = issuancePayload(latestIssuanceInit(fetchMock));
     expect(body.payload.fillingUnitDisplay).toBe("90");
     expect(body.payload.fillingAmountDisplay).toBe("900000");
     expect(body.payload.filmAmountDisplay).toBe("225000");
@@ -308,7 +312,7 @@ describe("quotation page stale draft", () => {
     await user.click(screen.getByTestId("save-history"));
     await waitFor(() => expect(screen.getByTestId("issue-success")).toBeVisible());
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const body = issuancePayload(fetchMock.mock.calls[0]?.[1]);
+    const body = issuancePayload(latestIssuanceInit(fetchMock));
     expect(body.productName).toBe("レモン琺瑯 / 充填物2");
     expect(body.payload.skuNames).toEqual(["レモン琺瑯", "充填物2"]);
   });
