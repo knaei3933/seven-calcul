@@ -74,6 +74,7 @@ describe("quotation page stale draft", () => {
     await userEvent.setup().type(screen.getByLabelText("郵便番号 ★"), "123-4567");
     await userEvent.setup().type(screen.getByLabelText("電話番号 ★"), "03-1234-5678");
     await userEvent.setup().type(screen.getByLabelText("住所 ★"), "東京都千代田区テスト1-1");
+    await userEvent.setup().type(screen.getByLabelText("製品名（SKU-1）★"), "手入力製品");
 
     await waitFor(() => {
       expect(screen.getByTestId("save-history")).toBeDisabled();
@@ -186,6 +187,7 @@ describe("quotation page stale draft", () => {
     await user.type(screen.getByLabelText("郵便番号 ★"), "100-0001");
     await user.type(screen.getByLabelText("電話番号 ★"), "06-1234-5678");
     await user.type(screen.getByLabelText("住所 ★"), "大阪府テスト市1-2-3");
+    await user.type(screen.getByLabelText("製品名（SKU-1）★"), "数量調整製品");
     await user.type(screen.getByTestId("customer-email-input"), "adjusted@example.co.jp");
 
     await waitFor(() => expect(screen.getByTestId("shortage-quote-warning")).toBeVisible());
@@ -235,6 +237,7 @@ describe("quotation page stale draft", () => {
     await user.type(screen.getByLabelText("郵便番号 ★"), "530-0001");
     await user.type(screen.getByLabelText("電話番号 ★"), "06-9999-9999");
     await user.type(screen.getByLabelText("住所 ★"), "大阪府修正市テスト3-4");
+    await user.type(screen.getByLabelText("製品名（SKU-1）★"), "手動修正製品");
     await user.type(screen.getByTestId("customer-email-input"), "manual@example.co.jp");
 
     await waitFor(() => expect(screen.getByTestId("save-history")).toBeEnabled());
@@ -358,7 +361,7 @@ describe("quotation page stale draft", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
       const target = String(url);
-      if (target === "/api/customers?q=&limit=30") {
+      if (target === "/api/customers?q=&limit=500") {
         return new Response(JSON.stringify({
           customers: [{
             customerCode: "C-001",

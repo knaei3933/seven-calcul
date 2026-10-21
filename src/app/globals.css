@@ -2387,6 +2387,15 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .customer-search-results strong { font-size: 11px; }
 .customer-search-results span { font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .customer-search-results small { font-size: 11px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.customer-search-count {
+  margin: 0;
+  padding: 4px 6px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 800;
+}
 .issue-fields-grid {
   display: grid;
   grid-template-columns: minmax(0, .88fr) minmax(0, .58fr) minmax(0, .76fr) minmax(0, 1.38fr) minmax(0, .92fr);

@@ -296,7 +296,7 @@ const defaultQuote: QuoteForm = {
   grandTotalLabel: "合計（税込）",
   grandTotalDisplay: "",
   quantity: "10000",
-  skuNames: [],
+  skuNames: [""],
   fillingCostPerPiece: "0",
   bulkCostPerPiece: "0",
   bulkUnitDisplay: "",
@@ -460,7 +460,7 @@ export default function PrintableQuotationPage({
   const searchCustomerMaster = async (query: string) => {
     setCustomerSearchStatus("loading");
     try {
-      const response = await fetch(`/api/customers?q=${encodeURIComponent(query)}&limit=30`);
+      const response = await fetch(`/api/customers?q=${encodeURIComponent(query)}&limit=500`);
       const payload = await response.json();
       if (!response.ok || !Array.isArray(payload.customers)) throw new Error("search_failed");
       setCustomerSearchResults(payload.customers as CustomerMaster[]);
@@ -684,7 +684,7 @@ export default function PrintableQuotationPage({
           productName: draft.productSummary,
           sizeSummary: draft.sizeSummary,
           quantity: draft.quantity,
-          skuNames: draft.skuNamesRaw ?? [],
+          skuNames: draft.skuNamesRaw?.length ? draft.skuNamesRaw : [""],
           customerName: draft.customerName ?? old.customerName,
           customerCode: draft.customerCode ?? old.customerCode,
           customerPostalCode: draft.customerPostalCode ?? old.customerPostalCode,
@@ -1697,6 +1697,9 @@ export default function PrintableQuotationPage({
           </div>
           {customerSearchResults.length ? (
             <div className="customer-search-results" data-testid="customer-search-results">
+              <p className="customer-search-count" data-testid="customer-search-count">
+                {customerSearchResults.length >= 500 ? "500件以上" : `${customerSearchResults.length}件`}の顧客が一致しました
+              </p>
               {customerSearchResults.map((customer) => (
                 <div key={customer.customerCode} className="customer-search-result-row">
                   <button type="button" onClick={() => selectCustomerMaster(customer)}>

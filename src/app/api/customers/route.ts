@@ -13,7 +13,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   try {
     const customers = await listCustomers(
       url.searchParams.get("q") ?? "",
-      Number(url.searchParams.get("limit") ?? 100),
+      Number(url.searchParams.get("limit") ?? 500),
       customerOwnerDomainOf(user.email),
     );
     return NextResponse.json({ customers });
