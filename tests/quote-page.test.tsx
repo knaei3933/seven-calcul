@@ -406,6 +406,41 @@ describe("quotation page stale draft", () => {
     expect(screen.getByTestId("issue-required-fields")).toBeVisible();
     expect(screen.getByRole("button", { name: "見積書を発行" })).toBeEnabled();
   });
+
+  it("keeps an active restored revision across quote page navigation", async () => {
+    const user = userEvent.setup();
+    sessionStorage.setItem("pouch-quotation-restore-v1", JSON.stringify({
+      customerCode: "C-001",
+      customerName: "保持株式会社",
+      customerPostalCode: "650-0001",
+      customerAddress: "兵庫県保持市1-2-3",
+      customerTelephone: "078-111-2222",
+      customerEmail: "keep@example.co.jp",
+      productName: "保持製品",
+      revisionOf: "KT-202610-002",
+      quantity: "12345",
+      targetMargin: "0.35",
+      fillingCostPerPiece: "10",
+      filmCostPerPiece: "20",
+      filmMeterPrice: "400",
+      filmOrderLengthM: "500",
+      calculationVersion: "simulator-linked",
+      resultHash: "keep-check",
+      calculationFilmTotal: "10000",
+    }));
+
+    const first = render(<QuotePage />);
+    await waitFor(() => expect(screen.getByLabelText("会社名 ★")).toHaveValue("保持株式会社"));
+    first.unmount();
+
+    const second = render(<QuotePage />);
+    await waitFor(() => expect(screen.getByLabelText("会社名 ★")).toHaveValue("保持株式会社"));
+    expect(screen.getByLabelText("住所 ★")).toHaveValue("兵庫県保持市1-2-3");
+    expect(screen.getByTestId("customer-email-input")).toHaveValue("keep@example.co.jp");
+    expect(screen.getByLabelText("製品名（SKU-1）★")).toHaveValue("");
+    await user.type(screen.getByLabelText("製品名（SKU-1）★"), "保持SKU");
+    second.unmount();
+  });
 });
 
 it("shows the authenticated approver directly above the internal review seal", () => {

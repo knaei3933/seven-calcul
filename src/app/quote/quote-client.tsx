@@ -21,6 +21,7 @@ import type { CustomerMaster } from "@/lib/quotation-shared";
 import type { FilmQuotationData } from "@/lib/film-quotation";
 
 const LAST_CHECKLIST_URL_KEY = "pouch-last-checklist-url-v1";
+const ACTIVE_REVISION_KEY = "pouch-active-quotation-revision-v1";
 import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
 import type { CalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 import type { CalculationInput } from "@/lib/calculation";
@@ -652,6 +653,30 @@ export default function PrintableQuotationPage({
     try {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sessionStorageはSSR後にしか読めない意図的な復元処理です。
       setQuoteDraftStale(Boolean(sessionStorage.getItem(SIMULATOR_STALE_STATUS_KEY)));
+
+      const activeRevisionRaw = sessionStorage.getItem(ACTIVE_REVISION_KEY);
+      if (activeRevisionRaw) {
+        const active = JSON.parse(activeRevisionRaw) as {
+          form?: Partial<QuoteForm>;
+          purchaseOrder?: PurchaseOrderSnapshot;
+          calculationChecklistSnapshot?: CalculationChecklistSnapshot;
+          sourceVersion?: unknown;
+          selectedCandidateShortage?: unknown;
+          checklistUrl?: unknown;
+        };
+        const restoredForm = { ...defaultQuote, ...(active.form ?? {}) };
+        if (!Array.isArray(restoredForm.skuNames) || restoredForm.skuNames.length === 0) restoredForm.skuNames = [""];
+        if (typeof restoredForm.revisionOf !== "string") restoredForm.revisionOf = "";
+        setForm(restoredForm);
+        setPurchaseOrder(active.purchaseOrder ?? null);
+        setCalculationChecklistSnapshot(active.calculationChecklistSnapshot ?? null);
+        setSourceVersion(typeof active.sourceVersion === "string" ? active.sourceVersion : "");
+        setSelectedCandidateShortage(active.selectedCandidateShortage === true);
+        setChecklistUrl(typeof active.checklistUrl === "string" ? active.checklistUrl : "");
+        setStorageLoaded(true);
+        return;
+      }
+
       const restoreRaw = sessionStorage.getItem(QUOTATION_RESTORE_KEY);
       if (restoreRaw) {
         const checklistUrl = sessionStorage.getItem(LAST_CHECKLIST_URL_KEY) ?? "";
@@ -679,14 +704,25 @@ export default function PrintableQuotationPage({
           ? JSON.stringify(restored.calculationRequest)
           : "";
         setForm(restoredForm);
+        let rawChecklistSnapshot: unknown = null;
+        let parsedPurchaseOrder: PurchaseOrderSnapshot | null = null;
         try {
           const rawPurchaseOrder = restored.purchaseOrderJson ?? (restored.purchaseOrder ? JSON.stringify(restored.purchaseOrder) : "");
           const rawChecklistSnapshot = restored.calculationChecklistSnapshot;
           setCalculationChecklistSnapshot(rawChecklistSnapshot ? rawChecklistSnapshot as CalculationChecklistSnapshot : null);
-          setPurchaseOrder(rawPurchaseOrder ? JSON.parse(rawPurchaseOrder) as PurchaseOrderSnapshot : null);
+          parsedPurchaseOrder = rawPurchaseOrder ? JSON.parse(rawPurchaseOrder) as PurchaseOrderSnapshot : null;
+          setPurchaseOrder(parsedPurchaseOrder);
         } catch { setPurchaseOrder(null); }
         setSourceVersion(typeof restored.resultHash === "string" ? restored.resultHash : "");
         setSelectedCandidateShortage(restored.selectedCandidateShortage === true);
+        sessionStorage.setItem(ACTIVE_REVISION_KEY, JSON.stringify({
+          form: restoredForm,
+          purchaseOrder: parsedPurchaseOrder,
+          calculationChecklistSnapshot: rawChecklistSnapshot,
+          sourceVersion: typeof restored.resultHash === "string" ? restored.resultHash : "",
+          selectedCandidateShortage: restored.selectedCandidateShortage === true,
+          checklistUrl,
+        }));
         sessionStorage.removeItem(QUOTATION_RESTORE_KEY);
         setStorageLoaded(true);
         return;
@@ -940,6 +976,7 @@ export default function PrintableQuotationPage({
         throw new Error("invalid_quotation_save_response");
       }
       const checklistUrl = `/checklists/${quotationId}`;
+      sessionStorage.removeItem(ACTIVE_REVISION_KEY);
       setSavedRecordId(quotationId);
       setSavedQuotationNumber(quotationNumber);
       setChecklistUrl(checklistUrl);
@@ -1612,7 +1649,7 @@ export default function PrintableQuotationPage({
               </div>
             </div>
             <div className="toolbar-actions no-print">
-              <button className="button secondary" type="button" onClick={() => router.push("/")}>シミュレーターから取込</button>
+              <button className="button secondary" type="button" onClick={() => { sessionStorage.removeItem(ACTIVE_REVISION_KEY); router.push("/"); }}>シミュレーターから取込</button>
               <button className="btn-issue" type="button" data-testid="save-history" disabled={issueButtonDisabled} onClick={() => void saveToHistory()}>
                 {saving ? "発行中..." : savedAt ? `発行済 ${savedAt}` : "見積書を発行"}
               </button>
