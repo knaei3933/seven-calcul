@@ -217,7 +217,6 @@ function hasValidSimulatorProvenance(input: QuotationRecordInput | null): boolea
     || basis.resultHash !== input.resultHash
     || !isCalculationRequest(request)
     || !snapshot
-    || !purchaseOrder
     || typeof basis.printingMethod !== "string"
     || typeof basis.quantity !== "string"
     || typeof basis.filmOrderLengthM !== "string"
@@ -227,7 +226,7 @@ function hasValidSimulatorProvenance(input: QuotationRecordInput | null): boolea
     const result = calculatePouchCost(request);
     return input.resultHash === result.audit.resultJsonSha256
       && hasValidChecklist(snapshot, result, request)
-      && hasValidPurchaseOrder(purchaseOrder, result, request)
+      && (!purchaseOrder || hasValidPurchaseOrder(purchaseOrder, result, request))
       && basis.printingMethod === result.printingMethod
       && decimalEquals(basis.quantity, result.quantity)
       && decimalEquals(basis.filmOrderLengthM, result.film.orderLengthM)

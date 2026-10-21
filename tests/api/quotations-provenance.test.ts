@@ -247,6 +247,16 @@ describe("quotation calculation provenance", () => {
     expect(payload.record.resultHash).toBe(originalResult.audit.resultJsonSha256);
   });
 
+  it("accepts valid simulator provenance without an optional purchase order", async () => {
+    const draft = draftFor(originalResult, originalRequest);
+    const body = quotationBody(`S7-PROVENANCE-NO-PO-${Date.now()}`, draft, originalResult);
+    delete body.payload.purchaseOrder;
+    const response = await post(body);
+    expect(response.status).toBe(201);
+    const payload = await response.json();
+    expect(payload.record.resultHash).toBe(originalResult.audit.resultJsonSha256);
+  });
+
   it("rejects tampered purchase-order economics and route metadata", async () => {
     for (const tamper of [
       (order: Record<string, unknown>) => { order.filmCostYen = "1"; },
