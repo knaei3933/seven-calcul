@@ -7,6 +7,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import re
 from pathlib import Path
 
 try:
@@ -38,6 +39,9 @@ def clean(value) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def login(base_url: str, email: str, password: str) -> str:
@@ -72,6 +76,8 @@ def rows_from_workbook(path: Path):
         name = public_name or original_name
         if not name:
             continue
+        public_email = public_email if EMAIL_RE.fullmatch(public_email) else ""
+        contact_email = contact_email if EMAIL_RE.fullmatch(contact_email) else ""
         yield {
             "customerCode": f"K-{number_value:04d}",
             "customerName": name,
@@ -89,13 +95,14 @@ def main() -> None:
     parser.add_argument("--base-url", default=os.environ.get("BASE_URL", "http://127.0.0.1:3002"))
     parser.add_argument("--email", default=os.environ.get("IMPORT_EMAIL", os.environ.get("ADMIN_EMAIL", "")))
     parser.add_argument("--password", default=os.environ.get("IMPORT_PASSWORD", os.environ.get("ADMIN_PASSWORD", "")))
+    parser.add_argument("--cookie", default=os.environ.get("IMPORT_COOKIE", ""))
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    if not args.email or not args.password:
+    if not args.cookie and (not args.email or not args.password):
         raise SystemExit("IMPORT_EMAIL and IMPORT_PASSWORD are required")
 
-    cookie = login(args.base_url, args.email, args.password)
+    cookie = args.cookie or login(args.base_url, args.email, args.password)
     imported = skipped = errors = 0
     for customer in rows_from_workbook(Path(args.workbook)):
         if args.dry_run:
