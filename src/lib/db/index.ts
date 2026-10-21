@@ -23,6 +23,21 @@ export function activeDialect(): "sqlite" | "postgres" {
   return postgresConnectionString() ? "postgres" : "sqlite";
 }
 
+function isHostedRuntime(): boolean {
+  return process.env.VERCEL === "1";
+}
+
+export function assertNeonDatabase(connectionString: string): void {
+  try {
+    const host = new URL(connectionString).hostname;
+    if (host !== "neon.tech" && !host.endsWith(".neon.tech")) {
+      throw new Error("neon_database_required");
+    }
+  } catch {
+    throw new Error("neon_database_required");
+  }
+}
+
 function sqlitePath(slot: StoreSlot): string {
   if (slot === "customers") {
     return process.env.POUCH_CUSTOMER_DB
@@ -34,13 +49,13 @@ function sqlitePath(slot: StoreSlot): string {
 
 async function createClient(slot: StoreSlot): Promise<SqlClient> {
   const connectionString = postgresConnectionString();
-  if (connectionString) return PostgresClient.connect(connectionString);
+  if (connectionString) {
+    if (isHostedRuntime()) assertNeonDatabase(connectionString);
+    return PostgresClient.connect(connectionString);
+  }
 
   if (process.env.VERCEL === "1") {
-    console.warn(
-      "[pouch] DATABASE_URL is not configured. Falling back to ephemeral SQLite; "
-      + "quotation history will not be shared between instances or survive deployments.",
-    );
+    throw new Error("neon_database_url_required");
   }
   return new SqliteClient(sqlitePath(slot));
 }
