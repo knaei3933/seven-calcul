@@ -630,6 +630,11 @@ function NextStepPanel({
               発注書をメーカーへ送信
             </button>
           ) : null}
+          {isKanei && order.po_sent_at ? (
+            <button className="button secondary" type="button" disabled={busy} onClick={() => void onRun({ action: "send-po" }, "発注書URLを再発行し、メーカーへ再送しました。")}>
+              発注書URLを再発行して再送
+            </button>
+          ) : null}
         </div>
       ) : null}
     </section>

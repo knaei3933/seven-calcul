@@ -260,7 +260,7 @@ const BASE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS film_order_external_tokens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     film_order_id INTEGER NOT NULL REFERENCES film_orders(id) ON DELETE CASCADE,
-    purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review')),
+    purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po')),
     token_hash TEXT NOT NULL UNIQUE,
     audience_email TEXT,
     expires_at TEXT NOT NULL,
@@ -316,6 +316,7 @@ const EXTERNAL_TOKEN_PURPOSES = [
   "supplier_proof",
   "customer_design",
   "customer_proof_review",
+  "supplier_po",
 ] as const;
 
 export type ExternalTokenPurpose = typeof EXTERNAL_TOKEN_PURPOSES[number];
@@ -601,6 +602,52 @@ async function migrateFilmOrderFileCategory(db: SqlClient): Promise<void> {
   await db.exec("ALTER TABLE film_order_files ADD CONSTRAINT film_order_files_category_check CHECK(category IN ('customer_design','receiving','proof','final'))");
 }
 
+async function migrateExternalTokenPurposes(db: SqlClient): Promise<void> {
+  if (db.dialect === "sqlite") {
+    const row = await db.get<{ sql: string | null }>(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'film_order_external_tokens'"
+    );
+    if (!row?.sql || row.sql.includes("'supplier_po'")) return;
+    await db.exec(`
+      DROP INDEX IF EXISTS idx_film_external_active_token;
+      ALTER TABLE film_order_external_tokens RENAME TO film_order_external_tokens_legacy_purpose;
+      CREATE TABLE film_order_external_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        film_order_id INTEGER NOT NULL REFERENCES film_orders(id) ON DELETE CASCADE,
+        purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po')),
+        token_hash TEXT NOT NULL UNIQUE,
+        audience_email TEXT,
+        expires_at TEXT NOT NULL,
+        revoked_at TEXT,
+        last_used_at TEXT,
+        last_used_ip_hash TEXT,
+        created_by_email TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO film_order_external_tokens (
+        id,film_order_id,purpose,token_hash,audience_email,expires_at,revoked_at,
+        last_used_at,last_used_ip_hash,created_by_email,created_at,updated_at
+      )
+      SELECT id,film_order_id,purpose,token_hash,audience_email,expires_at,revoked_at,
+             last_used_at,last_used_ip_hash,created_by_email,created_at,updated_at
+      FROM film_order_external_tokens_legacy_purpose;
+      DROP TABLE film_order_external_tokens_legacy_purpose;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_film_external_active_token
+        ON film_order_external_tokens(film_order_id, purpose)
+        WHERE revoked_at IS NULL;
+    `);
+    return;
+  }
+
+  await db.exec("ALTER TABLE film_order_external_tokens DROP CONSTRAINT IF EXISTS film_order_external_tokens_purpose_check");
+  await db.exec(`
+    ALTER TABLE film_order_external_tokens
+    ADD CONSTRAINT film_order_external_tokens_purpose_check
+    CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po'))
+  `);
+}
+
 async function migrateLegacyProofTokens(db: SqlClient): Promise<void> {
   const rows = await db.all<{ id: number; proof_upload_token: string | null; proof_upload_expires_at: string | null }>(
     "SELECT id, proof_upload_token, proof_upload_expires_at FROM film_orders WHERE proof_upload_token IS NOT NULL AND proof_upload_token != ''",
@@ -783,6 +830,7 @@ async function getDatabase(): Promise<SqlClient> {
       }
     }
     await migrateFilmOrderFileCategory(db);
+    await migrateExternalTokenPurposes(db);
     await db.exec(`
       UPDATE film_orders
       SET customer_design_status = 'legacy_exempt'
@@ -1357,7 +1405,12 @@ async function sendProofReceivedMail(
   return [await sendMail({ to: externalTo(order.seven_contact_email), subject, text })];
 }
 
-async function sendPurchaseOrderMail(order: FilmOrder, origin: string, etaUrl: string): Promise<MailSendResult[]> {
+async function sendPurchaseOrderMail(
+  order: FilmOrder,
+  origin: string,
+  etaUrl: string,
+  purchaseOrderUrl: string,
+): Promise<MailSendResult[]> {
   const destination = supplierDestinationFor(order);
   if (!destination.to) throw new Error("supplier_destination_missing");
   const locale = supplierLocale(order);
@@ -1381,8 +1434,8 @@ async function sendPurchaseOrderMail(order: FilmOrder, origin: string, etaUrl: s
       "【납기 전망 등록 페이지】",
       etaUrl,
       "",
-      "【발주서 URL(인쇄용)】",
-      `${origin}/film-orders`,
+      "【발주서 열람·인쇄 페이지】",
+      purchaseOrderUrl,
       "",
       "바쁘신 와중에도 협조해 주셔서 감사합니다.",
     ].join("\n")
@@ -1401,6 +1454,9 @@ async function sendPurchaseOrderMail(order: FilmOrder, origin: string, etaUrl: s
       "",
       "【納期見込み登録ページ】",
       etaUrl,
+      "",
+      "【発注書閲覧・印刷ページ】",
+      purchaseOrderUrl,
       "",
       "お忙しいところ恐れ入りますが、何卒よろしくお願い申し上げます。",
     ].join("\n");
@@ -1602,6 +1658,30 @@ export async function getFilmOrderForEta(token: string): Promise<FilmOrderView |
   const db = await getDatabase();
   const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ? AND eta_token = ?", [orderId, token]);
   return row ? getFilmOrder(orderId) : null;
+}
+
+export async function getFilmOrderForSupplierPurchaseOrder(
+  token: string,
+  request?: { headers: { get(name: string): string | null } },
+): Promise<FilmOrderView> {
+  const db = await getDatabase();
+  const resolved = await resolveExternalToken(db, token, "supplier_po");
+  if (!resolved) throw new Error("invalid_supplier_po_token");
+  await markExternalTokenUse(db, resolved.token, request);
+  const order = await getFilmOrder(resolved.orderId);
+  if (!order || order.status !== "final_approved" || !order.po_sent_at) {
+    throw new Error("invalid_supplier_po_token");
+  }
+  await addEvent(
+    db,
+    order.id,
+    "token_access",
+    "supplier_po purchase-order page viewed",
+    "external:supplier_po",
+  );
+  const refreshed = await getFilmOrder(order.id);
+  if (!refreshed) throw new Error("invalid_supplier_po_token");
+  return refreshed;
 }
 
 function validFileUrl(value: unknown): string {
@@ -2124,7 +2204,19 @@ export async function runFilmOrderAction(
     );
     await addEvent(db, id, "status", "最終承認済み → メーカー発注書送信済み", actorEmail);
     const refreshed = await getFilmOrder(id);
-    const mails = refreshed ? await sendPurchaseOrderMail(refreshed, origin, etaUrl) : [];
+    const destination = refreshed ? supplierDestinationFor(refreshed) : null;
+    const purchaseOrderToken = refreshed && destination?.to
+      ? await issueExternalToken(db, id, "supplier_po", actorEmail, {
+        audienceEmail: destination.to,
+        ttlDays: 90,
+      })
+      : null;
+    const purchaseOrderUrl = purchaseOrderToken
+      ? `${origin}/film-orders/purchase-order/${encodeURIComponent(purchaseOrderToken.token)}`
+      : "";
+    const mails = refreshed
+      ? await sendPurchaseOrderMail(refreshed, origin, etaUrl, purchaseOrderUrl)
+      : [];
     await logMailEvents(db, id, mails, "発注書送信", actorEmail);
     const result = await getFilmOrder(id);
     if (!result) throw new Error("film_order_update_failed");

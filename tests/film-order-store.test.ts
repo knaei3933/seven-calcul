@@ -16,6 +16,7 @@ const { ensureAdministratorSeed } = await import("@/lib/auth-store");
 const {
   buildFilmOrderFileName,
   getFilmOrder,
+  getFilmOrderForSupplierPurchaseOrder,
   getFilmOrderForEta,
   getFilmOrderForProofUpload,
   registerProofFromUploadToken,
@@ -201,6 +202,16 @@ describe("film order store", () => {
     expect(po.order.po_sent_at).toBeTruthy();
     expect(po.order.eta_token).toBeTruthy();
     expect(po.mails?.map((mail) => mail.to)).toContain("supplier@example.co.kr");
+    const supplierPoMail = po.mails?.find((mail) => mail.to === "supplier@example.co.kr");
+    const poToken = supplierPoMail?.text?.match(/\/film-orders\/purchase-order\/([^\s"]+)/u)?.[1] ?? "";
+    expect(poToken).not.toBe("");
+    expect(supplierPoMail?.text).not.toContain("【발주서 URL(인쇄용)】");
+    expect(supplierPoMail?.text).not.toContain(`${"http://localhost:3000"}/film-orders\n`);
+    const poView = await getFilmOrderForSupplierPurchaseOrder(poToken);
+    expect(poView?.id).toBe(orderId);
+    expect(poView?.purchaseOrder?.orderLengthM).toBe("1700");
+    expect(poView?.events.some((event) => event.type === "token_access" && event.detail.includes("supplier_po"))).toBe(true);
+    await expect(getFilmOrderForSupplierPurchaseOrder("1.supplier_po.1.bad.bad")).rejects.toThrow("invalid_supplier_po_token");
 
     const etaToken = po.order.eta_token!;
     const etaView = await getFilmOrderForEta(etaToken);
@@ -264,6 +275,43 @@ describe("film order store", () => {
       if (previousB === undefined) delete process.env.FILM_SUPPLIER_B_EMAIL;
       else process.env.FILM_SUPPLIER_B_EMAIL = previousB;
     }
+  });
+
+  it("issues a Korean purchase-order page for K procurement", async () => {
+    const record = await saveQuotation({
+      ...input,
+      quotationNumber: "S7-FILM-STORE-PO-K",
+      status: "approved",
+      payload: { purchaseOrder: { ...purchaseOrder, procurementRoute: "K" as const } },
+    }, 1, "admin");
+    void record;
+    await syncFilmOrdersFromQuotations("seven@727.co.jp");
+    const orders = await listFilmOrders();
+    const order = orders.find((item) => item.quotation_number === "S7-FILM-STORE-PO-K")!;
+    await runFilmOrderAction(order.id, "mark-ordered", {}, "seven@727.co.jp");
+    await runFilmOrderAction(order.id, "set-customer-design-not-required", { reason: "PO page test" }, "kanei@kanei-trade.co.jp");
+    await runFilmOrderAction(order.id, "set-supplier", { supplierName: "K 필름메이커", supplierEmail: "k-po@example.co.kr" }, "kanei@kanei-trade.co.jp");
+    await runFilmOrderAction(order.id, "register-receiving", {
+      aiFileName: "K_PO.ai",
+      aiFileUrl: "https://drive.google.com/file/d/k-po-ai/view",
+    }, "seven@727.co.jp");
+    await runFilmOrderAction(order.id, "register-proof", {
+      aiFileName: "K_PO_proof.ai",
+      aiFileUrl: "https://drive.google.com/file/d/k-po-proof/view",
+    }, "kanei@kanei-trade.co.jp");
+    await runFilmOrderAction(order.id, "record-customer-proof-approval", {
+      approverName: "K 발주 고객",
+      evidence: "메일 승인 회신",
+    }, "kanei@kanei-trade.co.jp");
+    await runFilmOrderAction(order.id, "approve", { fileName: "K_PO_final.pdf" }, "seven@727.co.jp");
+    const result = await runFilmOrderAction(order.id, "send-po", { origin: "http://localhost:3000" }, "kanei@kanei-trade.co.jp");
+    const mail = result.mails?.find((item) => item.to === "k-po@example.co.kr");
+    expect(mail?.subject).toContain("【필름 발주 요청】");
+    expect(mail?.text).toContain("【발주서 열람·인쇄 페이지】");
+    const token = mail?.text?.match(/\/film-orders\/purchase-order\/([^\s"]+)/u)?.[1] ?? "";
+    const view = await getFilmOrderForSupplierPurchaseOrder(token);
+    expect(view.id).toBe(order.id);
+    expect(view.procurement_route).toBe("K");
   });
 
   it("manages customer bulk-sample supply and adjustment loop", async () => {
