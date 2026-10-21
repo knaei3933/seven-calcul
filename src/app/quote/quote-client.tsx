@@ -451,6 +451,7 @@ export default function PrintableQuotationPage({
   });
   const [customerSearchTerm, setCustomerSearchTerm] = useState("");
   const [customerSearchResults, setCustomerSearchResults] = useState<CustomerMaster[]>([]);
+  const customerSearchRequestRef = useRef(0);
   const customerSearchRef = useRef<HTMLFormElement | null>(null);
   const issuanceInFlightRef = useRef(false);
   const pdfDownloadInFlightRef = useRef(false);
@@ -458,14 +459,17 @@ export default function PrintableQuotationPage({
   const [customerSearchStatus, setCustomerSearchStatus] = useState<"idle" | "loading" | "error">("idle");
 
   const searchCustomerMaster = async (query: string) => {
+    const requestId = ++customerSearchRequestRef.current;
     setCustomerSearchStatus("loading");
     try {
       const response = await fetch(`/api/customers?q=${encodeURIComponent(query)}&limit=500`);
       const payload = await response.json();
       if (!response.ok || !Array.isArray(payload.customers)) throw new Error("search_failed");
+      if (customerSearchRequestRef.current !== requestId) return;
       setCustomerSearchResults(payload.customers as CustomerMaster[]);
       setCustomerSearchStatus("idle");
     } catch {
+      if (customerSearchRequestRef.current !== requestId) return;
       setCustomerSearchResults([]);
       setCustomerSearchStatus("error");
     }
@@ -573,6 +577,15 @@ export default function PrintableQuotationPage({
     setCustomerSearchResults([]);
     setCustomerMasterStatus({ found: false,  loading: false, message: `顧客コード ${customer.customerCode} を読み込みました。`, saving: false });
   };
+
+  useEffect(() => {
+    const query = customerSearchTerm.trim();
+    if (!query) return;
+    const timer = window.setTimeout(() => {
+      void searchCustomerMaster(query);
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [customerSearchTerm]);
 
   const fillTestData = () => {
     const suffix = "0001";
@@ -1637,30 +1650,47 @@ export default function PrintableQuotationPage({
                 if (query) void loadCustomerMaster();
               }}
             >
-              <label className="customer-search-field">
-                顧客コード・検索
-                <input
-                  value={customerSearchTerm}
-                  onFocus={() => { if (customerSearchResults.length === 0) void searchCustomerMaster(customerSearchTerm.trim()); }}
+              <div className="customer-search-wrapper">
+                <label className="customer-search-field">
+                  顧客コード・検索
+                  <input
+                    value={customerSearchTerm}
                   onChange={(event) => {
-                    setCustomerSearchTerm(event.target.value);
-                    applyPatch({ customerCode: event.target.value });
+                    const value = event.target.value;
+                    setCustomerSearchTerm(value);
+                    applyPatch({ customerCode: value });
+                    if (!value.trim()) {
+                      customerSearchRequestRef.current += 1;
+                      setCustomerSearchResults([]);
+                      setCustomerSearchStatus("idle");
+                    }
                   }}
-                  placeholder="C-001 または 会社名"
-                  data-testid="customer-search-input"
-                />
-              </label>
-              <label className="customer-search-field">
-                メール
-                <input
-                  type="email"
-                  value={form.customerEmail}
-                  onChange={(event) => update("customerEmail", event.target.value)}
-                  placeholder="purchase@example.co.jp"
-                  autoComplete="email"
-                  data-testid="customer-master-email-input"
-                />
-              </label>
+                    placeholder="C-001 または 会社名"
+                    data-testid="customer-search-input"
+                  />
+                </label>
+                {customerSearchResults.length || customerSearchStatus === "loading" ? (
+                  <div className="customer-search-results" data-testid="customer-search-results">
+                    {customerSearchStatus === "loading" ? (
+                      <p className="customer-search-count">検索中...</p>
+                    ) : (
+                      <p className="customer-search-count" data-testid="customer-search-count">
+                        {customerSearchResults.length >= 500 ? "500件以上" : `${customerSearchResults.length}件`}の顧客が一致しました
+                      </p>
+                    )}
+                    {customerSearchResults.map((customer) => (
+                      <div key={`${customer.ownerDomain}-${customer.customerCode}`} className="customer-search-result-row">
+                        <button type="button" onClick={() => selectCustomerMaster(customer)}>
+                          <strong>{customer.customerCode}</strong>
+                          <span>{customer.customerName}</span>
+                          <small>{customer.customerAddress || "住所未登録"}</small>
+                          {customer.customerEmail ? <small>{customer.customerEmail}</small> : null}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <button
                 className="button secondary"
                 type="button"
@@ -1695,29 +1725,6 @@ export default function PrintableQuotationPage({
             ) : null}
             {customerMasterStatus.message ? <p className="customer-master-status" role="status">{customerMasterStatus.message}</p> : null}
           </div>
-          {customerSearchResults.length ? (
-            <div className="customer-search-results" data-testid="customer-search-results">
-              <p className="customer-search-count" data-testid="customer-search-count">
-                {customerSearchResults.length >= 500 ? "500件以上" : `${customerSearchResults.length}件`}の顧客が一致しました
-              </p>
-              {customerSearchResults.map((customer) => (
-                <div key={customer.customerCode} className="customer-search-result-row">
-                  <button type="button" onClick={() => selectCustomerMaster(customer)}>
-                    <strong>{customer.customerCode}</strong>
-                    <span>{customer.customerName}</span>
-                    <small>{customer.customerAddress || "住所未登録"}</small>
-                    {customer.customerEmail ? <small>{customer.customerEmail}</small> : null}
-                  </button>
-                  {(
-                    <button className="customer-delete-btn" type="button" disabled={customerMasterStatus.saving}
-                      onClick={() => void deleteCustomerMaster(customer.customerCode)}
-                      title="この顧客を削除"
-                    >削除</button>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : null}
           <div className="issue-fields-grid">
             <label className={form.customerName.trim() ? "filled" : "required"}>
               会社名 ★

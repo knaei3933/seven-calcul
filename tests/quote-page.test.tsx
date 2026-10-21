@@ -361,7 +361,7 @@ describe("quotation page stale draft", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
       const target = String(url);
-      if (target === "/api/customers?q=&limit=500") {
+      if (target.startsWith("/api/customers?")) {
         return new Response(JSON.stringify({
           customers: [{
             customerCode: "C-001",
@@ -379,8 +379,17 @@ describe("quotation page stale draft", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<QuotePage />);
-    await user.click(screen.getByTestId("customer-search-input"));
+    await user.type(screen.getByTestId("customer-search-input"), "既存");
     await waitFor(() => expect(screen.getByTestId("customer-search-results")).toBeInTheDocument());
+    await waitFor(() => {
+      const request = fetchMock.mock.calls.find(([requestedUrl]) => {
+        const parsed = new URL(String(requestedUrl), "http://localhost");
+        return parsed.pathname === "/api/customers"
+          && parsed.searchParams.get("q") === "既存"
+          && parsed.searchParams.get("limit") === "500";
+      });
+      expect(request).toBeTruthy();
+    });
     expect(screen.getByTestId("issue-required-fields")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /既存顧客株式会社/ }));
