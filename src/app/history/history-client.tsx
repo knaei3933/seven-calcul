@@ -323,7 +323,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
                       title={canManage(record) ? undefined : "作成者または管理者のみ変更できます"}
                       onChange={(event) => void changeStatus(record, event.target.value as QuotationStatus)}
                     >
-                      {MANUAL_STATUS_OPTIONS[record.status].map((item) => <option key={item} value={item}>{statusLabels[item]}</option>)}
+                      {manualStatusOptions(record).map((item) => <option key={item} value={item}>{statusLabels[item]}</option>)}
                     </select>
                   </td>
                   <td className="history-actions">
@@ -403,13 +403,20 @@ async function fetchStoredQuotationPdf(
   };
 }
 
-const MANUAL_STATUS_OPTIONS: Record<QuotationStatus, QuotationStatus[]> = {
-  draft: ["draft", "rejected", "expired"],
-  sent: ["sent", "rejected", "expired"],
-  approved: ["approved"],
-  rejected: ["rejected"],
-  expired: ["expired"],
-};
+function manualStatusOptions(record: QuotationRecord): QuotationStatus[] {
+  const base: Record<QuotationStatus, QuotationStatus[]> = {
+    draft: ["draft", "rejected", "expired"],
+    sent: ["sent", "approved", "rejected", "expired"],
+    approved: ["approved"],
+    rejected: ["rejected"],
+    expired: ["expired"],
+  };
+  // 成約への手動変更は内部承認後のみ出す。未承認のまま発注管理へ流さない。
+  if (record.status === "sent" && !record.internalApproval) {
+    return base.sent.filter((status) => status !== "approved");
+  }
+  return base[record.status];
+}
 
 function QuotationDetailModal({
   record,

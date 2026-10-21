@@ -18,7 +18,7 @@ type Context = { params: Promise<{ id: string }> };
 
 const MANUAL_STATUS_TRANSITIONS: Record<QuotationStatus, QuotationStatus[]> = {
   draft: ["draft", "rejected", "expired"],
-  sent: ["sent", "rejected", "expired"],
+  sent: ["sent", "approved", "rejected", "expired"],
   approved: ["approved"],
   rejected: ["rejected"],
   expired: ["expired"],
@@ -74,14 +74,17 @@ export async function PATCH(request: Request, context: Context): Promise<NextRes
     if (!MANUAL_STATUS_TRANSITIONS[existing.status]?.includes(status)) {
       return NextResponse.json({ error: "invalid_status_transition" }, { status: 409 });
     }
+    if (existing.status === "sent" && status === "approved" && !existing.internalApproval) {
+      return NextResponse.json({ error: "internal_approval_required" }, { status: 409 });
+    }
     const record = await updateQuotationStatus(Number(id), status, user.id);
     if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
     if (status === "approved") {
       // 成約時にフィルム発注管理へ自動反映する。失敗してもステータス更新は取り消さない。
       try {
         await syncFilmOrdersFromQuotations(user.email);
-      } catch {
-        console.error("[film-orders] sync after approval failed");
+      } catch (error) {
+        console.error("[film-orders] sync after approval failed", error);
       }
     }
     return NextResponse.json({ record });

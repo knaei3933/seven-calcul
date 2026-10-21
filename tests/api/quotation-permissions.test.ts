@@ -11,7 +11,7 @@ process.env.ADMIN_PASSWORD = "admin-permissions-password";
 process.env.ADMIN_NAME = "Permissions Admin";
 
 const { POST: login } = await import("@/app/api/auth/login/route");
-const { GET: getQuotation } = await import("@/app/api/quotations/[id]/route");
+const { GET: getQuotationRoute } = await import("@/app/api/quotations/[id]/route");
 const { PATCH: patchQuotation } = await import("@/app/api/quotations/[id]/route");
 const { DELETE: deleteQuotation } = await import("@/app/api/quotations/[id]/route");
 const { createUser } = await import("@/lib/auth-store");
@@ -22,6 +22,7 @@ const {
   updateQuotationStatus,
 } = await import("@/lib/quotation-store");
 const { syncFilmOrdersFromQuotations } = await import("@/lib/film-orders");
+const { getQuotation: getQuotationRecord } = await import("@/lib/quotation-store");
 const { filmOrderExistsForQuotation } = await import("@/lib/film-orders");
 
 afterAll(async () => {
@@ -103,7 +104,7 @@ describe("quotation ownership permissions", () => {
     const record = await createRecord("S7-PERMISSION-001", owner.id);
     const context = { params: Promise.resolve({ id: String(record.id) }) };
 
-    await expect(getQuotation(request("http://localhost/api/quotations/1", {}, readerToken), context)).resolves.toMatchObject({ status: 200 });
+    await expect(getQuotationRoute(request("http://localhost/api/quotations/1", {}, readerToken), context)).resolves.toMatchObject({ status: 200 });
     const forbidden = await patchQuotation(request("http://localhost/api/quotations/1", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -125,6 +126,7 @@ describe("quotation ownership permissions", () => {
       body: JSON.stringify({ status: "approved" }),
     }, adminToken), context);
     expect(adminPatch.status).toBe(409);
+    await expect(adminPatch.json()).resolves.toEqual({ error: "invalid_status_transition" });
 
     // Send and customer-approval gates are tested separately; establish approved
     // state to verify approved quotations remain deletion-protected.
@@ -142,6 +144,29 @@ describe("quotation ownership permissions", () => {
     expect(approvalResponse.status).toBe(200);
     await expect(approvalResponse.json()).resolves.toMatchObject({ gate: "customerApproval", filmOrderSynced: true });
     expect(await filmOrderExistsForQuotation(record.id)).toBe(true);
+
+    const manualRecord = await createRecord("S7-PERMISSION-MANUAL-APPROVED", owner.id);
+    await approveQuotationGate(manualRecord.id, "internal", owner.id);
+    await updateQuotationStatus(manualRecord.id, "sent", owner.id);
+    const manualContext = { params: Promise.resolve({ id: String(manualRecord.id) }) };
+    const manualApproved = await patchQuotation(request(
+      `http://localhost/api/quotations/${manualRecord.id}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "approved" }),
+      },
+      ownerToken,
+    ), manualContext);
+    expect(manualApproved.status).toBe(200);
+    const manualPayload = await manualApproved.json();
+    expect(manualPayload.record.id).toBe(manualRecord.id);
+    expect(manualPayload.record.status).toBe("approved");
+    const persistedManualResponse = await getQuotationRoute(request(`http://localhost/api/quotations/${manualRecord.id}`, {}, ownerToken), manualContext);
+    await expect(persistedManualResponse.json()).resolves.toMatchObject({
+      record: { id: manualRecord.id, status: "approved" },
+    });
+    expect(await filmOrderExistsForQuotation(manualRecord.id)).toBe(true);
 
     const readerDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, readerToken), context);
     expect(readerDelete.status).toBe(403);
