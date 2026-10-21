@@ -696,12 +696,19 @@ function QuotationDetailModal({
           <div>
             <span className="side-kicker">QUOTATION DETAIL</span>
             <h2 id="history-detail-title">{record.quotationNumber}</h2>
-            <p data-testid="history-film-composition">{record.customerName || "得意先未設定"} / {record.productName} / フィルム構成 {composition || DEFAULT_FILM_COMPOSITION}</p>
-            <p className="help" data-testid="approval-gate-state">
-              {record.internalApproval ? `内部承認済み（${new Date(record.internalApproval.approvedAt).toLocaleString("ja-JP")}）` : "内部承認待ち"}
-              {" / "}
-              {record.customerApproval ? `顧客承認済み（${new Date(record.customerApproval.approvedAt).toLocaleString("ja-JP")}）` : "顧客承認待ち"}
-            </p>
+            <div className="history-detail-meta">
+              <p data-testid="history-customer-name">{record.customerName || "得意先未設定"}</p>
+              <p data-testid="history-product-name">{record.productName}</p>
+              <p data-testid="history-film-composition">フィルム構成 {composition || DEFAULT_FILM_COMPOSITION}</p>
+              <div className="approval-state-row" data-testid="approval-gate-state">
+                <span className="approval-state-chip pending">
+                  {record.internalApproval ? `内部承認済み（${new Date(record.internalApproval.approvedAt).toLocaleString("ja-JP")}）` : "内部承認待ち"}
+                </span>
+                <span className="approval-state-chip pending">
+                  {record.customerApproval ? `顧客承認済み（${new Date(record.customerApproval.approvedAt).toLocaleString("ja-JP")}）` : "顧客承認待ち"}
+                </span>
+              </div>
+            </div>
           </div>
           <div className="detail-header-actions">
             {canEditEmail ? (
