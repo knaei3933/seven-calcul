@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { deleteCustomer, getCustomer } from "@/lib/customer-store";
 import { getSessionUser } from "@/lib/api-auth";
+import { customerOwnerDomainOf } from "@/lib/film-order-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
   const user = await getSessionUser(request);
   if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
   try {
-    const customer = await getCustomer(decodeURIComponent(code));
+    const customer = await getCustomer(customerOwnerDomainOf(user.email), decodeURIComponent(code));
     if (!customer) return NextResponse.json({ error: "customer_not_found" }, { status: 404 });
     return NextResponse.json({ customer });
   } catch {
@@ -27,7 +28,7 @@ export async function DELETE(request: Request, context: Context): Promise<NextRe
   // 削除は破壊的操作のため管理者アカウントに限定する。
   if (user.role !== "admin") return NextResponse.json({ error: "admin_required" }, { status: 403 });
   try {
-    const deleted = await deleteCustomer(decodeURIComponent(code));
+    const deleted = await deleteCustomer(customerOwnerDomainOf(user.email), decodeURIComponent(code));
     if (!deleted) return NextResponse.json({ error: "customer_not_found" }, { status: 404 });
     return NextResponse.json({ deleted: true });
   } catch {

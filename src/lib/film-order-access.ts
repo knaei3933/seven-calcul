@@ -16,6 +16,12 @@ export function isSevenChemicalUser(email: string | null | undefined): boolean {
   return hasDomain(email, SEVEN_CHEMICAL_EMAIL_DOMAIN);
 }
 
+export type CustomerOwnerDomain = "seven" | "kanei";
+
+export function customerOwnerDomainOf(email: string | null | undefined): CustomerOwnerDomain {
+  return isKaneiTradeUser(email) ? "kanei" : "seven";
+}
+
 export function isKaneiTradeUser(email: string | null | undefined): boolean {
   return hasDomain(email, KANEI_TRADE_EMAIL_DOMAIN);
 }

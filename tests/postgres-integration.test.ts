@@ -146,7 +146,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     expect(updatedChecklist!.acceptedCount).toBeGreaterThan(0);
 
     const { saveCustomer, getCustomer, listCustomers } = await import("@/lib/customer-store");
-    const customer = await saveCustomer({
+    const customer = await saveCustomer("kanei", {
       customerCode: "PG-001",
       customerName: "PostgreSQL顧客マスタ",
       customerPostalCode: "1000001",
@@ -156,8 +156,8 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
       customerEmail: "customer@pg.test",
     });
     expect(customer.customerCode).toBe("PG-001");
-    expect(await getCustomer("pg-001")).toBeNull();
-    const customers = await listCustomers("postgresql");
+    expect(await getCustomer("seven", "pg-001")).toBeNull();
+    const customers = await listCustomers("postgresql", 100, "kanei");
     expect(customers).toHaveLength(1);
 
     const { getDatabaseForTest } = await import("@/lib/quotation-store");

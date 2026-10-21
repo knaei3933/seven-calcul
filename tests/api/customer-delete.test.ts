@@ -39,7 +39,7 @@ describe("customer deletion API", () => {
   let userToken: string | undefined;
 
   beforeAll(async () => {
-    await saveCustomer({
+    await saveCustomer("seven", {
       customerCode: "DEL-001",
       customerName: "삭제검증주식회사",
       customerPostalCode: "",

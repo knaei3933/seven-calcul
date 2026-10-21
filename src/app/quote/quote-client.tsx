@@ -1650,6 +1650,17 @@ export default function PrintableQuotationPage({
                   data-testid="customer-search-input"
                 />
               </label>
+              <label className="customer-search-field">
+                メール
+                <input
+                  type="email"
+                  value={form.customerEmail}
+                  onChange={(event) => update("customerEmail", event.target.value)}
+                  placeholder="purchase@example.co.jp"
+                  autoComplete="email"
+                  data-testid="customer-master-email-input"
+                />
+              </label>
               <button
                 className="button secondary"
                 type="button"
@@ -1692,6 +1703,7 @@ export default function PrintableQuotationPage({
                     <strong>{customer.customerCode}</strong>
                     <span>{customer.customerName}</span>
                     <small>{customer.customerAddress || "住所未登録"}</small>
+                    {customer.customerEmail ? <small>{customer.customerEmail}</small> : null}
                   </button>
                   {(
                     <button className="customer-delete-btn" type="button" disabled={customerMasterStatus.saving}

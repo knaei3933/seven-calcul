@@ -47,7 +47,7 @@ describe("customer master validation", () => {
 
 describe("customer master persistence and search", () => {
   beforeAll(async () => {
-    await saveCustomer({
+    await saveCustomer("seven", {
       customerCode: "CA%A",
       customerName: "와일드카드주식회사",
       customerPostalCode: "",
@@ -56,7 +56,7 @@ describe("customer master persistence and search", () => {
       customerTelephone: "",
       customerEmail: "",
     });
-    await saveCustomer({
+    await saveCustomer("seven", {
       customerCode: "CA-B",
       customerName: "일반주식회사",
       customerPostalCode: "",
@@ -68,24 +68,24 @@ describe("customer master persistence and search", () => {
   });
 
   it("stores and reads back the same customer code", async () => {
-    const stored = await getCustomer("CA%A");
+    const stored = await getCustomer("seven", "CA%A");
     expect(stored?.customerName).toBe("와일드카드주식회사");
-    expect(await getCustomer("  CA-B  ")).not.toBeNull();
+    expect(await getCustomer("seven", "  CA-B  ")).not.toBeNull();
   });
 
   it("treats LIKE wildcards in searches as literal characters", async () => {
     // % 리터럴 검색: %를 포함한 코드 1건만 (와일드카드라면 2건 전부)
-    expect(await listCustomers("%")).toHaveLength(1);
+    expect(await listCustomers("%", 100, "seven")).toHaveLength(1);
     // _ 리터럴 검색: _를 포함한 고객은 없음 (와일드카드라면 2건 전부)
-    expect(await listCustomers("_")).toHaveLength(0);
-    expect(await listCustomers("A%")).toHaveLength(1);
-    expect(await listCustomers("CA%")).toHaveLength(1);
-    expect(await listCustomers("퍼센트 도시")).toHaveLength(1);
-    expect(await listCustomers("주식회사")).toHaveLength(2);
+    expect(await listCustomers("_", 100, "seven")).toHaveLength(0);
+    expect(await listCustomers("A%", 100, "seven")).toHaveLength(1);
+    expect(await listCustomers("CA%", 100, "seven")).toHaveLength(1);
+    expect(await listCustomers("퍼센트 도시", 100, "seven")).toHaveLength(1);
+    expect(await listCustomers("주식회사", 100, "seven")).toHaveLength(2);
   });
 
   it("deletes by code and reports unknown codes", async () => {
-    await saveCustomer({
+    await saveCustomer("seven", {
       customerCode: "CA-DEL",
       customerName: "삭제대상주식회사",
       customerPostalCode: "",
@@ -94,9 +94,37 @@ describe("customer master persistence and search", () => {
       customerTelephone: "",
       customerEmail: "",
     });
-    expect(await deleteCustomer("  CA-DEL  ")).toBe(true);
-    expect(await getCustomer("CA-DEL")).toBeNull();
-    expect(await deleteCustomer("CA-DEL")).toBe(false);
-    expect(await deleteCustomer("   ")).toBe(false);
+    expect(await deleteCustomer("seven", "  CA-DEL  ")).toBe(true);
+    expect(await getCustomer("seven", "CA-DEL")).toBeNull();
+    expect(await deleteCustomer("seven", "CA-DEL")).toBe(false);
+    expect(await deleteCustomer("seven", "   ")).toBe(false);
+  });
+
+  it("isolates the same customer code by owner domain", async () => {
+    await saveCustomer("kanei", {
+      customerCode: "C-001",
+      customerName: "カネイC-001",
+      customerPostalCode: "",
+      customerAddress: "",
+      customerContact: "",
+      customerTelephone: "",
+      customerEmail: "kanei-c001@example.test",
+    });
+    await saveCustomer("seven", {
+      customerCode: "C-001",
+      customerName: "セブンC-001",
+      customerPostalCode: "",
+      customerAddress: "",
+      customerContact: "",
+      customerTelephone: "",
+      customerEmail: "seven-c001@example.test",
+    });
+
+    expect((await getCustomer("kanei", "C-001"))?.customerName).toBe("カネイC-001");
+    expect((await getCustomer("seven", "C-001"))?.customerName).toBe("セブンC-001");
+    expect(await listCustomers("C-001", 100, "kanei")).toHaveLength(1);
+    expect(await listCustomers("C-001", 100, "seven")).toHaveLength(1);
+    expect(await deleteCustomer("kanei", "C-001")).toBe(true);
+    expect((await getCustomer("seven", "C-001"))?.customerName).toBe("セブンC-001");
   });
 });

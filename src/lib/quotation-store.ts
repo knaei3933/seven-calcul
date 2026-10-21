@@ -518,17 +518,21 @@ export interface IssuedQuotationResult {
   pdfSha256: string;
 }
 
-export async function getNextQuotationNumber(now = new Date()): Promise<string> {
+export async function getNextQuotationNumber(
+  ownerDomain: "seven" | "kanei" = "seven",
+  now = new Date(),
+): Promise<string> {
   const jstDateString = now.toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" });
   const [year, month] = jstDateString.split("-");
-  const prefix = `S7-${year}${month}-`;
+  const companyPrefix = ownerDomain === "kanei" ? "KT" : "S7";
+  const prefix = `${companyPrefix}-${year}${month}-`;
   const db = await getDatabase();
   const rows = await db.all<{ quotation_number: string }>(
     "SELECT quotation_number FROM quotations WHERE quotation_number LIKE ?",
     [`${prefix}%`],
   );
   const usedSuffixes = new Set(rows.map((row) => {
-    const match = /^S7-\d{6}-(\d+)$/.exec(row.quotation_number);
+    const match = new RegExp(`^${companyPrefix}-\\d{6}-(\\d+)$`).exec(row.quotation_number);
     return match ? Number(match[1]) : 0;
   }).filter((suffix) => suffix > 0));
 

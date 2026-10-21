@@ -26,7 +26,7 @@ afterAll(async () => {
 
 describe("quotation persistence with a manually edited selling price", () => {
   it("generates the next monthly number without reusing an existing quotation number", async () => {
-    const first = await getNextQuotationNumber(new Date("2026-10-19T00:00:00Z"));
+    const first = await getNextQuotationNumber("seven", new Date("2026-10-19T00:00:00Z"));
     expect(first).toMatch(/^S7-202610-\d{3}$/);
 
     await saveQuotation({
@@ -57,8 +57,17 @@ describe("quotation persistence with a manually edited selling price", () => {
       payload: {},
     }, actor.id, "user");
 
-    const second = await getNextQuotationNumber(new Date("2026-10-19T00:00:00Z"));
+    const second = await getNextQuotationNumber("seven", new Date("2026-10-19T00:00:00Z"));
     expect(Number(second.slice(-3))).toBe(Number(first.slice(-3)) + 1);
+  });
+
+  it("uses separate monthly number series for Seven and Kanei", async () => {
+    const date = new Date("2026-10-20T00:00:00Z");
+    const seven = await getNextQuotationNumber("seven", date);
+    const kanei = await getNextQuotationNumber("kanei", date);
+    expect(seven).toMatch(/^S7-202610-\d{3}$/);
+    expect(kanei).toMatch(/^KT-202610-\d{3}$/);
+    expect(seven).not.toBe(kanei);
   });
 
   it("stores simulator cost, displayed price, and reverse-calculated profit", async () => {

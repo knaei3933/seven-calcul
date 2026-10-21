@@ -70,6 +70,7 @@ export interface CustomerMasterInput {
 }
 
 export interface CustomerMaster extends CustomerMasterInput {
+  ownerDomain: "seven" | "kanei";
   createdAt: string;
   updatedAt: string;
 }

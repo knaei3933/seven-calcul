@@ -1,7 +1,9 @@
 import { getSqlClient, type SqlClient } from "./db";
 import type { CustomerMaster, CustomerMasterInput } from "./quotation-shared";
+import type { CustomerOwnerDomain } from "./film-order-access";
 
 interface CustomerRow {
+  owner_domain: CustomerOwnerDomain;
   customer_code: string;
   customer_name: string;
   postal_code: string;
@@ -15,9 +17,10 @@ interface CustomerRow {
 
 let schemaReady: Promise<SqlClient> | null = null;
 
-const SQLITE_SCHEMA = `
+const CUSTOMER_TABLE_SQL = `
     CREATE TABLE IF NOT EXISTS customers (
-      customer_code TEXT PRIMARY KEY,
+      owner_domain TEXT NOT NULL,
+      customer_code TEXT NOT NULL,
       customer_name TEXT NOT NULL,
       postal_code TEXT NOT NULL DEFAULT '',
       address TEXT NOT NULL DEFAULT '',
@@ -25,39 +28,116 @@ const SQLITE_SCHEMA = `
       telephone TEXT NOT NULL DEFAULT '',
       email TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (owner_domain, customer_code)
     );
-    CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(customer_name);
+    CREATE INDEX IF NOT EXISTS idx_customers_owner_name ON customers(owner_domain, customer_name);
 `;
 
-const POSTGRES_SCHEMA = `
-    CREATE TABLE IF NOT EXISTS customers (
-      customer_code TEXT PRIMARY KEY,
-      customer_name TEXT NOT NULL,
-      postal_code TEXT NOT NULL DEFAULT '',
-      address TEXT NOT NULL DEFAULT '',
-      contact TEXT NOT NULL DEFAULT '',
-      telephone TEXT NOT NULL DEFAULT '',
-      email TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(customer_name);
-`;
+/** LIKE/ILIKE 와일드카드를 문자 그대로 검색하기 위해 이스케이프한다. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+function normalizeOwnerDomain(value: CustomerOwnerDomain): CustomerOwnerDomain {
+  return value === "kanei" ? "kanei" : "seven";
+}
+
+async function migrateLegacyCustomers(db: SqlClient): Promise<void> {
+  if (db.dialect === "sqlite") {
+    const columns = await db.all<{ name: string; pk: number }>("PRAGMA table_info(customers)");
+    const names = new Set(columns.map((column) => column.name));
+    if (!names.has("owner_domain")) {
+      await db.exec("ALTER TABLE customers ADD COLUMN owner_domain TEXT NOT NULL DEFAULT 'seven'");
+    }
+    const primaryKey = columns
+      .filter((column) => Number(column.pk) > 0)
+      .sort((left, right) => left.pk - right.pk)
+      .map((column) => column.name);
+    if (primaryKey.join(",") === "owner_domain,customer_code") {
+      await db.exec("CREATE INDEX IF NOT EXISTS idx_customers_owner_name ON customers(owner_domain, customer_name)");
+      return;
+    }
+    await db.transaction(async (tx) => {
+      await tx.exec("DROP TABLE IF EXISTS customers_scoped");
+      await tx.exec(`
+        CREATE TABLE customers_scoped (
+          owner_domain TEXT NOT NULL,
+          customer_code TEXT NOT NULL,
+          customer_name TEXT NOT NULL,
+          postal_code TEXT NOT NULL DEFAULT '',
+          address TEXT NOT NULL DEFAULT '',
+          contact TEXT NOT NULL DEFAULT '',
+          telephone TEXT NOT NULL DEFAULT '',
+          email TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (owner_domain, customer_code)
+        )
+      `);
+      const ownerExpression = names.has("owner_domain")
+        ? "CASE WHEN owner_domain = 'kanei' THEN 'kanei' ELSE 'seven' END"
+        : "'seven'";
+      await tx.exec(`
+        INSERT OR IGNORE INTO customers_scoped
+          (owner_domain,customer_code,customer_name,postal_code,address,contact,telephone,email,created_at,updated_at)
+        SELECT ${ownerExpression},customer_code,customer_name,postal_code,address,contact,telephone,email,created_at,updated_at
+        FROM customers
+      `);
+      await tx.exec("DROP TABLE customers");
+      await tx.exec("ALTER TABLE customers_scoped RENAME TO customers");
+      await tx.exec("CREATE INDEX IF NOT EXISTS idx_customers_owner_name ON customers(owner_domain, customer_name)");
+    });
+    return;
+  }
+
+  const column = await db.get<{ column_name: string }>(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_name = 'customers' AND column_name = 'owner_domain'
+  `);
+  if (!column) {
+    await db.exec("ALTER TABLE customers ADD COLUMN owner_domain TEXT NOT NULL DEFAULT 'seven'");
+    await db.exec("UPDATE customers SET owner_domain = 'seven'");
+  }
+  const primaryKey = await db.get<{ column_name: string }>(`
+    SELECT kcu.column_name
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name
+     AND tc.table_schema = kcu.table_schema
+    WHERE tc.table_name = 'customers'
+      AND tc.constraint_type = 'PRIMARY KEY'
+    ORDER BY kcu.ordinal_position
+  `);
+  if (primaryKey?.column_name !== "owner_domain") {
+    await db.exec("ALTER TABLE customers DROP CONSTRAINT customers_pkey");
+    await db.exec("ALTER TABLE customers ADD PRIMARY KEY (owner_domain, customer_code)");
+  }
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_customers_owner_name ON customers(owner_domain, customer_name)");
+}
 
 async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
     const db = await getSqlClient("customers");
-    await db.exec(db.dialect === "postgres" ? POSTGRES_SCHEMA : SQLITE_SCHEMA);
-    if (db.dialect === "sqlite") {
-      try {
-        await db.exec("ALTER TABLE customers ADD COLUMN email TEXT NOT NULL DEFAULT ''");
-      } catch {
-        // 기존 DB에 email 컬럼이 이미 있는 경우는 무시한다.
-      }
-    }
+    const table = db.dialect === "postgres"
+      ? await db.get<{ table_name: string }>(`
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'customers'
+      `)
+      : await db.get<{ name: string }>(`
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'customers'
+      `);
+    if (table) await migrateLegacyCustomers(db);
+    else await db.exec(CUSTOMER_TABLE_SQL);
     return db;
-  })();
+  })().catch((error) => {
+    schemaReady = null;
+    throw error;
+  });
   return schemaReady;
 }
 
@@ -74,11 +154,6 @@ const CUSTOMER_FIELD_LIMITS = {
 } as const;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** LIKE/ILIKE 와일드카드를 문자 그대로 검색하기 위해 이스케이프한다. */
-function escapeLikePattern(value: string): string {
-  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
-}
 
 export function validateCustomerInput(value: unknown): CustomerMasterInput | null {
   if (!value || typeof value !== "object") return null;
@@ -113,6 +188,7 @@ export function validateCustomerInput(value: unknown): CustomerMasterInput | nul
 
 function mapRow(row: CustomerRow): CustomerMaster {
   return {
+    ownerDomain: row.owner_domain === "kanei" ? "kanei" : "seven",
     customerCode: row.customer_code,
     customerName: row.customer_name,
     customerPostalCode: row.postal_code,
@@ -125,13 +201,18 @@ function mapRow(row: CustomerRow): CustomerMaster {
   };
 }
 
-export async function saveCustomer(value: CustomerMasterInput): Promise<CustomerMaster> {
+export async function saveCustomer(
+  ownerDomain: CustomerOwnerDomain,
+  value: CustomerMasterInput,
+): Promise<CustomerMaster> {
+  const owner = normalizeOwnerDomain(ownerDomain);
   const db = await getDatabase();
   const now = new Date().toISOString();
   await db.run(`
-    INSERT INTO customers (customer_code,customer_name,postal_code,address,contact,telephone,email,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(customer_code) DO UPDATE SET
+    INSERT INTO customers
+      (owner_domain,customer_code,customer_name,postal_code,address,contact,telephone,email,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(owner_domain, customer_code) DO UPDATE SET
       customer_name=excluded.customer_name,
       postal_code=excluded.postal_code,
       address=excluded.address,
@@ -139,34 +220,64 @@ export async function saveCustomer(value: CustomerMasterInput): Promise<Customer
       telephone=excluded.telephone,
       email=excluded.email,
       updated_at=excluded.updated_at
-  `, [value.customerCode, value.customerName, value.customerPostalCode, value.customerAddress, value.customerContact, value.customerTelephone, value.customerEmail, now, now]);
-  const row = await db.get<CustomerRow>("SELECT * FROM customers WHERE customer_code = ?", [value.customerCode]);
+  `, [
+    owner,
+    value.customerCode,
+    value.customerName,
+    value.customerPostalCode,
+    value.customerAddress,
+    value.customerContact,
+    value.customerTelephone,
+    value.customerEmail,
+    now,
+    now,
+  ]);
+  const row = await db.get<CustomerRow>(
+    "SELECT * FROM customers WHERE owner_domain = ? AND customer_code = ?",
+    [owner, value.customerCode],
+  );
   if (!row) throw new Error("customer_save_failed");
   return mapRow(row);
 }
 
-export async function getCustomer(code: string): Promise<CustomerMaster | null> {
-  const db = await getDatabase();
+export async function getCustomer(ownerDomain: CustomerOwnerDomain, code: string): Promise<CustomerMaster | null> {
+  const owner = normalizeOwnerDomain(ownerDomain);
   if (!code.trim()) return null;
-  const row = await db.get<CustomerRow>("SELECT * FROM customers WHERE customer_code = ?", [code.trim()]);
+  const db = await getDatabase();
+  const row = await db.get<CustomerRow>(
+    "SELECT * FROM customers WHERE owner_domain = ? AND customer_code = ?",
+    [owner, code.trim()],
+  );
   return row ? mapRow(row) : null;
 }
 
-export async function deleteCustomer(code: string): Promise<boolean> {
-  const db = await getDatabase();
+export async function deleteCustomer(ownerDomain: CustomerOwnerDomain, code: string): Promise<boolean> {
+  const owner = normalizeOwnerDomain(ownerDomain);
   if (!code.trim()) return false;
-  const result = await db.run("DELETE FROM customers WHERE customer_code = ?", [code.trim()]);
+  const db = await getDatabase();
+  const result = await db.run(
+    "DELETE FROM customers WHERE owner_domain = ? AND customer_code = ?",
+    [owner, code.trim()],
+  );
   return result.changes > 0;
 }
 
-export async function listCustomers(query = "", limit = 100): Promise<CustomerMaster[]> {
+export async function listCustomers(
+  query = "",
+  limit = 100,
+  ownerDomain: CustomerOwnerDomain,
+): Promise<CustomerMaster[]> {
+  const owner = normalizeOwnerDomain(ownerDomain);
   const db = await getDatabase();
   const safeLimit = Math.min(Math.max(Number.isFinite(limit) ? limit : 100, 1), 500);
   const search = `%${escapeLikePattern(query.trim())}%`;
   const rows = await db.all<CustomerRow>(`
     SELECT * FROM customers
-    WHERE customer_code LIKE ? ESCAPE '\\' OR customer_name LIKE ? ESCAPE '\\' OR address LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\'
-    ORDER BY updated_at DESC LIMIT ?
-  `, [search, search, search, search, safeLimit]);
+    WHERE owner_domain = ?
+      AND (customer_code LIKE ? ESCAPE '\\' OR customer_name LIKE ? ESCAPE '\\'
+        OR address LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\')
+    ORDER BY customer_code
+    LIMIT ?
+  `, [owner, search, search, search, search, safeLimit]);
   return rows.map(mapRow);
 }
