@@ -15,6 +15,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       url.searchParams.get("q") ?? "",
       Number(url.searchParams.get("limit") ?? 500),
       customerOwnerDomainOf(user.email),
+      user.email,
     );
     return NextResponse.json({ customers });
   } catch {

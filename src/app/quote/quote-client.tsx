@@ -570,6 +570,11 @@ export default function PrintableQuotationPage({
   };
 
   const selectCustomerMaster = (customer: CustomerMaster) => {
+    // 失敗しても選択操作は妨げない。ランキングは次回表示時に反映されればよい。
+    void fetch(`/api/customers/${encodeURIComponent(customer.customerCode)}/selection`, {
+      method: "POST",
+      cache: "no-store",
+    }).catch(() => undefined);
     clearCustomerSearch();
     setCustomerSearchTerm(customer.customerCode);
     applyPatch({

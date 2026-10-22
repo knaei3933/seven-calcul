@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const databaseDirectory = await mkdtemp(join(tmpdir(), "customer-store-test-"));
 process.env.POUCH_CUSTOMER_DB = join(databaseDirectory, "customers.db");
 
-const { deleteCustomer, getCustomer, listCustomers, saveCustomer, validateCustomerInput } = await import("@/lib/customer-store");
+const { deleteCustomer, getCustomer, listCustomers, recordCustomerSelection, saveCustomer, validateCustomerInput } = await import("@/lib/customer-store");
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
@@ -126,5 +126,19 @@ describe("customer master persistence and search", () => {
     expect(await listCustomers("C-001", 100, "seven")).toHaveLength(1);
     expect(await deleteCustomer("kanei", "C-001")).toBe(true);
     expect((await getCustomer("seven", "C-001"))?.customerName).toBe("セブンC-001");
+  });
+
+  it("ranks customers by each user's own selection count", async () => {
+    // Kim often uses CA-B; Ishii often uses CA%A. Neither affects the other's order.
+    await recordCustomerSelection("seven", "Kim@kanei-trade.co.jp", "CA-B");
+    await recordCustomerSelection("seven", "kim@kanei-trade.co.jp", "CA-B");
+    await recordCustomerSelection("seven", "ishii@727.co.jp", "CA%A");
+
+    expect((await listCustomers("", 100, "seven", "kim@kanei-trade.co.jp")).map((item) => item.customerCode))
+      .toEqual(["CA-B", "CA%A"]);
+    expect((await listCustomers("", 100, "seven", "ISHII@727.co.jp")).map((item) => item.customerCode))
+      .toEqual(["CA%A", "CA-B"]);
+    expect((await listCustomers("", 100, "seven", "other@example.test")).map((item) => item.customerCode))
+      .toEqual(["CA%A", "CA-B"]);
   });
 });

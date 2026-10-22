@@ -36,6 +36,21 @@ const CUSTOMER_TABLE_SQL = `
 
 const CUSTOMER_SCHEMA_VERSION = "2026-10-22-owner-scoped-1";
 
+const CUSTOMER_SELECTION_TABLE_SQL = `
+    CREATE TABLE IF NOT EXISTS customer_selections (
+      owner_domain TEXT NOT NULL,
+      user_email TEXT NOT NULL,
+      customer_code TEXT NOT NULL,
+      selection_count INTEGER NOT NULL DEFAULT 0,
+      last_selected_at TEXT NOT NULL,
+      PRIMARY KEY (owner_domain, user_email, customer_code)
+    );
+    CREATE INDEX IF NOT EXISTS idx_customer_selections_user
+      ON customer_selections(owner_domain, user_email, selection_count DESC, last_selected_at DESC);
+`;
+
+const CUSTOMER_SCHEMA_WITH_SELECTIONS_VERSION = "2026-10-22-user-ranked-selections-1";
+
 /** LIKE/ILIKE 와일드카드를 문자 그대로 검색하기 위해 이스케이프한다. */
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
@@ -134,7 +149,7 @@ async function getDatabase(): Promise<SqlClient> {
       ["customers"],
     );
     // コールドスタート毎の情報スキーマ照会とDDL検査を省略する。
-    if (marker?.version === CUSTOMER_SCHEMA_VERSION) return db;
+    if (marker?.version === CUSTOMER_SCHEMA_WITH_SELECTIONS_VERSION) return db;
     const table = db.dialect === "postgres"
       ? await db.get<{ table_name: string }>(`
         SELECT table_name
@@ -148,10 +163,11 @@ async function getDatabase(): Promise<SqlClient> {
       `);
     if (table) await migrateLegacyCustomers(db);
     else await db.exec(CUSTOMER_TABLE_SQL);
+    await db.exec(CUSTOMER_SELECTION_TABLE_SQL);
     await db.run(`
       INSERT INTO customer_schema_migrations (slot,version,updated_at) VALUES (?,?,?)
       ON CONFLICT(slot) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at
-    `, ["customers", CUSTOMER_SCHEMA_VERSION, new Date().toISOString()]);
+    `, ["customers", CUSTOMER_SCHEMA_WITH_SELECTIONS_VERSION, new Date().toISOString()]);
     return db;
   })().catch((error) => {
     schemaReady = null;
@@ -281,22 +297,59 @@ export async function deleteCustomer(ownerDomain: CustomerOwnerDomain, code: str
   return result.changes > 0;
 }
 
+export async function recordCustomerSelection(
+  ownerDomain: CustomerOwnerDomain,
+  userEmail: string,
+  code: string,
+): Promise<boolean> {
+  const owner = normalizeOwnerDomain(ownerDomain);
+  const normalizedEmail = userEmail.trim().toLowerCase();
+  const customerCode = code.trim();
+  if (!normalizedEmail || !customerCode) return false;
+  const db = await getDatabase();
+  const customer = await db.get<{ customer_code: string }>(
+    "SELECT customer_code FROM customers WHERE owner_domain = ? AND customer_code = ?",
+    [owner, customerCode],
+  );
+  if (!customer) return false;
+  await db.run(`
+    INSERT INTO customer_selections
+      (owner_domain,user_email,customer_code,selection_count,last_selected_at)
+    VALUES (?,?,?,1,?)
+    ON CONFLICT(owner_domain, user_email, customer_code) DO UPDATE SET
+      selection_count = customer_selections.selection_count + 1,
+      last_selected_at = excluded.last_selected_at
+  `, [owner, normalizedEmail, customerCode, new Date().toISOString()]);
+  return true;
+}
+
 export async function listCustomers(
   query = "",
   limit = 100,
   ownerDomain: CustomerOwnerDomain,
+  userEmail?: string,
 ): Promise<CustomerMaster[]> {
   const owner = normalizeOwnerDomain(ownerDomain);
   const db = await getDatabase();
   const safeLimit = Math.min(Math.max(Number.isFinite(limit) ? limit : 100, 1), 500);
   const search = `%${escapeLikePattern(query.trim())}%`;
+  const normalizedEmail = userEmail?.trim().toLowerCase() ?? "";
+  const selectionJoin = normalizedEmail
+    ? "LEFT JOIN customer_selections s ON s.owner_domain = c.owner_domain AND s.customer_code = c.customer_code AND s.user_email = ?"
+    : "";
+  const selectionArguments = normalizedEmail ? [normalizedEmail] : [];
+  const selectionOrder = normalizedEmail
+    ? "COALESCE(s.selection_count, 0) DESC, COALESCE(s.last_selected_at, '') DESC, c.customer_code ASC"
+    : "c.customer_code ASC";
   const rows = await db.all<CustomerRow>(`
-    SELECT * FROM customers
-    WHERE owner_domain = ?
-      AND (customer_code LIKE ? ESCAPE '\\' OR customer_name LIKE ? ESCAPE '\\'
-        OR address LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\')
-    ORDER BY customer_code
+    SELECT c.*
+    FROM customers c
+    ${selectionJoin}
+    WHERE c.owner_domain = ?
+      AND (c.customer_code LIKE ? ESCAPE '\\' OR c.customer_name LIKE ? ESCAPE '\\'
+        OR c.address LIKE ? ESCAPE '\\' OR c.email LIKE ? ESCAPE '\\')
+    ORDER BY ${selectionOrder}
     LIMIT ?
-  `, [owner, search, search, search, search, safeLimit]);
+  `, [...selectionArguments, owner, search, search, search, search, safeLimit]);
   return rows.map(mapRow);
 }
