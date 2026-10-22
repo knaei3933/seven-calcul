@@ -7,10 +7,12 @@ import {
   updateFilmDeliveryFromToken,
 } from "@/lib/film-orders";
 import {
+  browserOriginOf,
   createResumableSession,
   deliveryDocumentFolderId,
   driveConfigured,
   findDriveFiles,
+  getConfirmedDriveUpload,
 } from "@/lib/google-drive";
 
 export const runtime = "nodejs";
@@ -59,6 +61,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       carrier?: unknown;
       trackingNumber?: unknown;
       note?: unknown;
+      fileId?: unknown;
     };
     const action = body.action === "session" || body.action === "complete" ? body.action : "";
     if (!action) return NextResponse.json({ error: "unknown_action" }, { status: 400 });
@@ -86,13 +89,17 @@ export async function POST(request: Request, context: Context): Promise<NextResp
         folderId,
         contentType: typeof body.contentType === "string" ? body.contentType : "application/pdf",
         sizeBytes: typeof body.sizeBytes === "number" ? body.sizeBytes : undefined,
+        origin: browserOriginOf(request),
       });
       return NextResponse.json({ sessionUri, fileName: safeFileName });
     }
 
     if (!shipmentDate || !uploadId) return NextResponse.json({ error: "invalid_upload_request" }, { status: 400 });
-    let candidates = await findDriveFiles({ fileName: safeFileName, folderId });
-    for (let attempt = 1; candidates.length === 0 && attempt < 3; attempt += 1) {
+    const fileId = typeof body.fileId === "string" ? body.fileId.trim() : "";
+    let candidates = fileId
+      ? [await getConfirmedDriveUpload({ fileId, fileName: safeFileName, folderId })].filter((candidate) => candidate != null)
+      : await findDriveFiles({ fileName: safeFileName, folderId });
+    for (let attempt = 1; !fileId && candidates.length === 0 && attempt < 3; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 800));
       candidates = await findDriveFiles({ fileName: safeFileName, folderId });
     }

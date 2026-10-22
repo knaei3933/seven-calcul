@@ -9,6 +9,8 @@ import {
   customerDesignStatusLabels,
   customerProofStatusLabels,
   sampleBulkStatusLabels,
+  shipToStatusLabels,
+  type CustomerDesignStatus,
   type FilmOrderStatus,
   type FilmOrderView,
 } from "@/lib/film-order-shared";
@@ -20,6 +22,7 @@ import {
 } from "@/lib/film-order-access";
 import { D } from "@/lib/decimal";
 import { filmQuotationNumberFor } from "@/lib/film-quotation";
+import type { CustomerDeliveryDestination } from "@/lib/quotation-shared";
 
 interface MailResult {
   to: string;
@@ -59,6 +62,25 @@ function companyLabel(company: FilmOrderCompany): string {
   return company === "seven" ? "セブン化学" : "金井貿易";
 }
 
+function customerDesignReadyOf(order: Pick<FilmOrderView, "customerDesign">): boolean {
+  return ["confirmed", "not_required", "legacy_exempt"].includes(order.customerDesign?.status as CustomerDesignStatus);
+}
+
+function customerDesignWaitLabelOf(order: Pick<FilmOrderView, "customerDesign">): string {
+  switch (order.customerDesign?.status) {
+    case "pending":
+      return "先に顧客デザインを依頼または不要設定";
+    case "requested":
+      return "顧客デザインのアップロード待ち";
+    case "received":
+      return "先に顧客デザインを確定";
+    case "correction_requested":
+      return "顧客デザイン修正の再提出待ち";
+    default:
+      return "顧客デザインの確定待ち";
+  }
+}
+
 function canOperate(company: FilmOrderCompany, isSeven: boolean, isKanei: boolean): boolean {
   return company === "seven" ? isSeven : isKanei;
 }
@@ -87,6 +109,9 @@ export function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: bo
         ? { kind: "run", label: "発注書送信済みにする", body: { action: "mark-ordered" }, ok: "発注書送信済みにしました。" }
         : { kind: "none", label: `${companyLabel(buyer)}の発注書送信待ち` };
     case "ordered":
+      if (!customerDesignReadyOf(order)) {
+        return { kind: "none", label: customerDesignWaitLabelOf(order) };
+      }
       return buyerCanOperate
         ? { kind: "form", label: "入稿データを登録", form: "receiving" }
         : { kind: "none", label: `${companyLabel(buyer)}の入稿登録待ち` };
@@ -361,6 +386,7 @@ function OrderCard({
         invalid_pdf_file_url: "PDFのDriveアップロードが完了していません。完了後に登録してください。",
         invalid_ai_file_url: "AIのDriveアップロードが完了していません。完了後に登録してください。",
         invalid_file_url: "ファイルURLが正しくありません。",
+        customer_design_confirmation_required: "先に「顧客デザイン」を確定または不要設定してください。",
       };
       setMessage(error instanceof Error && error.message !== "failed"
         ? `失敗しました（${humanMessages[error.message] ?? error.message}）`
@@ -446,6 +472,8 @@ function OrderCard({
               />
             </div>
           </div>
+
+          <ShipToPanel order={order} isSeven={isSeven} isKanei={isKanei} busy={busy} onRun={run} />
 
           <SampleBulkPanel order={order} isSeven={isSeven} isKanei={isKanei} busy={busy} onRun={run} />
           <CustomerDesignPanel order={order} isKanei={isKanei} busy={busy} onRun={run} />
@@ -717,6 +745,173 @@ function FilmReceiptConfirmForm({
       </label>
       <button className="button" type="submit" disabled={busy}>{busy ? "確認中..." : "フィルムを受領確認する"}</button>
     </form>
+  );
+}
+
+function ShipToPanel({
+  order,
+  isSeven,
+  isKanei,
+  busy,
+  onRun,
+}: {
+  order: FilmOrderView;
+  isSeven: boolean;
+  isKanei: boolean;
+  busy: boolean;
+  onRun: (body: Record<string, unknown>, ok: string) => Promise<void>;
+}) {
+  const [destinations, setDestinations] = useState<CustomerDeliveryDestination[]>([]);
+  const [selectedDestinationId, setSelectedDestinationId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({
+    label: "",
+    companyName: "",
+    department: "",
+    contactName: "",
+    postalCode: "",
+    address: "",
+    building: "",
+    phone: "",
+    email: "",
+    note: "",
+  });
+
+  const load = useCallback(async () => {
+    if (!order.customer_code) {
+      setDestinations([]);
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/customers/${encodeURIComponent(order.customer_code)}/delivery-destinations`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "load_failed");
+      const loaded = payload.destinations as CustomerDeliveryDestination[];
+      setDestinations(loaded);
+      setSelectedDestinationId((old) => old ?? loaded.find((item) => item.isDefault)?.id ?? loaded[0]?.id ?? null);
+    } catch {
+      setDestinations([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [order.customer_code]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 初回マウント時に納品先マスタを取得する意図的な処理です。
+    void load();
+  }, [load]);
+
+  const canOperateShipTo = canOperate(buyerCompanyOf(order), isSeven, isKanei);
+  const canEdit = canOperateShipTo && order.shipTo.status !== "confirmed";
+  const useSavedDestination = selectedDestinationId != null;
+
+  const submit = async () => {
+    if (busy || !canEdit) return;
+    const body = useSavedDestination && selectedDestinationId
+      ? { action: "register-ship-to", destinationId: selectedDestinationId }
+      : {
+        action: "register-ship-to",
+        shipToLabel: form.label,
+        shipToCompanyName: form.companyName,
+        shipToDepartment: form.department,
+        shipToContactName: form.contactName,
+        shipToPostalCode: form.postalCode,
+        shipToAddress: form.address,
+        shipToBuilding: form.building,
+        shipToPhone: form.phone,
+        shipToEmail: form.email,
+        shipToNote: form.note,
+        saveShipToMaster: true,
+      };
+    await onRun(body, "納品先を登録しました。顧客マスターへ自動保存しました。");
+    await load();
+  };
+
+  return (
+    <section className="film-order-section" aria-label="納品先管理" data-testid="ship-to-panel">
+      <h3>納品先管理</h3>
+      <div className="film-order-columns">
+        <dl>
+          <div><dt>状態</dt><dd data-testid="ship-to-status">{shipToStatusLabels[order.shipTo.status]}</dd></div>
+          <div><dt>納品先</dt><dd>{order.shipTo.companyName || "-"}</dd></div>
+          <div><dt>住所</dt><dd>{order.shipTo.postalCode || order.shipTo.address ? `${order.shipTo.postalCode} ${order.shipTo.address}${order.shipTo.building ? ` ${order.shipTo.building}` : ""}` : "-"}</dd></div>
+          <div><dt>電話</dt><dd>{order.shipTo.phone || "-"}</dd></div>
+          {order.shipTo.confirmedAt ? <div><dt>確認</dt><dd>{new Date(order.shipTo.confirmedAt).toLocaleString("ja-JP")}</dd></div> : null}
+        </dl>
+        <div className="film-order-inline-actions">
+          {!order.customer_code ? <p className="help">顧客コードがないため、住所録へ自動保存できません。</p> : null}
+          {loading ? <p className="help">住所録を読み込み中...</p> : null}
+          {canEdit ? (
+            <>
+              {destinations.length ? (
+                <div className="ship-to-options">
+                  {destinations.map((destination) => (
+                    <label key={destination.id}>
+                      <input
+                        type="radio"
+                        name={`ship-to-${order.id}`}
+                        checked={selectedDestinationId === destination.id}
+                        onChange={() => setSelectedDestinationId(destination.id)}
+                      />
+                      <span>
+                        <strong>{destination.label || destination.companyName}</strong>
+                        {destination.isDefault ? "（既定）" : ""}
+                        <small>{`〒${destination.postalCode} ${destination.address}${destination.building ? ` ${destination.building}` : ""}`}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+              {destinations.length ? (
+                <label className="ship-to-new-option">
+                  <input
+                    type="radio"
+                    name={`ship-to-${order.id}`}
+                    checked={selectedDestinationId == null}
+                    onChange={() => setSelectedDestinationId(null)}
+                  />
+                  <span><strong>新しい納品先を入力</strong><small>顧客住所録へ自動保存します</small></span>
+                </label>
+              ) : null}
+              <details open={!destinations.length}>
+                <summary>新しい納品先を入力（顧客住所録へ自動保存）</summary>
+                <div className="film-order-form ship-to-form">
+                  <label>ラベル<input value={form.label} onChange={(event) => setForm((old) => ({ ...old, label: event.target.value }))} /></label>
+                  <label>会社名 ★<input value={form.companyName} onChange={(event) => setForm((old) => ({ ...old, companyName: event.target.value }))} required /></label>
+                  <label>部署<input value={form.department} onChange={(event) => setForm((old) => ({ ...old, department: event.target.value }))} /></label>
+                  <label>担当者<input value={form.contactName} onChange={(event) => setForm((old) => ({ ...old, contactName: event.target.value }))} /></label>
+                  <label>郵便番号 ★<input value={form.postalCode} onChange={(event) => setForm((old) => ({ ...old, postalCode: event.target.value }))} required /></label>
+                  <label>住所 ★<input value={form.address} onChange={(event) => setForm((old) => ({ ...old, address: event.target.value }))} required /></label>
+                  <label>建物名<input value={form.building} onChange={(event) => setForm((old) => ({ ...old, building: event.target.value }))} /></label>
+                  <label>電話番号 ★<input value={form.phone} onChange={(event) => setForm((old) => ({ ...old, phone: event.target.value }))} required /></label>
+                  <label>メール<input type="email" value={form.email} onChange={(event) => setForm((old) => ({ ...old, email: event.target.value }))} /></label>
+                  <label>備考<textarea value={form.note} rows={2} onChange={(event) => setForm((old) => ({ ...old, note: event.target.value }))} /></label>
+                  <button
+                    className="button"
+                    type="button"
+                    disabled={busy || (useSavedDestination ? !selectedDestinationId : !form.companyName || !form.postalCode || !form.address || !form.phone)}
+                    onClick={() => void submit()}
+                  >
+                    {useSavedDestination ? "保存済み納品先を使用" : "納品先を登録"}
+                  </button>
+                </div>
+              </details>
+              {order.shipTo.status === "registered" ? (
+                <button
+                  className="button secondary"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void onRun({ action: "confirm-ship-to" }, "納品先を確認しました。")}
+                >
+                  納品先を確認する
+                </button>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1103,7 +1298,7 @@ function ReceivingForm({
   const [pdfFileName, setPdfFileName] = useState(`${baseName}.pdf`);
   const [pdfFileUrl, setPdfFileUrl] = useState("");
   const [pdfUploaded, setPdfUploaded] = useState(false);
-  const [withPdf, setWithPdf] = useState(true);
+  const [withPdf, setWithPdf] = useState(false);
   const [note, setNote] = useState("");
   const [formError, setFormError] = useState("");
   const isHttpUrl = (value: string) => /^https?:\/\//iu.test(value.trim());
@@ -1112,6 +1307,13 @@ function ReceivingForm({
   const receivingReady = aiFileName.trim().toLowerCase().endsWith(".ai")
     && aiReady
     && (!withPdf || (pdfFileName.trim().toLowerCase().endsWith(".pdf") && pdfReady));
+  const pendingItems: string[] = [];
+  if (!aiFileName.trim().toLowerCase().endsWith(".ai")) pendingItems.push("AIファイル名を .ai に設定");
+  else if (!aiReady) pendingItems.push(driveReady ? "AIファイルをDriveへアップロード" : "AIファイルのDrive URLを入力");
+  if (withPdf) {
+    if (!pdfFileName.trim().toLowerCase().endsWith(".pdf")) pendingItems.push("PDFファイル名を .pdf に設定");
+    else if (!pdfReady) pendingItems.push(driveReady ? "PDFファイルをDriveへアップロード" : "PDFファイルのDrive URLを入力");
+  }
   const submitReceiving = () => {
     if (!receivingReady) {
       setFormError(
@@ -1127,48 +1329,217 @@ function ReceivingForm({
   return (
     <div className="film-order-file-form">
       <strong>入稿データ登録（フィルム製作用）</strong>
-      {!driveReady ? <p className="film-order-upload-hint">直接アップロードは未設定です。Driveへ手動アップロード後、URLを入力してください。</p> : null}
-      <DriveFileField
+      <CompactDriveUploadField
         label="AIファイル（必須）"
+        accept=".ai"
         orderId={order.id}
         category="receiving"
-        fileName={aiFileName}
+        baseName={`${baseName}.ai`}
         onFileNameChange={setAiFileName}
-        url={aiFileUrl}
         onUrlChange={setAiFileUrl}
+        url={aiFileUrl}
         onUploadedChange={setAiUploaded}
-        accept=".ai"
         autofocus={autofocus}
         driveReady={driveReady === true}
       />
       <label className="film-order-pdf-toggle">
         <input type="checkbox" checked={withPdf} onChange={(event) => setWithPdf(event.target.checked)} />
-        PDFも登録する（任意）
+        PDFも追加する（任意）
       </label>
       {withPdf ? (
-        <DriveFileField
+        <CompactDriveUploadField
           label="PDFファイル"
+          accept=".pdf"
           orderId={order.id}
           category="receiving"
-          fileName={pdfFileName}
+          baseName={`${baseName}.pdf`}
           onFileNameChange={setPdfFileName}
-          url={pdfFileUrl}
           onUrlChange={setPdfFileUrl}
+          url={pdfFileUrl}
           onUploadedChange={setPdfUploaded}
-          accept=".pdf"
           driveReady={driveReady === true}
         />
       ) : null}
-      <label>メモ<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="任意" /></label>
+      <details className="film-order-note-details">
+        <summary>メモを追加（任意）</summary>
+        <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="任意" />
+      </details>
+      <p className="film-order-upload-hint" data-testid="receiving-readiness">
+        {pendingItems.length > 0 ? `送信に必要: ${pendingItems.join(" / ")}` : "入稿データを送信できます。"}
+      </p>
       {formError ? <p className="film-order-upload-error" role="alert">{formError}</p> : null}
       <button
         className="button"
         type="button"
         disabled={busy || !receivingReady}
+        title={pendingItems.length > 0 ? `送信に必要: ${pendingItems.join(" / ")}` : "入稿データを送信します"}
         onClick={submitReceiving}
       >
         入稿してデザインへ連絡
       </button>
+    </div>
+  );
+}
+
+function normalizeUploadName(baseName: string, extension: ".ai" | ".pdf"): string {
+  const dot = baseName.lastIndexOf(".");
+  return `${dot > 0 ? baseName.slice(0, dot) : baseName}${extension}`;
+}
+
+function CompactDriveUploadField({
+  label,
+  accept,
+  orderId,
+  category,
+  baseName,
+  onFileNameChange,
+  url,
+  onUrlChange,
+  onUploadedChange,
+  autofocus,
+  driveReady,
+}: {
+  label: string;
+  accept: ".ai" | ".pdf";
+  orderId: number;
+  category: "receiving" | "proof";
+  baseName: string;
+  onFileNameChange: (value: string) => void;
+  url: string;
+  onUrlChange: (value: string) => void;
+  onUploadedChange?: (uploaded: boolean) => void;
+  autofocus?: boolean;
+  driveReady: boolean;
+}) {
+  const extension = accept;
+  const [file, setFile] = useState<File | null>(null);
+  const [fileName, setFileName] = useState(baseName);
+  const [uploading, setUploading] = useState(false);
+  const [uploaded, setUploaded] = useState(false);
+  const [error, setError] = useState("");
+
+  const humanizeError = (value: string): string => (
+    value === "Failed to fetch"
+      ? "Googleへの接続が中断されました。ページを再読込して再試行してください。"
+      : `アップロード失敗: ${value}`
+  );
+
+  const upload = async (targetFile: File, targetName: string): Promise<void> => {
+    setUploading(true);
+    setUploaded(false);
+    onUploadedChange?.(false);
+    setError("");
+    try {
+      const sessionResponse = await fetch(`/api/film-orders/${orderId}/upload-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category,
+          fileName: targetName,
+          sizeBytes: targetFile.size,
+          contentType: targetFile.type || "application/octet-stream",
+        }),
+      });
+      const session = await sessionResponse.json() as { sessionUri?: string; error?: string };
+      if (!sessionResponse.ok || !session.sessionUri) throw new Error(session.error ?? "session_failed");
+      const put = await fetch(session.sessionUri, {
+        method: "PUT",
+        headers: {
+          "Content-Type": targetFile.type || "application/octet-stream",
+          "Content-Range": `bytes 0-${targetFile.size - 1}/${targetFile.size}`,
+        },
+        body: targetFile,
+      });
+      const uploaded = await put.json().catch(() => ({})) as { id?: unknown };
+      if (!put.ok || typeof uploaded.id !== "string") throw new Error(`upload_failed:${put.status}`);
+      const completeResponse = await fetch(`/api/film-orders/${orderId}/upload-complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category, fileName: targetName, fileId: uploaded.id }),
+      });
+      const complete = await completeResponse.json() as { url?: string; error?: string };
+      if (!completeResponse.ok || !complete.url) throw new Error(complete.error ?? "complete_failed");
+      onUrlChange(complete.url);
+      setUploaded(true);
+      onUploadedChange?.(true);
+    } catch (cause) {
+      onUrlChange("");
+      onUploadedChange?.(false);
+      setError(humanizeError(cause instanceof Error ? cause.message : "unknown_error"));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const pickFile = (selected: File | null): void => {
+    setFile(selected);
+    setUploaded(false);
+    setError("");
+    onUploadedChange?.(false);
+    if (!selected) return;
+    if (selected.size <= 0) {
+      setError("ファイルが読み取れませんでした。ローカルに保存したファイルを選択してください。");
+      return;
+    }
+    if (selected.size > 15 * 1024 * 1024) {
+      setError(`ファイルサイズが15MBを超えています（${(selected.size / 1024 / 1024).toFixed(1)}MB）。`);
+      return;
+    }
+    const targetName = normalizeUploadName(fileName, extension);
+    setFileName(targetName);
+    onFileNameChange(targetName);
+    if (driveReady) void upload(selected, targetName);
+  };
+
+  if (!driveReady) {
+    return (
+      <div className="film-order-drive-field">
+        <label>{label} URL
+          <input
+            value={url}
+            onChange={(event) => {
+              onUrlChange(event.target.value);
+              setUploaded(/^https?:\/\//iu.test(event.target.value));
+              onUploadedChange?.(/^https?:\/\//iu.test(event.target.value));
+            }}
+            placeholder="https://drive.google.com/..."
+            inputMode="url"
+            autoFocus={autofocus}
+          />
+        </label>
+      </div>
+    );
+  }
+
+  const status = uploading ? "uploading" : uploaded ? "done" : error ? "error" : file ? "selected" : "empty";
+  const statusLabel = uploading
+    ? "アップロード中..."
+    : uploaded
+      ? "完了 ✓"
+      : error
+        ? "要再選択"
+        : file
+          ? "選択済み"
+          : "未選択";
+
+  return (
+    <div className="compact-upload">
+      <label className={`upload-zone ${uploaded ? "done" : error ? "error" : ""}`}>
+        <span className="upload-zone-main">
+          <strong>{label}</strong>
+          <small>{file ? `${file.name} → ${fileName}` : "クリックしてファイルを選択"}</small>
+        </span>
+        <span className={`upload-status ${status}`}>{statusLabel}</span>
+        <input
+          className="visually-hidden"
+          type="file"
+          accept={extension}
+          autoFocus={autofocus}
+          onChange={(event) => pickFile(event.target.files?.[0] ?? null)}
+        />
+      </label>
+      {uploaded && url ? <a href={url} target="_blank" rel="noreferrer">アップロード済みファイルを開く</a> : null}
+      {error ? <p className="film-order-upload-error" role="alert">{error}</p> : null}
     </div>
   );
 }

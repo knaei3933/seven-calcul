@@ -58,6 +58,11 @@ function statusForError(message: string): number {
     || message === "delivery_report_required"
     || message === "shipment_report_required"
     || message === "invalid_delivery_transition"
+    || message === "ship_to_confirmation_required"
+    || message === "ship_to_not_registered"
+    || message === "invalid_ship_to"
+    || message === "delivery_destination_not_found"
+    || message === "customer_code_required"
     || message === "sample_bulk_quantity_mismatch"
   ) return 400;
   return 500;

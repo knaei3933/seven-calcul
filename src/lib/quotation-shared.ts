@@ -75,6 +75,30 @@ export interface CustomerMaster extends CustomerMasterInput {
   updatedAt: string;
 }
 
+export interface CustomerDeliveryDestinationInput {
+  label: string;
+  companyName: string;
+  department: string;
+  contactName: string;
+  postalCode: string;
+  address: string;
+  building: string;
+  phone: string;
+  email: string;
+  note: string;
+  isDefault: boolean;
+}
+
+export interface CustomerDeliveryDestination extends CustomerDeliveryDestinationInput {
+  id: number;
+  ownerDomain: "seven" | "kanei";
+  customerCode: string;
+  useCount: number;
+  lastUsedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ChecklistAudience = "CUSTOMER" | "INTERNAL_QA";
 
 export const checklistAudiences: ChecklistAudience[] = ["CUSTOMER", "INTERNAL_QA"];

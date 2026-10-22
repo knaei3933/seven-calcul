@@ -6,6 +6,7 @@ import type { QuotationRecordInput } from "@/lib/quotation-shared";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "film-order-store-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
+process.env.POUCH_CUSTOMER_DB = join(databaseDirectory, "customers.db");
 process.env.MAIL_DRY_RUN = "true";
 process.env.ADMIN_EMAIL = "seven@727.co.jp";
 process.env.ADMIN_PASSWORD = "seven-store-password";
@@ -15,6 +16,7 @@ process.env.FILM_DELIVERY_DOCUMENT_FOLDER_ID = "delivery-folder-test";
 const driveMocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   findFiles: vi.fn(),
+  getConfirmedUpload: vi.fn(),
 }));
 
 vi.mock("@/lib/google-drive", () => ({
@@ -25,9 +27,12 @@ vi.mock("@/lib/google-drive", () => ({
   driveConfigured: () => true,
   findDriveFiles: driveMocks.findFiles,
   createResumableSession: driveMocks.createSession,
+  browserOriginOf: () => "http://localhost:3000",
+  getConfirmedDriveUpload: driveMocks.getConfirmedUpload,
 }));
 
 const { saveQuotation } = await import("@/lib/quotation-store");
+const { saveCustomer, listDeliveryDestinations } = await import("@/lib/customer-store");
 const { POST: deliveryUpload } = await import("@/app/api/film-orders/delivery-upload/[token]/route");
 const { ensureAdministratorSeed } = await import("@/lib/auth-store");
 const {
@@ -96,15 +101,24 @@ const input: QuotationRecordInput = {
   notes: "",
   calculationVersion: "film-order-test",
   resultHash: "hash",
-  payload: { purchaseOrder },
+  payload: { customerCode: "FILM-CUSTOMER-001", purchaseOrder },
 };
 
 describe("film order store", () => {
   let orderId = 0;
 
-  beforeAll(async () => {
-    const adminId = await ensureAdministratorSeed();
-    const record = await saveQuotation(input, adminId, "admin");
+beforeAll(async () => {
+  const adminId = await ensureAdministratorSeed();
+  await saveCustomer("seven", {
+    customerCode: "FILM-CUSTOMER-001",
+    customerName: "フィルム発注検証株式会社",
+    customerPostalCode: "650-0001",
+    customerAddress: "兵庫県神戸市テスト1-2-3",
+    customerContact: "担当",
+    customerTelephone: "078-000-0000",
+    customerEmail: "film-customer@example.test",
+  });
+  const record = await saveQuotation(input, adminId, "admin");
     orderId = record.id;
   });
 
@@ -241,6 +255,32 @@ describe("film order store", () => {
     await expect(updateEtaFromToken("1.123.bad", "2026-10-31", "")).rejects.toThrow("invalid_eta_token");
     const afterEta = await getFilmOrder(orderId);
     expect(afterEta?.events.some((event) => event.type === "eta")).toBe(true);
+    await expect(updateFilmDeliveryFromToken(etaToken, { kind: "shipment", date: "2026-10-30" }))
+      .rejects.toThrow("ship_to_confirmation_required");
+    await expect(runFilmOrderAction(orderId, "register-ship-to", {
+      shipToCompanyName: "テスト物流株式会社",
+      shipToDepartment: "大阪倉庫",
+      shipToContactName: "納品担当",
+      shipToPostalCode: "550-0001",
+      shipToAddress: "大阪府大阪市テスト1-1-1",
+      shipToBuilding: "物流センター2F",
+      shipToPhone: "06-0000-0000",
+      shipToEmail: "warehouse@example.test",
+      shipToNote: "大型車不可",
+      saveShipToMaster: true,
+    }, "seven@727.co.jp")).resolves.toMatchObject({
+      order: {
+        shipTo: {
+          status: "registered",
+          companyName: "テスト物流株式会社",
+          savedToMaster: true,
+        },
+      },
+    });
+    const savedDestinations = await listDeliveryDestinations("seven", "FILM-CUSTOMER-001");
+    expect(savedDestinations).toHaveLength(1);
+    expect(savedDestinations[0]?.companyName).toBe("テスト物流株式会社");
+    await runFilmOrderAction(orderId, "confirm-ship-to", {}, "seven@727.co.jp");
     await expect(updateFilmDeliveryFromToken(etaToken, { kind: "shipment", date: "2026/10/30" }))
       .rejects.toThrow("invalid_delivery_date");
     await expect(updateFilmDeliveryFromToken(etaToken, { kind: "delivery", date: "2026-10-31" }))

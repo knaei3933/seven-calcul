@@ -121,6 +121,7 @@ export interface FilmOrderEventRecord {
 export interface FilmOrderRow {
   id: number;
   order_number: string;
+  customer_code: string;
   quotation_id: number;
   quotation_number: string;
   product_name: string;
@@ -154,6 +155,23 @@ export interface FilmOrderRow {
   film_received_at: string | null;
   film_received_note: string;
   film_received_by_email: string;
+  ship_to_destination_id: number | null;
+  ship_to_status: ShipToStatus;
+  ship_to_label: string;
+  ship_to_company_name: string;
+  ship_to_department: string;
+  ship_to_contact_name: string;
+  ship_to_postal_code: string;
+  ship_to_address: string;
+  ship_to_building: string;
+  ship_to_phone: string;
+  ship_to_email: string;
+  ship_to_note: string;
+  ship_to_registered_at: string | null;
+  ship_to_registered_by: string;
+  ship_to_saved_to_master: number | boolean;
+  ship_to_confirmed_at: string | null;
+  ship_to_confirmed_by: string;
   proof_upload_token: string | null;
   proof_upload_expires_at: string | null;
   status: FilmOrderStatus;
@@ -215,12 +233,47 @@ export interface FilmDeliveryTracking {
   receivedByEmail: string;
 }
 
+export const SHIP_TO_STATUSES = [
+  "not_provided",
+  "registered",
+  "confirmed",
+] as const;
+
+export type ShipToStatus = typeof SHIP_TO_STATUSES[number];
+
+export const shipToStatusLabels: Record<ShipToStatus, string> = {
+  not_provided: "納品先未登録",
+  registered: "納品先登録済み",
+  confirmed: "納品先確認済み",
+};
+
+export interface ShipToTracking {
+  status: ShipToStatus;
+  destinationId: number | null;
+  label: string;
+  companyName: string;
+  department: string;
+  contactName: string;
+  postalCode: string;
+  address: string;
+  building: string;
+  phone: string;
+  email: string;
+  note: string;
+  registeredAt: string | null;
+  registeredBy: string;
+  savedToMaster: boolean;
+  confirmedAt: string | null;
+  confirmedBy: string;
+}
+
 export type FilmOrder = FilmOrderRow & {
   purchaseOrder: PurchaseOrderSnapshot | null;
   sampleBulk: SampleBulkTracking;
   customerDesign: CustomerDesignTracking;
   customerProof: CustomerProofTracking;
   delivery: FilmDeliveryTracking;
+  shipTo: ShipToTracking;
 };
 
 export interface SampleBulkTracking {

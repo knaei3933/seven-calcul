@@ -70,6 +70,8 @@ const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
   "rotate-supplier-proof-token": "kanei",
   "set-supplier": "kanei",
   "send-po": "kanei",
+  "register-ship-to": "buyer",
+  "confirm-ship-to": "buyer",
   "confirm-film-receipt": "buyer",
 };
 

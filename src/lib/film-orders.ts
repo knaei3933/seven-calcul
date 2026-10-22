@@ -14,8 +14,16 @@ import {
   type CustomerProofStatus,
   type CustomerProofTracking,
   type FilmDeliveryTracking,
+  type ShipToStatus,
+  type ShipToTracking,
 } from "./film-order-shared";
 import { customerDesignFolderId, findDriveFiles } from "./google-drive";
+import {
+  getDeliveryDestination,
+  markDeliveryDestinationUsed,
+  upsertDeliveryDestination,
+  validateDeliveryDestinationInput,
+} from "./customer-store";
 
 interface FilmOrderRow extends SharedFilmOrderRow {
   purchase_order_json: string;
@@ -188,7 +196,9 @@ export type FilmOrderAction =
   | "request-customer-design-correction"
   | "set-customer-design-not-required"
   | "send-customer-proof-review"
-  | "record-customer-proof-approval";
+  | "record-customer-proof-approval"
+  | "register-ship-to"
+  | "confirm-ship-to";
 
 let schemaReady: Promise<SqlClient> | null = null;
 
@@ -198,6 +208,7 @@ const BASE_SCHEMA = `
     order_number TEXT NOT NULL UNIQUE,
     quotation_id INTEGER NOT NULL REFERENCES quotations(id),
     quotation_number TEXT NOT NULL,
+    customer_code TEXT NOT NULL DEFAULT '',
     product_name TEXT NOT NULL DEFAULT '',
     customer_name TEXT NOT NULL DEFAULT '',
     printing_method TEXT NOT NULL DEFAULT '',
@@ -229,6 +240,23 @@ const BASE_SCHEMA = `
     film_received_at TEXT,
     film_received_note TEXT NOT NULL DEFAULT '',
     film_received_by_email TEXT NOT NULL DEFAULT '',
+    ship_to_destination_id BIGINT,
+    ship_to_status TEXT NOT NULL DEFAULT 'not_provided' CHECK(ship_to_status IN ('not_provided','registered','confirmed')),
+    ship_to_label TEXT NOT NULL DEFAULT '',
+    ship_to_company_name TEXT NOT NULL DEFAULT '',
+    ship_to_department TEXT NOT NULL DEFAULT '',
+    ship_to_contact_name TEXT NOT NULL DEFAULT '',
+    ship_to_postal_code TEXT NOT NULL DEFAULT '',
+    ship_to_address TEXT NOT NULL DEFAULT '',
+    ship_to_building TEXT NOT NULL DEFAULT '',
+    ship_to_phone TEXT NOT NULL DEFAULT '',
+    ship_to_email TEXT NOT NULL DEFAULT '',
+    ship_to_note TEXT NOT NULL DEFAULT '',
+    ship_to_registered_at TEXT,
+    ship_to_registered_by TEXT NOT NULL DEFAULT '',
+    ship_to_saved_to_master BOOLEAN NOT NULL DEFAULT FALSE,
+    ship_to_confirmed_at TEXT,
+    ship_to_confirmed_by TEXT NOT NULL DEFAULT '',
     proof_upload_token TEXT,
     proof_upload_expires_at TEXT,
     status TEXT NOT NULL CHECK(status IN ('pending','ordered','receiving_registered','proof_registered','re_proof_requested','final_approved')),
@@ -746,7 +774,7 @@ export interface UploadFileMetadata {
   userAgent?: string | null;
 }
 
-const FILM_SCHEMA_VERSION = "2026-10-22-film-summary-detail-1";
+const FILM_SCHEMA_VERSION = "2026-10-22-ship-to-destinations-1";
 
 async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
@@ -769,6 +797,7 @@ async function getDatabase(): Promise<SqlClient> {
       ["film_order_files", "ALTER TABLE film_order_files ADD COLUMN url TEXT NOT NULL DEFAULT ''"],
       ["film_orders_seven_contact", "ALTER TABLE film_orders ADD COLUMN seven_contact_email TEXT NOT NULL DEFAULT ''"],
       ["film_orders_po_sent", "ALTER TABLE film_orders ADD COLUMN po_sent_at TEXT"],
+      ["film_orders_customer_code", "ALTER TABLE film_orders ADD COLUMN customer_code TEXT NOT NULL DEFAULT ''"],
       ["film_orders_eta_token", "ALTER TABLE film_orders ADD COLUMN eta_token TEXT"],
       ["film_orders_eta_expires", "ALTER TABLE film_orders ADD COLUMN eta_expires_at TEXT"],
       ["film_orders_eta_date", "ALTER TABLE film_orders ADD COLUMN eta_date TEXT"],
@@ -787,6 +816,23 @@ async function getDatabase(): Promise<SqlClient> {
       ["film_orders_film_received_at", "ALTER TABLE film_orders ADD COLUMN film_received_at TEXT"],
       ["film_orders_film_received_note", "ALTER TABLE film_orders ADD COLUMN film_received_note TEXT NOT NULL DEFAULT ''"],
       ["film_orders_film_received_by_email", "ALTER TABLE film_orders ADD COLUMN film_received_by_email TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_destination_id", "ALTER TABLE film_orders ADD COLUMN ship_to_destination_id BIGINT"],
+      ["film_orders_ship_to_status", "ALTER TABLE film_orders ADD COLUMN ship_to_status TEXT NOT NULL DEFAULT 'not_provided'"],
+      ["film_orders_ship_to_label", "ALTER TABLE film_orders ADD COLUMN ship_to_label TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_company_name", "ALTER TABLE film_orders ADD COLUMN ship_to_company_name TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_department", "ALTER TABLE film_orders ADD COLUMN ship_to_department TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_contact_name", "ALTER TABLE film_orders ADD COLUMN ship_to_contact_name TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_postal_code", "ALTER TABLE film_orders ADD COLUMN ship_to_postal_code TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_address", "ALTER TABLE film_orders ADD COLUMN ship_to_address TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_building", "ALTER TABLE film_orders ADD COLUMN ship_to_building TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_phone", "ALTER TABLE film_orders ADD COLUMN ship_to_phone TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_email", "ALTER TABLE film_orders ADD COLUMN ship_to_email TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_note", "ALTER TABLE film_orders ADD COLUMN ship_to_note TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_registered_at", "ALTER TABLE film_orders ADD COLUMN ship_to_registered_at TEXT"],
+      ["film_orders_ship_to_registered_by", "ALTER TABLE film_orders ADD COLUMN ship_to_registered_by TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_ship_to_saved_to_master", "ALTER TABLE film_orders ADD COLUMN ship_to_saved_to_master BOOLEAN NOT NULL DEFAULT FALSE"],
+      ["film_orders_ship_to_confirmed_at", "ALTER TABLE film_orders ADD COLUMN ship_to_confirmed_at TEXT"],
+      ["film_orders_ship_to_confirmed_by", "ALTER TABLE film_orders ADD COLUMN ship_to_confirmed_by TEXT NOT NULL DEFAULT ''"],
       ["film_orders_proof_token", "ALTER TABLE film_orders ADD COLUMN proof_upload_token TEXT"],
       ["film_orders_proof_expires", "ALTER TABLE film_orders ADD COLUMN proof_upload_expires_at TEXT"],
       // 既存テーブル（buyer_domain 導入前）向け。新規テーブルでは重複エラーを無視する。
@@ -919,6 +965,19 @@ async function getDatabase(): Promise<SqlClient> {
     }
     await migrateFilmOrderFileCategory(db);
     await migrateExternalTokenPurposes(db);
+    await db.exec(db.dialect === "postgres" ? `
+      UPDATE film_orders f
+      SET customer_code = COALESCE(NULLIF(q.payload_json::jsonb->>'customerCode', ''), f.customer_code)
+      FROM quotations q
+      WHERE f.quotation_id = q.id
+        AND COALESCE(f.customer_code, '') = ''
+    ` : `
+      UPDATE film_orders
+      SET customer_code = COALESCE(NULLIF(json_extract(q.payload_json, '$.customerCode'), ''), film_orders.customer_code)
+      FROM quotations q
+      WHERE film_orders.quotation_id = q.id
+        AND COALESCE(film_orders.customer_code, '') = ''
+    `);
     await db.exec(`
       UPDATE film_orders
       SET customer_design_status = 'legacy_exempt'
@@ -1026,6 +1085,25 @@ function mapOrder(row: FilmOrderRow): FilmOrder {
     receivedNote: row.film_received_note,
     receivedByEmail: row.film_received_by_email,
   };
+  const shipTo: ShipToTracking = {
+    status: (row.ship_to_status || "not_provided") as ShipToStatus,
+    destinationId: row.ship_to_destination_id == null ? null : Number(row.ship_to_destination_id),
+    label: row.ship_to_label,
+    companyName: row.ship_to_company_name,
+    department: row.ship_to_department,
+    contactName: row.ship_to_contact_name,
+    postalCode: row.ship_to_postal_code,
+    address: row.ship_to_address,
+    building: row.ship_to_building,
+    phone: row.ship_to_phone,
+    email: row.ship_to_email,
+    note: row.ship_to_note,
+    registeredAt: row.ship_to_registered_at,
+    registeredBy: row.ship_to_registered_by,
+    savedToMaster: Number(row.ship_to_saved_to_master) === 1 || row.ship_to_saved_to_master === true,
+    confirmedAt: row.ship_to_confirmed_at,
+    confirmedBy: row.ship_to_confirmed_by,
+  };
   return {
     ...rest,
     purchaseOrder: parsePurchaseOrder(purchase_order_json),
@@ -1033,6 +1111,7 @@ function mapOrder(row: FilmOrderRow): FilmOrder {
     customerDesign,
     customerProof,
     delivery,
+    shipTo,
   };
 }
 
@@ -1055,16 +1134,20 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
     const quotation = await getQuotation(row.id);
     if (!quotation) continue;
     const snapshot = purchaseOrderOf(quotation);
+    const customerCode = typeof quotation.payload.customerCode === "string"
+      ? quotation.payload.customerCode.trim()
+      : "";
     const now = new Date().toISOString();
     const orderNumber = await nextOrderNumber(db);
     await db.run(`
       INSERT INTO film_orders (
-        order_number, quotation_id, quotation_number, product_name, customer_name, printing_method, procurement_route, film_composition, order_length_m, web_width_mm, pouch_quantity, supplier_name, supplier_email, seven_contact_email, buyer_domain, status, purchase_order_json, sample_bulk_status, bulk_usage_reference_ml, created_at, updated_at, created_by_email, updated_by_email
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        order_number, quotation_id, quotation_number, customer_code, product_name, customer_name, printing_method, procurement_route, film_composition, order_length_m, web_width_mm, pouch_quantity, supplier_name, supplier_email, seven_contact_email, buyer_domain, status, purchase_order_json, sample_bulk_status, bulk_usage_reference_ml, created_at, updated_at, created_by_email, updated_by_email
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       orderNumber,
       quotation.id,
       quotation.quotationNumber,
+      customerCode,
       quotation.productName,
       quotation.customerName,
       snapshot?.printingMethod ?? "",
@@ -1873,6 +1956,7 @@ export async function updateFilmDeliveryFromToken(
 
   if (params.kind === "shipment") {
     if (order.delivery.deliveredOn) throw new Error("invalid_delivery_transition");
+    if (order.shipTo.status !== "confirmed") throw new Error("ship_to_confirmation_required");
     const carrier = typeof params.carrier === "string" ? params.carrier.trim().slice(0, 200) : "";
     const trackingNumber = typeof params.trackingNumber === "string" ? params.trackingNumber.trim().slice(0, 200) : "";
     const note = typeof params.note === "string" ? params.note.trim().slice(0, 1000) : "";
@@ -2271,6 +2355,18 @@ export async function runFilmOrderAction(
     customerMessage?: unknown;
     approverName?: unknown;
     evidence?: unknown;
+    destinationId?: unknown;
+    shipToLabel?: unknown;
+    shipToCompanyName?: unknown;
+    shipToDepartment?: unknown;
+    shipToContactName?: unknown;
+    shipToPostalCode?: unknown;
+    shipToAddress?: unknown;
+    shipToBuilding?: unknown;
+    shipToPhone?: unknown;
+    shipToEmail?: unknown;
+    shipToNote?: unknown;
+    saveShipToMaster?: unknown;
   },
   actorEmail: string,
 ): Promise<{ order: FilmOrderView; mails?: MailSendResult[] }> {
@@ -2281,7 +2377,75 @@ export async function runFilmOrderAction(
   if (!row) throw new Error("film_order_not_found");
   const order = mapOrder(row);
 
-  if (action === "set-supplier") {
+  if (action === "register-ship-to") {
+    let customerCode = order.customer_code;
+    if (!customerCode) {
+      const { getQuotation } = await import("./quotation-store");
+      const quotation = await getQuotation(order.quotation_id);
+      customerCode = typeof quotation?.payload.customerCode === "string"
+        ? quotation.payload.customerCode.trim()
+        : "";
+      if (customerCode) {
+        await db.run(
+          "UPDATE film_orders SET customer_code = ? WHERE id = ?",
+          [customerCode, id],
+        );
+      }
+    }
+    if (!customerCode) throw new Error("customer_code_required");
+
+    const ownerDomain = order.buyer_domain.includes("727") ? "seven" : "kanei";
+    const destinationId = Number(params.destinationId);
+    let destination = null as null | Awaited<ReturnType<typeof getDeliveryDestination>>;
+    if (Number.isInteger(destinationId) && destinationId > 0) {
+      destination = await getDeliveryDestination(ownerDomain, customerCode, destinationId);
+      if (!destination) throw new Error("delivery_destination_not_found");
+      destination = await markDeliveryDestinationUsed(ownerDomain, customerCode, destinationId) ?? destination;
+    } else {
+      const input = validateDeliveryDestinationInput({
+        label: params.shipToLabel,
+        companyName: params.shipToCompanyName,
+        department: params.shipToDepartment,
+        contactName: params.shipToContactName,
+        postalCode: params.shipToPostalCode,
+        address: params.shipToAddress,
+        building: params.shipToBuilding,
+        phone: params.shipToPhone,
+        email: params.shipToEmail,
+        note: params.shipToNote,
+        isDefault: params.saveShipToMaster === true,
+      });
+      if (!input) throw new Error("invalid_ship_to");
+      destination = await upsertDeliveryDestination(ownerDomain, customerCode, input);
+    }
+
+    await db.run(`
+      UPDATE film_orders SET
+        customer_code=?, ship_to_destination_id=?, ship_to_status='registered', ship_to_label=?,
+        ship_to_company_name=?, ship_to_department=?, ship_to_contact_name=?, ship_to_postal_code=?,
+        ship_to_address=?, ship_to_building=?, ship_to_phone=?, ship_to_email=?, ship_to_note=?,
+        ship_to_registered_at=?, ship_to_registered_by=?, ship_to_saved_to_master=TRUE,
+        ship_to_confirmed_at=NULL, ship_to_confirmed_by='', updated_at=?, updated_by_email=?
+      WHERE id=?
+    `, [
+      customerCode, destination.id, destination.label, destination.companyName, destination.department,
+      destination.contactName, destination.postalCode, destination.address, destination.building,
+      destination.phone, destination.email, destination.note, now, actorEmail, now, actorEmail, id,
+    ]);
+    await addEvent(db, id, "ship_to", `納品先登録: ${destination.companyName} / ${destination.postalCode} ${destination.address}`, actorEmail);
+  } else if (action === "confirm-ship-to") {
+    if (!order.shipTo.companyName || !order.shipTo.address || !order.shipTo.phone) {
+      throw new Error("ship_to_not_registered");
+    }
+    if (order.shipTo.status === "confirmed") throw new Error("invalid_status_transition");
+    await db.run(`
+      UPDATE film_orders SET
+        ship_to_status='confirmed', ship_to_confirmed_at=?, ship_to_confirmed_by=?,
+        updated_at=?, updated_by_email=?
+      WHERE id=?
+    `, [now, actorEmail, now, actorEmail, id]);
+    await addEvent(db, id, "ship_to", "納品先確認", actorEmail);
+  } else if (action === "set-supplier") {
     const supplierName = trimParam(params.supplierName, 200);
     const supplierEmail = trimParam(params.supplierEmail, 254);
     if (supplierEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supplierEmail)) throw new Error("invalid_supplier_email");
