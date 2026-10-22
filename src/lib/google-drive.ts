@@ -66,6 +66,17 @@ export function deliveryDocumentFolderId(): string {
   return folderId;
 }
 
+export function browserOriginOf(request: Request): string {
+  const origin = request.headers.get("origin");
+  if (origin && /^https?:\/\//iu.test(origin)) return origin;
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  if (forwardedHost) {
+    const forwardedProto = request.headers.get("x-forwarded-proto") ?? "https";
+    return `${forwardedProto.split(",")[0]!.trim()}://${forwardedHost.split(",")[0]!.trim()}`;
+  }
+  return new URL(request.url).origin;
+}
+
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
 function base64url(input: string | Buffer): string {
@@ -128,6 +139,7 @@ export async function createResumableSession(params: {
   folderId: string;
   contentType?: string;
   sizeBytes?: number;
+  origin?: string;
 }): Promise<string> {
   const token = await getAccessToken();
   const response = await fetch(
@@ -138,6 +150,7 @@ export async function createResumableSession(params: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json; charset=UTF-8",
         "X-Upload-Content-Type": params.contentType ?? "application/octet-stream",
+        ...(params.origin ? { Origin: params.origin } : {}),
         ...(params.sizeBytes != null ? { "X-Upload-Content-Length": String(params.sizeBytes) } : {}),
       },
       body: JSON.stringify({
@@ -171,6 +184,7 @@ export async function findDriveFiles(params: {
   checksum: string | null;
   sizeBytes: number | null;
   parentFolderIds: string[];
+  trashed: false;
 }>> {
   const token = await getAccessToken();
   const query = encodeURIComponent(`name = '${params.fileName.replace(/'/g, "\\'")}' and '${params.folderId}' in parents and trashed = false`);
@@ -193,9 +207,75 @@ export async function findDriveFiles(params: {
       sizeBytes: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : null,
       parentFolderIds: Array.isArray(file.parents)
         ? file.parents.filter((parent): parent is string => typeof parent === "string")
-        : [],
+      : [],
+      trashed: false,
     }];
   });
+}
+
+export async function getDriveFile(fileId: string): Promise<{
+  id: string;
+  name: string;
+  mimeType: string | null;
+  checksum: string | null;
+  sizeBytes: number | null;
+  parentFolderIds: string[];
+  trashed: boolean;
+} | null> {
+  const token = await getAccessToken();
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&includeItemsFromAllDrives=true&fields=id,name,mimeType,md5Checksum,size,parents,trashed`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`drive_file_get_failed:${response.status}`);
+  const payload = await response.json() as {
+    id?: unknown;
+    name?: unknown;
+    mimeType?: unknown;
+    md5Checksum?: unknown;
+    size?: unknown;
+    parents?: unknown;
+    trashed?: unknown;
+  };
+  if (typeof payload.id !== "string" || typeof payload.name !== "string") return null;
+  const sizeBytes = Number(payload.size);
+  return {
+    id: payload.id,
+    name: payload.name,
+    mimeType: typeof payload.mimeType === "string" ? payload.mimeType : null,
+    checksum: typeof payload.md5Checksum === "string" ? payload.md5Checksum : null,
+    sizeBytes: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : null,
+    parentFolderIds: Array.isArray(payload.parents)
+      ? payload.parents.filter((parent): parent is string => typeof parent === "string")
+      : [],
+    trashed: payload.trashed === true,
+  };
+}
+
+export async function getConfirmedDriveUpload(params: {
+  fileId: string;
+  fileName: string;
+  folderId: string;
+}): Promise<{
+  id: string;
+  name: string;
+  mimeType: string | null;
+  checksum: string | null;
+  sizeBytes: number | null;
+  parentFolderIds: string[];
+} | null> {
+  const candidate = await getDriveFile(params.fileId);
+  if (!candidate || candidate.trashed || candidate.name !== params.fileName) return null;
+  if (!candidate.parentFolderIds.includes(params.folderId)) return null;
+  return {
+    id: candidate.id,
+    name: candidate.name,
+    mimeType: candidate.mimeType,
+    checksum: candidate.checksum,
+    sizeBytes: candidate.sizeBytes,
+    parentFolderIds: candidate.parentFolderIds,
+  };
 }
 
 export async function downloadFile(fileId: string): Promise<Response> {

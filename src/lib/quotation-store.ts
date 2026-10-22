@@ -732,12 +732,12 @@ export async function listQuotations({
     ? await db.all<DatabaseRow>(`
         ${baseSelect}
         WHERE status = ?${ownershipFilter} AND (quotation_number LIKE ? OR customer_name LIKE ? OR customer_contact LIKE ? OR product_name LIKE ?)
-        ORDER BY updated_at DESC, id DESC LIMIT ?
+        ORDER BY quotations.updated_at DESC, quotations.id DESC LIMIT ?
       `, [statusFilter, ...ownershipArguments, search, search, search, search, safeLimit])
     : await db.all<DatabaseRow>(`
         ${baseSelect}
         WHERE (quotation_number LIKE ? OR customer_name LIKE ? OR customer_contact LIKE ? OR product_name LIKE ?)${ownershipFilter}
-        ORDER BY updated_at DESC, id DESC LIMIT ?
+        ORDER BY quotations.updated_at DESC, quotations.id DESC LIMIT ?
       `, [search, search, search, search, ...ownershipArguments, safeLimit]);
   return rows.map(mapRow);
 }
