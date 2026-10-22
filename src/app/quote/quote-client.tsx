@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ceilTo, D, Decimal, parseDecimal } from "@/lib/decimal";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
@@ -454,6 +454,7 @@ export default function PrintableQuotationPage({
   });
   const [customerSearchTerm, setCustomerSearchTerm] = useState("");
   const [customerSearchResults, setCustomerSearchResults] = useState<CustomerMaster[]>([]);
+  const [customerSearchVisibleCount, setCustomerSearchVisibleCount] = useState(50);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const customerSearchRequestRef = useRef(0);
   const customerSearchRef = useRef<HTMLFormElement | null>(null);
@@ -471,10 +472,12 @@ export default function PrintableQuotationPage({
       if (!response.ok || !Array.isArray(payload.customers)) throw new Error("search_failed");
       if (customerSearchRequestRef.current !== requestId) return;
       setCustomerSearchResults(payload.customers as CustomerMaster[]);
+      setCustomerSearchVisibleCount(50);
       setCustomerSearchStatus("idle");
     } catch {
       if (customerSearchRequestRef.current !== requestId) return;
       setCustomerSearchResults([]);
+      setCustomerSearchVisibleCount(50);
       setCustomerSearchStatus("error");
     }
   };
@@ -562,6 +565,7 @@ export default function PrintableQuotationPage({
 
   const clearCustomerSearch = () => {
     setCustomerSearchResults([]);
+    setCustomerSearchVisibleCount(50);
     setCustomerSearchTerm("");
   };
 
@@ -590,6 +594,11 @@ export default function PrintableQuotationPage({
     }, 180);
     return () => window.clearTimeout(timer);
   }, [customerSearchTerm]);
+
+  const visibleCustomerSearchResults = useMemo(
+    () => customerSearchResults.slice(0, customerSearchVisibleCount),
+    [customerSearchResults, customerSearchVisibleCount],
+  );
 
   const fillTestData = () => {
     const suffix = "0001";
@@ -1714,7 +1723,7 @@ export default function PrintableQuotationPage({
                     data-testid="customer-search-input"
                   />
                 </label>
-                {customerSearchOpen && (customerSearchResults.length > 0 || customerSearchStatus === "loading") ? (
+                {customerSearchOpen && (customerSearchResults.length > 0 || customerSearchStatus !== "idle") ? (
                   <div className="customer-search-results" data-testid="customer-search-results">
                     {customerSearchStatus === "loading" ? (
                       <p className="customer-search-count">検索中...</p>
@@ -1723,7 +1732,7 @@ export default function PrintableQuotationPage({
                         {customerSearchResults.length >= 500 ? "500件以上" : `${customerSearchResults.length}件`}の顧客が一致しました
                       </p>
                     )}
-                    {customerSearchResults.map((customer) => (
+                    {visibleCustomerSearchResults.map((customer) => (
                       <div key={`${customer.ownerDomain}-${customer.customerCode}`} className="customer-search-result-row">
                         <button type="button" onClick={() => selectCustomerMaster(customer)}>
                           <strong>{customer.customerCode}</strong>
@@ -1733,6 +1742,15 @@ export default function PrintableQuotationPage({
                         </button>
                       </div>
                     ))}
+                    {customerSearchResults.length > visibleCustomerSearchResults.length ? (
+                      <button
+                        type="button"
+                        className="customer-search-more"
+                        onClick={() => setCustomerSearchVisibleCount((count) => Math.min(count + 50, customerSearchResults.length))}
+                      >
+                        続きを表示（残り {customerSearchResults.length - visibleCustomerSearchResults.length}件）
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

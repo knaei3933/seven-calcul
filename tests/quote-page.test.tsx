@@ -407,6 +407,32 @@ describe("quotation page stale draft", () => {
     expect(screen.getByRole("button", { name: "見積書を発行" })).toBeEnabled();
   });
 
+  it("renders long customer lists in pages instead of mounting every row", async () => {
+    const user = userEvent.setup();
+    const customers = Array.from({ length: 120 }, (_, index) => ({
+      customerCode: `C-${String(index + 1).padStart(4, "0")}`,
+      customerName: `大量顧客${index + 1}株式会社`,
+      customerPostalCode: "",
+      customerAddress: "",
+      customerContact: "",
+      customerTelephone: "",
+      customerEmail: "",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ customers }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    )));
+
+    const { container } = render(<QuotePage />);
+    await user.click(screen.getByTestId("customer-search-input"));
+    await waitFor(() => expect(screen.getByTestId("customer-search-count")).toHaveTextContent("120件"));
+    expect(container.querySelectorAll(".customer-search-result-row")).toHaveLength(50);
+
+    await user.click(screen.getByRole("button", { name: /続きを表示/ }));
+    expect(container.querySelectorAll(".customer-search-result-row")).toHaveLength(100);
+    expect(screen.getByRole("button", { name: /残り 20件/ })).toBeVisible();
+  });
+
   it("keeps an active restored revision across quote page navigation", async () => {
     const user = userEvent.setup();
     sessionStorage.setItem("pouch-quotation-restore-v1", JSON.stringify({

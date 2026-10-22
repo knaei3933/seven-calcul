@@ -34,6 +34,8 @@ const CUSTOMER_TABLE_SQL = `
     CREATE INDEX IF NOT EXISTS idx_customers_owner_name ON customers(owner_domain, customer_name);
 `;
 
+const CUSTOMER_SCHEMA_VERSION = "2026-10-22-owner-scoped-1";
+
 /** LIKE/ILIKE 와일드카드를 문자 그대로 검색하기 위해 이스케이프한다. */
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
@@ -120,6 +122,19 @@ async function migrateLegacyCustomers(db: SqlClient): Promise<void> {
 async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
     const db = await getSqlClient("customers");
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS customer_schema_migrations (
+        slot TEXT PRIMARY KEY,
+        version TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    const marker = await db.get<{ version: string }>(
+      "SELECT version FROM customer_schema_migrations WHERE slot = ?",
+      ["customers"],
+    );
+    // コールドスタート毎の情報スキーマ照会とDDL検査を省略する。
+    if (marker?.version === CUSTOMER_SCHEMA_VERSION) return db;
     const table = db.dialect === "postgres"
       ? await db.get<{ table_name: string }>(`
         SELECT table_name
@@ -133,6 +148,10 @@ async function getDatabase(): Promise<SqlClient> {
       `);
     if (table) await migrateLegacyCustomers(db);
     else await db.exec(CUSTOMER_TABLE_SQL);
+    await db.run(`
+      INSERT INTO customer_schema_migrations (slot,version,updated_at) VALUES (?,?,?)
+      ON CONFLICT(slot) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at
+    `, ["customers", CUSTOMER_SCHEMA_VERSION, new Date().toISOString()]);
     return db;
   })().catch((error) => {
     schemaReady = null;
