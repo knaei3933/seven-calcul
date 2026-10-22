@@ -362,6 +362,27 @@ function isNonNegativeNumber(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0;
 }
 
+export function isQuotationValidityExpired(validUntil: string, todayJapanDate?: string): boolean {
+  const date = validUntil.slice(0, 10);
+  const today = todayJapanDate
+    ?? new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  return /^\d{4}-\d{2}-\d{2}$/u.test(date) && date < today;
+}
+
+/** 送付済みで回答待ちの見積のみ自動失効する。成約・見送り等の確定履歴は変更しない。 */
+export async function expireDueQuotations(): Promise<number> {
+  const db = await getDatabase();
+  const todayJapan = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const result = await db.run(`
+    UPDATE quotations
+    SET status = 'expired', updated_at = ?
+    WHERE status = 'sent'
+      AND length(valid_until) >= 10
+      AND substr(valid_until, 1, 10) < ?
+  `, [new Date().toISOString(), todayJapan]);
+  return Number(result.changes);
+}
+
 function text(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
@@ -374,6 +395,7 @@ export function validateQuotationInput(value: unknown): QuotationRecordInput | n
     "targetMargin", "taxRatePercent", "pricePerPiece", "subtotal", "tax", "grandTotal",
   ] as const;
   if (!text(input.quotationNumber).trim() || !text(input.issueDate).trim()) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(text(input.validUntil))) return null;
   if (numericFields.some((field) => !isNonNegativeNumber(input[field]))) return null;
   const status = quotationStatuses.find((item) => item === input.status);
   if (!status || typeof input.payload !== "object" || input.payload === null) return null;
@@ -678,6 +700,7 @@ export async function listQuotations({
   creatorId,
 }: { q?: string; status?: string; limit?: number; creatorId?: number } = {}): Promise<QuotationRecord[]> {
   const db = await getDatabase();
+  await expireDueQuotations();
   const safeLimit = Math.min(Math.max(Number.isFinite(limit) ? Number(limit) : 100, 1), 500);
   const search = `%${q.trim()}%`;
   const statusFilter = quotationStatuses.find((item) => item === status);
@@ -727,6 +750,7 @@ export async function getQuotation(id: number): Promise<QuotationRecord | null> 
 }
 
 export async function getQuotationByNumber(quotationNumber: string): Promise<QuotationRecord | null> {
+  await expireDueQuotations();
   const db = await getDatabase();
   const code = quotationNumber.trim();
   if (!code) return null;

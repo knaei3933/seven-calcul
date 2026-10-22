@@ -38,6 +38,9 @@ export async function POST(request: Request, context: Context): Promise<NextResp
 
     const email = typeof record.payload.customerEmail === "string" ? record.payload.customerEmail.trim() : "";
     if (!email) return NextResponse.json({ error: "customer_email_required" }, { status: 400 });
+    if (record.status === "expired") {
+      return NextResponse.json({ error: "quotation_validity_expired" }, { status: 409 });
+    }
     if (!record.internalApproval) {
       return NextResponse.json({ error: "internal_approval_required" }, { status: 409 });
     }

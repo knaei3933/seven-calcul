@@ -225,6 +225,8 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
         setEmailMessage("添付できる見積書PDFがありません。先にPDFを発行してください。");
       } else if (payload.error === "quotation_pdf_integrity_failed") {
         setEmailMessage("保存済みPDFの整合性確認に失敗しました。送信を中止しました。");
+      } else if (payload.error === "quotation_validity_expired") {
+        setEmailMessage("有効期限が切れています。復元して新しい見積番号で再発行してください。");
       } else {
         setEmailMessage("送信に失敗しました。");
       }
@@ -361,7 +363,14 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
                     <button className="button secondary small" type="button" onClick={() => openDetail(record.id, "film")}>
                       フィルム見積書
                     </button>
-                    <button className="button secondary small" type="button" onClick={() => restore(record)}>復元</button>
+                    <button
+                      className="button secondary small"
+                      type="button"
+                      title={record.status === "expired" ? "新しい見積番号で更新発行します" : "修正見積として復元します"}
+                      onClick={() => restore(record)}
+                    >
+                      {record.status === "expired" ? "更新" : "復元"}
+                    </button>
                     <button
                       className="button danger small"
                       type="button"
