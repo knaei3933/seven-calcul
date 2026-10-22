@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
-import { canViewFilmOrders, canPerformFilmOrderAction } from "@/lib/film-order-access";
+import { canViewFilmOrders, canPerformFilmOrderAction, isKaneiTradeUser, isSevenChemicalUser } from "@/lib/film-order-access";
 import { getFilmOrder } from "@/lib/film-orders";
 import { runFilmOrderAction, type FilmOrderAction } from "@/lib/film-orders";
 
@@ -8,6 +8,27 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ id: string }> };
+
+export async function GET(request: Request, context: Context): Promise<NextResponse> {
+  const { id } = await context.params;
+  const user = await getSessionUser(request);
+  if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
+  if (!canViewFilmOrders(user.email)) return NextResponse.json({ error: "film_order_forbidden" }, { status: 403 });
+  const orderId = Number(id);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    return NextResponse.json({ error: "invalid_film_order_id" }, { status: 400 });
+  }
+  try {
+    const order = await getFilmOrder(orderId);
+    // カネイ側は供給管理のため全件閲覧できる。セブン側は自社発注のみ。
+    const visible = isKaneiTradeUser(user.email)
+      || (order != null && isSevenChemicalUser(order.created_by_email));
+    if (!order || !visible) return NextResponse.json({ error: "film_order_not_found" }, { status: 404 });
+    return NextResponse.json({ order });
+  } catch {
+    return NextResponse.json({ error: "film_order_get_failed" }, { status: 500 });
+  }
+}
 
 
 

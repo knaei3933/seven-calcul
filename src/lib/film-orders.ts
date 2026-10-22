@@ -746,9 +746,24 @@ export interface UploadFileMetadata {
   userAgent?: string | null;
 }
 
+const FILM_SCHEMA_VERSION = "2026-10-22-film-summary-detail-1";
+
 async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
     const db = await getSqlClient("quotations");
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS film_order_schema_migrations (
+        slot TEXT PRIMARY KEY,
+        version TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    const marker = await db.get<{ version: string }>(
+      "SELECT version FROM film_order_schema_migrations WHERE slot = ?",
+      ["film_orders"],
+    );
+    // マーカーがある環境では、コールドスタート毎のDDL検査を省略する。
+    if (marker?.version === FILM_SCHEMA_VERSION) return db;
     await db.exec(db.dialect === "postgres" ? POSTGRES_SCHEMA : BASE_SCHEMA);
     const migrations: Array<[string, string]> = [
       ["film_order_files", "ALTER TABLE film_order_files ADD COLUMN url TEXT NOT NULL DEFAULT ''"],
@@ -812,11 +827,20 @@ async function getDatabase(): Promise<SqlClient> {
       ["film_orders_customer_proof_correction_count", "ALTER TABLE film_orders ADD COLUMN customer_proof_correction_count INTEGER NOT NULL DEFAULT 0"],
       ["film_orders_customer_proof_correction_reason", "ALTER TABLE film_orders ADD COLUMN customer_proof_correction_reason TEXT NOT NULL DEFAULT ''"],
     ];
-    for (const [, sql] of migrations) {
-      try {
-        await db.exec(sql);
-      } catch {
-        // 既存カラムの場合は無視する。
+    if (db.dialect === "postgres") {
+      // 以前は既存カラムへの ALTER を全て試行し、失敗を無視していた。
+      // Neon では失敗ALTERの往復だけで数十秒になるため、1バッチで冪適に宣言する。
+      const idempotentColumnMigrations = migrations
+        .map(([, sql]) => sql.replace(/ADD COLUMN(?! IF NOT EXISTS)/i, "ADD COLUMN IF NOT EXISTS"))
+        .join(";\n");
+      await db.exec(idempotentColumnMigrations);
+    } else {
+      for (const [, sql] of migrations) {
+        try {
+          await db.exec(sql);
+        } catch {
+          // 既存カラムの場合は無視する。
+        }
       }
     }
     if (db.dialect === "sqlite") {
@@ -908,6 +932,10 @@ async function getDatabase(): Promise<SqlClient> {
         AND customer_proof_status = 'pending'
     `);
     await migrateLegacyProofTokens(db);
+    await db.run(`
+      INSERT INTO film_order_schema_migrations (slot,version,updated_at) VALUES (?,?,?)
+      ON CONFLICT(slot) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at
+    `, ["film_orders", FILM_SCHEMA_VERSION, new Date().toISOString()]);
     return db;
   })();
   return schemaReady;
@@ -1085,6 +1113,22 @@ export async function listFilmOrders(actorEmail?: string): Promise<FilmOrderView
     files: files.filter((file) => file.order_id === row.id),
     events: events.filter((event) => event.order_id === row.id),
   }));
+}
+
+/**
+ * 一覧カードには親行のみ返す。ファイル・履歴はカード展開時に getFilmOrder で取得する。
+ * 成約案件が増えたときに全注文の子テーブルを転送しないことが目的。
+ */
+export async function listFilmOrderSummaries(actorEmail?: string): Promise<FilmOrderView[]> {
+  const db = await getDatabase();
+  const rows = await db.all<FilmOrderRow>("SELECT * FROM film_orders ORDER BY created_at DESC, id DESC");
+  return rows
+    .filter((row) => {
+      const buyerIsSeven = isSevenChemicalUser(row.created_by_email);
+      if (buyerIsSeven) return true;
+      return isKaneiTradeUser(actorEmail);
+    })
+    .map((row) => ({ ...mapOrder(row), files: [], events: [] }));
 }
 
 export async function getFilmOrder(id: number): Promise<FilmOrderView | null> {

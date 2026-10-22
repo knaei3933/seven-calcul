@@ -122,6 +122,8 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
   const [created, setCreated] = useState(0);
   const [statusFilter, setStatusFilter] = useState<"all" | FilmOrderStatus>("all");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [detailLoadingId, setDetailLoadingId] = useState<number | null>(null);
+  const [detailError, setDetailError] = useState("");
   const [focusForm, setFocusForm] = useState<{ id: number; kind: "receiving" | "proof" } | null>(null);
   const [driveReady, setDriveReady] = useState(false);
   const isSeven = isSevenChemicalUser(userEmail);
@@ -131,16 +133,42 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/film-orders");
+      const response = await fetch("/api/film-orders", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(20_000),
+      });
       const payload = await response.json();
       if (!response.ok || !Array.isArray(payload.orders)) throw new Error();
       setOrders(payload.orders as FilmOrderView[]);
       setCreated(Number(payload.created ?? 0));
       setDriveReady(payload.driveConfigured === true);
-    } catch {
-      setError("発注データを読み込めませんでした。");
+    } catch (error) {
+      setError(error instanceof DOMException && error.name === "TimeoutError"
+        ? "発注データの取得がタイムアウトしました。更新してください。"
+        : "発注データを読み込めませんでした。");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const loadDetail = useCallback(async (id: number) => {
+    setDetailLoadingId(id);
+    setDetailError("");
+    try {
+      const response = await fetch(`/api/film-orders/${id}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(20_000),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.order) throw new Error();
+      const order = payload.order as FilmOrderView;
+      setOrders((old) => old.map((item) => item.id === id ? order : item));
+    } catch (error) {
+      setDetailError(error instanceof DOMException && error.name === "TimeoutError"
+        ? "発注詳細の取得がタイムアウトしました。更新してください。"
+        : "発注詳細を読み込めませんでした。");
+    } finally {
+      setDetailLoadingId((current) => current === id ? null : current);
     }
   }, []);
 
@@ -169,8 +197,18 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
     setOrders((old) => old.map((order) => order.id === id ? result.order : order));
   };
 
-  const expandWithForm = (id: number, kind: "receiving" | "proof") => {
+  const toggleOrder = (id: number) => {
+    if (expandedId === id) {
+      setExpandedId(null);
+      setFocusForm(null);
+      return;
+    }
     setExpandedId(id);
+    void loadDetail(id);
+  };
+
+  const expandWithForm = (id: number, kind: "receiving" | "proof") => {
+    toggleOrder(id);
     setFocusForm({ id, kind });
   };
 
@@ -188,7 +226,11 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
           <span className="film-orders-myturn" role="status" aria-live="polite">
             あなたの操作待ち <strong>{myTurnCount}</strong> 件
           </span>
-          <button className="button secondary small" type="button" onClick={() => void load()}>
+          <button className="button secondary small" type="button" onClick={() => {
+            void load().then(() => {
+              if (expandedId != null) return loadDetail(expandedId);
+            });
+          }}>
             {loading ? "読み込み中..." : "更新"}
           </button>
         </div>
@@ -198,6 +240,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
       <div className="film-orders-alerts">
         {created > 0 ? <p className="film-orders-sync">成約見積 {created} 件を発注管理に反映しました。</p> : null}
         {error ? <p className="film-orders-error">{error}</p> : null}
+        {detailError ? <p className="film-orders-error">{detailError}</p> : null}
       </div>
 
       <details className="film-order-guide">
@@ -250,7 +293,8 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
             key={order.id}
             order={order}
             expanded={expandedId === order.id}
-            onToggle={() => setExpandedId(expandedId === order.id ? null : order.id)}
+            loadingDetail={detailLoadingId === order.id}
+            onToggle={() => toggleOrder(order.id)}
             onUpdated={applyResult}
             onExpandWithForm={expandWithForm}
             focusForm={focusForm}
@@ -267,6 +311,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
 function OrderCard({
   order,
   expanded,
+  loadingDetail,
   onToggle,
   onUpdated,
   onExpandWithForm,
@@ -277,6 +322,7 @@ function OrderCard({
 }: {
   order: FilmOrderView;
   expanded: boolean;
+  loadingDetail: boolean;
   onToggle: () => void;
   onUpdated: (id: number, result: { order: FilmOrderView }) => void;
   onExpandWithForm: (id: number, kind: "receiving" | "proof" ) => void;
@@ -371,6 +417,9 @@ function OrderCard({
 
       {expanded ? (
         <div className="film-order-detail">
+          {loadingDetail ? <p className="film-order-message" role="status">詳細データを読み込み中...</p> : null}
+          {loadingDetail ? null : (
+          <>
           {message ? <p className="film-order-message" role="status">{message}</p> : null}
           {mails.length > 0 ? (
             <ul className="film-order-mails">
@@ -437,6 +486,8 @@ function OrderCard({
               ))}
             </ul>
           </section>
+          </>
+          )}
         </div>
       ) : null}
     </article>

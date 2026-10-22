@@ -99,7 +99,7 @@ export function postgresPoolOptions(connectionString: string): PoolOptions {
   return {
     connectionString: url.toString(),
     max: 3,
-    idleTimeoutMillis: 10_000,
+    idleTimeoutMillis: 60_000,
     connectionTimeoutMillis: 12_000,
     allowExitOnIdle: true,
     ssl,

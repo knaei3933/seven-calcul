@@ -683,8 +683,19 @@ export async function listQuotations({
   const statusFilter = quotationStatuses.find((item) => item === status);
   const ownershipFilter = Number.isInteger(creatorId) && creatorId! > 0 ? " AND quotations.created_by = ?" : "";
   const ownershipArguments: Array<string | number | null> = ownershipFilter ? [creatorId ?? 0] : [];
+  // 一覧ではPDF本体を取得しない。BYTEAを含む quotations.* は数件でも転送量が数十MBになりやすい。
+  const quotationColumns = [
+    "id", "quotation_number", "status", "issue_date", "valid_until",
+    "customer_name", "customer_contact", "product_name", "size_summary", "quantity",
+    "filling_cost_per_piece", "film_cost_per_piece", "film_meter_price", "film_order_length_m",
+    "target_margin", "tax_rate_percent", "price_per_piece", "subtotal", "tax", "grand_total",
+    "delivery_date", "payment_terms", "notes", "calculation_version", "result_hash",
+    "payload_json", "created_at", "updated_at", "created_by", "updated_by",
+    "internal_approved_at", "internal_approved_by", "customer_approved_at", "customer_approved_by",
+    "customer_approval_ip_hash", "customer_approval_user_agent",
+  ].map((column) => `quotations.${column}`).join(", ");
   const baseSelect = `
-        SELECT quotations.*, creator.name AS creator_name, creator.email AS creator_email,
+        SELECT ${quotationColumns}, creator.name AS creator_name, creator.email AS creator_email,
                updater.name AS updater_name, updater.email AS updater_email,
                internal_approver.name AS internal_approver_name, internal_approver.email AS internal_approver_email,
                customer_approver.name AS customer_approver_name, customer_approver.email AS customer_approver_email
