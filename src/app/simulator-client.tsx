@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CalculationInput, CostResult } from "@/lib/calculation";
-import { CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForFillMl, machineChargeBasis, sizeMaster } from "@/lib/constants";
+import { CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForSpec, machineChargeBasis, sizeMaster } from "@/lib/constants";
 import { displayAmount } from "@/lib/calculation";
 import { D, Decimal, sum } from "@/lib/decimal";
 import { CURRENT_CHECKLIST_SNAPSHOT_KEY, buildCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
@@ -1220,12 +1220,18 @@ export default function QuotationPage({
   const chamberMaxFill = chamberFillNumbers.length ? Math.max(...chamberFillNumbers) : 0;
   const chamberAvgFill = chamberFillNumbers.length ? chamberTotalFill / chamberFillNumbers.length : 0;
   // 실 구성 사용 시 생산속도는 최대 충전량(병목) 기준.
-  const recommendedProductionSpeed = defaultProductionSpeedForFillMl(
-    chamberConfigActive ? (chamberMaxFill > 0 ? chamberMaxFill : 3) : (weightedAvgFill > 0 ? weightedAvgFill : 3),
-  );
+  const recommendedProductionSpeed = defaultProductionSpeedForSpec({
+    sizeKey: form.sizeKey,
+    isCustom: form.custom,
+    customWidthMm: form.widthMm,
+    customLengthMm: form.lengthMm,
+    fillMlPerChamber: chamberConfigActive
+      ? String(chamberMaxFill > 0 ? chamberMaxFill : 3)
+      : String(weightedAvgFill > 0 ? weightedAvgFill : 3),
+  });
   const effectiveProductionSpeedInput = productionSpeedManual
     ? parameters.productionSpeedPerMinute
-    : formatNumber(recommendedProductionSpeed, 0);
+    : String(recommendedProductionSpeed);
   const effectiveParameters = useMemo(() => ({
     ...parameters,
     productionSpeedPerMinute: effectiveProductionSpeedInput,
@@ -2354,7 +2360,7 @@ export default function QuotationPage({
                 />
                 <p className="help" id="production-speed-help">
                   {productionSpeedManual ? "手動入力中。" : `充填量 ${formatNumber(weightedAvgFill > 0 ? weightedAvgFill : 3)}ml の基準値を自動適用中。`}
-                  ルール：1ml台=140枚/分、2ml台=120枚/分、3〜7ml=100枚/分、8ml以上=80枚/分。
+                  ルール：1〜2ml=120枚/分、3〜4ml=100枚/分、4.1ml以上=80枚/分。マウスウォッシュ用 40×145 は60枚/分。
                   {productionSpeedManual ? (
                     <button className="button secondary small" type="button" onClick={() => { setProductionSpeedManual(false); setParameters((old) => ({ ...old, productionSpeedPerMinute: formatNumber(recommendedProductionSpeed, 0) })); }}>充填量基準速度に戻す</button>
                   ) : null}
@@ -2789,7 +2795,7 @@ export default function QuotationPage({
                     <table className="table formula-vars"><tbody>
                       <tr><th scope="row">人件費</th><td>{formatCurrency(displayAmount(parameters.laborPerHour))} /時間</td><td>生産と検品の両方にかかる人件費の単価です。それぞれの工程にかかる時間に応じて、1枚あたりに割り当てます。</td></tr>
                       <tr><th scope="row">機械チャージ</th><td>{formatCurrency(displayAmount(parameters.machineChargePerHour))} /時間</td><td>充填機を1時間動かすための単価です。年間の減価償却費と電気代を年間稼働時間で割って計算します。生産時間に応じた1枚あたりの費用と、段取り・清掃時間の固定費の両方に使います。</td></tr>
-                      <tr><th scope="row">生産速度</th><td>{formatNumber(effectiveParameters.productionSpeedPerMinute)} 枚/分（1連基準・時給換算 {formatNumber(Number(effectiveParameters.productionSpeedPerMinute) * 60)} 枚/h）</td><td>1分あたりに作れる1連パウチの枚数です。充填量基準の初期値は、1ml台=140、2ml台=120、3〜7ml=100、8ml以上=80です。手動入力でいつでも上書きできます。</td></tr>
+                      <tr><th scope="row">生産速度</th><td>{formatNumber(effectiveParameters.productionSpeedPerMinute)} 枚/分（1連基準・時給換算 {formatNumber(Number(effectiveParameters.productionSpeedPerMinute) * 60)} 枚/h）</td><td>1分あたりに作れる1連パウチの枚数です。充填量基準の初期値は、1〜2ml=120、3〜4ml=100、4.1ml以上=80です。マウスウォッシュ用 40×145 は60です。手動入力でいつでも上書きできます。</td></tr>
                       <tr><th scope="row">稼働生産数</th><td>{resultShown ? formatNumber(resultShown.productionRunQuantity) : "-"} 枚</td><td>「発注枚数 ÷ (1−ロス率)」で計算します。ロス分のパウチも実際には機械へ流すため、生産時間はこの数で計算します。</td></tr>
                       <tr><th scope="row">実効生産速度</th><td>{resultShown ? `${formatNumber(Number(resultShown.effectiveProductionSpeed) / 60)} 枚/分（${formatNumber(resultShown.effectiveProductionSpeed)} 枚/h）` : "-"}</td><td>「基準速度×60×連結別係数」で計算します（1連=×1／2連=×1/2／3連・4連=×1/4）。機械は3列でも4列でも1回に1個の製品しか作れないため、3連と4連の実効速度は同じです。</td></tr>
                       <tr><th scope="row">検品速度</th><td>{formatNumber(parameters.inspectionSpeed)} 枚/h</td><td>検品にかかる人件費を1枚あたりに割り当てるときの分母です。</td></tr>

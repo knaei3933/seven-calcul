@@ -18,7 +18,7 @@ export type SizeKey =
   | "bottle-50x90"
   | "bottle-70x120"
   | "xra-38.5x90"
-  | "mouthwash-45x145";
+  | "mouthwash-40x145";
 
 export type PriceBand = "lte570" | "571to740";
 export type FillingMethod = "hopper" | "pressure";

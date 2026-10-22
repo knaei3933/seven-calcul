@@ -1,4 +1,4 @@
-import type { CostParameters, SizeMaster, SizeKey } from "./types";
+import type { CostParameters, DecimalValue, SizeMaster, SizeKey } from "./types";
 import { D } from "./decimal";
 
 export const CALCULATION_VERSION = "2026-10.1";
@@ -49,11 +49,26 @@ export function machineChargePerHourFromBasis(basis: typeof machineChargeBasis =
 
 export function defaultProductionSpeedForFillMl(fillMl: number | string): number {
   const fill = Number(fillMl);
-  if (!Number.isFinite(fill) || fill <= 0) return 100;
-  if (fill < 2) return 140;
-  if (fill < 3) return 120;
-  if (fill < 8) return 100;
+  if (!Number.isFinite(fill) || fill <= 0) return 120;
+  if (fill <= 2) return 120;
+  if (fill <= 4) return 100;
   return 80;
+}
+
+export function defaultProductionSpeedForSpec(spec: {
+  sizeKey: SizeKey;
+  isCustom?: boolean;
+  customWidthMm?: DecimalValue;
+  customLengthMm?: DecimalValue;
+  fillMlPerChamber: DecimalValue;
+}): number {
+  const master = sizeMaster[spec.sizeKey as SizeKey];
+  const width = Number(spec.isCustom ? spec.customWidthMm ?? master?.widthMm ?? 0 : master?.widthMm ?? spec.customWidthMm ?? 0);
+  const length = Number(spec.isCustom ? spec.customLengthMm ?? master?.lengthMm ?? 0 : master?.lengthMm ?? spec.customLengthMm ?? 0);
+  const isMouthwash40x145 = spec.sizeKey === "mouthwash-40x145"
+    && (!spec.isCustom || (Number.isFinite(width) && Number.isFinite(length) && width === 40 && length === 145));
+  if (isMouthwash40x145) return 60;
+  return defaultProductionSpeedForFillMl(spec.fillMlPerChamber);
 }
 
 export const sizeMaster: Record<SizeKey, SizeMaster> = {
@@ -75,7 +90,7 @@ export const sizeMaster: Record<SizeKey, SizeMaster> = {
   "bottle-50x90": base("bottle-50x90", "bottle", "ボトル型 50×90", 50, 90, 4, 476, "lte570", 6, 1),
   "bottle-70x120": base("bottle-70x120", "bottle", "ボトル型 70×120", 70, 120, 4, 620, "571to740", 6, 1),
   "xra-38.5x90": switchableWeb("xra-38.5x90", "xraRound", "Xraラウンド 38.5×90", 38.5, 90, 368),
-  "mouthwash-45x145": base("mouthwash-45x145", "mouthWash", "マウスウォッシュ用 45×145", 45, 145, 4, 396, "lte570", 6, 1),
+  "mouthwash-40x145": base("mouthwash-40x145", "mouthWash", "マウスウォッシュ用 40×145", 40, 145, 4, 396, "lte570", 6, 1),
 };
 
 export const defaultParameters: CostParameters = {

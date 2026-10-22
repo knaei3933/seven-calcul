@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalize } from "./canonical-json";
-import { CALCULATION_VERSION, CONNECTED_FILLING_SURCHARGE, CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForFillMl, GRAVURE_MASTER_CALCULATION_VERSION, sizeMaster } from "./constants";
+import { CALCULATION_VERSION, CONNECTED_FILLING_SURCHARGE, CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForSpec, GRAVURE_MASTER_CALCULATION_VERSION, sizeMaster } from "./constants";
 import { D, Decimal, ceilTo, eq, maxD, roundTo2, roundUp1, sum } from "./decimal";
 import { normalizeDigitalFilmOrder, QuotationValidationError, type FilmOrderAdjustment, type FilmSkuOrder } from "./digital-film";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
@@ -213,7 +213,13 @@ function calculatePouchCostCore(
     ...parameters,
     productionSpeedPerMinute: parameters?.productionSpeedPerMinute
       // 充填量が実ごとに異なる場合は、最も多い室（ボトルネック）を速度基準にする。
-      ?? String(defaultProductionSpeedForFillMl(maxChamberFill.toString())),
+      ?? String(defaultProductionSpeedForSpec({
+        sizeKey: spec.sizeKey,
+        isCustom: spec.isCustom,
+        customWidthMm: spec.customWidthMm,
+        customLengthMm: spec.customLengthMm,
+        fillMlPerChamber: String(maxChamberFill),
+      })),
   } as CostParameters;
   const margins = resolveTargetMargins(targetMargins);
 
@@ -647,7 +653,13 @@ export function calculatePouchCost(input: CalculationInput): CostResult {
     ...defaultParameters,
     ...coreInput.parameters,
     productionSpeedPerMinute: coreInput.parameters?.productionSpeedPerMinute
-      ?? String(defaultProductionSpeedForFillMl(coreInput.spec.fillMlPerChamber)),
+      ?? String(defaultProductionSpeedForSpec({
+        sizeKey: coreInput.spec.sizeKey,
+        isCustom: coreInput.spec.isCustom,
+        customWidthMm: coreInput.spec.customWidthMm,
+        customLengthMm: coreInput.spec.customLengthMm,
+        fillMlPerChamber: coreInput.spec.fillMlPerChamber,
+      })),
   } as CostParameters;
   const context = createPrintCandidateContext({
     spec: coreInput.spec,

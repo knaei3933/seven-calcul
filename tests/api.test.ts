@@ -23,7 +23,7 @@ afterAll(async () => {
 
 describe("POST /api/calculate", () => {
   it("returns deterministic Decimal result", async () => {
-    const body = { spec: { sizeKey: "mouthwash-45x145", customWidthMm: "45", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 2, fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0.37", skuCount: 1 }, quantity: "10000", printingMethod: "digital" };
+    const body = { spec: { sizeKey: "mouthwash-40x145", customWidthMm: "40", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 2, fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0.37", skuCount: 1 }, quantity: "10000", printingMethod: "digital" };
     const response = POST(request(JSON.stringify(body)));
     const payload = await response;
     expect(payload.status).toBe(200);
@@ -39,7 +39,7 @@ describe("POST /api/calculate", () => {
 
   it("includes connected chambers in digital film demand", async () => {
     const body = {
-      spec: { sizeKey: "mouthwash-45x145", customWidthMm: "45", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 2, fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0.37", skuCount: 1 },
+      spec: { sizeKey: "mouthwash-40x145", customWidthMm: "40", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 2, fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0.37", skuCount: 1 },
       quantity: "10000",
       printingMethod: "digital",
     };

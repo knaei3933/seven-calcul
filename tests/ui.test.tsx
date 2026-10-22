@@ -201,7 +201,7 @@ describe("quotation UI", () => {
     render(<QuotationPage />);
     const result = calculatePouchCost({
       spec: {
-        sizeKey: "mouthwash-45x145", customWidthMm: "45", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 1,
+        sizeKey: "mouthwash-40x145", customWidthMm: "40", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 1,
         fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0",
         skuCount: 2,
       },
@@ -247,7 +247,7 @@ describe("quotation UI", () => {
 
     const secondResult = calculatePouchCost({
       spec: {
-        sizeKey: "mouthwash-45x145", customWidthMm: "45", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 1,
+        sizeKey: "mouthwash-40x145", customWidthMm: "40", customLengthMm: "145", fillMlPerChamber: "30", connectedChambers: 1,
         fillingMethod: "hopper", fillingLanes: 4, isCustom: false, colorCount: 4, bulkUnitPrice: "0",
         skuCount: 2,
       },

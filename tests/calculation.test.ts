@@ -2,14 +2,14 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { approvedCommission, calculatePouchCost } from "@/lib/calculation";
 import { canonicalize } from "@/lib/canonical-json";
-import { defaultParameters, defaultProductionSpeedForFillMl, sizeMaster } from "@/lib/constants";
+import { defaultParameters, defaultProductionSpeedForFillMl, defaultProductionSpeedForSpec, sizeMaster } from "@/lib/constants";
 import { normalizeDigitalFilmOrder } from "@/lib/digital-film";
 import { defaultGravureRollParameters } from "@/lib/gravure-roll";
 import { defaultGravureYSupplierRows } from "@/lib/sasche-gravure";
 import type { PouchSpec } from "@/lib/types";
 
 const baseSpec: PouchSpec = {
-  sizeKey: "mouthwash-45x145",
+  sizeKey: "mouthwash-40x145",
   fillMlPerChamber: "30",
   connectedChambers: 2,
   fillingMethod: "hopper",
@@ -226,8 +226,8 @@ describe("bulk calculation", () => {
     expect(result.totalFillMlPerPouch).toBe("15");
     expect(result.chambers).toHaveLength(2);
     // 생산속도는 최대 실 충전량(병목 10ml) 기준: 80枚/分 → 2연 2,400枚/h
-    expect(result.baseProductionSpeedPerMinute).toBe("80");
-    expect(result.effectiveProductionSpeed).toBe("2400");
+    expect(result.baseProductionSpeedPerMinute).toBe("60");
+    expect(result.effectiveProductionSpeed).toBe("1800");
   });
 
   it("charges one initial charge per liquid when a liquid spans multiple chambers", () => {
@@ -264,14 +264,25 @@ describe("bulk calculation", () => {
 
 describe("digital film", () => {
   it("uses the fill-volume based default production speed", () => {
-    expect(defaultProductionSpeedForFillMl(1)).toBe(140);
-    expect(defaultProductionSpeedForFillMl(1.99)).toBe(140);
+    expect(defaultProductionSpeedForFillMl(1)).toBe(120);
+    expect(defaultProductionSpeedForFillMl(1.99)).toBe(120);
     expect(defaultProductionSpeedForFillMl(2)).toBe(120);
-    expect(defaultProductionSpeedForFillMl(2.5)).toBe(120);
+    expect(defaultProductionSpeedForFillMl(2.5)).toBe(100);
     expect(defaultProductionSpeedForFillMl(3)).toBe(100);
-    expect(defaultProductionSpeedForFillMl(7)).toBe(100);
-    expect(defaultProductionSpeedForFillMl(7.99)).toBe(100);
+    expect(defaultProductionSpeedForFillMl(4)).toBe(100);
+    expect(defaultProductionSpeedForFillMl(4.1)).toBe(80);
     expect(defaultProductionSpeedForFillMl(8)).toBe(80);
+  });
+
+  it("uses 60/min only for the 40x145 mouthwash size", () => {
+    expect(defaultProductionSpeedForSpec({
+      sizeKey: "mouthwash-40x145",
+      fillMlPerChamber: "30",
+    })).toBe(60);
+    expect(defaultProductionSpeedForSpec({
+      sizeKey: "tube-50x90",
+      fillMlPerChamber: "30",
+    })).toBe(80);
   });
 
   it("scales effective production speed by connected chambers regardless of filling lanes", () => {
@@ -280,14 +291,14 @@ describe("digital film", () => {
     const tripleThreeLanes = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 3, fillingLanes: 3 }, quantity: "10000", printingMethod: "digital" });
     const tripleFourLanes = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 3, fillingLanes: 4 }, quantity: "10000", printingMethod: "digital" });
     const quad = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 4 }, quantity: "10000", printingMethod: "digital" });
-    expect(single.baseProductionSpeedPerMinute).toBe("80");
-    expect(single.effectiveProductionSpeed).toBe("4800");
-    expect(twin.effectiveProductionSpeed).toBe("2400");
+    expect(single.baseProductionSpeedPerMinute).toBe("60");
+    expect(single.effectiveProductionSpeed).toBe("3600");
+    expect(twin.effectiveProductionSpeed).toBe("1800");
     // 機械は3列でも4列でも1回に1個の製品しか作れないため、3連と4連の速度は同じ。
-    expect(tripleThreeLanes.effectiveProductionSpeed).toBe("1200");
-    expect(tripleFourLanes.effectiveProductionSpeed).toBe("1200");
+    expect(tripleThreeLanes.effectiveProductionSpeed).toBe("900");
+    expect(tripleFourLanes.effectiveProductionSpeed).toBe("900");
     expect(tripleThreeLanes.effectiveProductionSpeed).toBe(tripleFourLanes.effectiveProductionSpeed);
-    expect(quad.effectiveProductionSpeed).toBe("1200");
+    expect(quad.effectiveProductionSpeed).toBe("900");
     expect(tripleFourLanes.effectiveProductionSpeed).toBe(quad.effectiveProductionSpeed);
     expect(Number(twin.variableProcessingPerPiece)).toBeGreaterThan(Number(single.variableProcessingPerPiece));
     expect(Number(quad.variableProcessingPerPiece)).toBeGreaterThan(Number(twin.variableProcessingPerPiece));
@@ -296,7 +307,7 @@ describe("digital film", () => {
   it("runs the machine for the loss-inclusive quantity when computing production time", () => {
     const result = calculatePouchCost({ spec: { ...baseSpec, connectedChambers: 1 }, quantity: "10000", printingMethod: "digital" });
     expect(Number(result.productionRunQuantity)).toBeCloseTo(10000 / 0.9, 6);
-    expect(Number(result.productionHours)).toBeCloseTo(10000 / 0.9 / 4800, 6);
+    expect(Number(result.productionHours)).toBeCloseTo(10000 / 0.9 / 3600, 6);
     expect(Number(result.inspectionHours)).toBeCloseTo(10000 / 0.9 / 1500, 6);
   });
 
@@ -359,7 +370,7 @@ describe("digital film", () => {
 describe("commercial calculation", () => {
   it("does not add seller profit again to digital film prices", () => {
     const result = calculatePouchCost({
-      spec: { ...baseSpec, isCustom: true, customWidthMm: "45", customLengthMm: "145" },
+      spec: { ...baseSpec, isCustom: true, customWidthMm: "40", customLengthMm: "145" },
       quantity: "7",
       printingMethod: "digital",
     });
@@ -376,7 +387,7 @@ describe("commercial calculation", () => {
 
   it("adds custom charge once and reconciles components exactly", () => {
     const result = calculatePouchCost({
-      spec: { ...baseSpec, isCustom: true, customWidthMm: "45", customLengthMm: "145" },
+      spec: { ...baseSpec, isCustom: true, customWidthMm: "40", customLengthMm: "145" },
       quantity: "7",
       printingMethod: "digital",
     });
@@ -395,7 +406,7 @@ describe("commercial calculation", () => {
 describe("multi-SKU film aggregation", () => {
   it("uses size-specific pitch additions", () => {
     expect(sizeMaster["round-50x60"].pitchAddMm).toBe("6");
-    expect(sizeMaster["mouthwash-45x145"].pitchAddMm).toBe("6");
+    expect(sizeMaster["mouthwash-40x145"].pitchAddMm).toBe("6");
   });
 
   it("keeps identical SKU identifiers independently priced while auto-raising production minimums", () => {
@@ -573,7 +584,7 @@ describe("gravure roll integration", () => {
 
   it("replaces only film cost, keeps processing unchanged, and separates copper plates", () => {
     const result = calculatePouchCost({
-      spec: { ...baseSpec, sizeKey: "mouthwash-45x145", connectedChambers: 1 },
+      spec: { ...baseSpec, sizeKey: "mouthwash-40x145", connectedChambers: 1 },
       quantity: "10000",
       printingMethod: "gravure",
     });

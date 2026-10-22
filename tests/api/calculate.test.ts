@@ -37,8 +37,8 @@ afterAll(async () => {
 
 const validInput = {
   spec: {
-    sizeKey: "mouthwash-45x145",
-    customWidthMm: "45",
+    sizeKey: "mouthwash-40x145",
+    customWidthMm: "40",
     customLengthMm: "145",
     fillMlPerChamber: "30",
     connectedChambers: 1,
