@@ -173,6 +173,42 @@ describe("quotation history ownership UI", () => {
     expect(screen.getByTestId("history-auto-send")).toBeInTheDocument();
   });
 
+  it("shows the sales contract action for an internally approved draft without customer approval", async () => {
+    const sentRecord = {
+      ...ownerRecord,
+      status: "draft" as const,
+      internalApproval: {
+        approvedAt: "2026-10-22T00:00:00.000Z",
+        approvedBy: { id: currentUser.id, email: currentUser.email, name: currentUser.name },
+      },
+    };
+    const approvedRecord = {
+      ...sentRecord,
+      status: "approved" as const,
+      customerApproval: null,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/quotations/2" && init?.method === "PATCH") {
+        expect(JSON.parse(String(init.body))).toEqual({ status: "approved" });
+        return Response.json({ record: approvedRecord }, { status: 200 });
+      }
+      return Response.json({ records: [sentRecord] }, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<HistoryClient currentUser={currentUser} />);
+
+    await screen.findByText("S7-HISTORY-OWNER");
+    await user.selectOptions(screen.getByLabelText("S7-HISTORY-OWNER の状態"), "approved");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/quotations/2",
+      expect.objectContaining({ method: "PATCH" }),
+    ));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/film-orders"));
+  });
+
   it("opens the linked film quotation directly from URL parameters", async () => {
     window.history.replaceState({}, "", "/history?record=1&tab=film");
     vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({

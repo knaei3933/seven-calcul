@@ -743,6 +743,7 @@ export async function listQuotations({
 }
 
 export async function getQuotation(id: number): Promise<QuotationRecord | null> {
+  await expireDueQuotations();
   const db = await getDatabase();
   if (!Number.isInteger(id) || id <= 0) return null;
   const row = await selectRecordById(db, id);
@@ -847,7 +848,7 @@ export async function approveQuotationGate(
   } else {
     const result = await db.run(`
       UPDATE quotations
-      SET status = 'approved', customer_approved_at = ?, customer_approved_by = ?,
+      SET customer_approved_at = ?, customer_approved_by = ?,
           updated_by = ?, updated_at = ?
       WHERE id = ? AND status = 'sent'
         AND internal_approved_at IS NOT NULL AND customer_approved_at IS NULL
@@ -895,15 +896,15 @@ export async function approveQuotationByCustomerToken(
 ): Promise<QuotationRecord> {
   const record = await quotationForCustomerApprovalToken(token);
   if (record.customerApproval) return record;
-  if (record.status !== "sent") throw new QuotationApprovalTransitionError();
+  if (!["sent", "approved"].includes(record.status)) throw new QuotationApprovalTransitionError();
 
   const db = await getDatabase();
   const now = new Date().toISOString();
   const result = await db.run(`
     UPDATE quotations
-    SET status = 'approved', customer_approved_at = ?, customer_approved_by = NULL, updated_at = ?,
+    SET customer_approved_at = ?, customer_approved_by = NULL, updated_at = ?,
       customer_approval_ip_hash = ?, customer_approval_user_agent = ?
-    WHERE id = ? AND status = 'sent'
+    WHERE id = ? AND status IN ('sent', 'approved')
       AND internal_approved_at IS NOT NULL AND customer_approved_at IS NULL
   `, [now, now, approvalMetadata.customerIpHash ?? null, approvalMetadata.userAgent?.slice(0, 500) ?? null, record.id]);
   if (Number(result.changes) !== 1) throw new QuotationApprovalTransitionError();

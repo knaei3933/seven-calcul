@@ -7,8 +7,6 @@ import {
   getQuotationForCustomerApproval,
   QuotationApprovalTransitionError,
 } from "@/lib/quotation-store";
-import { syncFilmOrdersFromQuotations } from "@/lib/film-orders";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -31,6 +29,7 @@ function summary(record: Awaited<ReturnType<typeof getQuotationForCustomerApprov
     validUntil: record.validUntil,
     status: record.status,
     approvedAt: record.customerApproval?.approvedAt ?? null,
+    customerApprovalRecorded: Boolean(record.customerApproval),
   };
 }
 
@@ -61,14 +60,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       customerIpHash: clientIpHash(request),
       userAgent: request.headers.get("user-agent"),
     });
-    let filmOrderSynced: boolean;
-    try {
-      await syncFilmOrdersFromQuotations("customer-approval@system");
-      filmOrderSynced = true;
-    } catch {
-      filmOrderSynced = false;
-    }
-    return NextResponse.json({ quotation: summary(record), filmOrderSynced });
+    return NextResponse.json({ quotation: summary(record), filmOrderSynced: false });
   } catch (error) {
     if (error instanceof CustomerApprovalExpiredError) {
       return NextResponse.json({ error: "customer_approval_expired" }, { status: 410 });

@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/api-auth";
 import { canViewFilmOrders, canPerformFilmOrderAction } from "@/lib/film-order-access";
 import { getFilmOrder } from "@/lib/film-orders";
 import {
+  browserOriginOf,
   createResumableSession,
   driveConfigured,
   proofFolderId,
@@ -48,6 +49,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       folderId: category === "receiving" ? receivingFolderId() : proofFolderId(),
       contentType: typeof body.contentType === "string" ? body.contentType : undefined,
       sizeBytes: Number.isFinite(Number(body.sizeBytes)) ? Number(body.sizeBytes) : undefined,
+      origin: browserOriginOf(request),
     });
     return NextResponse.json({ sessionUri, fileName });
   } catch (error) {

@@ -8,10 +8,12 @@ import {
   registerCustomerDesignFromUploadToken,
 } from "@/lib/film-orders";
 import {
+  browserOriginOf,
   createResumableSession,
   customerDesignFolderId,
   driveConfigured,
   findDriveFiles,
+  getConfirmedDriveUpload,
 } from "@/lib/google-drive";
 
 export const runtime = "nodejs";
@@ -85,6 +87,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       contentType?: unknown;
       uploader?: unknown;
       note?: unknown;
+      fileId?: unknown;
     };
     const action = typeof body.action === "string" ? body.action : "";
     const order = await getFilmOrderForCustomerDesign(token, request);
@@ -104,6 +107,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     if (!driveConfigured()) return NextResponse.json({ error: "drive_not_configured" }, { status: 503 });
     const folderId = customerDesignFolderId();
     const fileName = nextCustomerDesignFileName(order, originalFileName);
+    const fileId = typeof body.fileId === "string" ? body.fileId.trim() : "";
 
     if (action === "session") {
       const sessionUri = await createResumableSession({
@@ -111,12 +115,15 @@ export async function POST(request: Request, context: Context): Promise<NextResp
         folderId,
         contentType: typeof body.contentType === "string" ? body.contentType : undefined,
         sizeBytes: typeof body.sizeBytes === "number" ? body.sizeBytes : undefined,
+        origin: browserOriginOf(request),
       });
       return NextResponse.json({ sessionUri, fileName });
     }
 
-    let candidates = await findDriveFiles({ fileName, folderId });
-    for (let attempt = 1; candidates.length === 0 && attempt < 3; attempt += 1) {
+    let candidates = fileId
+      ? [await getConfirmedDriveUpload({ fileId, fileName, folderId })].filter((candidate) => candidate != null)
+      : await findDriveFiles({ fileName, folderId });
+    for (let attempt = 1; !fileId && candidates.length === 0 && attempt < 3; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 800));
       candidates = await findDriveFiles({ fileName, folderId });
     }

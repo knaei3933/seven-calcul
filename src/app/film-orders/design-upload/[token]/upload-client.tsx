@@ -71,13 +71,15 @@ export default function CustomerDesignUploadClient({ token }: { token: string })
       headers: { "Content-Type": file.type || "application/octet-stream" },
       body: file,
     });
-    if (!put.ok) throw new Error(`upload_failed:${put.status}`);
+    const uploaded = await put.json().catch(() => ({})) as { id?: unknown };
+    if (!put.ok || typeof uploaded.id !== "string") throw new Error(`upload_failed:${put.status}`);
     const completeResponse = await fetch(`/api/film-orders/design-upload/${encodeURIComponent(token)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "complete",
         originalFileName: file.name,
+        fileId: uploaded.id,
         uploader: uploader.trim() || undefined,
         note: note.trim() || undefined,
       }),

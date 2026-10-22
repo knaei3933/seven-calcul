@@ -6,9 +6,11 @@ import {
   registerProofFromUploadToken,
 } from "@/lib/film-orders";
 import {
+  browserOriginOf,
   createResumableSession,
   driveConfigured,
   findDriveFiles,
+  getConfirmedDriveUpload,
   proofFolderId,
 } from "@/lib/google-drive";
 
@@ -76,6 +78,8 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       contentType?: unknown;
       uploader?: unknown;
       note?: unknown;
+      aiFileId?: unknown;
+      pdfFileId?: unknown;
     };
     const action = typeof body.action === "string" ? body.action : "";
     const fileName = typeof body.fileName === "string" ? body.fileName.trim() : "";
@@ -105,12 +109,16 @@ export async function POST(request: Request, context: Context): Promise<NextResp
         folderId: proofFolderId(),
         contentType: typeof body.contentType === "string" ? body.contentType : undefined,
         sizeBytes: typeof body.sizeBytes === "number" ? body.sizeBytes : undefined,
+        origin: browserOriginOf(request),
       });
       return NextResponse.json({ sessionUri });
     }
 
-    let candidates = await findDriveFiles({ fileName: aiFileName, folderId: proofFolderId() });
-    for (let attempt = 1; candidates.length === 0 && attempt < 3; attempt += 1) {
+    const aiFileId = typeof body.aiFileId === "string" ? body.aiFileId.trim() : "";
+    let candidates = aiFileId
+      ? [await getConfirmedDriveUpload({ fileId: aiFileId, fileName: aiFileName, folderId: proofFolderId() })].filter((candidate) => candidate != null)
+      : await findDriveFiles({ fileName: aiFileName, folderId: proofFolderId() });
+    for (let attempt = 1; !aiFileId && candidates.length === 0 && attempt < 3; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 800));
       candidates = await findDriveFiles({ fileName, folderId: proofFolderId() });
     }
@@ -140,8 +148,11 @@ export async function POST(request: Request, context: Context): Promise<NextResp
         const message = error instanceof Error ? error.message : "invalid_upload_request";
         return NextResponse.json({ error: message }, { status: publicErrorStatus(message) });
       }
-      let pdfCandidates = await findDriveFiles({ fileName: pdfFileName, folderId: proofFolderId() });
-      for (let attempt = 1; pdfCandidates.length === 0 && attempt < 3; attempt += 1) {
+      const pdfFileId = typeof body.pdfFileId === "string" ? body.pdfFileId.trim() : "";
+      let pdfCandidates = pdfFileId
+        ? [await getConfirmedDriveUpload({ fileId: pdfFileId, fileName: pdfFileName, folderId: proofFolderId() })].filter((candidate) => candidate != null)
+        : await findDriveFiles({ fileName: pdfFileName, folderId: proofFolderId() });
+      for (let attempt = 1; !pdfFileId && pdfCandidates.length === 0 && attempt < 3; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 800));
         pdfCandidates = await findDriveFiles({ fileName: pdfFileName, folderId: proofFolderId() });
       }

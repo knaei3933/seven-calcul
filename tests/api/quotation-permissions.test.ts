@@ -52,7 +52,7 @@ async function createRecord(number: string, creatorId: number): Promise<Quotatio
     quotationNumber: number,
     status: "draft",
     issueDate: "2026-09-20",
-    validUntil: "2026-10-20",
+    validUntil: "2099-12-31",
     customerName: "Permissions",
     customerContact: "Tester",
     productName: "Permission Pouch",
@@ -126,10 +126,10 @@ describe("quotation ownership permissions", () => {
       body: JSON.stringify({ status: "approved" }),
     }, adminToken), context);
     expect(adminPatch.status).toBe(409);
-    await expect(adminPatch.json()).resolves.toEqual({ error: "invalid_status_transition" });
+    await expect(adminPatch.json()).resolves.toEqual({ error: "internal_approval_required" });
 
-    // Send and customer-approval gates are tested separately; establish approved
-    // state to verify approved quotations remain deletion-protected.
+    // Customer approval is evidence only. A sales owner must move the sent
+    // quotation to 成約 explicitly before film-order synchronization.
     await approveQuotationGate(record.id, "internal", owner.id);
     await updateQuotationStatus(record.id, "sent", owner.id);
     const approvalResponse = await postQuotationApproval(request(
@@ -142,12 +142,30 @@ describe("quotation ownership permissions", () => {
       kaneiAdminToken,
     ), context);
     expect(approvalResponse.status).toBe(200);
-    await expect(approvalResponse.json()).resolves.toMatchObject({ gate: "customerApproval", filmOrderSynced: true });
+    const approvalPayload = await approvalResponse.json();
+    expect(approvalPayload).toMatchObject({
+      gate: "customerApproval",
+      filmOrderSynced: false,
+      record: { id: record.id, status: "sent" },
+    });
+    expect(approvalPayload.record.customerApproval).not.toBeNull();
+    expect(await filmOrderExistsForQuotation(record.id)).toBe(false);
+
+    const contractResponse = await patchQuotation(request(
+      `http://localhost/api/quotations/${record.id}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "approved" }),
+      },
+      ownerToken,
+    ), context);
+    expect(contractResponse.status).toBe(200);
+    await expect(contractResponse.json()).resolves.toMatchObject({ record: { id: record.id, status: "approved" } });
     expect(await filmOrderExistsForQuotation(record.id)).toBe(true);
 
     const manualRecord = await createRecord("S7-PERMISSION-MANUAL-APPROVED", owner.id);
     await approveQuotationGate(manualRecord.id, "internal", owner.id);
-    await updateQuotationStatus(manualRecord.id, "sent", owner.id);
     const manualContext = { params: Promise.resolve({ id: String(manualRecord.id) }) };
     const manualApproved = await patchQuotation(request(
       `http://localhost/api/quotations/${manualRecord.id}`,

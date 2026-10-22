@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
 
 const MANUAL_STATUS_TRANSITIONS: Record<QuotationStatus, QuotationStatus[]> = {
-  draft: ["draft", "rejected", "expired"],
+  draft: ["draft", "approved", "rejected", "expired"],
   sent: ["sent", "approved", "rejected", "expired"],
   approved: ["approved"],
   rejected: ["rejected"],
@@ -74,7 +74,7 @@ export async function PATCH(request: Request, context: Context): Promise<NextRes
     if (!MANUAL_STATUS_TRANSITIONS[existing.status]?.includes(status)) {
       return NextResponse.json({ error: "invalid_status_transition" }, { status: 409 });
     }
-    if (existing.status === "sent" && status === "approved" && !existing.internalApproval) {
+    if (status === "approved" && !existing.internalApproval) {
       return NextResponse.json({ error: "internal_approval_required" }, { status: 409 });
     }
     const record = await updateQuotationStatus(Number(id), status, user.id);

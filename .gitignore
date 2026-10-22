@@ -12,3 +12,7 @@ next-env.d.ts
 .env
 .verification/
 __pycache__/
+
+# Production database backups
+backups/*.dump
+backups/*.sql

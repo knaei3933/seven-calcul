@@ -12,6 +12,7 @@ interface ApprovalSummary {
   validUntil: string;
   status: string;
   approvedAt: string | null;
+  customerApprovalRecorded: boolean;
 }
 
 function formatNumber(value: string): string {
@@ -42,7 +43,7 @@ export default function CustomerApprovalClient({ token }: { token: string }) {
         throw new Error("承認ページを表示できません。リンクをご確認ください。");
       }
       setQuotation(payload.quotation as ApprovalSummary);
-      if (payload.quotation.status === "approved") {
+      if (payload.quotation.customerApprovalRecorded) {
         setMessage("このお見積書は承認済みです。");
       }
     } catch (cause) {
@@ -56,7 +57,7 @@ export default function CustomerApprovalClient({ token }: { token: string }) {
   useEffect(() => { void load(); }, [load]);
 
   const approve = async () => {
-    if (approving || quotation?.status === "approved") return;
+    if (approving || quotation?.customerApprovalRecorded) return;
     setApproving(true);
     setError("");
     setMessage("");
@@ -73,7 +74,7 @@ export default function CustomerApprovalClient({ token }: { token: string }) {
         throw new Error("承認処理に失敗しました。時間をおいて再度お試しください。");
       }
       setQuotation(payload.quotation as ApprovalSummary);
-      setMessage("お見積書を承認しました。ありがとうございます。");
+      setMessage("承認を受け付けました。担当者が確認のうえ、成約処理を行います。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "承認処理に失敗しました。");
     } finally {
@@ -103,12 +104,12 @@ export default function CustomerApprovalClient({ token }: { token: string }) {
               <div><dt>有効期限</dt><dd>{quotation.validUntil || "-"}</dd></div>
             </dl>
 
-            {quotation.status === "approved" ? (
+            {quotation.customerApprovalRecorded ? (
               <p className="eta-ok">承認日時：{quotation.approvedAt ? new Date(quotation.approvedAt).toLocaleString("ja-JP") : "-"}</p>
             ) : (
               <>
                 <p className="help">
-                  内容をご確認のうえ、下記のお見積書に同意される場合のみ承認してください。承認後は商談処理が進行します。
+                  内容をご確認のうえ、下記のお見積書に同意される場合のみ承認してください。承認記録は担当者に共有され、営業確認後に成約処理されます。
                 </p>
                 <button className="button" type="button" disabled={approving} onClick={() => void approve()}>
                   {approving ? "承認処理中..." : "このお見積書を承認する"}

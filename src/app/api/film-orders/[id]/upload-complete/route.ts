@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
 import { canViewFilmOrders, canPerformFilmOrderAction } from "@/lib/film-order-access";
 import { getFilmOrder } from "@/lib/film-orders";
-import { driveConfigured, findDriveFiles, proofFolderId, receivingFolderId } from "@/lib/google-drive";
+import { driveConfigured, findDriveFiles, getConfirmedDriveUpload, proofFolderId, receivingFolderId } from "@/lib/google-drive";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,9 +16,10 @@ export async function POST(request: Request, context: Context): Promise<NextResp
   if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
   if (!canViewFilmOrders(user.email)) return NextResponse.json({ error: "film_order_forbidden" }, { status: 403 });
   try {
-    const body = await request.json() as { category?: unknown; fileName?: unknown };
+    const body = await request.json() as { category?: unknown; fileName?: unknown; fileId?: unknown };
     const category = body.category === "receiving" || body.category === "proof" ? body.category : null;
     const fileName = typeof body.fileName === "string" ? body.fileName.trim() : "";
+    const fileId = typeof body.fileId === "string" ? body.fileId.trim() : "";
     if (!category || !fileName) return NextResponse.json({ error: "invalid_upload_request" }, { status: 400 });
     const order = await getFilmOrder(orderId);
     if (!order) return NextResponse.json({ error: "film_order_not_found" }, { status: 404 });
@@ -28,8 +29,10 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     }
     if (!driveConfigured()) return NextResponse.json({ error: "drive_not_configured" }, { status: 503 });
     const folderId = category === "receiving" ? receivingFolderId() : proofFolderId();
-    let candidates = await findDriveFiles({ fileName, folderId });
-    for (let attempt = 1; candidates.length === 0 && attempt < 3; attempt += 1) {
+    let candidates = fileId
+      ? [await getConfirmedDriveUpload({ fileId, fileName, folderId })].filter((candidate) => candidate != null)
+      : await findDriveFiles({ fileName, folderId });
+    for (let attempt = 1; !fileId && candidates.length === 0 && attempt < 3; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 800));
       candidates = await findDriveFiles({ fileName, folderId });
     }

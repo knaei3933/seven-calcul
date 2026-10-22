@@ -114,7 +114,7 @@ export default function ProofUploadClient({
   const aiFileName = baseName ? `${baseName}.ai` : "";
   const pdfFileName = baseName ? `${baseName}.pdf` : "";
 
-  const uploadOne = async (file: File, fileName: string) => {
+  const uploadOne = async (file: File, fileName: string): Promise<string> => {
     const sessionResponse = await fetch(`/api/film-orders/proof-upload/${encodeURIComponent(token)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -135,7 +135,9 @@ export default function ProofUploadClient({
       },
       body: file,
     });
-    if (!put.ok) throw new Error(`upload_failed:${put.status}`);
+    const uploaded = await put.json().catch(() => ({})) as { id?: unknown };
+    if (!put.ok || typeof uploaded.id !== "string") throw new Error(`upload_failed:${put.status}`);
+    return uploaded.id;
   };
 
   const submit = async () => {
@@ -158,8 +160,8 @@ export default function ProofUploadClient({
     setMessage("");
     setError("");
     try {
-      await uploadOne(aiFile, aiFileName.trim());
-      if (pdfFile) await uploadOne(pdfFile, pdfFileName.trim());
+      const aiFileId = await uploadOne(aiFile, aiFileName.trim());
+      const pdfFileId = pdfFile ? await uploadOne(pdfFile, pdfFileName.trim()) : undefined;
       const completeResponse = await fetch(`/api/film-orders/proof-upload/${encodeURIComponent(token)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -167,6 +169,8 @@ export default function ProofUploadClient({
           action: "complete",
           aiFileName: aiFileName.trim(),
           pdfFileName: pdfFile ? pdfFileName.trim() : undefined,
+          aiFileId,
+          pdfFileId,
           uploader: uploader.trim() || undefined,
           note: note.trim() || undefined,
         }),

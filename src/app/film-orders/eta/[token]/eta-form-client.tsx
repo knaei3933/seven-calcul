@@ -128,13 +128,15 @@ export default function EtaFormClient({
       headers: { "Content-Type": documentFile.type || "application/pdf" },
       body: documentFile,
     });
-    if (!put.ok) throw new Error(`upload_failed:${put.status}`);
+    const uploaded = await put.json().catch(() => ({})) as { id?: unknown };
+    if (!put.ok || typeof uploaded.id !== "string") throw new Error(`upload_failed:${put.status}`);
     const completeResponse = await fetch(`/api/film-orders/delivery-upload/${encodeURIComponent(token)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "complete",
         fileName: session.fileName,
+        fileId: uploaded.id,
         originalFileName: documentFile.name,
         shipmentDate,
         uploadId: nextUploadId,

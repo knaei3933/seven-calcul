@@ -142,14 +142,30 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   };
 
   const changeStatus = async (record: QuotationRecord, nextStatus: QuotationStatus) => {
-    const response = await fetch(`/api/quotations/${record.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: nextStatus }),
-    });
-    if (response.ok) {
-      const payload = await response.json();
-      setRecords((old) => old.map((item) => (item.id === record.id ? payload.record as QuotationRecord : item)));
+    setHistoryActionError("");
+    try {
+      const response = await fetch(`/api/quotations/${record.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setHistoryActionError(
+          payload.error === "internal_approval_required"
+            ? "成約にするには内部承認が必要です。"
+            : `${record.quotationNumber} の状態を変更できませんでした。`,
+        );
+        return;
+      }
+      const updated = payload.record as QuotationRecord;
+      setRecords((old) => old.map((item) => (item.id === record.id ? updated : item)));
+      if (nextStatus === "approved") {
+        setEmailMessage(`${record.quotationNumber} を成約にしました。フィルム発注管理へ移動します。`);
+        router.push("/film-orders");
+      }
+    } catch {
+      setHistoryActionError(`${record.quotationNumber} の状態を変更できませんでした。`);
     }
   };
 
@@ -168,9 +184,11 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
         const approved = payload.record as QuotationRecord;
         setRecords((old) => old.map((item) => (item.id === record.id ? approved : item)));
         if (selectedRecord?.id === record.id) setSelectedId(record.id);
-        setEmailMessage(gate === "internal"
-          ? `${record.quotationNumber} を内部承認しました。`
-          : `${record.quotationNumber} の顧客承認を記録しました。`);
+        if (gate === "customerApproval") {
+          setEmailMessage(`${record.quotationNumber} の顧客承認を記録しました。成約は担当者が確認して実行してください。`);
+        } else {
+          setEmailMessage(`${record.quotationNumber} を内部承認しました。`);
+        }
       } else if (payload.error === "internal_approval_forbidden") {
         setEmailMessage("内部承認はKimのみ実行できます。");
       } else if (payload.error === "invalid_approval_transition") {
@@ -444,15 +462,15 @@ async function fetchStoredQuotationPdf(
 
 function manualStatusOptions(record: QuotationRecord): QuotationStatus[] {
   const base: Record<QuotationStatus, QuotationStatus[]> = {
-    draft: ["draft", "rejected", "expired"],
+    draft: ["draft", "approved", "rejected", "expired"],
     sent: ["sent", "approved", "rejected", "expired"],
     approved: ["approved"],
     rejected: ["rejected"],
     expired: ["expired"],
   };
-  // 成約への手動変更は内部承認後のみ出す。未承認のまま発注管理へ流さない。
-  if (record.status === "sent" && !record.internalApproval) {
-    return base.sent.filter((status) => status !== "approved");
+  // 顧客承認は成約の必須条件ではない。ただし成約は内部承認後のみ許可する。
+  if (!record.internalApproval) {
+    return base[record.status].filter((status) => status !== "approved");
   }
   return base[record.status];
 }
@@ -849,14 +867,14 @@ function QuotationDetailModal({
                 {sendingEmail ? "送信中..." : "メール送信（PDF添付）"}
               </button>
             ) : null}
-            {record.status === "sent" && record.internalApproval && canRecordCustomerApproval ? (
+            {record.status === "sent" && record.internalApproval && !record.customerApproval && canRecordCustomerApproval ? (
               <button
                 className="button small"
                 type="button"
                 disabled={approvingGate}
                 onClick={() => onApproveGate(record, "customerApproval")}
                 data-testid="history-customer-approval-record"
-              >{approvingGate ? "承認中..." : "顧客承認を記録して成約"}</button>
+              >{approvingGate ? "承認中..." : "顧客承認を記録"}</button>
             ) : null}
             <button className="button secondary small" type="button" onClick={onClose}>閉じる</button>
           </div>

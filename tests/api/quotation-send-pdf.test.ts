@@ -157,13 +157,13 @@ describe("quotation send API with canonical PDF attachment", () => {
     );
     expect(approval.status).toBe(200);
     const approvalPayload = await approval.json();
-    expect(approvalPayload.quotation.status).toBe("approved");
-    expect(approvalPayload.filmOrderSynced).toBe(true);
+    expect(approvalPayload.quotation.status).toBe("sent");
+    expect(approvalPayload.filmOrderSynced).toBe(false);
     await expect(getQuotation(record.id)).resolves.toMatchObject({
-      status: "approved",
+      status: "sent",
       customerApproval: { approvedAt: expect.any(String) },
     });
-    await expect(filmOrderExistsForQuotation(record.id)).resolves.toBe(true);
+    await expect(filmOrderExistsForQuotation(record.id)).resolves.toBe(false);
   });
 
   it("does not send before Kim's internal approval", async () => {
