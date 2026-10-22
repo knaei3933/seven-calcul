@@ -126,6 +126,8 @@ describe("customer master persistence and search", () => {
     expect(await listCustomers("C-001", 100, "seven")).toHaveLength(1);
     expect(await deleteCustomer("kanei", "C-001")).toBe(true);
     expect((await getCustomer("seven", "C-001"))?.customerName).toBe("セブンC-001");
+    await deleteCustomer("seven", "C-001");
+    expect(await getCustomer("seven", "C-001")).toBeNull();
   });
 
   it("ranks customers by each user's own selection count", async () => {
