@@ -1716,7 +1716,9 @@ export default function PrintableQuotationPage({
                       setCustomerSearchOpen(true);
                       void searchCustomerMaster(customerSearchTerm.trim());
                     }}
-                    onBlur={() => {
+                    onBlur={(event) => {
+                      // ドロップダウン内の「続きを表示」や顧客選択では一覧を閉じない。
+                      if (customerSearchRef.current?.contains(event.relatedTarget as Node | null)) return;
                       window.setTimeout(() => setCustomerSearchOpen(false), 150);
                     }}
                   onChange={(event) => {
@@ -1729,7 +1731,11 @@ export default function PrintableQuotationPage({
                   />
                 </label>
                 {customerSearchOpen && (customerSearchResults.length > 0 || customerSearchStatus !== "idle") ? (
-                  <div className="customer-search-results" data-testid="customer-search-results">
+                  <div
+                    className="customer-search-results"
+                    data-testid="customer-search-results"
+                    onMouseDown={(event) => event.preventDefault()}
+                  >
                     {customerSearchStatus === "loading" ? (
                       <p className="customer-search-count">検索中...</p>
                     ) : (

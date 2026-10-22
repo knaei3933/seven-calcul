@@ -431,6 +431,10 @@ describe("quotation page stale draft", () => {
     await user.click(screen.getByRole("button", { name: /続きを表示/ }));
     expect(container.querySelectorAll(".customer-search-result-row")).toHaveLength(100);
     expect(screen.getByRole("button", { name: /残り 20件/ })).toBeVisible();
+    // blur遅延後にドロップダウンが勝手に閉じないことを回帰として抑止する。
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(screen.getByTestId("customer-search-results")).toBeVisible();
+    expect(container.querySelectorAll(".customer-search-result-row")).toHaveLength(100);
   });
 
   it("keeps an active restored revision across quote page navigation", async () => {
