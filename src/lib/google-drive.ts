@@ -268,14 +268,8 @@ export async function getConfirmedDriveUpload(params: {
   const candidate = await getDriveFile(params.fileId);
   if (!candidate || candidate.trashed || candidate.name !== params.fileName) return null;
   if (!candidate.parentFolderIds.includes(params.folderId)) return null;
-  return {
-    id: candidate.id,
-    name: candidate.name,
-    mimeType: candidate.mimeType,
-    checksum: candidate.checksum,
-    sizeBytes: candidate.sizeBytes,
-    parentFolderIds: candidate.parentFolderIds,
-  };
+  const { trashed: _trashed, ...confirmed } = candidate;
+  return confirmed;
 }
 
 export async function downloadFile(fileId: string): Promise<Response> {

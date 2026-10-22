@@ -1630,7 +1630,7 @@ function ProofRegistrationForm({
       <button
         className="button"
         type="button"
-        disabled={busy || !aiFileName.trim().toLowerCase().endsWith(".ai")}
+        disabled={busy || !proofReady}
         onClick={() => onSubmit(aiFileName.trim(), aiFileUrl.trim(), withPdf ? pdfFileName.trim() : "", withPdf ? pdfFileUrl.trim() : "", note)}
       >
         {submitLabel}
@@ -1801,10 +1801,12 @@ function DriveFileField({
         body: file,
       });
       if (!put.ok) throw new Error(`upload_failed:${put.status}`);
+      const uploaded = await put.json().catch(() => ({})) as { id?: unknown };
+      if (!put.ok || typeof uploaded.id !== "string") throw new Error(`upload_failed:${put.status}`);
       const completeResponse = await fetch(`/api/film-orders/${orderId}/upload-complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ category, fileName: fileName.trim() }),
+        body: JSON.stringify({ category, fileName: fileName.trim(), fileId: uploaded.id }),
       });
       const complete = await completeResponse.json() as { url?: string; error?: string };
       if (!completeResponse.ok || !complete.url) throw new Error(complete.error ?? "complete_failed");
