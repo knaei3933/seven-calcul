@@ -235,6 +235,69 @@ describe("quotation history ownership UI", () => {
     vi.unstubAllGlobals();
   });
 
+  it("regenerates a stored film quotation whose unit price excludes shipping and customs", async () => {
+    const inconsistentRecord: QuotationRecord = {
+      ...adminRecord,
+      payload: {
+        calculationChecklistSnapshot: {
+          printingMethod: "digital",
+          film: {
+            requiredLengthM: "1194.4444444444445",
+            orderLengthM: "1200",
+            unitPrice: "252",
+            filmTotal: "363000",
+          },
+          materialWidthMm: "556",
+          skus: [{ name: "History Pouch", quantity: "10000", orderLengthM: "1200", colorCount: "4" }],
+        },
+        filmQuotation: {
+          quotationNumber: "K-HISTORY-ADMIN-F",
+          pouchQuotationNumber: adminRecord.quotationNumber,
+          endCustomerName: "History Test",
+          productName: "History Pouch",
+          filmComposition: "PET12+AL7+PET12+LLDPE50μ",
+          printingMethodLabel: "デジタル印刷",
+          colorCountLabel: "4色",
+          quantity: "10000",
+          issueDate: adminRecord.issueDate,
+          validUntil: adminRecord.validUntil,
+          items: [{
+            description: "異形パウチ専用フィルム",
+            specification: "",
+            webWidthMm: "556",
+            orderLengthM: "1200",
+            unitPriceYenPerM: "252",
+            amountYen: "363000",
+          }],
+          subtotal: "363000",
+          tax: "36300",
+          grandTotal: "399300",
+          notes: [],
+        },
+      } as never,
+    };
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => (
+      String(input).endsWith("/pdf")
+        ? Response.json({ error: "pdf_not_found" }, { status: 404 })
+        : Response.json({ records: [inconsistentRecord] }, { status: 200 })
+    )));
+    const user = userEvent.setup();
+    render(<HistoryClient currentUser={currentUser} />);
+
+    await screen.findByText("S7-HISTORY-ADMIN");
+    await user.click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    await user.click(screen.getByTestId("film-quote-tab"));
+
+    expect(screen.getByText(/302\.5/)).toBeInTheDocument();
+    expect(screen.getByText(/単価条件：フィルム製作・国内輸送・海外輸送・通関費込み/)).toBeInTheDocument();
+  });
+
   it("displays, downloads, and prints only the canonical stored quotation PDF", async () => {
     vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
       matches: false,

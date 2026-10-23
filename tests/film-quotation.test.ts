@@ -33,8 +33,42 @@ describe("film quotation linkage", () => {
     expect(quotation?.items[0]?.specification).toContain("印刷色数：4色");
     expect(quotation?.printingMethodLabel).toBe("グラビア印刷（ロール）");
     expect(quotation?.colorCountLabel).toBe("4色");
+    expect(quotation?.items[0]?.specification).toContain("単価条件：フィルム製作・国内輸送・海外輸送・通関費込み");
     expect(quotation?.subtotal).toBe("141001");
     expect(quotation?.grandTotal).toBe("155102");
+  });
+
+  it("shows the film unit price including shipping and customs costs", () => {
+    const quotation = buildFilmQuotationFromRecord({
+      quotationNumber: "KT-202610-003",
+      customerName: "株式会社フォーライフ",
+      issueDate: "2026-10-22",
+      validUntil: "2026-11-21",
+      productName: "レディエイドルプリカント",
+      quantity: "50000",
+      payload: {
+        filmOrderLengthM: "1200",
+        calculationFilmTotal: "363000",
+        filmUnitDisplay: "252",
+        calculationChecklistSnapshot: {
+          printingMethod: "digital",
+          film: {
+            requiredLengthM: "1194.4444444444445",
+            orderLengthM: "1200",
+            unitPrice: "252",
+            filmTotal: "363000",
+          },
+          materialWidthMm: "556",
+        },
+      },
+    });
+
+    // 252×1200=302,400＋国内配送6,000＋海外配送48,000＋通関6,600＝363,000
+    expect(quotation?.items[0]?.orderLengthM).toBe("1200");
+    expect(quotation?.items[0]?.unitPriceYenPerM).toBe("302.5");
+    expect(quotation?.items[0]?.amountYen).toBe("363000");
+    expect(quotation?.subtotal).toBe("363000");
+    expect(quotation?.grandTotal).toBe("399300");
   });
 });
 

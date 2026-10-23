@@ -78,12 +78,16 @@ export function buildFilmQuotationFromRecord(record: {
   const orderLength = snapshot?.film?.orderLengthM ?? payload.filmOrderLengthM ?? record.filmOrderLengthM;
   if (!orderLength || Number(orderLength) <= 0) return null;
 
-  const unitPrice = snapshot?.film?.unitPrice ?? payload.filmUnitDisplay ?? record.filmMeterPrice ?? "0";
   const storedFilmTotal = snapshot?.film?.filmTotal ?? payload.calculationFilmTotal;
+  // 明細の単価は物流・通関費を含む総額換算にする。snapshot.unitPrice は材料単価のみのケースがある。
+  const materialUnitPrice = snapshot?.film?.unitPrice ?? payload.filmUnitDisplay ?? record.filmMeterPrice ?? "0";
   const filmTotal = storedFilmTotal
-    ?? (D(unitPrice).gt(0) && D(orderLength).gt(0)
-      ? D(unitPrice).times(D(orderLength)).toDecimalPlaces(0, Decimal.ROUND_CEIL).toString()
+    ?? (D(materialUnitPrice).gt(0)
+      ? D(materialUnitPrice).times(D(orderLength)).toDecimalPlaces(0, Decimal.ROUND_CEIL).toString()
       : "0");
+  const unitPrice = D(orderLength).gt(0) && D(filmTotal).gt(0)
+    ? D(filmTotal).div(D(orderLength)).toString()
+    : materialUnitPrice;
   const webWidth = String(payload.purchaseOrder?.webWidthMm ?? snapshot?.materialWidthMm ?? "");
   const composition = (typeof payload.filmComposition === "string" && payload.filmComposition.trim())
     || payload.purchaseOrder?.filmComposition
@@ -138,6 +142,7 @@ export function buildFilmQuotationFromRecord(record: {
         `フィルム構成：${composition}`,
         `印刷方式：${printingMethodLabel}`,
         `印刷色数：${colorCountLabel}`,
+        `単価条件：フィルム製作・国内輸送・海外輸送・通関費込み`,
       ].join("\n"),
       webWidthMm: webWidth,
       orderLengthM: orderLength,
