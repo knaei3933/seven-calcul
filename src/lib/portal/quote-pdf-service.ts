@@ -65,10 +65,12 @@ interface PortalPdfSourceRow {
   payment_terms: string;
   notes: string;
   created_at: string;
+  pdf_available: number | boolean;
 }
 
 export interface PortalPdfApiDependencies {
   now?: () => Date;
+  clientFingerprint?: string;
   authenticateSession?: typeof authenticatePortalSession;
   incrementRateLimit?: typeof incrementPortalRateLimit;
   resolveQuote?: typeof resolveOwnPortalQuoteForPdf;
@@ -119,7 +121,8 @@ async function resolveOwnPortalQuoteForPdf(input: {
            quotations.delivery_date,
            quotations.payment_terms,
            quotations.notes,
-           portal_quote_mappings.created_at
+           portal_quote_mappings.created_at,
+           (quotations.pdf_data IS NOT NULL) AS pdf_available
     FROM portal_quote_mappings
       INNER JOIN quotations ON quotations.id = portal_quote_mappings.quotation_id
     WHERE portal_quote_mappings.public_id = ?
@@ -154,6 +157,7 @@ async function resolveOwnPortalQuoteForPdf(input: {
       paymentTerms: row.payment_terms,
       notes: row.notes,
       createdAt: row.created_at,
+      pdfAvailable: Boolean(row.pdf_available),
     }, input.now),
   };
 }
@@ -195,17 +199,28 @@ async function requireOwnPortalCaller(
 
 async function enforceGenerationRateLimit(
   dependencies: PortalPdfApiDependencies,
+  request: Request,
   caller: AuthenticatedCaller,
   now: Date,
 ): Promise<void> {
   const incrementRateLimit = dependencies.incrementRateLimit ?? incrementPortalRateLimit;
-  const result = await incrementRateLimit({
-    key: `portal-quote-pdf-generate:${caller.ownerDomain}:${caller.user.id}`,
-    limit: GENERATION_RATE_LIMIT,
-    windowSeconds: 60,
-    now,
-  });
-  if (result.count > GENERATION_RATE_LIMIT) throw new PortalPdfRateLimitError();
+  const supplied = dependencies.clientFingerprint;
+  const header = request.headers.get("x-portal-client-fingerprint")?.trim() ?? "";
+  const client = supplied
+    ? (/^[0-9a-f]{64}$/.test(supplied) ? supplied : "unknown")
+    : (/^[0-9a-f]{64}$/.test(header) ? header : "unknown");
+  for (const key of [
+    `portal-quote-pdf-generate:${caller.ownerDomain}:${caller.user.id}`,
+    `portal-quote-pdf-generate:client:${client}`,
+  ]) {
+    const result = await incrementRateLimit({
+      key,
+      limit: GENERATION_RATE_LIMIT,
+      windowSeconds: 60,
+      now,
+    });
+    if (result.count > GENERATION_RATE_LIMIT) throw new PortalPdfRateLimitError();
+  }
 }
 
 function callerScope(caller: AuthenticatedCaller): {
@@ -273,7 +288,7 @@ export async function generatePortalQuotePdfApi(
     }
     const now = dependencies.now?.() ?? new Date();
     const caller = await requireOwnPortalCaller(request, dependencies);
-    await enforceGenerationRateLimit(dependencies, caller, now);
+    await enforceGenerationRateLimit(dependencies, request, caller, now);
     const resolveQuote = dependencies.resolveQuote ?? resolveOwnPortalQuoteForPdf;
     const quote = await resolveQuote({ ...callerScope(caller), publicId, now });
     if (!quote) {

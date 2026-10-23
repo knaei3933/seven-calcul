@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,12 +28,14 @@ const {
   createPortalUser,
   deletePortalUser,
   getPortalIdentityDatabase,
+  hashPortalSessionIp,
   getPortalUserByEmail,
   setPortalUserVerified,
   ensureQuotationPortalServiceActor,
   incrementPortalRateLimit,
   normalizePortalEmail,
   portalIdentitySchemas,
+  resetPortalIdentityStoreForTest,
   revokePortalSession,
 } = await import("@/lib/portal/identity-store");
 const { authenticatePortalServiceToken } = await import("@/lib/portal/service-auth");
@@ -306,6 +309,8 @@ describe("portal sessions", () => {
     expect(stored).toHaveLength(1);
     expect(stored[0].token_hash).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(stored)).not.toContain(issued.token);
+    expect(JSON.stringify(stored)).not.toContain("192.0.2.10");
+    expect(JSON.stringify(stored)).not.toContain("192.0.2.11");
 
     const authenticated = await authenticatePortalSession(issued.token, {
       now: new Date(now.getTime() + 1000),
@@ -313,14 +318,14 @@ describe("portal sessions", () => {
     });
     expect(authenticated).toMatchObject({ id: user.id, email: user.email });
     const metadata = await db.get<{
-      created_ip: string;
-      last_seen_ip: string;
+      created_ip_hash: string;
+      last_seen_ip_hash: string;
       last_seen_at: string;
       last_seen_user_agent: string;
-    }>("SELECT created_ip,last_seen_ip,last_seen_at,last_seen_user_agent FROM portal_sessions WHERE portal_user_id = ?", [user.id]);
+    }>("SELECT created_ip_hash,last_seen_ip_hash,last_seen_at,last_seen_user_agent FROM portal_sessions WHERE portal_user_id = ?", [user.id]);
     expect(metadata).toMatchObject({
-      created_ip: "192.0.2.10",
-      last_seen_ip: "192.0.2.11",
+      created_ip_hash: /^[0-9a-f]{64}$/,
+      last_seen_ip_hash: /^[0-9a-f]{64}$/,
       last_seen_at: "2026-01-03T00:00:01.000Z",
       last_seen_user_agent: "vitest-second",
     });
@@ -340,6 +345,48 @@ describe("portal sessions", () => {
     await expect(authenticatePortalSession(expiring.token, {
       now: new Date(now.getTime() + 60_000),
     })).resolves.toBeNull();
+  });
+});
+
+describe("portal session IP hash migration", () => {
+  it("hashes and removes legacy raw session IP columns", async () => {
+    const db = await getPortalIdentityDatabase();
+    await db.exec("ALTER TABLE portal_sessions DROP COLUMN created_ip_hash");
+    await db.exec("ALTER TABLE portal_sessions DROP COLUMN last_seen_ip_hash");
+    await db.exec("ALTER TABLE portal_sessions ADD COLUMN created_ip TEXT NOT NULL DEFAULT ''");
+    await db.exec("ALTER TABLE portal_sessions ADD COLUMN last_seen_ip TEXT");
+    await db.run("UPDATE portal_sessions SET created_ip = ?, last_seen_ip = ?", [
+      "192.0.2.99",
+      "192.0.2.100",
+    ]);
+    const token = randomBytes(32).toString("base64url");
+    const sessionUser = await db.get<{ portal_user_id: number }>(
+      "SELECT portal_user_id FROM portal_sessions LIMIT 1",
+    );
+    await db.run(`
+      INSERT INTO portal_sessions (
+        portal_user_id,token_hash,expires_at,created_ip,created_user_agent,created_at
+      ) VALUES (?,?,?,?,?,?)
+    `, [
+      Number(sessionUser?.portal_user_id),
+      createHash("sha256").update(token).digest("hex"),
+      new Date("2026-01-05T00:01:00.000Z").toISOString(),
+      "192.0.2.99",
+      "migration-test",
+      new Date("2026-01-05T00:00:00.000Z").toISOString(),
+    ]);
+
+    await resetPortalIdentityStoreForTest();
+    const migrated = await getPortalIdentityDatabase();
+    const row = await migrated.get<{ created_ip_hash: string; last_seen_ip_hash: string | null }>(
+      "SELECT created_ip_hash,last_seen_ip_hash FROM portal_sessions LIMIT 1",
+    );
+    expect(row?.created_ip_hash).toBe(hashPortalSessionIp("192.0.2.99"));
+    expect(row?.last_seen_ip_hash).toBe(hashPortalSessionIp("192.0.2.100"));
+    expect(JSON.stringify(row)).not.toContain("192.0.2.");
+    const columns = await migrated.all<{ name: string }>("PRAGMA table_info(portal_sessions)");
+    expect(columns.some((column) => column.name === "created_ip")).toBe(false);
+    expect(columns.some((column) => column.name === "last_seen_ip")).toBe(false);
   });
 });
 

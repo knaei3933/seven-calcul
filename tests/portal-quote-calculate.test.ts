@@ -118,8 +118,12 @@ async function createVerifiedUser(label: string, customerCode: string): Promise<
   return user;
 }
 
-function authFor(user: { token: string }): Record<string, string> {
-  return { ...authorization, "x-portal-session-token": user.token };
+function authFor(user: { id?: number; token: string }): Record<string, string> {
+  return {
+    ...authorization,
+    "x-portal-client-fingerprint": String(user.id ?? 0).padStart(64, "0"),
+    "x-portal-session-token": user.token,
+  };
 }
 
 async function counts(): Promise<{ quotations: number; mappings: number }> {

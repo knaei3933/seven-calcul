@@ -60,7 +60,11 @@ function advanceSeconds(seconds = 1): void {
 }
 
 function headersFor(user: TestUser): Record<string, string> {
-  return { ...authorization, "x-portal-session-token": user.token };
+  return {
+    ...authorization,
+    "x-portal-client-fingerprint": user.id.toString().padStart(64, "0"),
+    "x-portal-session-token": user.token,
+  };
 }
 
 function listRequest(
@@ -241,7 +245,7 @@ beforeAll(async () => {
   const portalDb = await getPortalIdentityDatabase();
   await portalDb.run(`
     INSERT INTO portal_sessions (
-      portal_user_id,token_hash,expires_at,created_ip,created_user_agent,created_at
+      portal_user_id,token_hash,expires_at,created_ip_hash,created_user_agent,created_at
     ) VALUES (?,?,?,?,?,?)
   `, [
     unverified.id,
@@ -474,6 +478,20 @@ describe("portal own-quote read APIs", () => {
     expect(quote).not.toHaveProperty("status");
   });
 
+  it("derives customer PDF availability from persisted canonical PDF bytes", async () => {
+    const publicId = await detailPublicId(owner);
+    const quotationDb = await (await import("@/lib/db")).getSqlClient("quotations");
+    await quotationDb.run(
+      "UPDATE quotations SET pdf_data = ? WHERE id = (SELECT quotation_id FROM portal_quote_mappings WHERE public_id = ?)",
+      [Buffer.from("%PDF-1.7\ntruthful"), publicId],
+    );
+    const detail = await getPortalQuoteApi(detailRequest(owner, publicId), publicId);
+    const quote = (await body(detail)).quote as Record<string, unknown>;
+    expect(quote.pdfAvailability).toBe("available");
+    expect(quote.availability).toBe("expired");
+    expect(quote).not.toHaveProperty("status");
+  });
+
   it("converts query failures into a generic response without leaking internals", async () => {
     const databaseError = new Error("secret table/column failure");
     const listFailure = await listPortalQuotesApi(listRequest(owner), {
@@ -506,6 +524,12 @@ describe("portal own-quote read APIs", () => {
     );
     expect(Number(durableList?.count)).toBeGreaterThan(0);
     expect(Number(durableDetail?.count)).toBeGreaterThan(0);
+    const clientRows = await rateDb.all<{ bucket_key: string }>(`
+      SELECT bucket_key FROM portal_rate_limits
+      WHERE bucket_key LIKE 'portal-quote-list:%client:%'
+        OR bucket_key LIKE 'portal-quote-detail:%client:%'
+    `);
+    expect(clientRows.length).toBeGreaterThanOrEqual(2);
     let calls = 0;
     const limited = await listPortalQuotesApi(listRequest(owner), {
       authenticateSession: (async () => authenticatePortalSession(owner.token, { now: now() })) as unknown as typeof authenticatePortalSession,

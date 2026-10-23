@@ -104,6 +104,12 @@ interface AdminQuoteRow {
   quotation_updated_at: string;
 }
 
+export async function initializePortalQuoteMappingSchema(): Promise<void> {
+  const { initializePortalQuoteMappingSchema: initializeStoreSchema } =
+    await import("@/lib/portal/quote-calculation-store");
+  await initializeStoreSchema();
+}
+
 function escapedSearchTerm(search: string): string {
   return `%${search.trim().replace(/[!%_]/g, (character) => `!${character}`)}%`;
 }
@@ -177,6 +183,7 @@ export async function listAdminPortalQuotes(
     throw new AdminQuoteValidationError();
   }
   const db = await getSqlClient("quotations");
+  await initializePortalQuoteMappingSchema();
   const where = "WHERE portal_quote_mappings.source = 'customer_portal'";
   const whereArguments: Array<string> = [];
   if (search) {

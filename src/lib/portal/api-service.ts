@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   PortalIdentityError,
   authenticatePortalSession,
-  authenticatePortalUser,
+  authenticatePortalUserWithState,
   createPortalEmailVerificationWithCooldown,
   createPortalSession,
   createPortalUser,
@@ -23,6 +23,7 @@ import {
 export interface PortalApiDependencies {
   now?: () => Date;
   mailSender?: PortalMailSender;
+  clientFingerprint?: string;
 }
 
 interface StrictBody {
@@ -61,6 +62,7 @@ const VERIFICATION_ATTEMPTS = 5;
 const RESEND_COOLDOWN_SECONDS = 60;
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CLIENT_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
 
 class ValidationError extends Error {
   constructor() {
@@ -161,6 +163,18 @@ function userProjection(user: Awaited<ReturnType<typeof getPortalUserByEmail>>):
   };
 }
 
+function requestClientFingerprint(request: Request, dependencies: PortalApiDependencies): string {
+  if (dependencies.clientFingerprint !== undefined) {
+    return CLIENT_FINGERPRINT_PATTERN.test(dependencies.clientFingerprint)
+      ? dependencies.clientFingerprint
+      : "unknown";
+  }
+  const value = request.headers.get("x-portal-client-fingerprint")?.trim() ?? "";
+  // Invalid browser-injected values are ignored. The BFF derives the only
+  // accepted value after this handler has authenticated the service token.
+  return CLIENT_FINGERPRINT_PATTERN.test(value) ? value : "unknown";
+}
+
 async function enforceRateLimit(input: {
   key: string;
   limit: number;
@@ -174,6 +188,28 @@ async function enforceRateLimit(input: {
     now: input.now,
   });
   if (result.count > input.limit) throw new RateLimitError();
+}
+
+async function enforceAccountAndClientRateLimits(input: {
+  action: "register" | "verify" | "resend" | "login";
+  accountId: string;
+  clientFingerprint: string;
+  limit: number;
+  windowSeconds: number;
+  now: Date;
+}): Promise<void> {
+  await enforceRateLimit({
+    key: `portal-${input.action}:${input.accountId}`,
+    limit: input.limit,
+    windowSeconds: input.windowSeconds,
+    now: input.now,
+  });
+  await enforceRateLimit({
+    key: `portal-${input.action}:client:${input.clientFingerprint}`,
+    limit: input.limit,
+    windowSeconds: input.windowSeconds,
+    now: input.now,
+  });
 }
 
 function sessionToken(request: Request): string | null {
@@ -201,10 +237,13 @@ async function register(
   request: Request,
   now: Date,
   mailSender: PortalMailSender,
+  dependencies: PortalApiDependencies,
 ): Promise<NextResponse> {
   const input = validateRegistration((await readStrictObject(request)).value);
-  await enforceRateLimit({
-    key: `portal-register:${input.email}`,
+  await enforceAccountAndClientRateLimits({
+    action: "register",
+    accountId: input.email,
+    clientFingerprint: requestClientFingerprint(request, dependencies),
     limit: 5,
     windowSeconds: 60 * 60,
     now,
@@ -227,13 +266,19 @@ async function register(
   return NextResponse.json({ user: userProjection(user) }, { status: 201 });
 }
 
-async function verify(request: Request, now: Date): Promise<NextResponse> {
+async function verify(
+  request: Request,
+  now: Date,
+  dependencies: PortalApiDependencies,
+): Promise<NextResponse> {
   const body = (await readStrictObject(request)).value;
   strictFields(body, ["email", "code"]);
   const email = normalizeEmail(requiredString(body, "email", 254));
   const code = requiredString(body, "code", 200);
-  await enforceRateLimit({
-    key: `portal-verify:${email}`,
+  await enforceAccountAndClientRateLimits({
+    action: "verify",
+    accountId: email,
+    clientFingerprint: requestClientFingerprint(request, dependencies),
     limit: 10,
     windowSeconds: 60 * 60,
     now,
@@ -246,12 +291,15 @@ async function resend(
   request: Request,
   now: Date,
   mailSender: PortalMailSender,
+  dependencies: PortalApiDependencies,
 ): Promise<NextResponse> {
   const body = (await readStrictObject(request)).value;
   strictFields(body, ["email"]);
   const email = normalizeEmail(requiredString(body, "email", 254));
-  await enforceRateLimit({
-    key: `portal-resend:${email}`,
+  await enforceAccountAndClientRateLimits({
+    action: "resend",
+    accountId: email,
+    clientFingerprint: requestClientFingerprint(request, dependencies),
     limit: 3,
     windowSeconds: 60 * 60,
     now,
@@ -278,6 +326,7 @@ async function resend(
 async function login(
   request: Request,
   now: Date,
+  dependencies: PortalApiDependencies,
 ): Promise<NextResponse> {
   const body = (await readStrictObject(request)).value;
   strictFields(body, ["email", "password"]);
@@ -285,15 +334,20 @@ async function login(
   if (typeof body.password !== "string" || body.password.length < 1 || body.password.length > 200) {
     throw new ValidationError();
   }
-  const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-  await enforceRateLimit({
-    key: `portal-login:${email}:${ipAddress}`,
+  await enforceAccountAndClientRateLimits({
+    action: "login",
+    accountId: email,
+    clientFingerprint: requestClientFingerprint(request, dependencies),
     limit: 10,
     windowSeconds: 15 * 60,
     now,
   });
-  const user = await authenticatePortalUser(email, body.password);
-  if (!user) throw new PortalIdentityError("invalid_credentials");
+  const loginState = await authenticatePortalUserWithState(email, body.password);
+  if (loginState.status === "unverified") {
+    return NextResponse.json({ error: "email_unverified" }, { status: 403 });
+  }
+  if (loginState.status !== "authenticated") throw new PortalIdentityError("invalid_credentials");
+  const user = loginState.user;
   const session = await createPortalSession(user.id, {
     ttlSeconds: SESSION_TTL_SECONDS,
     now,
@@ -369,10 +423,10 @@ export async function handlePortalApiRequest(
   const mailSender = dependencies.mailSender ?? createPortalMailSender();
   try {
     requirePortalServiceToken(request.headers.get("authorization"));
-    if (action === "register") return await register(request, now, mailSender);
-    if (action === "verify") return await verify(request, now);
-    if (action === "resend") return await resend(request, now, mailSender);
-    if (action === "login") return await login(request, now);
+    if (action === "register") return await register(request, now, mailSender, dependencies);
+    if (action === "verify") return await verify(request, now, dependencies);
+    if (action === "resend") return await resend(request, now, mailSender, dependencies);
+    if (action === "login") return await login(request, now, dependencies);
     if (action === "logout") return await logout(request, now);
     return await me(request, now);
   } catch (error) {

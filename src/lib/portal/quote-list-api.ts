@@ -41,6 +41,7 @@ class PortalQuoteValidationError extends Error {
 
 export interface PortalQuoteApiDependencies {
   now?: () => Date;
+  clientFingerprint?: string;
   authenticateSession?: typeof authenticatePortalSession;
   incrementRateLimit?: typeof incrementPortalRateLimit;
   listQuotes?: typeof listOwnPortalQuotes;
@@ -54,6 +55,16 @@ interface AuthenticatedCaller {
 
 function sessionToken(request: Request): string | null {
   return request.headers.get("x-portal-session-token");
+}
+
+function clientFingerprint(request: Request, dependencies: PortalQuoteApiDependencies): string {
+  if (dependencies.clientFingerprint !== undefined) {
+    return /^[0-9a-f]{64}$/.test(dependencies.clientFingerprint)
+      ? dependencies.clientFingerprint
+      : "unknown";
+  }
+  const value = request.headers.get("x-portal-client-fingerprint")?.trim() ?? "";
+  return /^[0-9a-f]{64}$/.test(value) ? value : "unknown";
 }
 
 async function requireOwnPortalCaller(
@@ -87,17 +98,23 @@ async function requireOwnPortalCaller(
 
 async function enforceRateLimit(
   dependencies: PortalQuoteApiDependencies,
-  input: { key: string; limit: number },
+  request: Request,
+  input: { scope: string; owner: string; limit: number },
   now: Date,
 ): Promise<void> {
   const incrementRateLimit = dependencies.incrementRateLimit ?? incrementPortalRateLimit;
-  const result = await incrementRateLimit({
-    key: input.key,
-    limit: input.limit,
-    windowSeconds: 60,
-    now,
-  });
-  if (result.count > input.limit) throw new PortalQuoteRateLimitError();
+  for (const key of [
+    `${input.scope}:${input.owner}`,
+    `${input.scope}:client:${clientFingerprint(request, dependencies)}`,
+  ]) {
+    const result = await incrementRateLimit({
+      key,
+      limit: input.limit,
+      windowSeconds: 60,
+      now,
+    });
+    if (result.count > input.limit) throw new PortalQuoteRateLimitError();
+  }
 }
 
 function callerScope(caller: AuthenticatedCaller): {
@@ -135,8 +152,9 @@ export async function listPortalQuotesApi(
     const cursor = rawCursor ? decodeCursor(rawCursor) : undefined;
     if (rawCursor && !cursor) throw new PortalQuoteValidationError();
     const limit = parseLimit(url.searchParams.get("limit"));
-    await enforceRateLimit(dependencies, {
-      key: `portal-quote-list:${caller.ownerDomain}:${caller.user.id}`,
+    await enforceRateLimit(dependencies, request, {
+      scope: "portal-quote-list",
+      owner: `${caller.ownerDomain}:${caller.user.id}`,
       limit: LIST_RATE_LIMIT,
     }, now);
     const listQuotes = dependencies.listQuotes ?? listOwnPortalQuotes;
@@ -158,8 +176,9 @@ export async function getPortalQuoteApi(
   try {
     const now = dependencies.now?.() ?? new Date();
     const caller = await requireOwnPortalCaller(request, dependencies);
-    await enforceRateLimit(dependencies, {
-      key: `portal-quote-detail:${caller.ownerDomain}:${caller.user.id}`,
+    await enforceRateLimit(dependencies, request, {
+      scope: "portal-quote-detail",
+      owner: `${caller.ownerDomain}:${caller.user.id}`,
       limit: DETAIL_RATE_LIMIT,
     }, now);
     const findQuote = dependencies.findQuote ?? findOwnPortalQuote;

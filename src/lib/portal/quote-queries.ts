@@ -21,6 +21,7 @@ interface PortalQuoteReadRow {
   payment_terms: string;
   notes: string;
   created_at: string;
+  pdf_available: number | boolean;
 }
 
 const SQLITE_SCHEMA = `
@@ -115,7 +116,8 @@ function safeQuoteSelection(): string {
            quotations.delivery_date,
            quotations.payment_terms,
            quotations.notes,
-           portal_quote_mappings.created_at
+           portal_quote_mappings.created_at,
+           (quotations.pdf_data IS NOT NULL) AS pdf_available
     FROM portal_quote_mappings
       INNER JOIN quotations ON quotations.id = portal_quote_mappings.quotation_id
   `;
@@ -145,6 +147,7 @@ function readRow(row: PortalQuoteReadRow, now: Date): PortalQuoteProjection {
     paymentTerms: row.payment_terms,
     notes: row.notes,
     createdAt: row.created_at,
+    pdfAvailable: Boolean(row.pdf_available),
   }, now);
 }
 

@@ -61,7 +61,11 @@ function advanceSeconds(seconds = 1): void {
 }
 
 function headersFor(user: TestUser): Record<string, string> {
-  return { ...serviceAuthorization, "x-portal-session-token": user.token };
+  return {
+    ...serviceAuthorization,
+    "x-portal-client-fingerprint": user.id.toString().padStart(64, "0"),
+    "x-portal-session-token": user.token,
+  };
 }
 
 function generateRequest(user: TestUser, publicId: string, headers = headersFor(user)): Request {
@@ -180,6 +184,7 @@ let generatedQuote: Record<string, unknown>;
 let generatedPublicId = "";
 let expiredQuote: Record<string, unknown>;
 let expiredPublicId = "";
+let expiredOwner: TestUser;
 let raceQuote: Record<string, unknown>;
 let racePublicId = "";
 
@@ -205,6 +210,7 @@ beforeAll(async () => {
   });
   owner = await createVerifiedUser("pdf-owner", "PDFOwner");
   foreignUser = await createVerifiedUser("pdf-foreign", "PDFForeign");
+  expiredOwner = await createVerifiedUser("pdf-expired-owner", "PDFExpiredOwner");
   const unverified = await createPortalUser({
     email: `unverified-${Math.random().toString(16).slice(2)}@example.test`,
     password: "secure-portal-password",
@@ -217,7 +223,7 @@ beforeAll(async () => {
   const portalDb = await getPortalIdentityDatabase();
   await portalDb.run(`
     INSERT INTO portal_sessions (
-      portal_user_id,token_hash,expires_at,created_ip,created_user_agent,created_at
+      portal_user_id,token_hash,expires_at,created_ip_hash,created_user_agent,created_at
     ) VALUES (?,?,?,?,?,?)
   `, [
     unverified.id,
@@ -236,7 +242,7 @@ beforeAll(async () => {
 
   generatedQuote = await createQuote(owner, "pdf-first");
   generatedPublicId = String(generatedQuote.publicId);
-  expiredQuote = await createQuote(owner, "pdf-expired");
+  expiredQuote = await createQuote(expiredOwner, "pdf-expired");
   expiredPublicId = String(expiredQuote.publicId);
   raceQuote = await createQuote(owner, "pdf-race");
   racePublicId = String(raceQuote.publicId);
@@ -467,7 +473,7 @@ describe("portal-owned canonical quotation PDF API", () => {
   });
 
   it("keeps expired quotes downloadable and renders only safe expiry wording without changing draft status", async () => {
-    const response = await generatePortalQuotePdfApi(generateRequest(owner, expiredPublicId), expiredPublicId, {
+    const response = await generatePortalQuotePdfApi(generateRequest(expiredOwner, expiredPublicId), expiredPublicId, {
       now,
       fontBytes,
     });
@@ -478,7 +484,7 @@ describe("portal-owned canonical quotation PDF API", () => {
       [Number(mapping.quotation_id)],
     ));
     expect(quoteStatus?.status).toBe("draft");
-    const download = await downloadPortalQuotePdfApi(downloadRequest(owner, expiredPublicId), expiredPublicId, { now });
+    const download = await downloadPortalQuotePdfApi(downloadRequest(expiredOwner, expiredPublicId), expiredPublicId, { now });
     expect(download.status).toBe(200);
     const text = await extractPdfText(new Uint8Array(await download.arrayBuffer()));
     expect(text).toContain("有効期限切れ");

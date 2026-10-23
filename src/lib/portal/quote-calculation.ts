@@ -31,10 +31,12 @@ import {
   PortalQuoteIdempotencyConflictError,
   type PortalQuoteOwnerDomain,
 } from "@/lib/portal/quote-calculation-store";
+import { portalQuoteAvailability } from "@/lib/portal/quote-projection";
 import { calculateAutomaticQuotation } from "@/lib/quotation-pricing";
 
 export interface PortalQuoteDependencies {
   now?: () => Date;
+  clientFingerprint?: string;
   calculate?: typeof calculatePouchCost;
   resolveFilmPrices?: typeof resolveFilmUnitPrices;
 }
@@ -349,6 +351,16 @@ function sessionToken(request: Request): string | null {
   return request.headers.get("x-portal-session-token");
 }
 
+function clientFingerprint(request: Request, dependencies: PortalQuoteDependencies): string {
+  if (dependencies.clientFingerprint !== undefined) {
+    return /^[0-9a-f]{64}$/.test(dependencies.clientFingerprint)
+      ? dependencies.clientFingerprint
+      : "unknown";
+  }
+  const value = request.headers.get("x-portal-client-fingerprint")?.trim() ?? "";
+  return /^[0-9a-f]{64}$/.test(value) ? value : "unknown";
+}
+
 function unavailableResponse(): NextResponse {
   return NextResponse.json({
     error: "print_method_unavailable",
@@ -399,13 +411,19 @@ export async function calculatePortalQuote(
       return NextResponse.json(existing.response);
     }
 
-    const rate = await incrementPortalRateLimit({
-      key: `portal-quote-calculate:${ownerDomain}:${user.id}`,
-      limit: MAX_QUOTE_CALCULATIONS_PER_HOUR,
-      windowSeconds: 60 * 60,
-      now,
-    });
-    if (rate.count > MAX_QUOTE_CALCULATIONS_PER_HOUR) throw new PortalQuoteRateLimitError();
+    const requestedFingerprint = clientFingerprint(request, dependencies);
+    for (const key of [
+      `portal-quote-calculate:${ownerDomain}:${user.id}`,
+      `portal-quote-calculate:client:${requestedFingerprint}`,
+    ]) {
+      const rate = await incrementPortalRateLimit({
+        key,
+        limit: MAX_QUOTE_CALCULATIONS_PER_HOUR,
+        windowSeconds: 60 * 60,
+        now,
+      });
+      if (rate.count > MAX_QUOTE_CALCULATIONS_PER_HOUR) throw new PortalQuoteRateLimitError();
+    }
 
     const calculationInput = buildCalculationInput(businessInput);
     const asOf = japaneseDate(now);
@@ -555,6 +573,7 @@ async function persistPortalQuote(input: {
     notes: input.businessInput.notes ?? "",
     createdAt: input.now.toISOString(),
     pdfAvailability: "unavailable",
+    availability: portalQuoteAvailability(validUntil, input.now),
   };
 
   const mapping = await createPortalQuoteWithMapping({

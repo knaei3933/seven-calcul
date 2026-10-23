@@ -93,6 +93,13 @@
     "cors": {
       "publicBrowserDirectAdminAccess": false,
       "publicCors": false
+    },
+    "clientFingerprint": {
+      "name": "X-Portal-Client-Fingerprint",
+      "valueFormat": "64-character lowercase HMAC-SHA256 hex digest",
+      "requiredFor": "rate-limited portal BFF requests",
+      "source": "server-derived by portal BFF from client IP; browser values ignored",
+      "secret": false
     }
   },
   "portalSessionCookie": {
@@ -180,6 +187,7 @@
       "notes",
       "createdAt",
       "pdfAvailability",
+      "availability",
       "lines"
     ]
   },
@@ -215,6 +223,7 @@
     "validation_failed",
     "pricing_authority_rejected",
     "unauthorized",
+    "email_unverified",
     "session_expired",
     "forbidden",
     "not_found",
@@ -232,7 +241,8 @@
       "ADMIN_PORTAL_API_BASE_URL",
       "PORTAL_SERVICE_TOKEN",
       "PORTAL_SESSION_COOKIE_NAME",
-      "PORTAL_SESSION_TTL_SECONDS"
+      "PORTAL_SESSION_TTL_SECONDS",
+      "PORTAL_CLIENT_FINGERPRINT_PEPPER"
     ],
     "committedSecretValues": []
   }

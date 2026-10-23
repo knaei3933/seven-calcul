@@ -41,6 +41,7 @@ export interface PortalQuoteSourceRow {
   paymentTerms: string;
   notes: string;
   createdAt: string;
+  pdfAvailable?: boolean;
 }
 
 export interface PortalQuoteProjection {
@@ -61,7 +62,7 @@ export interface PortalQuoteProjection {
   paymentTerms: string;
   notes: string;
   createdAt: string;
-  pdfAvailability: "unavailable";
+  pdfAvailability: "available" | "unavailable";
   lines: readonly unknown[];
   availability: PortalQuoteAvailability;
 }
@@ -78,6 +79,7 @@ export function projectPortalQuote(
   row: PortalQuoteSourceRow,
   now: Date,
 ): PortalQuoteProjection {
+  const pdfAvailable = row.pdfAvailable === true;
   const projection: PortalQuoteProjection = {
     publicId: row.publicId,
     quotationNumber: row.quotationNumber,
@@ -96,7 +98,7 @@ export function projectPortalQuote(
     paymentTerms: row.paymentTerms,
     notes: row.notes,
     createdAt: row.createdAt,
-    pdfAvailability: "unavailable",
+    pdfAvailability: pdfAvailable ? "available" : "unavailable",
     lines: Object.freeze([]),
     availability: portalQuoteAvailability(row.validUntil, now),
   };

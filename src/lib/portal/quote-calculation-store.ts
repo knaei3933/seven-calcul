@@ -96,6 +96,10 @@ export async function getPortalQuoteDatabaseForTest(): Promise<SqlClient> {
   return getDatabase();
 }
 
+export async function initializePortalQuoteMappingSchema(): Promise<void> {
+  await getDatabase();
+}
+
 export async function resetPortalQuoteStoreForTest(): Promise<void> {
   schemaReady = null;
   const { resetSqlClientForTest } = await import("@/lib/db");
