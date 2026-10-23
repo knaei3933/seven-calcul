@@ -4,10 +4,25 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = path.resolve(import.meta.dirname, "..");
+const peerRoot = process.env.PORTAL_CONTRACT_PEER_ROOT;
 
 describe("portal-api-v1 contract fixture", () => {
-  it("matches the committed checksum, peer bytes, and contract invariants", () => {
-    process.env.PORTAL_CONTRACT_PEER_ROOT = "/root/pouch-clacul";
+  it("requires a configured portal peer root with an actionable error", () => {
+    const previousPeerRoot = process.env.PORTAL_CONTRACT_PEER_ROOT;
+    delete process.env.PORTAL_CONTRACT_PEER_ROOT;
+    const result = spawnSync("node", [path.join(root, "scripts/verify-portal-api-v1-contract.mjs")], {
+      cwd: root,
+      encoding: "utf8",
+      env: process.env,
+    });
+    if (previousPeerRoot === undefined) delete process.env.PORTAL_CONTRACT_PEER_ROOT;
+    else process.env.PORTAL_CONTRACT_PEER_ROOT = previousPeerRoot;
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("PORTAL_CONTRACT_PEER_ROOT is required");
+    expect(result.stderr).toContain("Set it to the absolute path of the peer repository root");
+  });
+
+  it.skipIf(!peerRoot)("matches the committed checksum and the configured portal peer", () => {
     const result = spawnSync("node", [path.join(root, "scripts/verify-portal-api-v1-contract.mjs")], {
       cwd: root,
       encoding: "utf8",

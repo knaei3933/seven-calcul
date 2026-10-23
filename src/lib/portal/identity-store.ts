@@ -283,25 +283,31 @@ async function migratePortalSessionIpHashColumns(db: SqlClient): Promise<void> {
   for (const suffix of ["created", "last_seen"] as const) {
     const rawColumn = `${suffix}_ip`;
     const hashColumn = `${suffix}_ip_hash`;
-    if (has(hashColumn) || !has(rawColumn)) continue;
-    await db.exec(
-      suffix === "created"
-        ? `ALTER TABLE portal_sessions ADD COLUMN ${hashColumn} TEXT NOT NULL DEFAULT ''`
-        : `ALTER TABLE portal_sessions ADD COLUMN ${hashColumn} TEXT`,
-    );
-    const legacyRows = await db.all<{ id: number; [key: string]: unknown }>(`
-      SELECT id, ${rawColumn}
-      FROM portal_sessions
-      WHERE ${rawColumn} IS NOT NULL AND ${rawColumn} <> ''
-    `);
-    for (const row of legacyRows) {
-      await db.run(`
-        UPDATE portal_sessions
-        SET ${hashColumn} = ?
-        WHERE id = ?
-      `, [hashPortalSessionIp(String(row[rawColumn])), Number(row.id)]);
-    }
-    await db.exec(`ALTER TABLE portal_sessions DROP COLUMN ${rawColumn}`);
+    if (!has(rawColumn)) continue;
+    await db.transaction(async (tx) => {
+      if (!has(hashColumn)) {
+        await tx.exec(
+          suffix === "created"
+            ? `ALTER TABLE portal_sessions ADD COLUMN ${hashColumn} TEXT NOT NULL DEFAULT ''`
+            : `ALTER TABLE portal_sessions ADD COLUMN ${hashColumn} TEXT`,
+        );
+      }
+      const legacyRows = await tx.all<{ id: number; [key: string]: unknown }>(`
+        SELECT id, ${rawColumn}, ${hashColumn}
+        FROM portal_sessions
+      `);
+      for (const row of legacyRows) {
+        const rawValue = String(row[rawColumn] ?? "");
+        const existingHash = row[hashColumn];
+        if (!rawValue || (typeof existingHash === "string" && existingHash !== "")) continue;
+        await tx.run(`
+          UPDATE portal_sessions
+          SET ${hashColumn} = ?
+          WHERE id = ?
+        `, [hashPortalSessionIp(rawValue), Number(row.id)]);
+      }
+      await tx.exec(`ALTER TABLE portal_sessions DROP COLUMN ${rawColumn}`);
+    });
   }
 }
 
@@ -339,7 +345,7 @@ function sha256(value: string): string {
 }
 
 export async function getPortalIdentityDatabase(): Promise<SqlClient> {
-  schemaReady ??= (async () => {
+  const initialization = (async () => {
     const db = await getSqlClient("customers");
     // Customer-store owns the customers schema. Reading through its API both
     // initializes that schema and proves the two modules share one store.
@@ -349,7 +355,13 @@ export async function getPortalIdentityDatabase(): Promise<SqlClient> {
     await migratePortalSessionIpHashColumns(db);
     return db;
   })();
-  return schemaReady;
+  schemaReady = initialization;
+  try {
+    return await schemaReady;
+  } catch (error) {
+    if (schemaReady === initialization) schemaReady = null;
+    throw error;
+  }
 }
 
 export async function resetPortalIdentityStoreForTest(): Promise<void> {

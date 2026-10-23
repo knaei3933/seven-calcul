@@ -390,6 +390,78 @@ describe("portal session IP hash migration", () => {
   });
 });
 
+describe("portal session mixed IP migration", () => {
+  it("repairs mixed raw and hash columns without overwriting valid hashes", async () => {
+    const now = new Date("2026-01-05T00:00:00.000Z");
+    const hashedUser = await createVerifiedUser("mixed-hash");
+    const rawUser = await createVerifiedUser("mixed-raw");
+    await setPortalUserVerified(hashedUser.id, { now: new Date("2026-01-04T00:00:00.000Z") });
+    await setPortalUserVerified(rawUser.id, { now: new Date("2026-01-04T00:00:00.000Z") });
+    await createPortalSession(hashedUser.id, {
+      now,
+      ttlSeconds: 600,
+      metadata: { ipAddress: "192.0.2.99", userAgent: "mixed-hash" },
+    });
+    const rawToken = randomBytes(32).toString("base64url");
+    const db = await getPortalIdentityDatabase();
+    await db.exec("ALTER TABLE portal_sessions ADD COLUMN created_ip TEXT NOT NULL DEFAULT ''");
+    await db.exec("ALTER TABLE portal_sessions ADD COLUMN last_seen_ip TEXT");
+    await db.run(`
+      INSERT INTO portal_sessions (
+        portal_user_id,token_hash,expires_at,created_ip,created_user_agent,created_at
+      ) VALUES (?,?,?,?,?,?)
+    `, [
+      rawUser.id,
+      createHash("sha256").update(rawToken).digest("hex"),
+      new Date("2026-01-05T00:10:00.000Z").toISOString(),
+      "192.0.2.101",
+      "mixed-raw",
+      now.toISOString(),
+    ]);
+    await db.run("UPDATE portal_sessions SET created_ip = ? WHERE created_user_agent = ?", [
+      "192.0.2.100",
+      "mixed-hash",
+    ]);
+
+    await resetPortalIdentityStoreForTest();
+    const migrated = await getPortalIdentityDatabase();
+    const rows = await migrated.all<{ created_user_agent: string; created_ip_hash: string }>(
+      "SELECT created_user_agent,created_ip_hash FROM portal_sessions WHERE created_user_agent LIKE 'mixed-%' ORDER BY id",
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.created_user_agent === "mixed-hash")?.created_ip_hash)
+      .toBe(hashPortalSessionIp("192.0.2.99"));
+    expect(rows.find((row) => row.created_user_agent === "mixed-raw")?.created_ip_hash)
+      .toBe(hashPortalSessionIp("192.0.2.101"));
+    const columns = await migrated.all<{ name: string }>("PRAGMA table_info(portal_sessions)");
+    expect(columns.some((column) => column.name === "created_ip")).toBe(false);
+    expect(columns.some((column) => column.name === "last_seen_ip")).toBe(false);
+  });
+});
+
+describe("portal identity initialization", () => {
+  it("resets a failed initialization and retries without a process restart", async () => {
+    const initialized = await getPortalIdentityDatabase();
+    await initialized.exec("ALTER TABLE portal_sessions ADD COLUMN created_ip TEXT NOT NULL DEFAULT ''");
+    const marked = await initialized.run("UPDATE portal_sessions SET created_ip = ?", [
+      "192.0.2.102",
+    ]);
+    await initialized.run("UPDATE portal_sessions SET created_ip_hash = ''");
+    expect(marked.changes).toBeGreaterThan(0);
+    await resetPortalIdentityStoreForTest();
+    const previousEnvironment = process.env.NODE_ENV;
+    const previousPepper = process.env.PORTAL_CLIENT_FINGERPRINT_PEPPER;
+    Object.assign(process.env, { NODE_ENV: "production" });
+    delete process.env.PORTAL_CLIENT_FINGERPRINT_PEPPER;
+    await resetPortalIdentityStoreForTest();
+
+    await expect(getPortalIdentityDatabase()).rejects.toThrow("portal_client_fingerprint_pepper_required");
+    Object.assign(process.env, { NODE_ENV: previousEnvironment });
+    process.env.PORTAL_CLIENT_FINGERPRINT_PEPPER = previousPepper;
+    await expect(getPortalIdentityDatabase()).resolves.toBeDefined();
+  });
+});
+
 describe("portal durable rate limits", () => {
   it("atomically increments one durable bucket and starts a new injected window", async () => {
     const now = new Date("2026-01-04T00:00:00.000Z");
