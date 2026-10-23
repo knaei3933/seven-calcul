@@ -122,6 +122,7 @@
     "request": {
       "policy": "strict top-level and nested allowlist; canonical calculation inputs are constructed admin-side",
       "topLevelAllowlist": [
+        "idempotencyKey",
         "productName",
         "sizeKey",
         "customWidthMm",
@@ -130,6 +131,7 @@
         "connectedChambers",
         "fillingMethod",
         "fillingLanes",
+        "printingMethod",
         "quantity",
         "skus",
         "deliveryDate",
