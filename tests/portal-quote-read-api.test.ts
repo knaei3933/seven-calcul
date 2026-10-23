@@ -319,6 +319,37 @@ describe("portal own-quote read APIs", () => {
     }
   });
 
+  it("accepts only the canonical session header for owned quote reads", async () => {
+    const user = await createVerifiedUser("read-header", "PREADHEADER");
+    const quote = await createQuote(user, "read-header-key");
+    const publicId = String(quote.publicId);
+    const aliasHeaders = {
+      ...authorization,
+      "x-portal-session": user.token,
+    };
+
+    const aliasList = await listPortalQuotesApi(listRequest(user, "", aliasHeaders));
+    const aliasDetail = await getPortalQuoteApi(detailRequest(user, publicId, aliasHeaders), publicId);
+    expect(aliasList.status).toBe(401);
+    expect(aliasDetail.status).toBe(401);
+    expect(await listBody(aliasList)).toEqual({ error: "unauthorized" });
+    expect(await body(aliasDetail)).toEqual({ error: "unauthorized" });
+
+    const canonicalList = await listPortalQuotesApi(listRequest(user));
+    const canonicalDetail = await getPortalQuoteApi(detailRequest(user, publicId), publicId);
+    expect(canonicalList.status).toBe(200);
+    expect(canonicalDetail.status).toBe(200);
+    expect((await listBody(canonicalList)).quotes).toHaveLength(1);
+    expect(await body(canonicalDetail)).toMatchObject({
+      quote: {
+        publicId,
+        productName: quote.productName,
+        quantity: quote.quantity,
+        displayedGrandTotal: quote.displayedGrandTotal,
+      },
+    });
+  });
+
   it("returns an empty own list without requiring prior quotes", async () => {
     const emptyOwner = await createVerifiedUser("empty", "PREADEMPTY");
     const response = await listPortalQuotesApi(listRequest(emptyOwner));

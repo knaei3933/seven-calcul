@@ -163,8 +163,7 @@ async function readBrandFont(): Promise<Buffer> {
 }
 
 function sessionToken(request: Request): string | null {
-  return request.headers.get("x-portal-session-token")
-    ?? request.headers.get("x-portal-session");
+  return request.headers.get("x-portal-session-token");
 }
 
 async function requireOwnPortalCaller(

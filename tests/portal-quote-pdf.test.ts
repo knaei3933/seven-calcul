@@ -321,6 +321,46 @@ describe("portal-owned canonical quotation PDF API", () => {
     expect(await responseBody(foreign)).toEqual(await responseBody(missing));
   });
 
+  it("accepts only the canonical session header for PDF generation and download", async () => {
+    const quote = await createQuote(owner, "pdf-header-key");
+    const publicId = String(quote.publicId);
+    const aliasHeaders = {
+      ...serviceAuthorization,
+      "x-portal-session": owner.token,
+    };
+
+    const aliasGenerate = await generatePortalQuotePdfApi(
+      generateRequest(owner, publicId, aliasHeaders),
+      publicId,
+      { now, fontBytes },
+    );
+    expect(aliasGenerate.status).toBe(401);
+    expect(await responseBody(aliasGenerate)).toMatchObject({ error: "unauthorized" });
+
+    const canonicalGenerate = await generatePortalQuotePdfApi(generateRequest(owner, publicId), publicId, {
+      now,
+      fontBytes,
+      // Header behavior is under test here; avoid consuming the shared owner quota.
+      incrementRateLimit: async () => ({
+        count: 1,
+        windowStartedAt: now().toISOString(),
+        expiresAt: now().toISOString(),
+      }),
+    });
+    expect(canonicalGenerate.status).toBe(201);
+
+    const aliasDownload = await downloadPortalQuotePdfApi(
+      downloadRequest(owner, publicId, aliasHeaders),
+      publicId,
+      { now },
+    );
+    const canonicalDownload = await downloadPortalQuotePdfApi(downloadRequest(owner, publicId), publicId, { now });
+    expect(aliasDownload.status).toBe(401);
+    expect(await responseBody(aliasDownload)).toMatchObject({ error: "unauthorized" });
+    expect(canonicalDownload.status).toBe(200);
+    await canonicalDownload.arrayBuffer();
+  });
+
   it("generates one A4 Japanese PDF and stores its SHA-256 without overwriting bytes", async () => {
     const response = await generatePortalQuotePdfApi(generateRequest(owner, generatedPublicId), generatedPublicId, {
       now,

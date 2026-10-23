@@ -327,19 +327,25 @@ describe("portal v1 auth API", () => {
 
     const me = await handlePortalApiRequest(request(undefined, {
       ...authorization,
+      "x-portal-session-token": session.token,
+    }), "me", { now });
+    const aliasMe = await handlePortalApiRequest(request(undefined, {
+      ...authorization,
       "x-portal-session": session.token,
     }), "me", { now });
+    expect(aliasMe.status).toBe(401);
+    expect(await json(aliasMe)).toEqual({ error: "session_expired" });
     expect(me.status).toBe(200);
     expect(((await json(me)).user as Record<string, unknown>).email).toBe(target.email);
 
     const logout = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": session.token,
+      "x-portal-session-token": session.token,
     }), "logout", { now });
     expect(logout.status).toBe(200);
     const afterLogout = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": session.token,
+      "x-portal-session-token": session.token,
     }), "me", { now });
     expect(afterLogout.status).toBe(401);
     expect(await json(afterLogout)).toEqual({ error: "session_expired" });
@@ -365,11 +371,11 @@ describe("portal v1 auth API", () => {
 
     const firstMe = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": firstToken,
+      "x-portal-session-token": firstToken,
     }), "me", { now });
     const secondMe = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": secondToken,
+      "x-portal-session-token": secondToken,
     }), "me", { now });
     expect(((await json(firstMe)).user as Record<string, unknown>).email).toBe(first.email);
     expect(((await json(secondMe)).user as Record<string, unknown>).email).toBe(second.email);
@@ -377,7 +383,7 @@ describe("portal v1 auth API", () => {
     const missing = await handlePortalApiRequest(request(undefined, authorization), "me", { now });
     const invalid = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": `${firstToken}invalid`,
+      "x-portal-session-token": `${firstToken}invalid`,
     }), "me", { now });
     expect(missing.status).toBe(401);
     expect(invalid.status).toBe(401);
