@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
-import { updateUser, type UserRole } from "@/lib/auth-store";
+import { getUserById, updateUser, type UserRole } from "@/lib/auth-store";
+import { canAdministerUser } from "@/lib/user-admin-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,11 @@ export async function PATCH(request: Request, context: Context): Promise<NextRes
   if (current.role !== "admin") return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const { id } = await context.params;
   try {
+    const target = await getUserById(Number(id));
+    if (!target) return NextResponse.json({ error: "user_not_found" }, { status: 404 });
+    if (!canAdministerUser(current, target)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
     const body = await request.json() as {
       name?: unknown;
       password?: unknown;

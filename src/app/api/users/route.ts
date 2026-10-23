@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
 import { createUser, listUsers } from "@/lib/auth-store";
+import { canAdministerEmail } from "@/lib/user-admin-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +22,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
   if (user.role !== "admin") return NextResponse.json({ error: "forbidden" }, { status: 403 });
   try {
-    const created = await createUser(await request.json());
+    const input = await request.json() as { email?: unknown };
+    if (typeof input.email !== "string" || !canAdministerEmail(user, input.email)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+    const created = await createUser(input as Parameters<typeof createUser>[0]);
     return NextResponse.json({ user: created }, { status: 201 });
   } catch (error) {
     if (error instanceof Error && error.message === "duplicate_email") {

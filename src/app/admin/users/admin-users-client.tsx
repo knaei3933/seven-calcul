@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { PublicUser, UserRole } from "@/lib/auth-store";
+import { canAdministerEmail } from "@/lib/user-admin-access";
 
 const roleLabels: Record<UserRole, string> = {
   admin: "管理者",
   user: "一般ユーザー",
 };
 
-export default function AdminUsersClient() {
+export default function AdminUsersClient({ currentUser }: { currentUser: PublicUser }) {
   const [users, setUsers] = useState<PublicUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -41,6 +42,10 @@ export default function AdminUsersClient() {
 
   const createUser = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canAdministerEmail(currentUser, email)) {
+      setError("このドメインのユーザーは作成できません。");
+      return;
+    }
     setSaving(true);
     setError("");
     setStatus("");
@@ -52,7 +57,11 @@ export default function AdminUsersClient() {
       });
       const payload = await response.json();
       if (!response.ok) {
-        setError(payload.error === "duplicate_email" ? "このメールアドレスは既に登録されています。" : "ユーザーを作成できませんでした。");
+        setError(payload.error === "duplicate_email"
+          ? "このメールアドレスは既に登録されています。"
+          : payload.error === "forbidden"
+            ? "このドメインのユーザーは作成できません。"
+            : "ユーザーを作成できませんでした。");
         return;
       }
       setEmail("");
@@ -80,7 +89,9 @@ export default function AdminUsersClient() {
         ? "少なくとも1人の有効な管理者が必要です。"
         : payload.error === "invalid_password"
           ? "パスワードは10文字以上にしてください。"
-          : "ユーザーを更新できませんでした。");
+          : payload.error === "forbidden"
+            ? "このユーザーは管理対象ドメイン外です。"
+            : "ユーザーを更新できませんでした。");
       return;
     }
     setStatus(successMessage);
@@ -137,30 +148,42 @@ export default function AdminUsersClient() {
             </thead>
             <tbody>
               {users.map((user) => (
-                <tr key={user.id}>
-                  <td>{user.email}</td>
-                  <td>{user.name}</td>
-                  <td>
-                    <select
-                      aria-label={`${user.name} の権限`}
-                      value={user.role}
-                      onChange={(event) => void patchUser(user, { role: event.target.value }, "権限を更新しました。")}
-                    >
-                      <option value="user">{roleLabels.user}</option>
-                      <option value="admin">{roleLabels.admin}</option>
-                    </select>
-                  </td>
-                  <td>{user.isActive ? "有効" : "無効"}</td>
-                  <td>{new Date(user.createdAt).toLocaleString("ja-JP")}</td>
-                  <td className="history-actions">
-                    <button className="button small" type="button" onClick={() => void resetPassword(user)}>パスワード変更</button>
-                    <button
-                      className={user.isActive ? "button secondary small" : "button small"}
-                      type="button"
-                      onClick={() => void patchUser(user, { isActive: !user.isActive }, user.isActive ? "アカウントを無効化しました。" : "アカウントを有効化しました。")}
-                    >{user.isActive ? "無効化" : "有効化"}</button>
-                  </td>
-                </tr>
+                (() => {
+                  const canManage = canAdministerEmail(currentUser, user.email);
+                  return (
+                    <tr key={user.id}>
+                      <td>{user.email}</td>
+                      <td>{user.name}</td>
+                      <td>
+                        <select
+                          aria-label={`${user.name} の権限`}
+                          value={user.role}
+                          disabled={!canManage}
+                          onChange={(event) => void patchUser(user, { role: event.target.value }, "権限を更新しました。")}
+                        >
+                          <option value="user">{roleLabels.user}</option>
+                          <option value="admin">{roleLabels.admin}</option>
+                        </select>
+                      </td>
+                      <td>{user.isActive ? "有効" : "無効"}</td>
+                      <td>{new Date(user.createdAt).toLocaleString("ja-JP")}</td>
+                      <td className="history-actions">
+                        {canManage ? (
+                          <>
+                            <button className="button small" type="button" onClick={() => void resetPassword(user)}>パスワード変更</button>
+                            <button
+                              className={user.isActive ? "button secondary small" : "button small"}
+                              type="button"
+                              onClick={() => void patchUser(user, { isActive: !user.isActive }, user.isActive ? "アカウントを無効化しました。" : "アカウントを有効化しました。")}
+                            >{user.isActive ? "無効化" : "有効化"}</button>
+                          </>
+                        ) : (
+                          <span className="help">管理対象外</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })()
               ))}
             </tbody>
           </table>

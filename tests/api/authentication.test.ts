@@ -165,4 +165,58 @@ describe("authentication and authorization APIs", () => {
     }, adminToken), { params: Promise.resolve({ id: String(adminId) }) });
     expect(deactivated.status).toBe(400);
   });
+
+  it("limits Seven Chemical administrators to their own email domain", async () => {
+    const sevenAdmin = await createUser({
+      email: "seven-admin@727.co.jp",
+      name: "Seven Scoped Admin",
+      password: "seven-admin-password",
+      role: "admin",
+    });
+    const sevenToken = await loginToken(sevenAdmin.email, "seven-admin-password");
+    expect(sevenToken).toBeDefined();
+
+    const kaneiTarget = await createUser({
+      email: "kanei-target@kanei-trade.co.jp",
+      name: "Kanei Protected Target",
+      password: "original-kanei-password",
+      role: "user",
+    });
+    const forbiddenReset = await updateUserRoute(
+      request(`http://localhost/api/users/${kaneiTarget.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "changed-kanei-password" }),
+      }, sevenToken),
+      { params: Promise.resolve({ id: String(kaneiTarget.id) }) },
+    );
+    expect(forbiddenReset.status).toBe(403);
+    await expect(forbiddenReset.json()).resolves.toEqual({ error: "forbidden" });
+    await expect(loginToken(kaneiTarget.email, "original-kanei-password")).resolves.toBeDefined();
+    await expect(loginToken(kaneiTarget.email, "changed-kanei-password")).resolves.toBeUndefined();
+
+    const forbiddenCreate = await createUserRoute(request("http://localhost/api/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: "created-by-seven@kanei-trade.co.jp",
+        name: "Forbidden Kanei User",
+        password: "forbidden-user-password",
+        role: "user",
+      }),
+    }, sevenToken));
+    expect(forbiddenCreate.status).toBe(403);
+
+    const allowedCreate = await createUserRoute(request("http://localhost/api/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: "created-by-seven@727.co.jp",
+        name: "Allowed Seven User",
+        password: "allowed-user-password",
+        role: "user",
+      }),
+    }, sevenToken));
+    expect(allowedCreate.status).toBe(201);
+  });
 });
