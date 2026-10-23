@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "contract": "portal-api-v1",
+  "version": 1,
+  "status": "contract-baseline",
+  "description": "Checksummed v1 contract baseline shared by the customer portal and admin Portal API.",
+  "routeInventory": {
+    "basePath": "/api/portal/v1",
+    "routes": [
+      {
+        "method": "POST",
+        "path": "/auth/register",
+        "purpose": "Create an unverified customer portal account and issue a confirmation code.",
+        "auth": ["service"]
+      },
+      {
+        "method": "POST",
+        "path": "/auth/verify",
+        "purpose": "Consume the confirmation code, create a new linked customer, and activate the account.",
+        "auth": ["service"]
+      },
+      {
+        "method": "POST",
+        "path": "/auth/resend",
+        "purpose": "Reissue a rate-limited confirmation code.",
+        "auth": ["service"]
+      },
+      {
+        "method": "POST",
+        "path": "/auth/login",
+        "purpose": "Verify credentials and create an opaque portal session.",
+        "auth": ["service"]
+      },
+      {
+        "method": "POST",
+        "path": "/auth/logout",
+        "purpose": "Revoke the presented portal session.",
+        "auth": ["service", "portalSession"]
+      },
+      {
+        "method": "GET",
+        "path": "/me",
+        "purpose": "Return the signed-in account and linked customer-code projection.",
+        "auth": ["service", "portalSession"]
+      },
+      {
+        "method": "GET",
+        "path": "/quotes",
+        "purpose": "Return the caller's own customer-safe quote list.",
+        "auth": ["service", "portalSession"]
+      },
+      {
+        "method": "GET",
+        "path": "/quotes/:publicId",
+        "purpose": "Return one owner-scoped customer-safe quote projection.",
+        "auth": ["service", "portalSession"]
+      },
+      {
+        "method": "POST",
+        "path": "/quotes/calculate",
+        "purpose": "Map the allowlisted business DTO, calculate admin-side, and persist a draft quote.",
+        "auth": ["service", "portalSession"]
+      },
+      {
+        "method": "POST",
+        "path": "/quotes/:publicId/pdf/generate",
+        "purpose": "Generate the canonical quote PDF server-side and return generation metadata.",
+        "auth": ["service", "portalSession"]
+      },
+      {
+        "method": "GET",
+        "path": "/quotes/:publicId/pdf",
+        "purpose": "Download the owner's stored canonical PDF.",
+        "auth": ["service", "portalSession"]
+      }
+    ]
+  },
+  "headerContract": {
+    "service": {
+      "name": "Authorization",
+      "valueFormat": "Bearer <PORTAL_SERVICE_TOKEN>",
+      "required": true,
+      "secret": true,
+      "adminVerification": "constant-time comparison"
+    },
+    "portalSession": {
+      "name": "X-Portal-Session-Token",
+      "valueFormat": "opaque browser session token",
+      "requiredFor": "portalSession routes",
+      "adminStorage": "hashed token only",
+      "secret": true
+    },
+    "cors": {
+      "publicBrowserDirectAdminAccess": false,
+      "publicCors": false
+    }
+  },
+  "portalSessionCookie": {
+    "name": "shapepouch_portal_session",
+    "httpOnly": true,
+    "sameSite": "lax",
+    "secureInProduction": true,
+    "path": "/",
+    "ttlSeconds": 604800,
+    "value": "opaque token; never a customer identifier"
+  },
+  "registration": {
+    "request": {
+      "policy": "strict allowlist",
+      "allowlist": [
+        "companyName",
+        "contactName",
+        "postalCode",
+        "address",
+        "telephone",
+        "email",
+        "password"
+      ]
+    }
+  },
+  "quoteCalculation": {
+    "request": {
+      "policy": "strict top-level and nested allowlist; canonical calculation inputs are constructed admin-side",
+      "topLevelAllowlist": [
+        "productName",
+        "sizeKey",
+        "customWidthMm",
+        "customLengthMm",
+        "fillMlPerChamber",
+        "connectedChambers",
+        "fillingMethod",
+        "fillingLanes",
+        "quantity",
+        "skus",
+        "deliveryDate",
+        "notes"
+      ],
+      "skuAllowlist": [
+        "name",
+        "quantity",
+        "fillMlPerChamber",
+        "colorCount"
+      ]
+    },
+    "pricingAuthorityDenial": {
+      "policy": "reject named fields at any relevant DTO boundary before mapping or calculation",
+      "deniedFields": [
+        "parameters",
+        "parameters.filmUnitPrices",
+        "bulkUnitPrice",
+        "gravureYRows",
+        "ySupplierRows",
+        "pricingSnapshot",
+        "publicProjectionHash",
+        "pricingSnapshotSha256",
+        "fullAugmentedCalculationRequest"
+      ]
+    }
+  },
+  "customerSafeQuoteProjection": {
+    "policy": "explicit response allowlist",
+    "allowlist": [
+      "publicId",
+      "quotationNumber",
+      "issueDate",
+      "validUntil",
+      "customerName",
+      "customerContact",
+      "productName",
+      "sizeSummary",
+      "quantity",
+      "displayedUnitPrice",
+      "displayedSubtotal",
+      "displayedTax",
+      "displayedGrandTotal",
+      "deliveryDate",
+      "paymentTerms",
+      "notes",
+      "createdAt",
+      "pdfAvailability",
+      "lines"
+    ]
+  },
+  "forbiddenResponseFields": [
+    "cost",
+    "costTotal",
+    "totalCostPerPiece",
+    "purchasePrice",
+    "margin",
+    "targetMargin",
+    "profit",
+    "successFee",
+    "commission",
+    "fillingCostPerPiece",
+    "filmCostPerPiece",
+    "filmMeterPrice",
+    "filmOrderLengthM",
+    "film",
+    "filmOrder",
+    "purchaseOrder",
+    "supplier",
+    "pricingSnapshot",
+    "internalApproval",
+    "customerApproval",
+    "staffComment",
+    "adminUser",
+    "payload",
+    "payloadJson",
+    "resultHash",
+    "internalQuotationId"
+  ],
+  "errorCodes": [
+    "validation_failed",
+    "pricing_authority_rejected",
+    "unauthorized",
+    "session_expired",
+    "forbidden",
+    "not_found",
+    "email_verification_failed",
+    "conflict",
+    "rate_limited",
+    "calculation_failed",
+    "print_method_unavailable",
+    "pdf_generation_failed",
+    "internal_error"
+  ],
+  "secretHandling": {
+    "fixtureContainsSecrets": false,
+    "environmentVariableNamesOnly": [
+      "ADMIN_PORTAL_API_BASE_URL",
+      "PORTAL_SERVICE_TOKEN",
+      "PORTAL_SESSION_COOKIE_NAME",
+      "PORTAL_SESSION_TTL_SECONDS"
+    ],
+    "committedSecretValues": []
+  }
+}
