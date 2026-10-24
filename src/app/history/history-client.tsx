@@ -141,8 +141,15 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
     setSelectedId(recordId);
   };
 
+  const internalApprovalRequiredMessage =
+    "まだカネイ貿易側で承認されていません。お急ぎの場合はカネイ貿易へお電話ください。";
   const changeStatus = async (record: QuotationRecord, nextStatus: QuotationStatus) => {
     setHistoryActionError("");
+    // 成約は選択肢として見せる。ただし内部承認がない場合は送信前に阻断する。
+    if (nextStatus === "approved" && !record.internalApproval) {
+      setHistoryActionError(internalApprovalRequiredMessage);
+      return;
+    }
     try {
       const response = await fetch(`/api/quotations/${record.id}`, {
         method: "PATCH",
@@ -153,7 +160,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
       if (!response.ok) {
         setHistoryActionError(
           payload.error === "internal_approval_required"
-            ? "成約にするには内部承認が必要です。"
+            ? internalApprovalRequiredMessage
             : `${record.quotationNumber} の状態を変更できませんでした。`,
         );
         return;

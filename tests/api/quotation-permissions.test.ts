@@ -178,7 +178,7 @@ describe("quotation ownership permissions", () => {
     });
     expect(await filmOrderExistsForQuotation(manualRecord.id)).toBe(true);
 
-    // Approval records are evidence only. A creator can explicitly mark a draft as 成約 without either approval gate.
+    // The 成約 option stays visible, but the server still rejects conversion before internal approval.
     const noGateRecord = await createRecord("S7-PERMISSION-NO-GATE-APPROVED", owner.id);
     const noGateContext = { params: Promise.resolve({ id: String(noGateRecord.id) }) };
     const noGateResponse = await patchQuotation(request(
@@ -190,11 +190,9 @@ describe("quotation ownership permissions", () => {
       },
       ownerToken,
     ), noGateContext);
-    expect(noGateResponse.status).toBe(200);
-    await expect(noGateResponse.json()).resolves.toMatchObject({
-      record: { id: noGateRecord.id, status: "approved", internalApproval: null, customerApproval: null },
-    });
-    expect(await filmOrderExistsForQuotation(noGateRecord.id)).toBe(true);
+    expect(noGateResponse.status).toBe(409);
+    await expect(noGateResponse.json()).resolves.toEqual({ error: "internal_approval_required" });
+    expect(await filmOrderExistsForQuotation(noGateRecord.id)).toBe(false);
 
     const readerDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, readerToken), context);
     expect(readerDelete.status).toBe(403);

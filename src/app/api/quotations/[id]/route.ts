@@ -74,6 +74,9 @@ export async function PATCH(request: Request, context: Context): Promise<NextRes
     if (!MANUAL_STATUS_TRANSITIONS[existing.status]?.includes(status)) {
       return NextResponse.json({ error: "invalid_status_transition" }, { status: 409 });
     }
+    if (status === "approved" && !existing.internalApproval) {
+      return NextResponse.json({ error: "internal_approval_required" }, { status: 409 });
+    }
     const record = await updateQuotationStatus(Number(id), status, user.id);
     if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
     if (status === "approved") {

@@ -205,16 +205,10 @@ describe("quotation history ownership UI", () => {
     expect(screen.getByTestId("history-auto-send")).toBeInTheDocument();
   });
 
-  it("shows 成約 without any approval records so owners can convert manually", async () => {
-    const approvedRecord = { ...ownerRecord, status: "approved" as const };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const target = String(input);
-      if (target === "/api/quotations/2" && init?.method === "PATCH") {
-        expect(JSON.parse(String(init.body))).toEqual({ status: "approved" });
-        return Response.json({ record: approvedRecord }, { status: 200 });
-      }
-      return Response.json({ records: [ownerRecord] }, { status: 200 });
-    });
+  it("keeps 成約 visible but blocks selection without internal approval", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
+      Response.json({ records: [ownerRecord] }, { status: 200 })
+    ));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<HistoryClient currentUser={currentUser} />);
@@ -225,11 +219,14 @@ describe("quotation history ownership UI", () => {
     expect(within(select).getByRole("option", { name: "成約" })).toBeInTheDocument();
     await user.selectOptions(select, "approved");
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+    expect(screen.getByTestId("history-action-error")).toHaveTextContent(
+      "まだカネイ貿易側で承認されていません。お急ぎの場合はカネイ貿易へお電話ください。",
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/quotations/2",
       expect.objectContaining({ method: "PATCH" }),
-    ));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/film-orders"));
+    );
+    expect(select).toHaveDisplayValue("下書き");
   });
 
   it("shows the sales contract action for an internally approved draft without customer approval", async () => {
