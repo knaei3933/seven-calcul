@@ -70,6 +70,60 @@ describe("film quotation linkage", () => {
     expect(quotation?.subtotal).toBe("363000");
     expect(quotation?.grandTotal).toBe("399300");
   });
+
+  it("handles repeating landed unit prices safely", () => {
+    const quotation = buildFilmQuotationFromRecord({
+      quotationNumber: "S7-EDGE-REPEAT",
+      issueDate: "2026-10-24",
+      validUntil: "2026-11-23",
+      productName: "Edge Product",
+      quantity: "10000",
+      payload: { filmOrderLengthM: "900", calculationFilmTotal: "100000" },
+    });
+    expect(quotation?.items[0]?.unitPriceYenPerM).toBe("111.1111");
+    expect(quotation?.items[0]?.amountYen).toBe("100000");
+  });
+
+  it("falls back safely when a stored total is corrupt", () => {
+    const quotation = buildFilmQuotationFromRecord({
+      quotationNumber: "S7-EDGE-CORRUPT",
+      issueDate: "2026-10-24",
+      validUntil: "2026-11-23",
+      productName: "Edge Product",
+      quantity: "10000",
+      payload: {
+        filmOrderLengthM: "1200",
+        calculationChecklistSnapshot: {
+          film: { orderLengthM: "1200", unitPrice: "252", filmTotal: "not-a-number" },
+        },
+      },
+    });
+    expect(quotation?.items[0]?.unitPriceYenPerM).toBe("252");
+    expect(quotation?.items[0]?.amountYen).toBe("302400");
+  });
+
+  it("rejects invalid and negative money data without throwing", () => {
+    expect(buildFilmQuotationFromRecord({
+      quotationNumber: "S7-EDGE-LENGTH",
+      issueDate: "2026-10-24",
+      validUntil: "2026-11-23",
+      productName: "Edge Product",
+      quantity: "10000",
+      filmOrderLengthM: "not-a-number",
+      payload: { calculationFilmTotal: "100000" },
+    })).toBeNull();
+    const negative = buildFilmQuotationFromRecord({
+      quotationNumber: "S7-EDGE-NEGATIVE",
+      issueDate: "2026-10-24",
+      validUntil: "2026-11-23",
+      productName: "Edge Product",
+      quantity: "10000",
+      filmOrderLengthM: "1200",
+      payload: { calculationFilmTotal: "-100" },
+    });
+    expect(Number(negative?.items[0]?.amountYen)).toBe(0);
+    expect(Number(negative?.subtotal)).toBe(0);
+  });
 });
 
 describe("film quotation numbering", () => {

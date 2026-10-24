@@ -532,7 +532,8 @@ function QuotationDetailModal({
     || storedFilmQuotation.pouchQuotationNumber !== record.quotationNumber
     || storedFilmQuotation.quotationNumber !== expectedFilmQuotationNumber;
   // 旧保存分は材料単価（例：252円/m）と物流込合計（例：363,000円）が混在することがある。
-  const hasInconsistentStoredPricing = Boolean(storedFilmQuotation?.items.some((item) => {
+  const hasInconsistentStoredPricing = Array.isArray(storedFilmQuotation?.items)
+    && storedFilmQuotation.items.some((item) => {
     const length = Number(item.orderLengthM);
     const amount = Number(item.amountYen);
     const unit = Number(item.unitPriceYenPerM);
@@ -540,7 +541,7 @@ function QuotationDetailModal({
       && Number.isFinite(amount) && amount > 0
       && Number.isFinite(unit)
       && Math.abs(amount - unit * length) > 1;
-  }));
+    });
   const filmQuotation = legacyFilmQuotation
     || hasInconsistentStoredPricing
     ? buildFilmQuotationFromRecord(record)
