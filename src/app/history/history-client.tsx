@@ -755,6 +755,7 @@ function QuotationDetailModal({
         }
       }),
     );
+    if ("fonts" in document) await document.fonts.ready;
     // ブラウザの「PDFとして保存」の初期ファイル名は document.title から作られる。
     const previousTitle = document.title;
     document.title = detailTab === "film" && filmQuotation
@@ -984,8 +985,8 @@ function QuotationDetailModal({
                         src="/api/brand-assets/kanei-trade-logo.png"
                         alt="金井貿易株式会社 ロゴ"
                         className="film-quote-kanei-logo"
-                        width={612}
-                        height={408}
+                        width={354}
+                        height={236}
                       />
                       <div className="film-quote-company">
                         <strong className="film-quote-company-name">{kaneiTrade.name}</strong>
@@ -998,8 +999,8 @@ function QuotationDetailModal({
                         src="/api/brand-assets/epackage-lab-logo.png"
                         alt="Epackage-Lab ロゴ"
                         className="film-quote-division-logo"
-                        width={2172}
-                        height={724}
+                        width={567}
+                        height={189}
                       />
                     </div>
                     <small>{kaneiTrade.englishName}</small>
@@ -1104,8 +1105,8 @@ function QuotationDetailModal({
                       src="/api/brand-assets/kanei-trade-seal.png"
                       alt="金井貿易株式会社各印"
                       className="film-quote-seal-image"
-                      width={1254}
-                      height={1254}
+                      width={425}
+                      height={425}
                     />
                   </div>
                 </footer>

@@ -14,6 +14,42 @@
   --global-header-height: 62px;
 }
 
+@font-face {
+  font-family: "Noto Serif JP Film";
+  src: url("../fonts/NotoSerifJP-Film-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Noto Serif JP Film";
+  src: url("../fonts/NotoSerifJP-Film-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Noto Serif JP Film";
+  src: url("../fonts/NotoSerifJP-Film-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Noto Serif JP Film";
+  src: url("../fonts/NotoSerifJP-Film-800.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Noto Serif JP Film";
+  src: url("../fonts/NotoSerifJP-Film-900.woff2") format("woff2");
+  font-weight: 900;
+  font-style: normal;
+  font-display: block;
+}
+
 * { box-sizing: border-box; }
 html { color-scheme: light; }
 body { margin: 0; max-width: 100%; background: var(--background); color: var(--ink); font-family: var(--font-noto-sans-jp), "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif; line-height: 1.6; }
@@ -2611,7 +2647,7 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
   width: 100%;
   min-height: 297mm;
   padding: 10mm 13mm 8mm;
-  font-family: var(--font-noto-serif-jp), "Hiragino Mincho ProN", "Yu Mincho", serif;
+  font-family: "Noto Serif JP Film", var(--font-noto-serif-jp), "Hiragino Mincho ProN", "Yu Mincho", serif;
   font-size: 9.7pt;
   line-height: 1.42;
   color: #1e293b;
