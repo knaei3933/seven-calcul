@@ -121,13 +121,13 @@ describe("quotation history ownership UI", () => {
     expect(screen.getByText(/異形パウチ専用フィルム/)).toBeInTheDocument();
     expect(screen.getAllByText("History Test").length).toBeGreaterThan(0);
     expect(screen.queryByText("最終損益サマリー")).not.toBeInTheDocument();
-    expect(screen.getByTestId("detail-print-current")).toHaveTextContent("フィルム見積書PDF");
+    expect(screen.getByTestId("detail-print-current")).toHaveTextContent("PDF出力・印刷");
 
     const printSpy = vi.spyOn(window, "print").mockImplementation(() => {});
     await user.click(screen.getByRole("button", { name: "詳細データ" }));
     expect(screen.getByTestId("data-report-a4")).toBeVisible();
     expect(screen.getByTestId("data-report-a4")).toHaveTextContent("内部管理用");
-    expect(screen.getByTestId("detail-print-current")).toHaveTextContent("詳細データPDF");
+    expect(screen.getByTestId("detail-print-current")).toHaveTextContent("PDF出力・印刷");
     await user.click(screen.getByTestId("detail-print-current"));
     await waitFor(() => expect(printSpy).toHaveBeenCalledTimes(1));
     printSpy.mockRestore();
@@ -193,7 +193,8 @@ describe("quotation history ownership UI", () => {
     await screen.findByText("S7-HISTORY-OWNER");
     await user.click(screen.getByRole("button", { name: "詳細" }));
     expect(screen.getByTestId("history-customer-email")).toHaveValue("");
-    expect(screen.queryByTestId("history-auto-send")).not.toBeInTheDocument();
+    expect(screen.getByTestId("history-auto-send")).toBeDisabled();
+    expect(screen.getByTestId("history-auto-send")).toHaveAttribute("title", "送信前にカネイ貿易側の内部承認が必要です。");
 
     await user.click(screen.getByTestId("history-email-edit"));
     await user.type(screen.getByTestId("history-customer-email"), "legacy@example.test");

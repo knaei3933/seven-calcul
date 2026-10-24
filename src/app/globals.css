@@ -413,7 +413,9 @@ header .version-badge { display: none; }
 }
 @media (max-width: 1100px) {
   .history-detail-header { grid-template-columns: minmax(0, 1fr); }
-  .detail-header-actions { justify-content: start; }
+  .detail-action-toolbar { align-items: stretch; }
+  .detail-action-divider { display: none; }
+  .detail-action-group { flex: 1 1 100%; }
 }
 .detail-scroll { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .detail-scroll > * { flex: 0 0 auto; }
@@ -479,11 +481,44 @@ header .version-badge { display: none; }
 .detail-tabbar button:hover { color: var(--primary); background: #f7fafd; }
 .detail-tabbar button.active,
 .detail-tabbar button[aria-current="true"] { color: white; background: var(--primary); box-shadow: 0 1px 4px rgba(15, 23, 42, .14); }
-.detail-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
-.history-detail-header .detail-header-actions { grid-row: 2; max-width: 100%; }
-.detail-header-actions .button,
-.detail-header-actions a.button { min-height: 35px; padding: 6px 10px; font-size: 12px; border-radius: 7px; }
-.detail-header-actions [data-testid="detail-print-current"] { min-width: 148px; }
+.detail-action-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  grid-column: 1 / -1;
+  border: 1px solid #d7dfeb;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 8px;
+}
+.detail-action-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.detail-action-divider {
+  width: 1px;
+  align-self: stretch;
+  min-height: 28px;
+  background: #cbd5e1;
+}
+.detail-action-toolbar .button,
+.detail-action-toolbar a.button {
+  min-height: 38px;
+  padding: 7px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+.detail-action-toolbar .button[aria-disabled="true"],
+.detail-action-toolbar a.button[aria-disabled="true"] {
+  color: #74819a;
+  background: #e6ebf2;
+  border-color: #cbd5e1;
+  cursor: not-allowed;
+}
+.detail-action-toolbar [data-testid="detail-print-current"] { min-width: 138px; }
 .history-email-editor {
   display: grid;
   grid-template-columns: minmax(190px, 1fr) auto auto;

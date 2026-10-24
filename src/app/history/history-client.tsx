@@ -776,6 +776,31 @@ function QuotationDetailModal({
   };
 
   const customerEmail = record.payload.customerEmail;
+  const hasCustomerEmail = typeof customerEmail === "string" && customerEmail.trim() !== "";
+  const customerEmailText = hasCustomerEmail ? (customerEmail as string).trim() : "";
+  const canSendStoredPdf = record.status === "draft"
+    && Boolean(record.internalApproval)
+    && hasCustomerEmail;
+  const pdfDownloadTitle = storedPdfStatus === "loading"
+    ? "保存済みPDFを確認中です。"
+    : storedPdfStatus === "unavailable"
+      ? "保存済み見積書PDFがありません。"
+      : "保存済み見積書PDFをダウンロードします。";
+  const printTitle = detailTab === "document"
+    ? (storedPdfStatus === "available" ? "保存済み見積書PDFを開いて印刷します。" : "保存済み見積書PDFがありません。")
+    : detailTab === "film"
+      ? "表示中のフィルム見積書を印刷します。"
+      : "表示中の詳細データを印刷します。";
+  const mailtoTitle = hasCustomerEmail
+    ? "メールソフトで見積書案内を作成します。"
+    : "宛先メールが未登録のため、メール作成はできません。";
+  const sendEmailTitle = record.status !== "draft"
+    ? "下書き状態の見積書のみ送信できます。"
+    : !record.internalApproval
+      ? "送信前にカネイ貿易側の内部承認が必要です。"
+      : !hasCustomerEmail
+        ? "宛先メールが未登録のため、送信できません。"
+        : "保存済み見積書PDFを添付して送信し、状態を送付済みにします。";
   const mailtoLink = (() => {
     if (typeof customerEmail !== "string" || !customerEmail.trim()) return null;
     const subject = encodeURIComponent(`お見積書 ${record.quotationNumber} のご案内`);
@@ -809,72 +834,97 @@ function QuotationDetailModal({
               </div>
             </div>
           </div>
-          <div className="detail-header-actions">
-            {canEditEmail ? (
-              <div className="history-email-editor">
-                <label>
-                  <span>宛先メール</span>
-                  <input
-                    type="email"
-                    value={editingEmail ? editingEmailValue : typeof customerEmail === "string" ? customerEmail : ""}
-                    readOnly={!editingEmail}
-                    onChange={(event) => onEditingEmailChange(event.target.value)}
-                    placeholder="未登録"
-                    data-testid="history-customer-email"
-                  />
-                </label>
-                {editingEmail ? (
-                  <>
-                    <button
-                      className="button small"
-                      type="button"
-                      disabled={updatingEmail || !editingEmailValue.trim()}
-                      onClick={() => onSaveEmail(record)}
-                      data-testid="history-email-save"
-                    >{updatingEmail ? "保存中..." : "保存"}</button>
-                    <button
-                      className="button secondary small"
-                      type="button"
-                      disabled={updatingEmail}
-                      onClick={onCancelEmailEdit}
-                    >取消</button>
-                  </>
-                ) : (
+          {canEditEmail ? (
+            <div className="history-email-editor">
+              <label>
+                <span>宛先メール</span>
+                <input
+                  type="email"
+                  value={editingEmail ? editingEmailValue : customerEmailText}
+                  readOnly={!editingEmail}
+                  onChange={(event) => onEditingEmailChange(event.target.value)}
+                  placeholder="未登録"
+                  data-testid="history-customer-email"
+                />
+              </label>
+              {editingEmail ? (
+                <>
+                  <button
+                    className="button small"
+                    type="button"
+                    disabled={updatingEmail || !editingEmailValue.trim()}
+                    onClick={() => onSaveEmail(record)}
+                    data-testid="history-email-save"
+                  >{updatingEmail ? "保存中..." : "保存"}</button>
                   <button
                     className="button secondary small"
                     type="button"
-                    onClick={() => onStartEmailEdit(record)}
-                    data-testid="history-email-edit"
-                  >編集</button>
-                )}
-              </div>
-            ) : null}
-            {detailTab === "document" ? (
+                    disabled={updatingEmail}
+                    onClick={onCancelEmailEdit}
+                  >取消</button>
+                </>
+              ) : (
+                <button
+                  className="button secondary small"
+                  type="button"
+                  onClick={() => onStartEmailEdit(record)}
+                  data-testid="history-email-edit"
+                >編集</button>
+              )}
+            </div>
+          ) : null}
+          <div className="detail-action-toolbar" role="toolbar" aria-label="見積書操作">
+            <div className="detail-action-group">
               <button
                 className="button small"
                 type="button"
                 onClick={downloadStoredPdf}
                 data-testid="detail-download-current"
                 disabled={storedPdfStatus !== "available"}
-              >PDFダウンロード</button>
-            ) : null}
-            <button
-              className="button small"
-              type="button"
+                title={pdfDownloadTitle}
+                aria-label={`見積書PDFダウンロード。${pdfDownloadTitle}`}
+              >見積書PDFダウンロード</button>
+              <button
+                className="button small"
+                type="button"
               onClick={() => {
                 if (detailTab === "document") printStoredPdf();
                 else void printCurrentDocument();
               }}
               data-testid="detail-print-current"
               disabled={detailTab === "document" && storedPdfStatus !== "available"}
+                title={printTitle}
+                aria-label={`PDF出力・印刷。${printTitle}`}
             >
-              {detailTab === "document" ? "PDFを開いて印刷"
-                : detailTab === "film" ? "フィルム見積書PDF"
-                  : "詳細データPDF"}
+              PDF出力・印刷
             </button>
-            {mailtoLink ? (
-              <a className="button small" href={mailtoLink} data-testid="history-mail-link">メール作成</a>
-            ) : null}
+            </div>
+            <span className="detail-action-divider" aria-hidden="true" />
+            <div className="detail-action-group">
+              <a
+                className="button secondary small"
+                href={mailtoLink ?? undefined}
+                aria-disabled={!mailtoLink}
+                title={mailtoTitle}
+                aria-label={`メール作成。${mailtoTitle}`}
+                onClick={(event) => {
+                  if (!mailtoLink) event.preventDefault();
+                }}
+                data-testid="history-mail-link"
+              >メール作成</a>
+              <button
+                className="button small"
+                type="button"
+                disabled={sendingEmail || !canSendStoredPdf}
+                title={sendingEmail ? "送信中です。" : sendEmailTitle}
+                aria-label={`メール送信。${sendingEmail ? "送信中です。" : sendEmailTitle}`}
+                onClick={() => onSendEmail(record)}
+                data-testid="history-auto-send"
+              >
+                {sendingEmail ? "送信中..." : "メール送信（PDF添付）"}
+              </button>
+            </div>
+            <span className="detail-action-divider" aria-hidden="true" />
             {record.status === "draft" && !record.internalApproval && canApproveInternally ? (
               <button
                 className="button small"
@@ -883,20 +933,6 @@ function QuotationDetailModal({
                 onClick={() => onApproveGate(record, "internal")}
                 data-testid="history-internal-approve"
               >{approvingGate ? "承認中..." : "内部承認する"}</button>
-            ) : null}
-            {record.status === "draft" && typeof record.payload.customerEmail === "string" && record.payload.customerEmail.trim() ? (
-              <button
-                className="button small"
-                type="button"
-                disabled={sendingEmail || !record.internalApproval}
-                title={record.internalApproval
-                  ? "保存済み見積書PDFを添付して送信し、状態を送付済みにします。テスト設定では宛先が強制変更される場合があります。"
-                  : "送信前に内部承認が必要です。"}
-                onClick={() => onSendEmail(record)}
-                data-testid="history-auto-send"
-              >
-                {sendingEmail ? "送信中..." : "メール送信（PDF添付）"}
-              </button>
             ) : null}
             {record.status === "sent" && record.internalApproval && !record.customerApproval && canRecordCustomerApproval ? (
               <button
@@ -907,6 +943,7 @@ function QuotationDetailModal({
                 data-testid="history-customer-approval-record"
               >{approvingGate ? "承認中..." : "顧客承認を記録"}</button>
             ) : null}
+            <span className="detail-action-divider" aria-hidden="true" />
             <button className="button secondary small" type="button" onClick={onClose}>閉じる</button>
           </div>
         </header>
