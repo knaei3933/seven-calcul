@@ -134,6 +134,38 @@ describe("quotation history ownership UI", () => {
     vi.unstubAllGlobals();
   });
 
+  it("uses the automatic film PDF filename in the print dialog", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => (
+      String(input).endsWith("/pdf")
+        ? Response.json({ error: "pdf_not_found" }, { status: 404 })
+        : Response.json({ records: [adminRecord] }, { status: 200 })
+    )));
+    const user = userEvent.setup();
+    const previousTitle = document.title;
+    render(<HistoryClient currentUser={currentUser} />);
+
+    await screen.findByText("S7-HISTORY-ADMIN");
+    await user.click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    await user.click(screen.getByTestId("film-quote-tab"));
+
+    let titleDuringPrint = "";
+    const printSpy = vi.spyOn(window, "print").mockImplementation(() => {
+      titleDuringPrint = document.title;
+    });
+    await user.click(screen.getByTestId("detail-print-current"));
+
+    await waitFor(() => expect(titleDuringPrint).toBe("お見積書_History_Pouch(History_Test)_260920"));
+    await waitFor(() => expect(document.title).toBe(previousTitle));
+    printSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
   it("lets an owner correct a missing customer email on an issued draft", async () => {
     const noEmailRecord = { ...ownerRecord, payload: {} };
     const updatedRecord = {

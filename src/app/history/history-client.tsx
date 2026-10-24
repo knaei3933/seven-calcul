@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { CALCULATION_VERSION, sizeMaster } from "@/lib/constants";
-import { buildFilmQuotationFromRecord, filmQuotationNumberFor, kaneiTrade } from "@/lib/film-quotation";
+import { buildFilmQuotationFromRecord, buildFilmQuotationPdfFileName, filmQuotationNumberFor, kaneiTrade } from "@/lib/film-quotation";
 import { D, Decimal } from "@/lib/decimal";
 import { analyzeQuotation, filmCompositionOf, printingMethodOf } from "@/lib/quotation-history";
 import { fileNameFromContentDisposition } from "@/lib/content-disposition";
@@ -751,8 +751,23 @@ function QuotationDetailModal({
         }
       }),
     );
+    // ブラウザの「PDFとして保存」の初期ファイル名は document.title から作られる。
+    const previousTitle = document.title;
+    document.title = detailTab === "film" && filmQuotation
+      ? buildFilmQuotationPdfFileName({
+          issueDate: filmQuotation.issueDate || record.issueDate,
+          productName: filmQuotation.productName || record.productName,
+          customerName: filmQuotation.endCustomerName || record.customerName,
+        })
+      : previousTitle;
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.print());
+      requestAnimationFrame(() => {
+        try {
+          window.print();
+        } finally {
+          document.title = previousTitle;
+        }
+      });
     });
   };
 

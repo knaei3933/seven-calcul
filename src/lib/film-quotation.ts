@@ -43,6 +43,27 @@ export function filmQuotationNumberFor(
   return `K-${sourceId || Date.now().toString(36).toUpperCase()}-F`;
 }
 
+function sanitizePdfFileNamePart(value: string, maxLength = 60): string {
+  const cleaned = value
+    .replace(/\s+/g, "_")
+    .replace(/[\\/:*?"<>|]/g, "")
+    .slice(0, maxLength);
+  return cleaned || "無題";
+}
+
+export function buildFilmQuotationPdfFileName(input: {
+  issueDate: string;
+  productName: string;
+  customerName: string;
+}): string {
+  const dateText = input.issueDate.slice(0, 10);
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateText);
+  const datePart = dateMatch
+    ? `${dateMatch[1].slice(2)}${dateMatch[2]}${dateMatch[3]}`
+    : new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).replaceAll("-", "").slice(2);
+  return `お見積書_${sanitizePdfFileNamePart(input.productName)}(${sanitizePdfFileNamePart(input.customerName)})_${datePart}`;
+}
+
 export function buildFilmQuotationFromRecord(record: {
   quotationNumber: string;
   customerName?: string;
