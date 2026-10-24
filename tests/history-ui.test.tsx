@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -203,6 +203,33 @@ describe("quotation history ownership UI", () => {
     expect(screen.getByTestId("history-customer-email")).toHaveValue("legacy@example.test");
     expect(screen.getByTestId("history-customer-email")).toHaveProperty("readOnly", true);
     expect(screen.getByTestId("history-auto-send")).toBeInTheDocument();
+  });
+
+  it("shows 成約 without any approval records so owners can convert manually", async () => {
+    const approvedRecord = { ...ownerRecord, status: "approved" as const };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/quotations/2" && init?.method === "PATCH") {
+        expect(JSON.parse(String(init.body))).toEqual({ status: "approved" });
+        return Response.json({ record: approvedRecord }, { status: 200 });
+      }
+      return Response.json({ records: [ownerRecord] }, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<HistoryClient currentUser={currentUser} />);
+
+    await screen.findByText("S7-HISTORY-OWNER");
+    const select = screen.getByLabelText("S7-HISTORY-OWNER の状態");
+    expect(select).toHaveDisplayValue("下書き");
+    expect(within(select).getByRole("option", { name: "成約" })).toBeInTheDocument();
+    await user.selectOptions(select, "approved");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/quotations/2",
+      expect.objectContaining({ method: "PATCH" }),
+    ));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/film-orders"));
   });
 
   it("shows the sales contract action for an internally approved draft without customer approval", async () => {

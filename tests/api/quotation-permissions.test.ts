@@ -120,14 +120,6 @@ describe("quotation ownership permissions", () => {
     expect(ownerPatch.status).toBe(409);
     await expect(ownerPatch.json()).resolves.toEqual({ error: "invalid_status_transition" });
 
-    const adminPatch = await patchQuotation(request("http://localhost/api/quotations/1", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: "approved" }),
-    }, adminToken), context);
-    expect(adminPatch.status).toBe(409);
-    await expect(adminPatch.json()).resolves.toEqual({ error: "internal_approval_required" });
-
     // Customer approval is evidence only. A sales owner must move the sent
     // quotation to 成約 explicitly before film-order synchronization.
     await approveQuotationGate(record.id, "internal", owner.id);
@@ -185,6 +177,24 @@ describe("quotation ownership permissions", () => {
       record: { id: manualRecord.id, status: "approved" },
     });
     expect(await filmOrderExistsForQuotation(manualRecord.id)).toBe(true);
+
+    // Approval records are evidence only. A creator can explicitly mark a draft as 成約 without either approval gate.
+    const noGateRecord = await createRecord("S7-PERMISSION-NO-GATE-APPROVED", owner.id);
+    const noGateContext = { params: Promise.resolve({ id: String(noGateRecord.id) }) };
+    const noGateResponse = await patchQuotation(request(
+      `http://localhost/api/quotations/${noGateRecord.id}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "approved" }),
+      },
+      ownerToken,
+    ), noGateContext);
+    expect(noGateResponse.status).toBe(200);
+    await expect(noGateResponse.json()).resolves.toMatchObject({
+      record: { id: noGateRecord.id, status: "approved", internalApproval: null, customerApproval: null },
+    });
+    expect(await filmOrderExistsForQuotation(noGateRecord.id)).toBe(true);
 
     const readerDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, readerToken), context);
     expect(readerDelete.status).toBe(403);

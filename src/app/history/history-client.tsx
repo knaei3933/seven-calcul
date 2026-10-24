@@ -468,10 +468,7 @@ function manualStatusOptions(record: QuotationRecord): QuotationStatus[] {
     rejected: ["rejected"],
     expired: ["expired"],
   };
-  // 顧客承認は成約の必須条件ではない。ただし成約は内部承認後のみ許可する。
-  if (!record.internalApproval) {
-    return base[record.status].filter((status) => status !== "approved");
-  }
+  // 承認ワークフローの記録は証跡。担当者が成約を明示的に選択できればよい。
   return base[record.status];
 }
 
