@@ -51,7 +51,7 @@ function sanitizePdfFileNamePart(value: string, maxLength = 60): string {
   return cleaned || "無題";
 }
 
-export function buildFilmQuotationPdfFileName(input: {
+export function buildQuotationPdfFileName(input: {
   issueDate: string;
   productName: string;
   customerName: string;
@@ -62,6 +62,10 @@ export function buildFilmQuotationPdfFileName(input: {
     ? `${dateMatch[1].slice(2)}${dateMatch[2]}${dateMatch[3]}`
     : new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).replaceAll("-", "").slice(2);
   return `お見積書_${sanitizePdfFileNamePart(input.productName)}(${sanitizePdfFileNamePart(input.customerName)})_${datePart}`;
+}
+
+export function buildFilmQuotationPdfFileName(input: Parameters<typeof buildQuotationPdfFileName>[0]): string {
+  return buildQuotationPdfFileName(input);
 }
 
 export function buildFilmQuotationFromRecord(record: {

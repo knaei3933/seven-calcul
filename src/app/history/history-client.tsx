@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { CALCULATION_VERSION, sizeMaster } from "@/lib/constants";
-import { buildFilmQuotationFromRecord, buildFilmQuotationPdfFileName, filmQuotationNumberFor, kaneiTrade } from "@/lib/film-quotation";
+import { buildFilmQuotationFromRecord, buildFilmQuotationPdfFileName, buildQuotationPdfFileName, filmQuotationNumberFor, kaneiTrade } from "@/lib/film-quotation";
 import { D, Decimal } from "@/lib/decimal";
 import { analyzeQuotation, filmCompositionOf, printingMethodOf } from "@/lib/quotation-history";
 import { fileNameFromContentDisposition } from "@/lib/content-disposition";
@@ -719,7 +719,11 @@ function QuotationDetailModal({
     const objectUrl = URL.createObjectURL(pdf.blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
-    anchor.download = pdf.fileName;
+    anchor.download = `${buildQuotationPdfFileName({
+      issueDate: record.issueDate,
+      productName: record.productName,
+      customerName: record.customerName,
+    })}.pdf`;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();

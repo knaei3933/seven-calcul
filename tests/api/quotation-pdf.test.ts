@@ -177,7 +177,7 @@ describe("quotation PDF API", () => {
     expect(retrieved.headers.get("content-type")).toBe("application/pdf");
     expect(retrieved.headers.get("cache-control")).toBe("private, no-store");
     expect(retrieved.headers.get("content-disposition")).toContain(
-      encodeURIComponent("S7-PDF-STORE-001.pdf"),
+      encodeURIComponent("お見積書_PDF_Pouch(PDF_Customer)_261015.pdf"),
     );
     await expect(retrieved.arrayBuffer()).resolves.toEqual(bytes.buffer);
   });

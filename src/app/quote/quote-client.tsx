@@ -17,6 +17,7 @@ import {
 } from "@/lib/quotation-shared";
 import { BULK_SELLING_MARKUP, calculateCopperQuotation, clampGravureFilmMeterUnit, COPPER_QUOTE_UNIT_MAX_YEN, COPPER_SELLING_MARKUP, COPPER_TARGET_MARGIN_RATE } from "@/lib/quotation-pricing";
 import { fileNameFromContentDisposition } from "@/lib/content-disposition";
+import { buildQuotationPdfFileName } from "@/lib/film-quotation";
 import type { CustomerMaster } from "@/lib/quotation-shared";
 import type { FilmQuotationData } from "@/lib/film-quotation";
 
@@ -1036,7 +1037,11 @@ export default function PrintableQuotationPage({
         savedRecordId,
         `${savedQuotationNumber || form.quotationNumber}.pdf`,
       );
-      downloadPdfBlob(storedPdf.blob, storedPdf.fileName);
+      downloadPdfBlob(storedPdf.blob, `${buildQuotationPdfFileName({
+        issueDate: form.issueDate,
+        productName: form.skuNames.filter((name) => name.trim()).join(" / ") || form.productName,
+        customerName: form.customerName,
+      })}.pdf`);
     } catch (error) {
       setSaveError(error instanceof QuotationPdfError
         ? error.message

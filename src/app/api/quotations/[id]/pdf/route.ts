@@ -7,6 +7,7 @@ import {
   QuotationPdfIntegrityError,
   saveQuotationPdf,
 } from "@/lib/quotation-store";
+import { buildQuotationPdfFileName } from "@/lib/film-quotation";
 import type { AuthenticatedUser } from "@/lib/auth-store";
 
 export const runtime = "nodejs";
@@ -81,12 +82,19 @@ export async function GET(request: Request, context: Context): Promise<Response>
     return NextResponse.json({ error: "invalid_id" }, { status: 400 });
   }
   try {
+    const record = await getQuotation(quotationId);
+    if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
     const pdf = await getQuotationPdf(quotationId);
     if (!pdf) return NextResponse.json({ error: "pdf_not_found" }, { status: 404 });
+    const fileName = buildQuotationPdfFileName({
+      issueDate: record.issueDate,
+      productName: record.productName,
+      customerName: record.customerName,
+    });
     return new Response(new Uint8Array(pdf.data), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(pdf.fileName)}`,
+        "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(`${fileName}.pdf`)}`,
         "Cache-Control": "private, no-store",
         "Content-Length": String(pdf.data.byteLength),
       },

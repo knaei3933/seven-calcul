@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFilmQuotationFromRecord, buildFilmQuotationPdfFileName, filmQuotationNumberFor } from "@/lib/film-quotation";
+import { buildFilmQuotationFromRecord, buildFilmQuotationPdfFileName, buildQuotationPdfFileName, filmQuotationNumberFor } from "@/lib/film-quotation";
 
 describe("film quotation linkage", () => {
   it("creates a paired film number and shows the product and film printing specification", () => {
@@ -127,6 +127,19 @@ describe("film quotation linkage", () => {
 });
 
 describe("film quotation numbering", () => {
+  it("uses the shared quotation PDF filename format", () => {
+    expect(buildQuotationPdfFileName({
+      issueDate: "2026-10-14",
+      productName: "テスト製品",
+      customerName: "テスト株式会社",
+    })).toBe("お見積書_テスト製品(テスト株式会社)_261014");
+    expect(buildFilmQuotationPdfFileName({
+      issueDate: "2026-10-14",
+      productName: "テスト製品",
+      customerName: "テスト株式会社",
+    })).toBe("お見積書_テスト製品(テスト株式会社)_261014");
+  });
+
   it("builds the automatic print-to-PDF filename from the issued date", () => {
     expect(buildFilmQuotationPdfFileName({
       issueDate: "2026-10-14",
