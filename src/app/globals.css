@@ -748,7 +748,8 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   width: 100%;
   min-height: 297mm;
   height: auto;
-  font-size: 9.6pt;
+  font-size: 10.5pt;
+  line-height: 1.47;
   overflow: visible;
 }
 .history-a4-fit {
@@ -766,13 +767,13 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   border-bottom: 1px solid #8b96a6;
   padding-bottom: 3mm;
 }
-.history-page2-header span { color: #1f3a5f; font-size: 7.8pt; font-weight: 800; letter-spacing: .16em; }
+.history-page2-header span { color: #1f3a5f; font-size: 8.6pt; font-weight: 800; letter-spacing: .16em; }
 .history-page2-header h2 { margin: 1mm 0 1mm; font-size: 16pt; }
-.history-page2-header small { display: block; color: #526075; font-size: 7.8pt; }
+.history-page2-header small { display: block; color: #526075; font-size: 8.6pt; }
 .history-page2-header > div:last-child { text-align: right; }
-.history-page2-header > div:last-child strong { display: block; color: #1f3a5f; font-size: 10pt; }
+.history-page2-header > div:last-child strong { display: block; color: #1f3a5f; font-size: 11pt; }
 .history-page2-header > div:last-child small { color: #526075; }
-.history-cost-table { width: 100%; border-collapse: collapse; font-size: 8.4pt; }
+.history-cost-table { width: 100%; border-collapse: collapse; font-size: 9.2pt; }
 .history-cost-table th,
 .history-cost-table td {
   border-bottom: .2mm solid #cbd5e1;
@@ -782,12 +783,12 @@ body:has(main.supplier-po-page) .global-header { display: none; }
 }
 .history-cost-table th:first-child,
 .history-cost-table td:first-child { text-align: left; }
-.history-cost-table thead th { color: #526075; font-size: 7.8pt; white-space: nowrap; }
+.history-cost-table thead th { color: #526075; font-size: 8.6pt; white-space: nowrap; }
 .history-cost-table tfoot th,
 .history-cost-table tfoot td { border-top: .5mm solid #1f3a5f; border-bottom: 0; font-weight: 900; }
-.history-formula-list { margin: 0; padding-left: 5mm; display: grid; gap: 1.8mm; font-size: 8.4pt; }
+.history-formula-list { margin: 0; padding-left: 5mm; display: grid; gap: 2mm; font-size: 9.2pt; }
 .history-formula-list strong { margin-right: 1mm; }
-.history-verify-table { width: 100%; border-collapse: collapse; font-size: 7.8pt; }
+.history-verify-table { width: 100%; border-collapse: collapse; font-size: 8.6pt; }
 .history-verify-table th,
 .history-verify-table td {
   border-bottom: .2mm solid #cbd5e1;
@@ -798,7 +799,7 @@ body:has(main.supplier-po-page) .global-header { display: none; }
 }
 .history-verify-table thead th {
   color: #1f3a5f;
-  font-size: 7.4pt;
+  font-size: 8.1pt;
   background: #f1f5f9;
   white-space: nowrap;
 }
@@ -806,14 +807,14 @@ body:has(main.supplier-po-page) .global-header { display: none; }
 .history-verify-table td:nth-child(2),
 .history-verify-table td:nth-child(3) {
   font-family: var(--font-noto-sans-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 7.3pt;
+  font-size: 8pt;
 }
 .history-verify-table td:last-child { font-weight: 800; text-align: right; white-space: nowrap; }
 .history-audit-note {
   margin: 2mm 0 0;
   color: #526075;
-  font-size: 7.2pt;
-  line-height: 1.45;
+  font-size: 7.9pt;
+  line-height: 1.55;
 }
 .history-a4-section {
   margin-top: 6mm;
@@ -853,7 +854,7 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   border-bottom: .2mm dotted #cbd5e1;
   padding: 1mm 0;
 }
-.history-facts dt { color: #526075; font-size: 8.4pt; font-weight: 700; }
+.history-facts dt { color: #526075; font-size: 9.2pt; font-weight: 700; }
 .history-facts dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
 .history-line-table { width: 100%; border-collapse: collapse; }
 .history-line-table th,
@@ -863,15 +864,15 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   text-align: left;
   vertical-align: top;
 }
-.history-line-table th { color: #526075; font-size: 8.4pt; }
+.history-line-table th { color: #526075; font-size: 9.2pt; }
 .history-line-table td:nth-child(2),
 .history-line-table td:nth-child(3),
 .history-line-table td:last-child,
 .history-line-table th:nth-child(2),
 .history-line-table th:nth-child(3),
 .history-line-table th:last-child { text-align: right; }
-.history-line-table small { color: #526075; font-size: 7.6pt; }
-.history-line-table tfoot th { border-bottom: 0; text-align: right; font-size: 9.4pt; }
+.history-line-table small { color: #526075; font-size: 8.4pt; line-height: 1.5; }
+.history-line-table tfoot th { border-bottom: 0; text-align: right; font-size: 10.2pt; }
 .history-line-table tfoot tr:last-child th,
 .history-line-table tfoot tr:last-child td { border-top: .5mm solid #1f3a5f; border-bottom: 0; font-weight: 900; }
 .history-calc-cards {
@@ -885,13 +886,13 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   padding: 3mm;
   break-inside: avoid;
 }
-.history-calc-cards h3 { margin: 0 0 2mm; font-size: 9.8pt; }
+.history-calc-cards h3 { margin: 0 0 2.2mm; font-size: 10.5pt; }
 .history-calc-cards dl { display: grid; gap: 1.5mm; margin: 0; }
 .history-cost-breakdown { margin: 3mm 0 0; padding: 2mm 3mm; border: .2mm dashed #cbd5e1; border-radius: 2mm; background: #f8fafc; font-size: 11px; color: #374151; break-inside: avoid; }
 .history-cost-split td { color: #475569; }
 .badge { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .history-calc-cards dl div { display: flex; justify-content: space-between; gap: 3mm; }
-.history-calc-cards dt { color: #526075; font-size: 8pt; }
+.history-calc-cards dt { color: #526075; font-size: 8.8pt; }
 .history-calc-cards dd { margin: 0; font-weight: 800; }
 .history-total-note {
   display: grid;
@@ -903,12 +904,13 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   padding: 3mm;
 }
 .history-total-note div { display: grid; gap: .8mm; }
-.history-total-note span { color: #526075; font-size: 7.8pt; font-weight: 800; }
-.history-total-note strong { font-size: 10pt; }
+.history-total-note span { color: #526075; font-size: 8.6pt; font-weight: 800; }
+.history-total-note strong { font-size: 11pt; }
 .history-a4-footer {
   margin-top: 5mm;
   color: #526075;
-  font-size: 7.8pt;
+  font-size: 8.6pt;
+  line-height: 1.5;
   text-align: right;
 }
 
@@ -1000,8 +1002,8 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   box-shadow: 0 12px 34px rgba(15, 23, 42, .12);
   padding: 12mm 14mm 11mm;
   font-family: var(--font-noto-serif-jp), "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", "Times New Roman", serif;
-  font-size: 10.5pt;
-  line-height: 1.38;
+  font-size: 11.5pt;
+  line-height: 1.46;
   display: flex;
   flex-direction: column;
 }
@@ -1022,25 +1024,25 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   object-fit: contain;
 }
 .issuer-logo .logo-mark.large { background: #1f3a5f; border-radius: 2.8mm; }
-.issuer-logo strong { display: block; font-size: 13.5pt; letter-spacing: .05em; }
-.issuer-logo small { color: #5b6573; font-size: 8.2pt; letter-spacing: .09em; }
-.issuer address { font-style: normal; margin-top: 2.6mm; font-size: 8.4pt; line-height: 1.38; color: #475569; }
+.issuer-logo strong { display: block; font-size: 14.4pt; letter-spacing: .05em; }
+.issuer-logo small { color: #5b6573; font-size: 9pt; letter-spacing: .09em; }
+.issuer address { font-style: normal; margin-top: 2.8mm; font-size: 9.2pt; line-height: 1.5; color: #475569; }
 .document-title { min-width: 40mm; text-align: right; }
-.document-title .english { margin: 0; color: #1f3a5f; font-size: 8.6pt; letter-spacing: .22em; font-weight: 700; }
-.document-title h2 { margin: 1mm 0 3mm; color: #111827; font-size: 20pt; letter-spacing: .09em; }
+.document-title .english { margin: 0; color: #1f3a5f; font-size: 9.2pt; letter-spacing: .22em; font-weight: 700; }
+.document-title h2 { margin: 1mm 0 3mm; color: #111827; font-size: 21.5pt; letter-spacing: .09em; }
 .document-title dl div { display: flex; justify-content: space-between; border-bottom: 1px solid #cbd5e1; padding: 1mm 0; }
 .document-title dt { color: #64748b; font-weight: 600; }
 .document-title dd { font-weight: 800; }
 
 .recipient-block { margin-top: 4.5mm; }
 .recipient-block p { margin: 0 0 1mm; }
-.recipient-block .customer { font-size: 13pt; font-weight: 900; color: #111827; }
-.recipient-block .greeting { margin-top: 2.6mm; color: #374151; font-size: 8.8pt; }
+.recipient-block .customer { font-size: 14pt; font-weight: 900; color: #111827; }
+.recipient-block .greeting { margin-top: 2.8mm; color: #374151; font-size: 9.6pt; line-height: 1.55; }
 .price-highlight { display: grid; grid-template-columns: 1.15fr .72fr .9fr; gap: 3mm; align-items: end; margin: 4mm 0 3.5mm; padding: 3.2mm 4mm; background: #f6f8fb; border: 1px solid #d8dfe9; border-left: 1.2mm solid #1f3a5f; }
 .quote-spec { margin: 3.5mm 0 0; padding: 2.4mm 3.2mm 2.2mm; background: #f8fafc; border: 1px solid #d8dfe9; border-radius: 1.2mm; }
-.quote-spec h3 { margin: 0 0 1.4mm; color: #1f3a5f; font-size: 9.4pt; font-weight: 800; letter-spacing: .08em; }
+.quote-spec h3 { margin: 0 0 1.6mm; color: #1f3a5f; font-size: 10.2pt; font-weight: 800; letter-spacing: .08em; }
 .quote-spec dl { display: grid; grid-template-columns: 1fr; gap: 0; margin: 0; }
-.quote-spec dl > div { display: grid; grid-template-columns: 24mm 1fr; align-items: baseline; gap: 3mm; padding: 1.1mm 0; border-bottom: 1px dotted #cbd5e1; font-size: 9.2pt; min-width: 0; }
+.quote-spec dl > div { display: grid; grid-template-columns: 26mm 1fr; align-items: baseline; gap: 3mm; padding: 1.3mm 0; border-bottom: 1px dotted #cbd5e1; font-size: 10pt; min-width: 0; }
 .quote-spec dl > div:last-child { border-bottom: 0; }
 .quote-spec dt { color: #4b5563; font-weight: 700; }
 .quote-spec dd { margin: 0; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
@@ -1065,37 +1067,37 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   .chamber-row select { flex-basis: 100%; }
   .liquid-master-form label { flex-basis: 100%; }
 }
-.price-highlight span { display: block; color: #64748b; font-size: 8.2pt; font-weight: 700; }
+.price-highlight span { display: block; color: #64748b; font-size: 9pt; font-weight: 700; }
 .price-highlight > div { display: grid; align-content: end; min-width: 0; }
-.price-highlight span { display: block; min-height: 4.2mm; margin-bottom: 1.4mm; line-height: 1.25; color: #64748b; font-size: 8.2pt; font-weight: 700; letter-spacing: .02em; }
-.price-highlight strong { display: flex; align-items: baseline; gap: 1.2mm; min-width: 0; margin: 0; line-height: 1; font-size: 15pt; font-weight: 900; color: #17223a; }
+.price-highlight span { display: block; min-height: 4.6mm; margin-bottom: 1.5mm; line-height: 1.35; color: #64748b; font-size: 9pt; font-weight: 700; letter-spacing: .02em; }
+.price-highlight strong { display: flex; align-items: baseline; gap: 1.2mm; min-width: 0; margin: 0; line-height: 1; font-size: 16.5pt; font-weight: 900; color: #17223a; }
 .price-highlight .money { overflow-wrap: anywhere; }
-.price-highlight small { flex: 0 0 auto; line-height: 1; font-size: 9pt; font-weight: 700; color: #475569; }
+.price-highlight small { flex: 0 0 auto; line-height: 1; font-size: 9.8pt; font-weight: 700; color: #475569; }
 .quote-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.quote-table th { background: #eef2f7; color: #243447; border: 1px solid #8b96a6; border-top: 1.5px solid #1f3a5f; padding: 2.2mm 2.2mm; font-size: 9.4pt; text-align: center; }
-.quote-table td { border: 1px solid #8b96a6; padding: 2.7mm 2.2mm; vertical-align: top; background: white; }
+.quote-table th { background: #eef2f7; color: #243447; border: 1px solid #8b96a6; border-top: 1.5px solid #1f3a5f; padding: 2.5mm 2.4mm; font-size: 10.1pt; text-align: center; }
+.quote-table td { border: 1px solid #8b96a6; padding: 3mm 2.4mm; vertical-align: top; background: white; }
 .quote-table th:nth-child(1), .quote-table td:nth-child(1) { width: 42%; text-align: left; }
 .quote-table th:not(:first-child), .quote-table td:not(:first-child) { text-align: right; }
-.quote-table small { display: block; margin-top: .7mm; color: #64748b; font-size: 7.8pt; font-weight: 400; }
+.quote-table small { display: block; margin-top: .8mm; color: #64748b; font-size: 8.7pt; line-height: 1.45; font-weight: 400; }
 .film-composition { letter-spacing: .01em; }
 .sheet-editable { border-bottom: 1px dashed transparent; cursor: text; display: inline; line-height: inherit; min-width: 0; outline: none; transition: background .12s ease, border-color .12s ease; vertical-align: baseline; white-space: pre-wrap; }
 .sheet-editable:hover { background: #fffbeb; border-bottom-color: #f59e0b; }
 .sheet-editable:focus { background: #eff6ff; border-bottom-color: var(--primary); box-shadow: 0 2px 0 rgba(37, 99, 235, .18); }
 .sheet-editable.money { font: inherit; text-align: inherit; }
-.total-block { margin-left: auto; width: min(82mm, 100%); margin-top: 3.5mm; font-size: 9.6pt; }
+.total-block { margin-left: auto; width: min(86mm, 100%); margin-top: 3.5mm; font-size: 10.4pt; }
 .total-block > div { display: flex; justify-content: space-between; gap: 4mm; padding: 1.5mm 0; border-bottom: 1px solid #d8dfe9; }
 .total-block span { color: #4b5563; }
 .total-block strong { font-weight: 800; }
-.total-block .grand { border-top: 3px double #1f3a5f; border-bottom: 0; margin-top: .8mm; font-size: 12.5pt; color: #17223a; }
+.total-block .grand { border-top: 3px double #1f3a5f; border-bottom: 0; margin-top: .8mm; font-size: 13.5pt; color: #17223a; }
 .terms { margin-top: 4.5mm; border: 1px solid #d8dfe9; padding: 3mm 4mm; background: #f8fafc; }
 .terms dl div { display: flex; gap: 4mm; border-bottom: 0; padding: .8mm 0; }
 .terms dt { flex: 0 0 24mm; color: #4b5563; font-weight: 700; }
 .terms dd { margin: 0; }
-.terms .notes { margin: 2mm 0 0; padding-top: 1.6mm; border-top: 1px solid #d8dfe9; color: #374151; font-size: 8.6pt; }
-.sheet-footer { margin-top: auto; display: grid; gap: 3mm; border-top: 1px solid #8b96a6; padding-top: 3.5mm; color: #4b5563; font-size: 8.2pt; }
-.sheet-footer p { max-width: 82mm; margin: 0; line-height: 1.42; }
+.terms .notes { margin: 2mm 0 0; padding-top: 1.8mm; border-top: 1px solid #d8dfe9; color: #374151; font-size: 9.4pt; line-height: 1.55; }
+.sheet-footer { margin-top: auto; display: grid; gap: 3.2mm; border-top: 1px solid #8b96a6; padding-top: 3.5mm; color: #4b5563; font-size: 9.1pt; }
+.sheet-footer p { max-width: 86mm; margin: 0; line-height: 1.55; }
 .footer-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6mm; align-items: start; }
-.footer-contact { display: grid; gap: .6mm; justify-items: end; font-size: 8.2pt; line-height: 1.25; color: #374151; }
+.footer-contact { display: grid; gap: .7mm; justify-items: end; font-size: 9.1pt; line-height: 1.4; color: #374151; }
 /* 인쇄 시 적용되는 footer 여백을 오프스크린 측정 클론에도 동일하게 반영한다. */
 body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 #quote-print-measure-host {
@@ -1127,10 +1129,10 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
   margin: 0;
   box-shadow: none;
 }
-.approval { display: flex; align-items: flex-end; gap: 5mm; justify-content: flex-end; margin-left: auto; font-size: 10pt; font-weight: 800; color: #111827; }
+.approval { display: flex; align-items: flex-end; gap: 5mm; justify-content: flex-end; margin-left: auto; font-size: 10.8pt; font-weight: 800; color: #111827; }
 .approval-seal-group { display: grid; justify-items: center; gap: 1.2mm; }
-.seal { display: grid; place-items: center; width: 17mm; height: 17mm; border: 2.5px solid #b91c1c; border-radius: 50%; color: #b91c1c; font-size: 8.5pt; transform: rotate(-9deg); }
-.seal .seal-name { display: block; font-size: 7.6pt; font-weight: 800; line-height: 1; }
+.seal { display: grid; place-items: center; width: 18mm; height: 18mm; border: 2.5px solid #b91c1c; border-radius: 50%; color: #b91c1c; font-size: 9.2pt; transform: rotate(-9deg); }
+.seal .seal-name { display: block; font-size: 8.3pt; font-weight: 800; line-height: 1; }
 .sheet-error { margin-top: 8mm; }
 
 .quote-edge-handles { display: none; }
@@ -2646,10 +2648,10 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-quote-a4 {
   width: 100%;
   min-height: 297mm;
-  padding: 10mm 13mm 8mm;
+  padding: 9mm 12mm 7mm;
   font-family: "Noto Serif JP Film", var(--font-noto-serif-jp), "Hiragino Mincho ProN", "Yu Mincho", serif;
-  font-size: 9.7pt;
-  line-height: 1.42;
+  font-size: 10.6pt;
+  line-height: 1.5;
   color: #1e293b;
   display: flex;
   flex-direction: column;
@@ -2671,53 +2673,53 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-quote-kanei-logo { width: 15mm; height: auto; }
 .film-quote-division-logo { width: 24mm; height: auto; }
 .film-quote-company { display: grid; gap: .4mm; min-width: 0; }
-.film-quote-company-name { font-size: 12pt; line-height: 1.1; }
+.film-quote-company-name { font-size: 13pt; line-height: 1.1; }
 .film-quote-division {
   display: flex;
   align-items: baseline;
   gap: 1.5mm;
   color: #1f3a5f;
 }
-.film-quote-division strong { font-size: 8.2pt; line-height: 1.1; }
-.film-quote-division span { font-size: 6.7pt; color: #64748b; font-weight: 600; }
-.film-quote-issuer { font-size: 8pt; line-height: 1.42; }
+.film-quote-division strong { font-size: 9pt; line-height: 1.1; }
+.film-quote-division span { font-size: 7.6pt; color: #64748b; font-weight: 600; }
+.film-quote-issuer { font-size: 8.9pt; line-height: 1.5; }
 .film-quote-issuer strong { color: #1f3a5f; letter-spacing: .07em; }
-.film-quote-issuer small { display: block; color: #94a3b8; font-size: 6.8pt; margin: .5mm 0 1.4mm; letter-spacing: .11em; text-transform: uppercase; }
-.film-quote-issuer address { font-style: normal; color: #374151; font-size: 7.4pt; }
+.film-quote-issuer small { display: block; color: #94a3b8; font-size: 7.7pt; margin: .5mm 0 1.5mm; letter-spacing: .11em; text-transform: uppercase; }
+.film-quote-issuer address { font-style: normal; color: #374151; font-size: 8.3pt; line-height: 1.5; }
 .film-quote-title { text-align: right; }
-.film-quote-title .english { font-size: 6.8pt; letter-spacing: .28em; color: #94a3b8; margin: 0 0 .8mm; text-transform: uppercase; }
-.film-quote-title h2 { margin: 0 0 1.8mm; font-size: 18pt; color: #1f3a5f; letter-spacing: .16em; font-weight: 900; border-bottom: 2px solid #1f3a5f; padding-bottom: 1.3mm; display: inline-block; }
-.film-quote-title dl { display: flex; gap: 4mm; font-size: 7.8pt; margin: 1mm 0 0; justify-content: flex-end; }
+.film-quote-title .english { font-size: 7.6pt; letter-spacing: .28em; color: #94a3b8; margin: 0 0 .8mm; text-transform: uppercase; }
+.film-quote-title h2 { margin: 0 0 2mm; font-size: 19.5pt; color: #1f3a5f; letter-spacing: .16em; font-weight: 900; border-bottom: 2px solid #1f3a5f; padding-bottom: 1.4mm; display: inline-block; }
+.film-quote-title dl { display: flex; gap: 4mm; font-size: 8.8pt; margin: 1mm 0 0; justify-content: flex-end; }
 .film-quote-title dl > div { display: flex; flex-direction: column; align-items: flex-end; gap: .3mm; }
-.film-quote-title dt { color: #94a3b8; font-size: 6.2pt; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
-.film-quote-title dd { margin: 0; font-weight: 800; color: #1e293b; font-size: 8.8pt; }
+.film-quote-title dt { color: #94a3b8; font-size: 7.1pt; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.film-quote-title dd { margin: 0; font-weight: 800; color: #1e293b; font-size: 9.7pt; }
 
 /* Recipient */
 .film-quote-recipient { margin-bottom: 3mm; padding-bottom: 2mm; border-bottom: 1px solid #e2e8f0; }
-.film-quote-recipient .to { font-size: 12pt; font-weight: 800; margin: 0 0 1.1mm; color: #1e293b; letter-spacing: .05em; }
-.film-quote-recipient .subject { font-size: 9pt; color: #475569; margin: 0; }
+.film-quote-recipient .to { font-size: 13pt; font-weight: 800; margin: 0 0 1.2mm; color: #1e293b; letter-spacing: .05em; }
+.film-quote-recipient .subject { font-size: 9.9pt; color: #475569; margin: 0; line-height: 1.55; }
 
 /* Background */
 .film-quote-background { margin-bottom: 2.8mm; padding: 2.4mm 3mm; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 1.5mm; }
-.film-quote-background h3 { margin: 0 0 1.6mm; font-size: 8.8pt; color: #1f3a5f; font-weight: 800; }
-.film-quote-bg-list { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1mm 4.5mm; margin: 0 0 1.6mm; }
-.film-quote-bg-list > div { display: flex; align-items: baseline; gap: 1.8mm; font-size: 8.4pt; min-width: 0; }
+.film-quote-background h3 { margin: 0 0 1.8mm; font-size: 9.6pt; color: #1f3a5f; font-weight: 800; }
+.film-quote-bg-list { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4mm 4.5mm; margin: 0 0 1.8mm; }
+.film-quote-bg-list > div { display: flex; align-items: baseline; gap: 1.8mm; font-size: 9.3pt; min-width: 0; }
 .film-quote-bg-list dt { flex: none; min-width: 16mm; color: #64748b; font-weight: 600; }
 .film-quote-bg-list dd { margin: 0; color: #1e293b; font-weight: 600; overflow-wrap: anywhere; }
 .film-quote-bg-chain { border-top: 1px dashed #cbd5e1; padding-top: 1.5mm; margin-top: 1mm; }
-.chain-label { font-size: 7.8pt; font-weight: 700; color: #1f3a5f; margin: 0 0 .6mm; }
-.chain-text { font-size: 8.4pt; color: #374151; margin: 0; line-height: 1.45; }
+.chain-label { font-size: 8.7pt; font-weight: 700; color: #1f3a5f; margin: 0 0 .7mm; }
+.chain-text { font-size: 9.3pt; color: #374151; margin: 0; line-height: 1.55; }
 
 /* Table */
 .film-quote-table { width: 100%; border-collapse: collapse; margin-bottom: 3.5mm; border: 1.5px solid #1f3a5f; }
 .film-quote-table thead th {
-  padding: 1.8mm 2mm; background: #1f3a5f; color: white; font-size: 8.6pt;
+  padding: 2.1mm 2.2mm; background: #1f3a5f; color: white; font-size: 9.5pt;
   text-align: center; font-weight: 700; border: .5px solid #1f3a5f;
 }
 .film-quote-table thead th:first-child { text-align: left; }
 .film-quote-table tbody td {
-  padding: 2.2mm 2.2mm; border-bottom: .5px solid #cbd5e1;
-  font-size: 9.2pt; color: #1e293b; border-left: .5px solid #e2e8f0; border-right: .5px solid #e2e8f0;
+  padding: 2.5mm 2.4mm; border-bottom: .5px solid #cbd5e1;
+  font-size: 10.1pt; color: #1e293b; border-left: .5px solid #e2e8f0; border-right: .5px solid #e2e8f0;
 }
 .film-quote-table tbody td:first-child { border-left: none; }
 .film-quote-table tbody td:last-child { border-right: none; text-align: right; font-weight: 700; }
@@ -2725,24 +2727,24 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 .film-quote-table tbody td.desc { font-weight: 600; }
 .film-quote-table tbody td.amt { font-weight: 800; }
 .film-quote-table tfoot td {
-  padding: 1.6mm 2.2mm; font-size: 9.2pt; font-weight: 600;
+  padding: 1.9mm 2.4mm; font-size: 10.1pt; font-weight: 600;
   border-bottom: 1px solid #cbd5e1; text-align: right; color: #374151;
   border-left: .5px solid #e2e8f0; border-right: .5px solid #e2e8f0;
 }
 .film-quote-table tfoot td:first-child { text-align: left; border-left: none; }
 .film-quote-table tfoot .grand td {
-  background: #1f3a5f; color: white; font-size: 11pt; font-weight: 800;
+  background: #1f3a5f; color: white; font-size: 12pt; font-weight: 800;
   border: none; padding: 2.2mm;
 }
-.film-item-spec { display: block; margin-top: 1mm; color: #64748b; font-size: 7.6pt; line-height: 1.38; white-space: pre-line; }
+.film-item-spec { display: block; margin-top: 1.2mm; color: #64748b; font-size: 8.6pt; line-height: 1.5; white-space: pre-line; }
 
 /* Notes */
 .film-quote-notes { margin-bottom: 4mm; }
 .film-quote-notes h3 {
-  font-size: 10.8pt; color: #1f3a5f; margin: 0 0 1.5mm;
+  font-size: 11.6pt; color: #1f3a5f; margin: 0 0 1.7mm;
   padding-left: 2mm; border-left: 3px solid #1f3a5f; font-weight: 800;
 }
-.film-quote-notes ul { padding-left: 5mm; font-size: 9.8pt; color: #475569; line-height: 1.42; margin: 0; list-style-type: disc; }
+.film-quote-notes ul { padding-left: 5.5mm; font-size: 10.5pt; color: #475569; line-height: 1.55; margin: 0; list-style-type: disc; }
 .film-quote-notes li + li { margin-top: .4mm; }
 
 /* Footer */
@@ -2750,7 +2752,7 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
   display: flex; justify-content: space-between; align-items: flex-end; gap: 5mm;
   border-top: 2px solid #1f3a5f; padding-top: 2.5mm; margin-top: 0;
 }
-.film-quote-footer .greeting p { font-size: 8.5pt; color: #374151; margin: 0; line-height: 1.45; }
+.film-quote-footer .greeting p { font-size: 9.4pt; color: #374151; margin: 0; line-height: 1.55; }
 .film-quote-footer .issuer-seal {
   display: grid;
   justify-items: center;
