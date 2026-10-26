@@ -1002,8 +1002,8 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   box-shadow: 0 12px 34px rgba(15, 23, 42, .12);
   padding: 12mm 14mm 11mm;
   font-family: var(--font-noto-serif-jp), "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", "Times New Roman", serif;
-  font-size: 11.5pt;
-  line-height: 1.46;
+  font-size: 12.2pt;
+  line-height: 1.56;
   display: flex;
   flex-direction: column;
 }
@@ -1011,6 +1011,8 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  justify-content: space-between;
+  gap: 5mm;
   min-height: 0;
 }
 .sheet-header { position: relative; display: flex; justify-content: space-between; gap: 14mm; align-items: start; border-bottom: 1px solid #8b96a6; padding-bottom: 4mm; }
@@ -1034,15 +1036,15 @@ body:has(main.supplier-po-page) .global-header { display: none; }
 .document-title dt { color: #64748b; font-weight: 600; }
 .document-title dd { font-weight: 800; }
 
-.recipient-block { margin-top: 4.5mm; }
+.recipient-block { margin-top: 4mm; padding: 4mm 4.5mm; border: 1px solid #dbe2ec; border-radius: 2mm; background: linear-gradient(180deg, #fbfdff, #f6f8fb); }
 .recipient-block p { margin: 0 0 1mm; }
 .recipient-block .customer { font-size: 14pt; font-weight: 900; color: #111827; }
 .recipient-block .greeting { margin-top: 2.8mm; color: #374151; font-size: 9.6pt; line-height: 1.55; }
-.price-highlight { display: grid; grid-template-columns: 1.15fr .72fr .9fr; gap: 3mm; align-items: end; margin: 4mm 0 3.5mm; padding: 3.2mm 4mm; background: #f6f8fb; border: 1px solid #d8dfe9; border-left: 1.2mm solid #1f3a5f; }
-.quote-spec { margin: 3.5mm 0 0; padding: 2.4mm 3.2mm 2.2mm; background: #f8fafc; border: 1px solid #d8dfe9; border-radius: 1.2mm; }
+.price-highlight { display: grid; grid-template-columns: 1.15fr .72fr .9fr; gap: 3mm; align-items: end; margin: 5mm 0 4.5mm; padding: 4.5mm 5mm; background: linear-gradient(180deg, #fbfdff, #f3f7fc); border: 1px solid #d8dfe9; border-left: 1.2mm solid #1f3a5f; border-radius: 2mm; }
+.quote-spec { margin: 4mm 0 0; padding: 4mm 4.5mm 3.5mm; background: #f8fafc; border: 1px solid #d8dfe9; border-radius: 2mm; }
 .quote-spec h3 { margin: 0 0 1.6mm; color: #1f3a5f; font-size: 10.2pt; font-weight: 800; letter-spacing: .08em; }
 .quote-spec dl { display: grid; grid-template-columns: 1fr; gap: 0; margin: 0; }
-.quote-spec dl > div { display: grid; grid-template-columns: 26mm 1fr; align-items: baseline; gap: 3mm; padding: 1.3mm 0; border-bottom: 1px dotted #cbd5e1; font-size: 10pt; min-width: 0; }
+.quote-spec dl > div { display: grid; grid-template-columns: 28mm 1fr; align-items: baseline; gap: 3mm; padding: 1.6mm 0; border-bottom: 1px dotted #cbd5e1; font-size: 10.4pt; min-width: 0; }
 .quote-spec dl > div:last-child { border-bottom: 0; }
 .quote-spec dt { color: #4b5563; font-weight: 700; }
 .quote-spec dd { margin: 0; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
@@ -1070,34 +1072,34 @@ body:has(main.supplier-po-page) .global-header { display: none; }
 .price-highlight span { display: block; color: #64748b; font-size: 9pt; font-weight: 700; }
 .price-highlight > div { display: grid; align-content: end; min-width: 0; }
 .price-highlight span { display: block; min-height: 4.6mm; margin-bottom: 1.5mm; line-height: 1.35; color: #64748b; font-size: 9pt; font-weight: 700; letter-spacing: .02em; }
-.price-highlight strong { display: flex; align-items: baseline; gap: 1.2mm; min-width: 0; margin: 0; line-height: 1; font-size: 16.5pt; font-weight: 900; color: #17223a; }
+.price-highlight strong { display: flex; align-items: baseline; gap: 1.2mm; min-width: 0; margin: 0; line-height: 1; font-size: 17.5pt; font-weight: 900; color: #17223a; }
 .price-highlight .money { overflow-wrap: anywhere; }
 .price-highlight small { flex: 0 0 auto; line-height: 1; font-size: 9.8pt; font-weight: 700; color: #475569; }
 .quote-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.quote-table th { background: #eef2f7; color: #243447; border: 1px solid #8b96a6; border-top: 1.5px solid #1f3a5f; padding: 2.5mm 2.4mm; font-size: 10.1pt; text-align: center; }
-.quote-table td { border: 1px solid #8b96a6; padding: 3mm 2.4mm; vertical-align: top; background: white; }
+.quote-table th { background: #e8eef6; color: #243447; border: 1px solid #8b96a6; border-top: 1.5px solid #1f3a5f; padding: 3.2mm 2.8mm; font-size: 10.6pt; text-align: center; }
+.quote-table td { border: 1px solid #8b96a6; padding: 4mm 2.8mm; vertical-align: top; background: white; }
 .quote-table th:nth-child(1), .quote-table td:nth-child(1) { width: 42%; text-align: left; }
 .quote-table th:not(:first-child), .quote-table td:not(:first-child) { text-align: right; }
-.quote-table small { display: block; margin-top: .8mm; color: #64748b; font-size: 8.7pt; line-height: 1.45; font-weight: 400; }
+.quote-table small { display: block; margin-top: 1mm; color: #64748b; font-size: 9pt; line-height: 1.55; font-weight: 400; }
 .film-composition { letter-spacing: .01em; }
 .sheet-editable { border-bottom: 1px dashed transparent; cursor: text; display: inline; line-height: inherit; min-width: 0; outline: none; transition: background .12s ease, border-color .12s ease; vertical-align: baseline; white-space: pre-wrap; }
 .sheet-editable:hover { background: #fffbeb; border-bottom-color: #f59e0b; }
 .sheet-editable:focus { background: #eff6ff; border-bottom-color: var(--primary); box-shadow: 0 2px 0 rgba(37, 99, 235, .18); }
 .sheet-editable.money { font: inherit; text-align: inherit; }
-.total-block { margin-left: auto; width: min(86mm, 100%); margin-top: 3.5mm; font-size: 10.4pt; }
+.total-block { margin-left: auto; width: min(88mm, 100%); margin-top: 4.5mm; font-size: 10.8pt; }
 .total-block > div { display: flex; justify-content: space-between; gap: 4mm; padding: 1.5mm 0; border-bottom: 1px solid #d8dfe9; }
 .total-block span { color: #4b5563; }
 .total-block strong { font-weight: 800; }
-.total-block .grand { border-top: 3px double #1f3a5f; border-bottom: 0; margin-top: .8mm; font-size: 13.5pt; color: #17223a; }
-.terms { margin-top: 4.5mm; border: 1px solid #d8dfe9; padding: 3mm 4mm; background: #f8fafc; }
+.total-block .grand { border-top: 3px double #1f3a5f; border-bottom: 0; margin-top: .8mm; font-size: 14pt; color: #17223a; }
+.terms { margin-top: 6mm; border: 1px solid #d8dfe9; border-radius: 2mm; padding: 6mm 6mm; background: linear-gradient(180deg, #fbfdff, #f6f8fb); }
 .terms dl div { display: flex; gap: 4mm; border-bottom: 0; padding: .8mm 0; }
 .terms dt { flex: 0 0 24mm; color: #4b5563; font-weight: 700; }
 .terms dd { margin: 0; }
-.terms .notes { margin: 2mm 0 0; padding-top: 1.8mm; border-top: 1px solid #d8dfe9; color: #374151; font-size: 9.4pt; line-height: 1.55; }
-.sheet-footer { margin-top: auto; display: grid; gap: 3.2mm; border-top: 1px solid #8b96a6; padding-top: 3.5mm; color: #4b5563; font-size: 9.1pt; }
-.sheet-footer p { max-width: 86mm; margin: 0; line-height: 1.55; }
+.terms .notes { margin: 2.5mm 0 0; padding-top: 2.2mm; border-top: 1px solid #d8dfe9; color: #374151; font-size: 9.8pt; line-height: 1.65; }
+.sheet-footer { margin-top: 6mm; display: grid; gap: 4.5mm; border: 1px solid #dbe2ec; border-top: 2px solid #1f3a5f; border-radius: 2mm; padding: 6mm; color: #4b5563; font-size: 9.7pt; background: #f8fafc; }
+.sheet-footer p { max-width: 88mm; margin: 0; line-height: 1.65; }
 .footer-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6mm; align-items: start; }
-.footer-contact { display: grid; gap: .7mm; justify-items: end; font-size: 9.1pt; line-height: 1.4; color: #374151; }
+.footer-contact { display: grid; gap: .8mm; justify-items: end; font-size: 9.5pt; line-height: 1.5; color: #374151; }
 /* 인쇄 시 적용되는 footer 여백을 오프스크린 측정 클론에도 동일하게 반영한다. */
 body[data-quote-print-measure="1"] .sheet-footer { margin-top: 6mm; }
 #quote-print-measure-host {
