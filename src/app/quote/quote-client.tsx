@@ -18,6 +18,7 @@ import {
 import { BULK_SELLING_MARKUP, calculateCopperQuotation, clampGravureFilmMeterUnit, COPPER_QUOTE_UNIT_MAX_YEN, COPPER_SELLING_MARKUP, COPPER_TARGET_MARGIN_RATE } from "@/lib/quotation-pricing";
 import { fileNameFromContentDisposition } from "@/lib/content-disposition";
 import { buildQuotationPdfFileName } from "@/lib/film-quotation";
+import { generateStandardQuotationPdf, type StandardQuotePdfModel } from "@/lib/standard-quote-pdf";
 import type { CustomerMaster } from "@/lib/quotation-shared";
 import type { FilmQuotationData } from "@/lib/film-quotation";
 
@@ -903,15 +904,136 @@ export default function PrintableQuotationPage({
         totalProfit: profitUnit.times(totals.quantity).toString(),
         recordedAt: new Date().toISOString(),
       };
-      const previewElement = document.getElementById("quote-preview");
-      if (!previewElement) {
-        throw new QuotationPdfError("見積書のA4 PDFを作成できませんでした。もう一度お試しください。");
+      const issuedProductName = form.skuNames.filter((name) => name.trim()).join(" / ") || form.productName;
+      const fillingSpec = calculationChecklistSnapshot
+        ? (calculationChecklistSnapshot.chambers && calculationChecklistSnapshot.chambers.length > 1
+          ? `${calculationChecklistSnapshot.chambers.map((chamber) => `${chamber.position}室:${chamber.liquidName} ${formatNumber(chamber.fillMl)}ml`).join("／")} ＝ ${formatNumber(calculationChecklistSnapshot.totalFillMlPerPouch)}ml/枚（${calculationChecklistSnapshot.fillingMethod === "pressure" ? "加圧充填" : "ホッパ充填"}）`
+          : `${formatNumber(calculationChecklistSnapshot.fillMlPerChamber)}ml/室 × ${calculationChecklistSnapshot.connectedChambers}室 ＝ ${formatNumber(calculationChecklistSnapshot.totalFillMlPerPouch)}ml/枚（${calculationChecklistSnapshot.fillingMethod === "pressure" ? "加圧充填" : "ホッパ充填"}）`)
+        : "-";
+      const rows: StandardQuotePdfModel["rows"] = [
+        {
+          name: form.fillingItemName,
+          description: form.fillingItemDescription,
+          unit: moneyDisplay(shownTotals.fillingUnit, form.fillingUnitDisplay, 2),
+          quantity: `${numberDisplay(form.quantity)} 枚`,
+          amount: moneyDisplay(shownTotals.fillingAmount, form.fillingAmountDisplay),
+        },
+      ];
+      if (D(shownTotals.bulkAmount).gt(0)) {
+        rows.push({
+          name: form.bulkItemName,
+          description: form.bulkItemDescription,
+          unit: `${moneyDisplay(shownTotals.bulkUnit, form.bulkUnitDisplay, 2)} /g`,
+          quantity: `${formatNumber(calculationChecklistSnapshot?.bulkUsageMl ?? "0")} g`,
+          amount: moneyDisplay(shownTotals.bulkAmount, form.bulkAmountDisplay),
+        });
       }
-      const quotePdfCapture = createQuotePdfCapture(
-        previewElement.matches(".a4-sheet") ? previewElement : previewElement.querySelector<HTMLElement>(".a4-sheet"),
-      );
-      const pdfBlob = await generateQuotationPdf(quotePdfCapture.element).finally(quotePdfCapture.restore).catch((error: unknown) => {
-        console.error("[quotation-pdf] PDF generation failed", error);
+      rows.push({
+        name: form.filmItemName,
+        description: [
+          form.filmItemDescription,
+          `印刷方式：${form.printingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}`,
+          `構成：${form.filmComposition || DEFAULT_FILM_COMPOSITION}`,
+          "フィルム金額は円未満を四捨五入します。",
+          ...(calculationChecklistSnapshot?.sascheCandidate
+            ? [`採用条件：${calculationChecklistSnapshot.sascheCandidate.laneCount}丁 / ${calculationChecklistSnapshot.sascheCandidate.printTierM}m印刷 / 幅${formatNumber(calculationChecklistSnapshot.sascheCandidate.matchedWidthMm, 0)}mm`]
+            : []),
+        ].filter(Boolean).join("\n"),
+        unit: `${moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay, 2)} /m（パウチ換算 ${moneyDisplay(shownTotals.filmPouchUnit, form.filmPouchUnitDisplay, 2)} /枚）`,
+        quantity: `${numberDisplay(shownTotals.filmOrderLength, form.filmOrderLengthM)} m`,
+        amount: moneyDisplay(shownTotals.filmAmount, form.filmAmountDisplay),
+      });
+      if (D(shownTotals.customAmount).gt(0)) {
+        rows.push({
+          name: form.customItemName,
+          description: form.customItemDescription,
+          unit: `${moneyDisplay(shownTotals.customUnit, form.customUnitDisplay, 0)} /式`,
+          quantity: `${numberDisplay(form.customQuantity)} 式`,
+          amount: moneyDisplay(shownTotals.customAmount, form.customAmountDisplay, 0),
+        });
+      }
+      if (D(shownTotals.copperAmount).gt(0)) {
+        rows.push({
+          name: form.copperItemName,
+          description: [form.copperItemDescription, "印刷色1色につき新規銅版1本を作成します。"].join("\n"),
+          unit: `${moneyDisplay(shownTotals.copperColorUnit, form.copperUnitDisplay, 0)} /色`,
+          quantity: `${numberDisplay(form.copperColorCount)} 色`,
+          amount: moneyDisplay(shownTotals.copperAmount, form.copperAmountDisplay),
+        });
+      }
+      rows.push({
+        name: form.roundingItemName,
+        description: form.roundingItemDescription,
+        unit: "—",
+        quantity: "—",
+        amount: shownTotals.adjustment === "-" ? "-" : moneyDisplay(shownTotals.adjustment),
+      });
+      const [fontRegular, fontBold, logo] = await Promise.all([
+        fetch("/api/fonts/standard-quotation?weight=regular").then(async (response) => {
+          if (!response.ok) throw new Error("regular_font_fetch_failed");
+          return response.arrayBuffer();
+        }),
+        fetch("/api/fonts/standard-quotation?weight=bold").then(async (response) => {
+          if (!response.ok) throw new Error("bold_font_fetch_failed");
+          return response.arrayBuffer();
+        }),
+        fetch("/seven-chemical-logo.png").then((response) => (
+          response.ok ? response.arrayBuffer() : null
+        )).catch(() => null),
+      ]);
+      const pdfModel: StandardQuotePdfModel = {
+        issuerName: form.issuerName,
+        issuerEnglishName: form.issuerEnglishName,
+        issuerPostalCode: form.issuerPostalCode,
+        issuerAddress: form.issuerAddress,
+        issuerTelephone: form.issuerTelephone,
+        issuerWebsite: form.issuerWebsite,
+        documentEnglish: form.documentEnglish,
+        documentHeading: form.documentHeading,
+        quotationNumber: form.quotationNumber,
+        issueDate: form.issueDate,
+        customerPostalCode: form.customerPostalCode,
+        customerAddress: form.customerAddress,
+        customerName: form.customerName,
+        customerContact: form.customerContact,
+        customerCode: form.customerCode,
+        customerEmail: form.customerEmail,
+        greeting: form.greeting,
+        productName: issuedProductName,
+        sizeSummary: form.sizeSummary,
+        quantity: numberDisplay(form.quantity),
+        fillingSpec,
+        bulkUsage: D(calculationChecklistSnapshot?.bulkUsageMl ?? "0").gt(0)
+          ? `${formatNumber(calculationChecklistSnapshot?.bulkUsageMl ?? "0")}g（貴社ご支給ください）`
+          : null,
+        filmComposition: form.filmComposition || DEFAULT_FILM_COMPOSITION,
+        skuSummary: calculationChecklistSnapshot?.skus?.length
+          ? calculationChecklistSnapshot.skus.map((sku, index) => `${form.skuNames[index]?.trim() || sku.name} ／ ${formatNumber(sku.quantity)}枚`).join("　")
+          : "",
+        priceUnitLabel: "お見積単価（税抜）",
+        priceUnit: moneyDisplay(shownTotals.pricePerPiece, form.pricePerPieceDisplay, 2),
+        taxIncludedLabel: "税込合計",
+        taxIncluded: moneyDisplay(shownTotals.grandTotal, form.grandTotalDisplay),
+        rows,
+        subtotalLabel: form.subtotalLabel,
+        subtotal: moneyDisplay(shownTotals.subtotal, form.subtotalDisplay),
+        taxLabel: form.taxLabel || `消費税（${formatNumber(Number(form.taxRatePercent), 0)}%）`,
+        tax: moneyDisplay(shownTotals.tax, form.taxDisplay),
+        grandTotalLabel: form.grandTotalLabel,
+        grandTotal: moneyDisplay(shownTotals.grandTotal, form.grandTotalDisplay),
+        deliveryDate: form.deliveryDate,
+        paymentTerms: form.paymentTerms,
+        validUntil: form.validUntil,
+        notes: form.notes,
+        footerNote: form.footerNote,
+        footerCompanyName: issuerContact.companyName,
+        footerEmail: issuerContact.email,
+        footerTelephone: issuerContact.telephone,
+        approverName,
+        sealText: form.sealText,
+      };
+      const pdfBlob = await generateStandardQuotationPdf(pdfModel, fontRegular, fontBold, logo).catch((error: unknown) => {
+        console.error("[quotation-pdf] vector PDF generation failed", error);
         throw new QuotationPdfError("見積書のA4 PDFを作成できませんでした。もう一度お試しください。");
       });
 

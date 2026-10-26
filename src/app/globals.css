@@ -1044,7 +1044,7 @@ body:has(main.supplier-po-page) .global-header { display: none; }
 .quote-spec { margin: 4mm 0 0; padding: 4mm 4.5mm 3.5mm; background: #f8fafc; border: 1px solid #d8dfe9; border-radius: 2mm; }
 .quote-spec h3 { margin: 0 0 1.8mm; color: #1f3a5f; font-size: 11.2pt; font-weight: 800; letter-spacing: .08em; }
 .quote-spec dl { display: grid; grid-template-columns: 1fr; gap: 0; margin: 0; }
-.quote-spec dl > div { display: grid; grid-template-columns: 30mm 1fr; align-items: baseline; gap: 3mm; padding: 1.8mm 0; border-bottom: 1px dotted #cbd5e1; font-size: 11pt; min-width: 0; }
+.quote-spec dl > div { display: grid; grid-template-columns: 30mm 1fr; align-items: baseline; gap: 3mm; padding: 2mm 0; border-bottom: 1px dotted #cbd5e1; font-size: 11.3pt; min-width: 0; }
 .quote-spec dl > div:last-child { border-bottom: 0; }
 .quote-spec dt { color: #4b5563; font-weight: 700; }
 .quote-spec dd { margin: 0; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
@@ -1076,11 +1076,11 @@ body:has(main.supplier-po-page) .global-header { display: none; }
 .price-highlight .money { overflow-wrap: anywhere; }
 .price-highlight small { flex: 0 0 auto; line-height: 1; font-size: 10.8pt; font-weight: 700; color: #475569; }
 .quote-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.quote-table th { background: #e8eef6; color: #243447; border: 1px solid #8b96a6; border-top: 1.5px solid #1f3a5f; padding: 3.4mm 3mm; font-size: 11.4pt; text-align: center; }
-.quote-table td { border: 1px solid #8b96a6; padding: 4.4mm 3.2mm; vertical-align: top; background: white; }
+.quote-table th { background: #e8eef6; color: #243447; border: 1px solid #8b96a6; border-top: 1.5px solid #1f3a5f; padding: 3.4mm 3mm; font-size: 11.8pt; text-align: center; }
+.quote-table td { border: 1px solid #8b96a6; padding: 4.2mm 3.2mm; vertical-align: top; background: white; font-size: 12pt; line-height: 1.58; }
 .quote-table th:nth-child(1), .quote-table td:nth-child(1) { width: 42%; text-align: left; }
 .quote-table th:not(:first-child), .quote-table td:not(:first-child) { text-align: right; }
-.quote-table small { display: block; margin-top: 1.2mm; color: #64748b; font-size: 9.8pt; line-height: 1.6; font-weight: 400; }
+.quote-table small { display: block; margin-top: 1.4mm; color: #64748b; font-size: 10.6pt; line-height: 1.65; font-weight: 400; }
 .film-composition { letter-spacing: .01em; }
 .sheet-editable { border-bottom: 1px dashed transparent; cursor: text; display: inline; line-height: inherit; min-width: 0; outline: none; transition: background .12s ease, border-color .12s ease; vertical-align: baseline; white-space: pre-wrap; }
 .sheet-editable:hover { background: #fffbeb; border-bottom-color: #f59e0b; }

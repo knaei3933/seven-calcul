@@ -8,26 +8,46 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock("html2pdf.js", () => ({
-  default: vi.fn(),
+const fontFetch = vi.fn(async (input: RequestInfo | URL) => {
+  const url = String(input);
+  if (url.includes("weight=bold")) return new Response(new Uint8Array([0x01, 0x02]), { status: 200 });
+  return new Response(new Uint8Array([0x03, 0x04]), { status: 200 });
+});
+
+vi.mock("@pdf-lib/fontkit", () => ({ default: {} }));
+vi.mock("pdf-lib", () => ({
+  PDFDocument: {
+    create: vi.fn(async () => ({
+      registerFontkit: vi.fn(),
+      setTitle: vi.fn(),
+      setAuthor: vi.fn(),
+      setProducer: vi.fn(),
+      embedFont: vi.fn(async () => ({ widthOfTextAtSize: () => 10 })),
+      embedPng: vi.fn(async () => ({ width: 10, height: 10 })),
+      addPage: vi.fn(() => ({ drawText: vi.fn(), drawRectangle: vi.fn(), drawLine: vi.fn(), drawCircle: vi.fn(), drawImage: vi.fn() })),
+      save: vi.fn(async () => new Uint8Array([0x25, 0x50, 0x44, 0x46])),
+    })),
+  },
+  rgb: (...args: number[]) => args,
 }));
 
 const issuancePdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
 
+const fontBytes = new Uint8Array([0x00, 0x01, 0x00, 0x00]);
+
+function withFontFetch(fetchMock: (url: RequestInfo | URL, init?: RequestInit) => Promise<Response>) {
+  return vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).includes("/api/fonts/standard-quotation")) {
+      return new Response(new Uint8Array(fontBytes), { status: 200 });
+    }
+    return fetchMock(url, init);
+  });
+}
+
+
 async function mockSuccessfulPdfCapture(): Promise<Mock> {
-  const pdfModule = await import("html2pdf.js") as unknown as { default: Mock };
-  const html2pdf = vi.mocked(pdfModule.default);
-  html2pdf.mockImplementation(() => ({
-    from: () => ({
-      set: () => ({
-        outputPdf: () => Promise.resolve(Object.assign(
-          new Blob([issuancePdfBytes], { type: "application/pdf" }),
-          { arrayBuffer: async () => issuancePdfBytes.buffer },
-        )),
-      }),
-    }),
-  }));
-  return html2pdf;
+  // Vector PDF generation is exercised without rasterizing the A4 DOM in tests.
+  return vi.fn();
 }
 
 function atomicIssuanceResponse(record: Record<string, unknown>): Response {
@@ -51,6 +71,7 @@ describe("quotation page stale draft", () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.stubGlobal("fetch", vi.fn());
+    fontFetch.mockClear();
     vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
       matches: false,
       media: query,
@@ -220,7 +241,7 @@ describe("quotation page stale draft", () => {
       expect(String(url)).toBe("/api/quotations");
       return atomicIssuanceResponse({ id: 71, quotationNumber: "S7-MANUAL-EDIT" });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFontFetch(fetchMock));
     sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
       productSummary: "充填物1",
       sizeSummary: "60×80mm / 1連",
@@ -279,7 +300,7 @@ describe("quotation page stale draft", () => {
         productName: "レモン琺瑯 / 充填物2",
       });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFontFetch(fetchMock));
     sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
       productSummary: "レモン琺瑯 / 充填物2",
       sizeSummary: "60×80mm / 2連",
@@ -380,7 +401,7 @@ describe("quotation page stale draft", () => {
       }
       return new Response(JSON.stringify({}), { status: 404 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFontFetch(fetchMock));
 
     render(<QuotePage />);
     await user.type(screen.getByTestId("customer-search-input"), "既存");
@@ -418,10 +439,10 @@ describe("quotation page stale draft", () => {
       customerTelephone: "",
       customerEmail: "",
     }));
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+    vi.stubGlobal("fetch", withFontFetch(vi.fn(async () => new Response(
       JSON.stringify({ customers }),
       { status: 200, headers: { "Content-Type": "application/json" } },
-    )));
+    ))));
 
     const { container } = render(<QuotePage />);
     await user.click(screen.getByTestId("customer-search-input"));
