@@ -36,6 +36,28 @@ describe("customer master validation", () => {
     });
   });
 
+  it("treats fax as optional and stores an empty value when omitted", async () => {
+    const input = validateCustomerInput({
+      customerCode: "C-NO-FAX",
+      customerName: "팩스없는주식회사",
+      customerPostalCode: "100-0002",
+      customerAddress: "도쿄도",
+      customerContact: "담당자",
+      customerTelephone: "03-0000-0002",
+      customerEmail: "no-fax@example.test",
+    });
+    expect(input).toEqual({
+      customerCode: "C-NO-FAX",
+      customerName: "팩스없는주식회사",
+      customerPostalCode: "100-0002",
+      customerAddress: "도쿄도",
+      customerContact: "담당자",
+      customerTelephone: "03-0000-0002",
+      customerFax: "",
+      customerEmail: "no-fax@example.test",
+    });
+  });
+
   it("rejects missing identifiers, oversized fields, and malformed emails", () => {
     expect(validateCustomerInput({ customerCode: "C-002" })).toBeNull();
     expect(validateCustomerInput({ customerName: "이름만" })).toBeNull();
@@ -75,6 +97,20 @@ describe("customer master persistence and search", () => {
     expect(await getCustomer("seven", "  CA-B  ")).not.toBeNull();
   });
 
+  it("persists omitted fax as an empty optional value", async () => {
+    await saveCustomer("seven", {
+      customerCode: "CA-NO-FAX",
+      customerName: "팩스선택주식회사",
+      customerPostalCode: "",
+      customerAddress: "",
+      customerContact: "",
+      customerTelephone: "",
+      customerEmail: "",
+    });
+    const stored = await getCustomer("seven", "CA-NO-FAX");
+    expect(stored?.customerFax).toBe("");
+  });
+
   it("treats LIKE wildcards in searches as literal characters", async () => {
     // % 리터럴 검색: %를 포함한 코드 1건만 (와일드카드라면 2건 전부)
     expect(await listCustomers("%", 100, "seven")).toHaveLength(1);
@@ -83,7 +119,7 @@ describe("customer master persistence and search", () => {
     expect(await listCustomers("A%", 100, "seven")).toHaveLength(1);
     expect(await listCustomers("CA%", 100, "seven")).toHaveLength(1);
     expect(await listCustomers("퍼센트 도시", 100, "seven")).toHaveLength(1);
-    expect(await listCustomers("주식회사", 100, "seven")).toHaveLength(2);
+    expect(await listCustomers("주식회사", 100, "seven")).toHaveLength(3);
   });
 
   it("deletes by code and reports unknown codes", async () => {
@@ -139,10 +175,10 @@ describe("customer master persistence and search", () => {
     await recordCustomerSelection("seven", "ishii@727.co.jp", "CA%A");
 
     expect((await listCustomers("", 100, "seven", "kim@kanei-trade.co.jp")).map((item) => item.customerCode))
-      .toEqual(["CA-B", "CA%A"]);
+      .toEqual(["CA-B", "CA%A", "CA-NO-FAX"]);
     expect((await listCustomers("", 100, "seven", "ISHII@727.co.jp")).map((item) => item.customerCode))
-      .toEqual(["CA%A", "CA-B"]);
+      .toEqual(["CA%A", "CA-B", "CA-NO-FAX"]);
     expect((await listCustomers("", 100, "seven", "other@example.test")).map((item) => item.customerCode))
-      .toEqual(["CA%A", "CA-B"]);
+      .toEqual(["CA%A", "CA-B", "CA-NO-FAX"]);
   });
 });
