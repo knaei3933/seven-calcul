@@ -261,7 +261,7 @@ function applyPersistedLegacyIssuance(input: QuotationRecordInput, existing: Quo
   const persisted = existing.payload as Record<string, unknown>;
   const preserved = Object.fromEntries([
     "customerName", "customerCode", "customerContact", "customerPostalCode",
-    "customerAddress", "customerTelephone", "customerEmail",
+    "customerAddress", "customerTelephone", "customerFax", "customerEmail",
   ].map((field) => [field, submitted[field] ?? persisted[field]]).filter(([, value]) => typeof value === "string"));
   input.quantity = existing.quantity;
   input.filmCostPerPiece = existing.filmCostPerPiece;
@@ -293,7 +293,7 @@ async function applySnapshotAuthoritativeIssuance(
   const submitted = input.payload as Record<string, unknown>;
   const preserved = Object.fromEntries([
     "customerName", "customerCode", "customerContact", "customerPostalCode",
-    "customerAddress", "customerTelephone", "customerEmail",
+    "customerAddress", "customerTelephone", "customerFax", "customerEmail",
   ].map((field) => [field, submitted[field]]).filter(([, value]) => typeof value === "string"));
   input.quantity = verified.result.quantity;
   input.filmCostPerPiece = verified.result.costPerPieceComponents.film;

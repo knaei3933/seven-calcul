@@ -45,7 +45,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `node -e 'for (const suffix of ["", "-shm", "-wal"]) require("node:fs").rmSync("/tmp/pouch-playwright-quotations.db" + suffix, { force: true })' && POUCH_QUOTATION_DB=${JSON.stringify(databasePath)} ADMIN_EMAIL=admin@pouch-e2e.test ADMIN_PASSWORD=admin-e2e-password ADMIN_NAME='E2E Administrator' SECOND_ADMIN_EMAIL=kanai-admin@kanei-trade.co.jp SECOND_ADMIN_PASSWORD=kanai-e2e-password SECOND_ADMIN_NAME='Kanai E2E Administrator' npm run dev -- -H 127.0.0.1 -p 3101`,
+    command: `node -e 'for (const suffix of ["", "-shm", "-wal"]) require("node:fs").rmSync("/tmp/pouch-playwright-quotations.db" + suffix, { force: true })' && POUCH_QUOTATION_DB=${JSON.stringify(databasePath)} ADMIN_EMAIL=admin@pouch-e2e.test ADMIN_PASSWORD=admin-e2e-password ADMIN_NAME='E2E Administrator' SECOND_ADMIN_EMAIL=kanai-admin@kanei-trade.co.jp SECOND_ADMIN_PASSWORD=kanai-e2e-password SECOND_ADMIN_NAME='Kanai E2E Administrator' npm run start -- -H 127.0.0.1 -p 3101`,
     url: "http://127.0.0.1:3101",
     reuseExistingServer: process.env.CI !== "true",
     timeout: 60000,

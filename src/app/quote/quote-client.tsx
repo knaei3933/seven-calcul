@@ -39,6 +39,7 @@ type QuoteForm = {
   customerPostalCode: string;
   customerAddress: string;
   customerTelephone: string;
+  customerFax: string;
   customerEmail: string;
   documentEnglish: string;
   documentHeading: string;
@@ -281,6 +282,7 @@ const defaultQuote: QuoteForm = {
   customerPostalCode: "",
   customerAddress: "",
   customerTelephone: "",
+  customerFax: "",
   customerEmail: "",
   documentEnglish: "QUOTATION",
   documentHeading: "お見積書",
@@ -541,7 +543,7 @@ export default function PrintableQuotationPage({
       if (!response.ok || !payload.customer) throw new Error("not_found");
       const customer = payload.customer as {
         customerCode: string; customerName: string; customerPostalCode?: string;
-        customerAddress?: string; customerContact?: string; customerTelephone?: string; customerEmail?: string;
+        customerAddress?: string; customerContact?: string; customerTelephone?: string; customerFax?: string; customerEmail?: string;
       };
       applyPatch({
         customerCode: customer.customerCode,
@@ -550,6 +552,7 @@ export default function PrintableQuotationPage({
         customerAddress: customer.customerAddress || "",
         customerContact: customer.customerContact || "",
         customerTelephone: customer.customerTelephone || "",
+        customerFax: customer.customerFax || "",
         customerEmail: customer.customerEmail || "",
       });
       setCustomerMasterStatus({ found: false,  loading: false, message: `顧客コード ${code} を読み込みました。`, saving: false });
@@ -573,6 +576,7 @@ export default function PrintableQuotationPage({
         customerAddress: "",
         customerContact: "",
         customerTelephone: "",
+        customerFax: "",
         customerEmail: "",
       });
     } catch {
@@ -598,6 +602,7 @@ export default function PrintableQuotationPage({
           customerAddress: form.customerAddress,
           customerContact: form.customerContact,
           customerTelephone: form.customerTelephone,
+          customerFax: form.customerFax,
           customerEmail: form.customerEmail,
         }),
       });
@@ -630,6 +635,7 @@ export default function PrintableQuotationPage({
       customerAddress: customer.customerAddress,
       customerContact: customer.customerContact,
       customerTelephone: customer.customerTelephone,
+      customerFax: customer.customerFax,
       customerEmail: customer.customerEmail,
     });
     setCustomerSearchTerm("");
@@ -818,6 +824,7 @@ export default function PrintableQuotationPage({
           customerAddress: draft.customerAddress ?? old.customerAddress,
           customerContact: draft.customerContact ?? old.customerContact,
           customerTelephone: draft.customerTelephone ?? old.customerTelephone,
+          customerFax: draft.customerFax ?? old.customerFax,
           customerEmail: draft.customerEmail ?? old.customerEmail,
           customLotCost: draft.customLotCost ?? "0",
           setupCost: draft.setupCost ?? "0",
@@ -1971,6 +1978,10 @@ export default function PrintableQuotationPage({
             <label className={form.customerTelephone.trim() ? "filled" : "required"}>
               電話番号 ★
               <input value={form.customerTelephone} onChange={(e) => update("customerTelephone", e.target.value)} placeholder="03-1234-5678" />
+            </label>
+            <label className={(form.customerFax ?? "").trim() ? "filled" : ""}>
+              FAX
+              <input value={form.customerFax} onChange={(e) => update("customerFax", e.target.value)} placeholder="03-1234-5679" />
             </label>
             <label className={form.customerEmail.trim() ? "filled" : "required"}>
               メールアドレス ★

@@ -1041,6 +1041,7 @@ export default function QuotationPage({
   const [selecting, setSelecting] = useState(false);
   const [kMasterApplied, setKMasterApplied] = useState(false);
   const [kMasterUnavailable, setKMasterUnavailable] = useState(false);
+  const [kMasterReady, setKMasterReady] = useState(!kanaiMasterAccess);
   const [shortagePlansOpen, setShortagePlansOpen] = useState(false);
   const [redactedCompareOpen, setRedactedCompareOpen] = useState(false);
   const requestOrderRef = useRef(0);
@@ -1179,6 +1180,8 @@ export default function QuotationPage({
         }
       } catch {
         if (!cancelled) setKMasterUnavailable(true);
+      } finally {
+        if (!cancelled) setKMasterReady(true);
       }
     })();
     return () => { cancelled = true; };
@@ -2953,7 +2956,7 @@ export default function QuotationPage({
 	                type="submit"
 	                data-testid="calculate-desktop"
 	                data-state={staleResult ? "needs-recalc" : "current"}
-	                disabled={blocker || pending}
+	                disabled={blocker || pending || !kMasterReady}
 	              >
 	                {pending ? "計算中..." : staleResult ? "再計算して候補を見る" : serverResult ? "候補を再取得" : "フィルム候補を探す"}
 	              </button>
@@ -2980,7 +2983,7 @@ export default function QuotationPage({
 	              className={`button${staleResult ? " needs-recalc" : ""}`}
 	              type="submit"
 	              data-state={staleResult ? "needs-recalc" : "current"}
-	              disabled={blocker || pending}
+	              disabled={blocker || pending || !kMasterReady}
 	            >
 	              {pending ? "計算中..." : staleResult ? "再計算して候補を見る" : serverResult ? "候補を再取得" : "フィルム候補を探す"}
 	            </button>

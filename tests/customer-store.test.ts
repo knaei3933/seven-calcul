@@ -21,6 +21,7 @@ describe("customer master validation", () => {
       customerAddress: " 도쿄도 ",
       customerContact: " 담당자 ",
       customerTelephone: " 03-0000-0000 ",
+      customerFax: " 03-0000-0001 ",
       customerEmail: " Order@Example.Co.jp ",
     });
     expect(input).toEqual({
@@ -30,6 +31,7 @@ describe("customer master validation", () => {
       customerAddress: "도쿄도",
       customerContact: "담당자",
       customerTelephone: "03-0000-0000",
+      customerFax: "03-0000-0001",
       customerEmail: "Order@Example.Co.jp",
     });
   });

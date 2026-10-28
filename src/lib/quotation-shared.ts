@@ -66,6 +66,7 @@ export interface CustomerMasterInput {
   customerAddress: string;
   customerContact: string;
   customerTelephone: string;
+  customerFax?: string;
   customerEmail: string;
 }
 

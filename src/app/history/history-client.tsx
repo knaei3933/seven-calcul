@@ -1556,6 +1556,9 @@ function QuotationDetailModal({
           </>) : null}
         </div>
       </div>
+      {/* pointerdown prevents a slow list refresh from swapping the table row
+          under the pointer and turning the original "詳細" click into a click
+          on the newly appeared overlay. */}
       <div className="history-detail-overlay" onClick={onClose} aria-hidden="true" />
     </div>
   );

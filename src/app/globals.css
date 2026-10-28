@@ -517,10 +517,9 @@ header .version-badge { display: none; }
   position: sticky;
   top: 0;
   z-index: 4;
-  display: inline-grid;
-  grid-auto-flow: column;
-  grid-auto-columns: max-content;
-  align-self: flex-start;
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
   gap: 3px;
   border: 1px solid #c7d2e0;
   border-radius: 9px;

@@ -49,6 +49,7 @@ export interface QuotationDraft {
   customerPostalCode?: string;
   customerAddress?: string;
   customerTelephone?: string;
+  customerFax?: string;
   customerEmail?: string;
   printingMethod?: string;
   copperPlateCostPerPiece?: string;
@@ -86,6 +87,7 @@ export function buildQuotationDraft(
     customerPostalCode?: string;
     customerAddress?: string;
     customerTelephone?: string;
+    customerFax?: string;
     customerEmail?: string;
     parameters?: CostParameters;
     quotationNumber: string;
@@ -194,6 +196,7 @@ export function buildQuotationDraft(
     customerPostalCode: context.customerPostalCode,
     customerAddress: context.customerAddress,
     customerTelephone: context.customerTelephone,
+    customerFax: context.customerFax,
     customerEmail: context.customerEmail,
     originalQuantity: context.originalQuantity,
     selectedCandidateShortage: context.selectedCandidateShortage,

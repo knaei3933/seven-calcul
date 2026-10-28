@@ -16,6 +16,7 @@ interface CustomerRow {
   address: string;
   contact: string;
   telephone: string;
+  fax: string;
   email: string;
   created_at: string;
   updated_at: string;
@@ -54,6 +55,7 @@ const CUSTOMER_TABLE_SQL = `
       address TEXT NOT NULL DEFAULT '',
       contact TEXT NOT NULL DEFAULT '',
       telephone TEXT NOT NULL DEFAULT '',
+      fax TEXT NOT NULL DEFAULT '',
       email TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -107,7 +109,7 @@ const DELIVERY_DESTINATION_TABLE_SQL = `
       ON customer_delivery_destinations(owner_domain, customer_code, is_default DESC, last_used_at DESC);
 `;
 
-const CUSTOMER_SCHEMA_WITH_DELIVERY_DESTINATIONS_VERSION = "2026-10-22-delivery-destinations-1";
+const CUSTOMER_SCHEMA_WITH_DELIVERY_DESTINATIONS_VERSION = "2026-10-28-customer-fax-1";
 
 /** LIKE/ILIKE 와일드카드를 문자 그대로 검색하기 위해 이스케이프한다. */
 function escapeLikePattern(value: string): string {
@@ -144,6 +146,7 @@ async function migrateLegacyCustomers(db: SqlClient): Promise<void> {
           address TEXT NOT NULL DEFAULT '',
           contact TEXT NOT NULL DEFAULT '',
           telephone TEXT NOT NULL DEFAULT '',
+          fax TEXT NOT NULL DEFAULT '',
           email TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
@@ -192,6 +195,22 @@ async function migrateLegacyCustomers(db: SqlClient): Promise<void> {
   await db.exec("CREATE INDEX IF NOT EXISTS idx_customers_owner_name ON customers(owner_domain, customer_name)");
 }
 
+async function addCustomerFaxColumn(db: SqlClient): Promise<void> {
+  if (db.dialect === "sqlite") {
+    const columns = await db.all<{ name: string }>("PRAGMA table_info(customers)");
+    if (!columns.some((column) => column.name === "fax")) {
+      await db.exec("ALTER TABLE customers ADD COLUMN fax TEXT NOT NULL DEFAULT ''");
+    }
+    return;
+  }
+  const column = await db.get<{ column_name: string }>(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_name = 'customers' AND column_name = 'fax'
+  `);
+  if (!column) await db.exec("ALTER TABLE customers ADD COLUMN fax TEXT NOT NULL DEFAULT ''");
+}
+
 async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
     const db = await getSqlClient("customers");
@@ -221,6 +240,7 @@ async function getDatabase(): Promise<SqlClient> {
       `);
     if (table) await migrateLegacyCustomers(db);
     else await db.exec(CUSTOMER_TABLE_SQL);
+    await addCustomerFaxColumn(db);
     await db.exec(CUSTOMER_SELECTION_TABLE_SQL);
     if (db.dialect === "postgres") {
       await db.exec(DELIVERY_DESTINATION_TABLE_SQL.replace(
@@ -249,6 +269,7 @@ const CUSTOMER_FIELD_LIMITS = {
   customerAddress: 500,
   customerContact: 100,
   customerTelephone: 100,
+  customerFax: 100,
   customerEmail: 254,
 } as const;
 
@@ -287,9 +308,10 @@ export function validateCustomerInput(value: unknown): CustomerMasterInput | nul
   const customerAddress = optional(input.customerAddress, "customerAddress");
   const customerContact = optional(input.customerContact, "customerContact");
   const customerTelephone = optional(input.customerTelephone, "customerTelephone");
+  const customerFax = optional(input.customerFax, "customerFax") ?? "";
   const customerEmail = optional(input.customerEmail, "customerEmail");
   if (customerPostalCode === null || customerAddress === null || customerContact === null
-    || customerTelephone === null || customerEmail === null) return null;
+    || customerTelephone === null || customerFax === null || customerEmail === null) return null;
   if (customerEmail && !EMAIL_PATTERN.test(customerEmail)) return null;
   return {
     customerCode,
@@ -298,6 +320,7 @@ export function validateCustomerInput(value: unknown): CustomerMasterInput | nul
     customerAddress,
     customerContact,
     customerTelephone,
+    customerFax,
     customerEmail,
   };
 }
@@ -311,6 +334,7 @@ function mapRow(row: CustomerRow): CustomerMaster {
     customerAddress: row.address,
     customerContact: row.contact,
     customerTelephone: row.telephone,
+    customerFax: row.fax,
     customerEmail: row.email,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -393,18 +417,20 @@ export async function saveCustomer(
   value: CustomerMasterInput,
 ): Promise<CustomerMaster> {
   const owner = normalizeOwnerDomain(ownerDomain);
+  const customerFax = typeof value.customerFax === "string" ? value.customerFax : "";
   const db = await getDatabase();
   const now = new Date().toISOString();
   await db.run(`
     INSERT INTO customers
-      (owner_domain,customer_code,customer_name,postal_code,address,contact,telephone,email,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?)
+      (owner_domain,customer_code,customer_name,postal_code,address,contact,telephone,fax,email,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(owner_domain, customer_code) DO UPDATE SET
       customer_name=excluded.customer_name,
       postal_code=excluded.postal_code,
       address=excluded.address,
       contact=excluded.contact,
       telephone=excluded.telephone,
+      fax=excluded.fax,
       email=excluded.email,
       updated_at=excluded.updated_at
   `, [
@@ -415,6 +441,7 @@ export async function saveCustomer(
     value.customerAddress,
     value.customerContact,
     value.customerTelephone,
+    customerFax,
     value.customerEmail,
     now,
     now,
