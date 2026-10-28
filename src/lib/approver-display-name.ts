@@ -3,5 +3,7 @@ const APPROVER_DISPLAY_NAMES: Record<string, string> = {
 };
 
 export function approverDisplayName(user: { email: string; name: string }): string {
-  return APPROVER_DISPLAY_NAMES[user.email.trim().toLowerCase()] ?? user.name;
+  const mapped = APPROVER_DISPLAY_NAMES[user.email.trim().toLowerCase()] ?? user.name;
+  const shortened = mapped.replace(/[（(][^（）)]*[）)]/g, "").trim();
+  return shortened || mapped;
 }

@@ -98,6 +98,10 @@ export type CalculationChecklistSnapshot = {
   costTotal: string;
   sellingPrices: CostResult["sellingPrices"];
   film: CostResult["film"];
+  setupCost: string;
+  setupCostPerPiece?: string;
+  setupCostUnit?: string;
+  setupQuantity?: string;
   gravure?: CostResult["gravure"];
   gravureParameters?: GravureRollParameters;
   skus?: {
@@ -148,6 +152,8 @@ export type CalculationChecklistContext = {
   resultHash: string;
   filmComposition: string;
   bulkUnitPrice?: string;
+  setupCost?: string;
+  setupQuantity?: string;
   widthMm?: string;
   lengthMm?: string;
   lanes?: number;
@@ -237,6 +243,10 @@ export function buildCalculationChecklistSnapshot(
     costTotal: result.costTotal,
     sellingPrices: result.sellingPrices,
     film: result.film,
+    setupCost: result.setupCost,
+    setupCostPerPiece: result.setupCostPerPiece,
+    setupCostUnit: result.setupCostUnit,
+    setupQuantity: result.setupQuantity,
     gravure: result.gravure,
     gravureParameters: context.gravureParameters,
     skus: (context.skus?.length ? context.skus : result.film.skuCosts).map((contextSku, index) => {

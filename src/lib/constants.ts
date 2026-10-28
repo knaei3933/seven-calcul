@@ -1,4 +1,6 @@
 import type { CostParameters, DecimalValue, SizeMaster, SizeKey } from "./types";
+
+export type { SizeKey };
 import { D } from "./decimal";
 
 export const CALCULATION_VERSION = "2026-10.1";

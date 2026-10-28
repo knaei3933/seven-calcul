@@ -1,9 +1,13 @@
 import { resolveMailRoute } from "@/lib/mail-routing";
+import { withRecipientSubjectPrefix } from "@/lib/mail-subject";
+import { getMailSettings } from "@/lib/mail-settings";
 
 export interface PortalMailMessage {
   to: string;
   subject: string;
   body: string;
+  templateKey?: string;
+  templateVars?: Record<string, unknown>;
 }
 
 export interface PortalMailSendResult {
@@ -39,8 +43,16 @@ export function createPortalMailSender(): PortalMailSender {
     const route = resolveMailRoute(message.to);
     const result = await sendMail({
       to: message.to,
-      subject: message.subject,
+      subject: withRecipientSubjectPrefix({
+        to: message.to,
+        subject: message.subject,
+        body: message.body,
+        audience: "customer",
+      }),
       body: message.body,
+      cc: (await getMailSettings()).globalCc,
+      templateKey: message.templateKey,
+      templateVars: message.templateVars,
     });
     return {
       messageId: result.messageId,

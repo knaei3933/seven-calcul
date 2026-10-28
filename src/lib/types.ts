@@ -57,6 +57,8 @@ export interface PouchSpec {
   skuNames?: string[];
   skuFillMlPerChamber?: DecimalValue[];
   skuColorCounts?: DecimalValue[];
+  setupCost?: DecimalValue;
+  setupQuantity?: DecimalValue;
 }
 
 export interface CostParameters {

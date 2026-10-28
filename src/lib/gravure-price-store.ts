@@ -568,15 +568,22 @@ export async function listGravureYMasterRows(): Promise<GravureYMasterRow[]> {
   });
 }
 
-async function insertGravureYMasterRow(tx: SqlClient, input: GravureYMasterInput, actor: GravureMasterActor): Promise<GravureYMasterRow> {
+async function insertGravureYMasterRow(
+  tx: SqlClient,
+  input: GravureYMasterInput,
+  actor: GravureMasterActor,
+  excludeOverlapIds: number[] = [],
+): Promise<GravureYMasterRow> {
   if (tx.dialect === "postgres") {
     await tx.run("SELECT pg_advisory_xact_lock(hashtext(?))", [`gravure-y:${input.webWidthMm}:${input.laneCount}:${input.printTierM}`]);
   }
   const overlapping = await tx.get<YDbRow>(
     `SELECT * FROM gravure_y_supplier_prices
      WHERE web_width_mm = ? AND lane_count = ? AND print_tier_m = ?
-       AND effective_from <= ? AND effective_to >= ? LIMIT 1`,
-    [input.webWidthMm, input.laneCount, input.printTierM, input.effectiveTo, input.effectiveFrom],
+       AND effective_from <= ? AND effective_to >= ?
+       AND id NOT IN (${excludeOverlapIds.map(() => "?").join(",") || "-1"}) LIMIT 1`,
+    [input.webWidthMm, input.laneCount, input.printTierM, input.effectiveTo, input.effectiveFrom,
+      ...excludeOverlapIds],
   );
   if (overlapping) throw new GravureOverlapError("gravure_y_overlap");
   await tx.run(
@@ -606,18 +613,36 @@ export async function supersedeGravureYMasterRow(
   return withGravureDatabase((db) => db.transaction(async (tx) => {
     const old = await tx.get<YDbRow>("SELECT * FROM gravure_y_supplier_prices WHERE id = ?", [id]);
     if (!old) throw new GravureValidationError("gravure_y_not_found");
-    if (old.superseded_by_id != null) throw new GravureValidationError("already_superseded");
-    if (input.effectiveFrom <= old.effective_from) throw new GravureValidationError("supersede_date_not_later");
+    if (old.superseded_by_id != null) {
+      const successor = await tx.get<{ effective_from: string }>(
+        "SELECT effective_from FROM gravure_y_supplier_prices WHERE id = ?",
+        [old.superseded_by_id],
+      );
+      if (successor && successor.effective_from <= input.effectiveFrom) {
+        throw new GravureValidationError("already_superseded");
+      }
+    }
+    if (input.effectiveFrom < old.effective_from) throw new GravureValidationError("supersede_date_not_later");
     const previousTo = previousDayUtc(input.effectiveFrom);
+    const futureSuccessor = await tx.get<{ effective_from: string }>(
+      `SELECT effective_from FROM gravure_y_supplier_prices
+       WHERE web_width_mm = ? AND lane_count = ? AND print_tier_m = ? AND effective_from > ?
+       ORDER BY effective_from ASC, id ASC LIMIT 1`,
+      [old.web_width_mm, old.lane_count, old.print_tier_m, input.effectiveFrom],
+    );
+    const replacementInput: GravureYMasterInput = {
+      ...input,
+      effectiveTo: futureSuccessor ? previousDayUtc(futureSuccessor.effective_from) : input.effectiveTo,
+    };
     const closed = await tx.run(
       `UPDATE gravure_y_supplier_prices SET effective_to = ?, superseded_at = ?, updated_by = ?, updated_at = ?
-       WHERE id = ? AND superseded_by_id IS NULL`,
+       WHERE id = ?`,
       [previousTo, new Date().toISOString(), actor, new Date().toISOString(), id],
     );
     if (closed.changes !== 1) throw new GravureValidationError("already_superseded");
-    const replacement = await insertGravureYMasterRow(tx, input, actor);
+    const replacement = await insertGravureYMasterRow(tx, replacementInput, actor, [old.id].filter((value): value is number => value != null));
     const superseded = await tx.run(
-      "UPDATE gravure_y_supplier_prices SET superseded_by_id = ? WHERE id = ? AND superseded_by_id IS NULL",
+      "UPDATE gravure_y_supplier_prices SET superseded_by_id = ? WHERE id = ?",
       [replacement.id, id],
     );
     if (superseded.changes !== 1) throw new GravureValidationError("already_superseded");
@@ -714,13 +739,13 @@ type KDbRow = {
   updated_at: string;
   superseded_by_id: number | null;
   superseded_at: string | null;
-} & Record<GravureKSourceField, string>;
+} & Record<string, string | undefined>;
 
 function mapKRow(row: KDbRow): GravureKMasterRow {
   // The normalized columns are authoritative. source_json exists only as a
   // legacy migration artifact and is intentionally never read here.
   const source = Object.fromEntries(
-    GRAVURE_K_SOURCE_FIELDS.map((field) => [field, row[field]]),
+    GRAVURE_K_SOURCE_FIELDS.map((field) => [field, row[field] ?? row[field.toLowerCase()]]),
   ) as GravureKSource;
   return {
     id: Number(row.id), source, derived: JSON.parse(row.derived_json), memo: row.memo,
@@ -788,11 +813,17 @@ export async function listGravureSnapshotAuditRecords(limit = 50): Promise<Gravu
   });
 }
 
-async function insertGravureKMasterRow(tx: SqlClient, input: GravureKMasterInput, actor: GravureMasterActor): Promise<GravureKMasterRow> {
+async function insertGravureKMasterRow(
+  tx: SqlClient,
+  input: GravureKMasterInput,
+  actor: GravureMasterActor,
+  excludeOverlapIds: number[] = [],
+): Promise<GravureKMasterRow> {
   if (tx.dialect === "postgres") await tx.run("SELECT pg_advisory_xact_lock(hashtext(?))", ["gravure-k-active"]);
   const overlapping = await tx.get<KDbRow>(
-    "SELECT * FROM gravure_k_parameter_sets WHERE effective_from <= ? AND effective_to >= ? LIMIT 1",
-    [input.effectiveTo || OPEN_EFFECTIVE_TO, input.effectiveFrom],
+    `SELECT * FROM gravure_k_parameter_sets WHERE effective_from <= ? AND effective_to >= ?
+       AND id NOT IN (${excludeOverlapIds.map(() => "?").join(",") || "-1"}) LIMIT 1`,
+    [input.effectiveTo || OPEN_EFFECTIVE_TO, input.effectiveFrom, ...excludeOverlapIds],
   );
   if (overlapping) throw new GravureOverlapError("gravure_k_overlap");
   const source = normalizeKSource(input.source);
@@ -819,18 +850,35 @@ export async function supersedeGravureKMasterRow(id: number, input: GravureKMast
   return withGravureDatabase((db) => db.transaction(async (tx) => {
     const old = await tx.get<KDbRow>("SELECT * FROM gravure_k_parameter_sets WHERE id = ?", [id]);
     if (!old) throw new GravureValidationError("gravure_k_not_found");
-    if (old.superseded_by_id != null) throw new GravureValidationError("already_superseded");
-    if (input.effectiveFrom <= old.effective_from) throw new GravureValidationError("supersede_date_not_later");
+    if (old.superseded_by_id != null) {
+      const successor = await tx.get<{ effective_from: string }>(
+        "SELECT effective_from FROM gravure_k_parameter_sets WHERE id = ?",
+        [old.superseded_by_id],
+      );
+      if (successor && successor.effective_from <= input.effectiveFrom) {
+        throw new GravureValidationError("already_superseded");
+      }
+    }
+    if (input.effectiveFrom < old.effective_from) throw new GravureValidationError("supersede_date_not_later");
     const previousTo = previousDayUtc(input.effectiveFrom);
+    const futureSuccessor = await tx.get<{ effective_from: string }>(
+      `SELECT effective_from FROM gravure_k_parameter_sets
+       WHERE effective_from > ? ORDER BY effective_from ASC, id ASC LIMIT 1`,
+      [input.effectiveFrom],
+    );
+    const replacementInput: GravureKMasterInput = {
+      ...input,
+      effectiveTo: futureSuccessor ? previousDayUtc(futureSuccessor.effective_from) : input.effectiveTo,
+    };
     const closed = await tx.run(
       `UPDATE gravure_k_parameter_sets SET effective_to = ?, superseded_at = ?, updated_by = ?, updated_at = ?
-       WHERE id = ? AND superseded_by_id IS NULL`,
+       WHERE id = ?`,
       [previousTo, new Date().toISOString(), actor, new Date().toISOString(), id],
     );
     if (closed.changes !== 1) throw new GravureValidationError("already_superseded");
-    const replacement = await insertGravureKMasterRow(tx, input, actor);
+    const replacement = await insertGravureKMasterRow(tx, replacementInput, actor, [old.id].filter((value): value is number => value != null));
     const superseded = await tx.run(
-      "UPDATE gravure_k_parameter_sets SET superseded_by_id = ? WHERE id = ? AND superseded_by_id IS NULL",
+      "UPDATE gravure_k_parameter_sets SET superseded_by_id = ? WHERE id = ?",
       [replacement.id, id],
     );
     if (superseded.changes !== 1) throw new GravureValidationError("already_superseded");
@@ -857,10 +905,10 @@ async function appendAudit(
 export async function resolveGravureMasters(asOf = tokyoDate()): Promise<GravureResolvedMasters> {
   return withGravureDatabase(async (db) => {
     const [yRows, kRow] = await Promise.all([
-      db.all<YDbRow>(
-        `SELECT * FROM gravure_y_supplier_prices
-         WHERE superseded_by_id IS NULL AND effective_from <= ? AND effective_to >= ?
-         ORDER BY effective_from DESC, id DESC`,
+	      db.all<YDbRow>(
+	        `SELECT * FROM gravure_y_supplier_prices
+	         WHERE effective_from <= ? AND effective_to >= ?
+	         ORDER BY effective_from DESC, id DESC`,
         [asOf, asOf],
       ),
       db.get<KDbRow>(

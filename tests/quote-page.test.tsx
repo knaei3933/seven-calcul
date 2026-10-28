@@ -4,8 +4,17 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import QuotePage from "@/app/quote/quote-client";
 
+afterEach(async () => {
+  cleanup();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
+}));
+
+vi.mock("html2pdf.js", () => ({
+  default: vi.fn(),
 }));
 
 const fontFetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -46,8 +55,19 @@ function withFontFetch(fetchMock: (url: RequestInfo | URL, init?: RequestInit) =
 
 
 async function mockSuccessfulPdfCapture(): Promise<Mock> {
-  // Vector PDF generation is exercised without rasterizing the A4 DOM in tests.
-  return vi.fn();
+  const pdfModule = await import("html2pdf.js") as unknown as { default: Mock };
+  const html2pdf = vi.mocked(pdfModule.default);
+  html2pdf.mockImplementation(() => ({
+    from: () => ({
+      set: () => ({
+        outputPdf: () => Promise.resolve(Object.assign(
+          new Blob([issuancePdfBytes], { type: "application/pdf" }),
+          { arrayBuffer: async () => issuancePdfBytes.buffer },
+        )),
+      }),
+    }),
+  }));
+  return html2pdf;
 }
 
 function atomicIssuanceResponse(record: Record<string, unknown>): Response {
@@ -128,6 +148,10 @@ describe("quotation page stale draft", () => {
     expect(screen.getByTestId("quote-spec")).toHaveTextContent("フィルム構成");
     // 印刷方式は右上ではなくフィルム費用の行に表示する。
     expect(screen.getByTestId("film-printing-method")).toHaveTextContent("印刷方式：デジタル印刷");
+    const preview = within(document.getElementById("quote-preview")!);
+    expect(preview.queryByText("発注ロットに応じた単価を適用したフィルム製作・物流の一式")).not.toBeInTheDocument();
+    expect(preview.queryByText(/^構成：PET12\+AL7\+PET12\+LLDPE50μ/)).not.toBeInTheDocument();
+    expect(preview.queryByText("フィルム金額は円未満を四捨五入します。")).not.toBeInTheDocument();
     expect(screen.queryByTestId("quote-printing-method")).not.toBeInTheDocument();
     expect(screen.getByAltText("セブン化學ロゴ")).toBeVisible();
     expect(screen.queryByText("代表取締役社長 吾藤 靖")).not.toBeInTheDocument();
@@ -143,8 +167,33 @@ describe("quotation page stale draft", () => {
     const terms = within(document.getElementById("quote-preview")!);
     expect(terms.getByText("データ校了後約２か月")).toBeVisible();
     expect(terms.getByText("先払い")).toBeVisible();
+    expect(terms.getByText("運送条件")).toBeVisible();
+    expect(terms.getByText("御社1か所納品")).toBeVisible();
     expect(sheet.getAllByText(/初回製作時は、バルクサンプルを株式会社セブン化学/).length).toBeGreaterThan(0);
     expect(sheet.getAllByText(/責任技術者：福井/).length).toBeGreaterThan(0);
+  });
+
+  it("shows the simulator pouch design in plain Japanese next to the size", async () => {
+    sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
+      productSummary: "レディエイドルプリカント",
+      sizeSummary: "50×90mm / 1連",
+      quantity: "20000",
+      targetMargin: "0.4",
+      fillingCostPerPiece: "8",
+      filmCostPerPiece: "12",
+      filmMeterPrice: "252",
+      filmOrderLengthM: "1200",
+      totalCostPerPiece: "20",
+      calculationVersion: "simulator-linked",
+      resultHash: "shape-check",
+      calculationFilmTotal: "302400",
+      calculationRequest: { spec: { sizeKey: "bottle-50x90" } },
+    }));
+    render(<QuotePage />);
+
+    await waitFor(() => expect(screen.getByTestId("quote-spec")).toBeVisible());
+    expect(screen.getByTestId("pouch-shape")).toHaveTextContent("ボトル型");
+    expect(screen.getByTestId("quote-spec")).toHaveTextContent("50×90mm / 1連");
   });
 
   it("shows the calculated bulk amount as a customer-supplied quantity", () => {
@@ -382,6 +431,34 @@ describe("quotation page stale draft", () => {
     expect(screen.queryByTestId("bulk-line")).not.toBeInTheDocument();
   });
 
+  it("adds a target-margin setup line from simulator inputs", async () => {
+    sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
+      productSummary: "充填物1",
+      sizeSummary: "60×80mm / 1連",
+      quantity: "10000",
+      targetMargin: "0.4",
+      fillingCostPerPiece: "5.2",
+      bulkCostPerPiece: "48.6",
+      setupCost: "100",
+      setupQuantity: "2",
+      filmCostPerPiece: "20.1",
+      filmMeterPrice: "402",
+      filmOrderLengthM: "500",
+      totalCostPerPiece: "73.9",
+      calculationVersion: "simulator-linked",
+      resultHash: "setup-line-test",
+      calculationFilmTotal: "201000",
+      calculationChecklistSnapshot: { bulkUsageMl: "486000" },
+    }));
+    render(<QuotePage />);
+
+    await waitFor(() => expect(screen.getByTestId("setup-line")).toBeVisible());
+    // 原価 100円×2式÷(1-0.4)=333円。1式販売単価は166.5円。
+    expect(screen.getByTestId("setup-unit-price")).toHaveTextContent("166.5");
+    expect(screen.getByTestId("setup-line")).toHaveTextContent("2 個");
+    expect(screen.getByTestId("setup-line")).toHaveTextContent("￥333");
+  });
+
   it("keeps the issue panel fixed, restores saved customers, and fills test data", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
@@ -503,9 +580,8 @@ it("shows the authenticated approver directly above the internal review seal", (
   expect(within(approval!).getByText("検討済")).toBeVisible();
 });
 
-it("renders issuer contact details for the authenticated issuing company", () => {
-  cleanup();
-  render(<QuotePage
+it("renders issuer contact details, fax, and unique personal contact names", async () => {
+  const { unmount: unmount1 } = render(<QuotePage
     approverName="石井"
     issuerContact={{
       companyName: "金井貿易株式会社",
@@ -514,9 +590,35 @@ it("renders issuer contact details for the authenticated issuing company", () =>
       telephone: "TEL 050-3613-9673",
     }}
   />);
+  await waitFor(() => expect(screen.getByTestId("footer-contact")).toBeInTheDocument());
+  expect(screen.getByTestId("footer-contact")).toHaveTextContent("金井貿易株式会社");
+  unmount1();
 
-  const contact = screen.getByTestId("issuer-contact");
-  expect(contact).toHaveTextContent("金井貿易株式会社");
-  expect(contact).toHaveTextContent("kim@kanei-trade.co.jp");
-  expect(contact).toHaveTextContent("TEL 050-3613-9673");
+  const { unmount: unmount2 } = render(<QuotePage
+    approverName="石井"
+    issuerContact={{
+      companyName: "",
+      contactName: "石井（金井貿易株式会社）",
+      email: "shapepouch@package-lab.com",
+      telephone: "TEL 050-3613-9673",
+    }}
+  />);
+  await waitFor(() => expect(screen.getByTestId("issuer-telephone-fax")).toBeInTheDocument());
+  expect(screen.getByTestId("issuer-telephone-fax")).toHaveTextContent("TEL 072-971-0726 / FAX 072-971-5800");
+  expect(screen.getByTestId("issuer-contact-name")).toHaveTextContent("石井");
+  unmount2();
+
+  const { unmount: unmount3 } = render(<QuotePage
+    approverName="吾藤"
+    issuerContact={{
+      companyName: "株式会社セブン化学",
+      contactName: "吾藤",
+      email: "gotou@727.co.jp",
+      telephone: "TEL 072-971-0726",
+    }}
+  />);
+  await waitFor(() => expect(screen.getByTestId("issuer-party-contact-list")).toBeInTheDocument());
+  expect(screen.getByTestId("issuer-party-contact-list")).toHaveTextContent("gotou@727.co.jp");
+  expect(screen.queryByTestId("issuer-party-telephone")).not.toBeInTheDocument();
+  unmount3();
 });

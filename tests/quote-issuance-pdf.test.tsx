@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import QuotePage from "@/app/quote/quote-client";
+import { buildQuotationPdfFileName } from "@/lib/film-quotation";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -103,7 +104,12 @@ describe("quotation issuance canonical PDF", () => {
         expect(String(payload.quotationNumber)).toMatch(/^S7-[A-Z0-9]+$/);
         const quotationNumber = String(payload.quotationNumber);
         const file = formData.get("pdf") as File;
-        expect(file.name).toBe(`${quotationNumber}.pdf`);
+        expect(file.name).toBe(buildQuotationPdfFileName({
+          issueDate: String(payload.issueDate),
+          productName: String(payload.productName),
+          customerName: String(payload.customerName),
+        }));
+        expect(file.name).toContain(quotationNumber === "" ? "無題" : "お見積書_");
         await expect(new Response(file).arrayBuffer()).resolves.toEqual(pdfBytes.buffer);
         return jsonResponse({
           record: { id: 123, quotationNumber },
@@ -173,8 +179,8 @@ describe("quotation issuance canonical PDF", () => {
     expect(capture.parentElement).toHaveAttribute("id", "quote-pdf-capture-host");
     expect(capture).not.toBe(visibleFit);
     expect(capture.style.width).toBe("210mm");
-    expect(capture.style.height).toBe("296mm");
-    expect(capture.style.minHeight).toBe("296mm");
+    expect(capture.style.height).toBe("288mm");
+    expect(capture.style.minHeight).toBe("288mm");
     expect(capture.style.overflow).toBe("hidden");
     expect(captureFit?.style.transform).toBe("scale(1.00000)");
     expect(captureFit?.style.transformOrigin).toBe("top left");
@@ -185,7 +191,7 @@ describe("quotation issuance canonical PDF", () => {
 
     captureControl.resolve(pdfBlob);
     await waitFor(() => expect(screen.getByTestId("issue-success")).toBeVisible());
-    expect(document.getElementById("quote-pdf-capture-host")).toBeNull();
+    await waitFor(() => expect(document.getElementById("quote-pdf-capture-host")).toBeNull());
     expect(document.body.hasAttribute("data-quote-pdf-capture")).toBe(false);
     expect(visibleFit?.style.getPropertyValue("zoom")).toBe("");
     expect(visibleFit?.style.transform).toBe("");
@@ -349,11 +355,11 @@ describe("quotation issuance canonical PDF", () => {
       fireEvent.click(screen.getByTestId("print-pdf"));
       fireEvent.click(screen.getByTestId("print-pdf"));
       const getRequest = fetchMock.mock.calls.find(([url, init]) =>
-        String(url) === "/api/quotations/789/pdf" && (init as RequestInit | undefined)?.cache === "no-store",
+        String(url) === "/api/quotations/789/pdf" && (init as RequestInit | undefined)?.cache === "default",
       );
       expect(getRequest).toBeDefined();
       expect(fetchMock.mock.calls.filter(([url, init]) =>
-        String(url) === "/api/quotations/789/pdf" && (init as RequestInit | undefined)?.cache === "no-store",
+        String(url) === "/api/quotations/789/pdf" && (init as RequestInit | undefined)?.cache === "default",
       )).toHaveLength(1);
       resolveStoredDownload(new Response(pdfBytes, {
         status: 200,

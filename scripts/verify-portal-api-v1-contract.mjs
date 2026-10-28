@@ -8,11 +8,20 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixturePath = path.join(root, "contracts", "portal-api-v1.json");
 const checksumPath = path.join(root, "contracts", "portal-api-v1.sha256");
-const peerRoot = process.env.PORTAL_CONTRACT_PEER_ROOT
-  ?? (path.basename(root) === "ShapePouch-LP" ? "/root/pouch-clacul" : "/root/ShapePouch-LP");
+const peerRoot = process.env.PORTAL_CONTRACT_PEER_ROOT;
+
+if (!peerRoot || peerRoot.trim() === "") {
+  console.error(
+    "ERROR: PORTAL_CONTRACT_PEER_ROOT is required for cross-repo contract verification.\n" +
+    "Set it to the absolute path of the peer repository root that contains contracts/portal-api-v1.json\n" +
+    "Example: PORTAL_CONTRACT_PEER_ROOT=/path/to/peer-repo npm run verify:contract",
+  );
+  process.exit(1);
+}
 
 function fail(message) {
-  throw new Error(message);
+  console.error(`ERROR: ${message}`);
+  process.exit(1);
 }
 
 function assertArray(value, name, minLength = 1) {
@@ -54,21 +63,34 @@ function assertNoSecretValues(node, keyPath = "") {
   }
 }
 
-const [fixtureBytes, committedDigest, peerBytes, peerDigest] = await Promise.all([
+const resolvedPeerRoot = path.resolve(peerRoot.trim());
+let peerFixtureBytes;
+let peerDigestRaw;
+try {
+  [peerFixtureBytes, peerDigestRaw] = await Promise.all([
+    readFile(path.join(resolvedPeerRoot, "contracts", "portal-api-v1.json")),
+    readFile(path.join(resolvedPeerRoot, "contracts", "portal-api-v1.sha256"), "utf8"),
+  ]);
+} catch {
+  fail(
+    `cannot read peer contract files under PORTAL_CONTRACT_PEER_ROOT=${resolvedPeerRoot}\n` +
+    `Expected: ${path.join(resolvedPeerRoot, "contracts", "portal-api-v1.json")} and .sha256`,
+  );
+}
+
+const [fixtureBytes, committedDigest] = await Promise.all([
   readFile(fixturePath),
   readFile(checksumPath, "utf8"),
-  readFile(path.join(peerRoot, "contracts", "portal-api-v1.json")),
-  readFile(path.join(peerRoot, "contracts", "portal-api-v1.sha256"), "utf8"),
 ]);
 
 const actualDigest = createHash("sha256").update(fixtureBytes).digest("hex");
 const expectedDigest = committedDigest.trim().split(/\s+/)[0];
-const peerExpectedDigest = peerDigest.trim().split(/\s+/)[0];
+const peerExpectedDigest = peerDigestRaw.trim().split(/\s+/)[0];
 
 if (!/^[0-9a-f]{64}$/.test(expectedDigest) || expectedDigest !== actualDigest) {
   fail("fixture SHA-256 sidecar does not match");
 }
-if (!peerBytes.equals(fixtureBytes) || peerExpectedDigest !== expectedDigest) {
+if (!peerFixtureBytes.equals(fixtureBytes) || peerExpectedDigest !== expectedDigest) {
   fail("shared portal-api-v1 fixture bytes or digest differ between repositories");
 }
 
@@ -100,6 +122,9 @@ assertContainsAll(
 );
 if (contract.headerContract?.service?.name !== "Authorization") fail("missing service header contract");
 if (contract.headerContract?.portalSession?.name !== "X-Portal-Session-Token") fail("missing session header contract");
+if (contract.headerContract?.clientFingerprint?.name !== "X-Portal-Client-Fingerprint") {
+  fail("missing client fingerprint header contract");
+}
 assertExactSet(
   contract.registration?.request?.allowlist,
   ["companyName", "contactName", "postalCode", "address", "telephone", "email", "password"],
@@ -107,7 +132,7 @@ assertExactSet(
 );
 assertContainsAll(
   contract.quoteCalculation?.request?.topLevelAllowlist,
-  ["productName", "sizeKey", "quantity", "skus", "deliveryDate"],
+  ["idempotencyKey", "productName", "sizeKey", "customWidthMm", "customLengthMm", "fillMlPerChamber", "connectedChambers", "fillingMethod", "fillingLanes", "printingMethod", "quantity", "skus", "deliveryDate", "notes"],
   "quote top-level allowlist",
 );
 assertContainsAll(
@@ -126,7 +151,7 @@ assertContainsAll(
 );
 assertContainsAll(
   contract.customerSafeQuoteProjection?.allowlist,
-  ["publicId", "quotationNumber", "quantity", "displayedGrandTotal", "pdfAvailability"],
+  ["publicId", "quotationNumber", "quantity", "displayedGrandTotal", "pdfAvailability", "availability"],
   "customer-safe projection",
 );
 assertContainsAll(
@@ -148,7 +173,7 @@ assertContainsAll(
 );
 assertContainsAll(
   contract.errorCodes,
-  ["validation_failed", "pricing_authority_rejected", "unauthorized", "session_expired", "not_found", "conflict", "rate_limited", "internal_error"],
+  ["validation_failed", "pricing_authority_rejected", "unauthorized", "email_unverified", "session_expired", "not_found", "conflict", "rate_limited", "internal_error"],
   "error codes",
 );
 assertNoSecretValues(contract);

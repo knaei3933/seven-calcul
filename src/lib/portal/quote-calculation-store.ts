@@ -96,6 +96,10 @@ export async function getPortalQuoteDatabaseForTest(): Promise<SqlClient> {
   return getDatabase();
 }
 
+export async function initializePortalQuoteMappingSchema(): Promise<void> {
+  await getDatabase();
+}
+
 export async function resetPortalQuoteStoreForTest(): Promise<void> {
   schemaReady = null;
   const { resetSqlClientForTest } = await import("@/lib/db");
@@ -209,9 +213,7 @@ export async function createPortalQuoteWithMapping(input: {
         if (existingRow) {
           const existing = mapMapping(existingRow);
           if (
-            existingRow.request_fingerprint !== input.requestFingerprint
-            || existing.portalUserId !== input.portalUserId
-            || existing.ownerDomain !== input.ownerDomain
+            existing.requestFingerprint !== input.requestFingerprint
             || existing.customerCode !== input.customerCode
           ) throw new PortalQuoteIdempotencyConflictError();
           return existing;
@@ -311,8 +313,10 @@ export async function createPortalQuoteWithMapping(input: {
         idempotencyKey: input.idempotencyKey,
       });
       if (existing) {
-        if (existing.customerCode !== input.customerCode
-          || existing.source !== "customer_portal") {
+        if (
+          existing.requestFingerprint !== input.requestFingerprint
+          || existing.customerCode !== input.customerCode
+        ) {
           throw new PortalQuoteIdempotencyConflictError();
         }
         return existing;

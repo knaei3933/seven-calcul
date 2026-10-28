@@ -83,10 +83,14 @@ export function analyzeQuotation(record: QuotationRecord) {
   const customLotCost = storedNumber(payload.customLotCost);
   const customQuantity = positiveNumber(payload.customQuantity) ?? D(1);
   const customCostUnit = customLotCost.div(quantity);
+  const setupLotCost = storedNumber(payload.setupCost);
+  const setupQuantity = positiveNumber(payload.setupQuantity) ?? D(1);
+  const setupCostUnit = setupLotCost.div(quantity);
   const costUnit = fillingCostUnit
     .plus(separatedBulkCostUnit ?? D(0))
     .plus(filmCostUnit)
     .plus(copperCostUnit)
+    .plus(setupCostUnit)
     .plus(customCostUnit);
 
   const targetMargin = positiveNumber(payload.targetMargin ?? record.targetMargin) ?? D(0);
@@ -110,6 +114,11 @@ export function analyzeQuotation(record: QuotationRecord) {
   );
   const targetCustomUnit = customQuantity.gt(0) ? targetCustomSaleTotal.div(customQuantity) : D(0);
   const targetCustomSalePerPiece = quantity.gt(0) ? targetCustomSaleTotal.div(quantity) : D(0);
+  const targetSetupSaleTotal = Decimal.max(
+    setupLotCost.times(setupQuantity).div(marginDivider).toDecimalPlaces(0, Decimal.ROUND_HALF_UP),
+    D(0),
+  );
+  const targetSetupUnit = quantity.gt(0) ? targetSetupSaleTotal.div(quantity) : D(0);
 
   // record側の単価・合計は保存時に見積書表示値として確定しているため、
   // 旧payload（表示snapshotがない履歴）でも必ずrecord値をfallbackにする。
@@ -201,6 +210,9 @@ export function analyzeQuotation(record: QuotationRecord) {
     copperCostUnit,
     customCostUnit,
     customQuantity,
+    setupCostUnit,
+    setupQuantity,
+    targetSetupUnit,
     displayedFilmMeterUnit,
     orderPatternCount: storedNumber(payload.orderPatternCount),
     deliverablePatternLengthM: storedNumber(payload.deliverablePatternLengthM),

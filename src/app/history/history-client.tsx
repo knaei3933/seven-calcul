@@ -14,6 +14,7 @@ import {
   QUOTATION_RESTORE_KEY,
   quotationStatuses,
   type QuotationRecord,
+  type QuotationSampleBulkConfirmation,
   type QuotationStatus,
   type UserSummary,
 } from "@/lib/quotation-shared";
@@ -28,7 +29,7 @@ const statusLabels: Record<QuotationStatus, string> = {
   expired: "期限切れ",
 };
 
-type HistoryDetailTab = "document" | "film" | "data";
+type HistoryDetailTab = "document" | "film" | "sample" | "data";
 type QuotationApprovalGate = "internal" | "customerApproval";
 
 function requestedHistoryRecordId(): number | null {
@@ -39,8 +40,8 @@ function requestedHistoryRecordId(): number | null {
 
 function requestedHistoryDetailTab(): HistoryDetailTab {
   if (typeof window === "undefined") return "document";
-  const tab = new URLSearchParams(window.location.search).get("tab");
-  return tab === "film" || tab === "data" ? tab : "document";
+  const tab = new URLSearchParams(window.location.search).get("tab") ?? "";
+  return ["film", "sample", "data"].includes(tab) ? tab as HistoryDetailTab : "document";
 }
 
 export default function HistoryClient({ currentUser }: { currentUser: AuthenticatedUser }) {
@@ -141,15 +142,8 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
     setSelectedId(recordId);
   };
 
-  const internalApprovalRequiredMessage =
-    "まだカネイ貿易側で承認されていません。お急ぎの場合はカネイ貿易へお電話ください。";
   const changeStatus = async (record: QuotationRecord, nextStatus: QuotationStatus) => {
     setHistoryActionError("");
-    // 成約は選択肢として見せる。ただし内部承認がない場合は送信前に阻断する。
-    if (nextStatus === "approved" && !record.internalApproval) {
-      setHistoryActionError(internalApprovalRequiredMessage);
-      return;
-    }
     try {
       const response = await fetch(`/api/quotations/${record.id}`, {
         method: "PATCH",
@@ -160,7 +154,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
       if (!response.ok) {
         setHistoryActionError(
           payload.error === "internal_approval_required"
-            ? internalApprovalRequiredMessage
+            ? "成約にするには内部承認が必要です。"
             : `${record.quotationNumber} の状態を変更できませんでした。`,
         );
         return;
@@ -377,10 +371,22 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
                       aria-label={`${record.quotationNumber} の状態`}
                       value={record.status}
                       disabled={!canManage(record)}
-                      title={canManage(record) ? undefined : "作成者または管理者のみ変更できます"}
+                      title={canManage(record)
+                        ? (record.internalApproval ? undefined : "成約にするには、詳細画面で内部承認を完了してください")
+                        : "作成者または管理者のみ変更できます"}
                       onChange={(event) => void changeStatus(record, event.target.value as QuotationStatus)}
                     >
-                      {manualStatusOptions(record).map((item) => <option key={item} value={item}>{statusLabels[item]}</option>)}
+                      {manualStatusOptions(record).map((item) => (
+                        <option
+                          key={item}
+                          value={item}
+                          disabled={item === "approved" && !record.internalApproval}
+                        >
+                          {item === "approved" && !record.internalApproval
+                            ? "成約（内部承認後に選択可）"
+                            : statusLabels[item]}
+                        </option>
+                      ))}
                     </select>
                   </td>
                   <td className="history-actions">
@@ -437,6 +443,10 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
             canApproveInternally={currentUser.email.trim().toLowerCase() === "kim@kanei-trade.co.jp"}
             canRecordCustomerApproval={isKaneiTradeUser(currentUser.email)}
             sendingEmail={sendingEmail}
+            onSampleBulkUpdated={(updated) => {
+              setRecords((old) => old.map((item) => (item.id === updated.id ? updated : item)));
+              setSelectedId(updated.id);
+            }}
           />
           {emailMessage ? <p className="help" role="status" data-testid="email-message" style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 999, background: "white", padding: "8px 16px", borderRadius: 8, border: "1px solid #cbd5e1" }}>{emailMessage}</p> : null}
         </>
@@ -451,7 +461,7 @@ async function fetchStoredQuotationPdf(
   recordId: number,
   fallbackFileName: string,
 ): Promise<{ blob: Blob; fileName: string }> {
-  const response = await fetch(`/api/quotations/${recordId}/pdf`, { cache: "no-store" });
+  const response = await fetch(`/api/quotations/${recordId}/pdf`, { cache: "default" });
   if (response.status === 404) {
     throw new StoredQuotationPdfUnavailableError("見積書PDFが見つかりません。");
   }
@@ -475,7 +485,6 @@ function manualStatusOptions(record: QuotationRecord): QuotationStatus[] {
     rejected: ["rejected"],
     expired: ["expired"],
   };
-  // 承認ワークフローの記録は証跡。担当者が成約を明示的に選択できればよい。
   return base[record.status];
 }
 
@@ -498,9 +507,10 @@ function QuotationDetailModal({
   canApproveInternally,
   canRecordCustomerApproval,
   sendingEmail,
+  onSampleBulkUpdated,
 }: {
   record: QuotationRecord;
-  initialTab?: "document" | "film" | "data";
+  initialTab?: "document" | "film" | "sample" | "data";
   onClose: () => void;
   onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void;
   onSendEmail: (record: QuotationRecord) => void;
@@ -517,6 +527,7 @@ function QuotationDetailModal({
   canApproveInternally: boolean;
   canRecordCustomerApproval: boolean;
   sendingEmail: boolean;
+  onSampleBulkUpdated: (record: QuotationRecord) => void;
 }) {
   const [storedPdf, setStoredPdf] = useState<{ url: string; blob: Blob; fileName: string } | null>(null);
   const [storedPdfStatus, setStoredPdfStatus] = useState<"loading" | "available" | "unavailable">("loading");
@@ -535,9 +546,9 @@ function QuotationDetailModal({
     || !storedFilmQuotation.items[0]?.specification
     || storedFilmQuotation.pouchQuotationNumber !== record.quotationNumber
     || storedFilmQuotation.quotationNumber !== expectedFilmQuotationNumber;
-  // 旧保存分は材料単価（例：252円/m）と物流込合計（例：363,000円）が混在することがある。
-  const hasInconsistentStoredPricing = Array.isArray(storedFilmQuotation?.items)
-    && storedFilmQuotation.items.some((item) => {
+  // 旧保存分は材料単価（252円/m）と物流込合計（363,000円）が混在することがある。
+  // 金額の整合がない保存分は常に物流・通関費込みの再生成値で表示する。
+  const hasInconsistentStoredPricing = Boolean(storedFilmQuotation?.items.some((item) => {
     const length = Number(item.orderLengthM);
     const amount = Number(item.amountYen);
     const unit = Number(item.unitPriceYenPerM);
@@ -545,14 +556,48 @@ function QuotationDetailModal({
       && Number.isFinite(amount) && amount > 0
       && Number.isFinite(unit)
       && Math.abs(amount - unit * length) > 1;
-    });
+  }));
+  const shouldRegenerateFilmQuotation = legacyFilmQuotation || hasInconsistentStoredPricing;
   const filmQuotation = legacyFilmQuotation
     || hasInconsistentStoredPricing
     ? buildFilmQuotationFromRecord(record)
     : storedFilmQuotation;
-  const [detailTab, setDetailTab] = useState<"document" | "film" | "data">(
+  const sampleBulkConfirmation = typeof record.payload.sampleBulkConfirmation === "object"
+    && record.payload.sampleBulkConfirmation !== null
+    ? record.payload.sampleBulkConfirmation as QuotationSampleBulkConfirmation
+    : null;
+  const [detailTab, setDetailTab] = useState<"document" | "film" | "sample" | "data">(
     initialTab === "film" && !filmQuotation ? "document" : initialTab,
   );
+  const [sampleBulk, setSampleBulk] = useState<QuotationSampleBulkConfirmation | null>(sampleBulkConfirmation);
+  const [sampleBulkBusy, setSampleBulkBusy] = useState(false);
+  const [sampleBulkError, setSampleBulkError] = useState("");
+  const [sampleReceivedMl, setSampleReceivedMl] = useState("");
+  const [sampleNote, setSampleNote] = useState("");
+
+  const updateSampleBulk = async (action: "record-received" | "confirm") => {
+    if (sampleBulkBusy) return;
+    setSampleBulkBusy(true);
+    setSampleBulkError("");
+    try {
+      const response = await fetch(`/api/quotations/${record.id}/sample-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, receivedMl: sampleReceivedMl, note: sampleNote }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.record) throw new Error(payload.error ?? "failed");
+      const updated = payload.record as QuotationRecord;
+      setSampleBulk(updated.payload.sampleBulkConfirmation as QuotationSampleBulkConfirmation);
+      setSampleReceivedMl("");
+      setSampleNote("");
+      onSampleBulkUpdated(updated);
+    } catch (caught) {
+      setSampleBulkError(caught instanceof Error && caught.message !== "failed" ? caught.message : "サンプルバルク状態を更新できませんでした。");
+    } finally {
+      setSampleBulkBusy(false);
+    }
+  };
   const calculationChecklistSnapshot = record.payload.calculationChecklistSnapshot as {
     fillMlPerChamber?: string;
     connectedChambers?: number;
@@ -644,7 +689,11 @@ function QuotationDetailModal({
     let objectUrl: string | null = null;
     const loadStoredPdf = async () => {
       try {
-        const pdf = await fetchStoredQuotationPdf(record.id, `${record.quotationNumber}.pdf`);
+        const pdf = await fetchStoredQuotationPdf(record.id, buildQuotationPdfFileName({
+          issueDate: record.issueDate,
+          productName: record.productName,
+          customerName: record.customerName,
+        }));
         if (!active) return;
         objectUrl = URL.createObjectURL(pdf.blob);
         setStoredPdf({
@@ -694,14 +743,18 @@ function QuotationDetailModal({
       window.removeEventListener("afterprint", resetFit);
       printMedia?.removeEventListener("change", handleMediaChange);
     };
-  }, [record.id, record.quotationNumber]);
+  }, [record.customerName, record.id, record.issueDate, record.productName, record.quotationNumber]);
 
   const loadStoredQuotationPdf = async (): Promise<{ blob: Blob; fileName: string } | null> => {
     if (storedPdfBusyRef.current) return null;
     storedPdfBusyRef.current = true;
     setStoredPdfError("");
     try {
-      return await fetchStoredQuotationPdf(record.id, `${record.quotationNumber}.pdf`);
+      return await fetchStoredQuotationPdf(record.id, buildQuotationPdfFileName({
+        issueDate: record.issueDate,
+        productName: record.productName,
+        customerName: record.customerName,
+      }));
     } catch (error) {
       setStoredPdfStatus("unavailable");
       setStoredPdfError(error instanceof StoredQuotationPdfUnavailableError
@@ -716,14 +769,15 @@ function QuotationDetailModal({
   const downloadStoredPdf = async () => {
     const pdf = await loadStoredQuotationPdf();
     if (!pdf) return;
-    const objectUrl = URL.createObjectURL(pdf.blob);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = `${buildQuotationPdfFileName({
+    const fileName = buildQuotationPdfFileName({
       issueDate: record.issueDate,
       productName: record.productName,
       customerName: record.customerName,
-    })}.pdf`;
+    });
+    const objectUrl = URL.createObjectURL(pdf.blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = fileName;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
@@ -759,7 +813,6 @@ function QuotationDetailModal({
         }
       }),
     );
-    if ("fonts" in document) await document.fonts.ready;
     // ブラウザの「PDFとして保存」の初期ファイル名は document.title から作られる。
     const previousTitle = document.title;
     document.title = detailTab === "film" && filmQuotation
@@ -781,31 +834,6 @@ function QuotationDetailModal({
   };
 
   const customerEmail = record.payload.customerEmail;
-  const hasCustomerEmail = typeof customerEmail === "string" && customerEmail.trim() !== "";
-  const customerEmailText = hasCustomerEmail ? (customerEmail as string).trim() : "";
-  const canSendStoredPdf = record.status === "draft"
-    && Boolean(record.internalApproval)
-    && hasCustomerEmail;
-  const pdfDownloadTitle = storedPdfStatus === "loading"
-    ? "保存済みPDFを確認中です。"
-    : storedPdfStatus === "unavailable"
-      ? "保存済み見積書PDFがありません。"
-      : "保存済み見積書PDFをダウンロードします。";
-  const printTitle = detailTab === "document"
-    ? (storedPdfStatus === "available" ? "保存済み見積書PDFを開いて印刷します。" : "保存済み見積書PDFがありません。")
-    : detailTab === "film"
-      ? "表示中のフィルム見積書を印刷します。"
-      : "表示中の詳細データを印刷します。";
-  const mailtoTitle = hasCustomerEmail
-    ? "メールソフトで見積書案内を作成します。"
-    : "宛先メールが未登録のため、メール作成はできません。";
-  const sendEmailTitle = record.status !== "draft"
-    ? "下書き状態の見積書のみ送信できます。"
-    : !record.internalApproval
-      ? "送信前にカネイ貿易側の内部承認が必要です。"
-      : !hasCustomerEmail
-        ? "宛先メールが未登録のため、送信できません。"
-        : "保存済み見積書PDFを添付して送信し、状態を送付済みにします。";
   const mailtoLink = (() => {
     if (typeof customerEmail !== "string" || !customerEmail.trim()) return null;
     const subject = encodeURIComponent(`お見積書 ${record.quotationNumber} のご案内`);
@@ -837,107 +865,120 @@ function QuotationDetailModal({
                   {record.customerApproval ? `顧客承認済み（${new Date(record.customerApproval.approvedAt).toLocaleString("ja-JP")}）` : "顧客承認待ち"}
                 </span>
               </div>
+              {detailTab === "document" ? (
+                <span
+                  className={storedPdfStatus === "available" ? "pdf-status-chip available" : "pdf-status-chip"}
+                  data-testid="history-pdf-status"
+                >
+                  {storedPdfStatus === "loading" ? "PDF準備中" : storedPdfStatus === "available" ? "PDF利用可能" : "PDFなし"}
+                </span>
+              ) : null}
             </div>
           </div>
-          {canEditEmail ? (
-            <div className="history-email-editor">
-              <label>
-                <span>宛先メール</span>
-                <input
-                  type="email"
-                  value={editingEmail ? editingEmailValue : customerEmailText}
-                  readOnly={!editingEmail}
-                  onChange={(event) => onEditingEmailChange(event.target.value)}
-                  placeholder="未登録"
-                  data-testid="history-customer-email"
-                />
-              </label>
-              {editingEmail ? (
-                <>
-                  <button
-                    className="button small"
-                    type="button"
-                    disabled={updatingEmail || !editingEmailValue.trim()}
-                    onClick={() => onSaveEmail(record)}
-                    data-testid="history-email-save"
-                  >{updatingEmail ? "保存中..." : "保存"}</button>
+          <div className="detail-header-actions">
+            {canEditEmail ? (
+              <div className="history-email-editor">
+                <label>
+                  <span>宛先メール</span>
+                  <input
+                    type="email"
+                    value={editingEmail ? editingEmailValue : typeof customerEmail === "string" ? customerEmail : ""}
+                    readOnly={!editingEmail}
+                    onChange={(event) => onEditingEmailChange(event.target.value)}
+                    placeholder="未登録"
+                    data-testid="history-customer-email"
+                  />
+                </label>
+                {editingEmail ? (
+                  <>
+                    <button
+                      className="button small"
+                      type="button"
+                      disabled={updatingEmail || !editingEmailValue.trim()}
+                      onClick={() => onSaveEmail(record)}
+                      data-testid="history-email-save"
+                    >{updatingEmail ? "保存中..." : "保存"}</button>
+                    <button
+                      className="button secondary small"
+                      type="button"
+                      disabled={updatingEmail}
+                      onClick={onCancelEmailEdit}
+                    >取消</button>
+                  </>
+                ) : (
                   <button
                     className="button secondary small"
                     type="button"
-                    disabled={updatingEmail}
-                    onClick={onCancelEmailEdit}
-                  >取消</button>
-                </>
-              ) : (
-                <button
-                  className="button secondary small"
-                  type="button"
-                  onClick={() => onStartEmailEdit(record)}
-                  data-testid="history-email-edit"
-                >編集</button>
-              )}
-            </div>
-          ) : null}
-          <div className="detail-action-toolbar" role="toolbar" aria-label="見積書操作">
-            <div className="detail-action-group">
+                    onClick={() => onStartEmailEdit(record)}
+                    data-testid="history-email-edit"
+                  >編集</button>
+                )}
+              </div>
+            ) : null}
+            {detailTab === "document" ? (
               <button
                 className="button small"
                 type="button"
                 onClick={downloadStoredPdf}
                 data-testid="detail-download-current"
                 disabled={storedPdfStatus !== "available"}
-                title={pdfDownloadTitle}
-                aria-label={`見積書PDFダウンロード。${pdfDownloadTitle}`}
-              >見積書PDFダウンロード</button>
-              <button
-                className="button small"
-                type="button"
+              >PDFダウンロード</button>
+            ) : null}
+            <button
+              className="button small"
+              type="button"
               onClick={() => {
                 if (detailTab === "document") printStoredPdf();
                 else void printCurrentDocument();
               }}
               data-testid="detail-print-current"
               disabled={detailTab === "document" && storedPdfStatus !== "available"}
-                title={printTitle}
-                aria-label={`PDF出力・印刷。${printTitle}`}
             >
-              PDF出力・印刷
+              {detailTab === "document" ? "PDFを開いて印刷"
+                : detailTab === "film" ? "フィルム見積書PDF"
+                  : "詳細データPDF"}
             </button>
-            </div>
-            <span className="detail-action-divider" aria-hidden="true" />
-            <div className="detail-action-group">
-              <a
-                className="button secondary small"
-                href={mailtoLink ?? undefined}
-                aria-disabled={!mailtoLink}
-                title={mailtoTitle}
-                aria-label={`メール作成。${mailtoTitle}`}
-                onClick={(event) => {
-                  if (!mailtoLink) event.preventDefault();
-                }}
-                data-testid="history-mail-link"
-              >メール作成</a>
+            {mailtoLink ? (
+              <a className="button small" href={mailtoLink} data-testid="history-mail-link">メール作成</a>
+            ) : null}
+            {record.status === "draft" && !record.internalApproval && canRecordCustomerApproval ? (
+              (() => {
+                const sampleBulkConfirmed = !sampleBulk?.required || sampleBulk.status === "confirmed";
+                const blockedReason = !canApproveInternally
+                  ? "内部承認はKimのみ実行できます。"
+                  : "";
+                return (
+                  <>
+                    <button
+                      className="button small"
+                      type="button"
+                      disabled={approvingGate || Boolean(blockedReason)}
+                      title={blockedReason || undefined}
+                      onClick={() => onApproveGate(record, "internal")}
+                      data-testid="history-internal-approve"
+                    >{approvingGate ? "承認中..." : "内部承認する"}</button>
+                    {blockedReason ? (
+                      <span className="approval-block-reason" data-testid="history-internal-approval-blocked-reason">
+                        {blockedReason}
+                      </span>
+                    ) : null}
+                  </>
+                );
+              })()
+            ) : null}
+            {record.status === "draft" && typeof record.payload.customerEmail === "string" && record.payload.customerEmail.trim() ? (
               <button
                 className="button small"
                 type="button"
-                disabled={sendingEmail || !canSendStoredPdf}
-                title={sendingEmail ? "送信中です。" : sendEmailTitle}
-                aria-label={`メール送信。${sendingEmail ? "送信中です。" : sendEmailTitle}`}
+                disabled={sendingEmail || !record.internalApproval}
+                title={record.internalApproval
+                  ? "保存済み見積書PDFを添付して送信し、状態を送付済みにします。テスト設定では宛先が強制変更される場合があります。"
+                  : "送信前に内部承認が必要です。"}
                 onClick={() => onSendEmail(record)}
                 data-testid="history-auto-send"
               >
                 {sendingEmail ? "送信中..." : "メール送信（PDF添付）"}
               </button>
-            </div>
-            <span className="detail-action-divider" aria-hidden="true" />
-            {record.status === "draft" && !record.internalApproval && canApproveInternally ? (
-              <button
-                className="button small"
-                type="button"
-                disabled={approvingGate}
-                onClick={() => onApproveGate(record, "internal")}
-                data-testid="history-internal-approve"
-              >{approvingGate ? "承認中..." : "内部承認する"}</button>
             ) : null}
             {record.status === "sent" && record.internalApproval && !record.customerApproval && canRecordCustomerApproval ? (
               <button
@@ -948,7 +989,6 @@ function QuotationDetailModal({
                 data-testid="history-customer-approval-record"
               >{approvingGate ? "承認中..." : "顧客承認を記録"}</button>
             ) : null}
-            <span className="detail-action-divider" aria-hidden="true" />
             <button className="button secondary small" type="button" onClick={onClose}>閉じる</button>
           </div>
         </header>
@@ -970,6 +1010,15 @@ function QuotationDetailModal({
                 data-testid="film-quote-tab"
               >フィルム見積書</button>
             ) : null}
+            {sampleBulk?.required ? (
+              <button
+                className={detailTab === "sample" ? "active" : ""}
+                type="button"
+                onClick={() => setDetailTab("sample")}
+                aria-current={detailTab === "sample"}
+                data-testid="sample-bulk-quote-tab"
+              >サンプルバルク</button>
+            ) : null}
             <button
               className={detailTab === "data" ? "active" : ""}
               type="button"
@@ -989,8 +1038,8 @@ function QuotationDetailModal({
                         src="/api/brand-assets/kanei-trade-logo.png"
                         alt="金井貿易株式会社 ロゴ"
                         className="film-quote-kanei-logo"
-                        width={354}
-                        height={236}
+                        width={612}
+                        height={408}
                       />
                       <div className="film-quote-company">
                         <strong className="film-quote-company-name">{kaneiTrade.name}</strong>
@@ -1003,8 +1052,8 @@ function QuotationDetailModal({
                         src="/api/brand-assets/epackage-lab-logo.png"
                         alt="Epackage-Lab ロゴ"
                         className="film-quote-division-logo"
-                        width={567}
-                        height={189}
+                        width={2172}
+                        height={724}
                       />
                     </div>
                     <small>{kaneiTrade.englishName}</small>
@@ -1109,8 +1158,8 @@ function QuotationDetailModal({
                       src="/api/brand-assets/kanei-trade-seal.png"
                       alt="金井貿易株式会社各印"
                       className="film-quote-seal-image"
-                      width={425}
-                      height={425}
+                      width={1254}
+                      height={1254}
                     />
                   </div>
                 </footer>
@@ -1139,6 +1188,57 @@ function QuotationDetailModal({
             </p>
           )
           ) : null}
+          {detailTab === "sample" && sampleBulk?.required ? (
+            <section className="panel sample-bulk-quote-panel" aria-label="サンプルバルク確認">
+              <h2>サンプルバルク確認（見積前工程）</h2>
+              <p className="help">
+                顧客バルクの到着量を確認し、充填方法と見積金額へ反映してください。サンプル確認は任意運用であり、内部承認の必須条件ではありません。
+              </p>
+              <dl className="sample-bulk-quote-state">
+                <div><dt>状態</dt><dd data-testid="sample-bulk-quote-status">
+                  {sampleBulk.status === "confirmed" ? "確認済み" : sampleBulk.status === "received" ? "受領済み" : "未受領"}
+                </dd></div>
+                {sampleBulk.sampleQuantityMl ? <div><dt>依頼量</dt><dd>{sampleBulk.sampleQuantityMl}ml</dd></div> : null}
+                {sampleBulk.receivedMl ? <div><dt>受領量</dt><dd>{sampleBulk.receivedMl}ml</dd></div> : null}
+                {sampleBulk.receivedAt ? <div><dt>受領日時</dt><dd>{new Date(sampleBulk.receivedAt).toLocaleString("ja-JP")}</dd></div> : null}
+                {sampleBulk.confirmedAt ? <div><dt>確認日時</dt><dd>{new Date(sampleBulk.confirmedAt).toLocaleString("ja-JP")}</dd></div> : null}
+                {sampleBulk.note ? <div><dt>メモ</dt><dd>{sampleBulk.note}</dd></div> : null}
+              </dl>
+
+              {record.status === "draft" && canApproveInternally ? (
+                <div className="sample-bulk-quote-actions">
+                  {sampleBulk.status === "pending" ? (
+                    <>
+                      <label>受領量 (ml)<input value={sampleReceivedMl} inputMode="decimal" onChange={(event) => setSampleReceivedMl(event.target.value)} /></label>
+                      <label>メモ<textarea value={sampleNote} rows={2} onChange={(event) => setSampleNote(event.target.value)} /></label>
+                      <button
+                        className="button workflow-action role-customer"
+                        type="button"
+                        disabled={sampleBulkBusy}
+                        onClick={() => void updateSampleBulk("record-received")}
+                      >{sampleBulkBusy ? "登録中..." : "受領を記録"}</button>
+                    </>
+                  ) : null}
+                  {sampleBulk.status === "received" ? (
+                    <>
+                      <label>反映メモ<textarea value={sampleNote} rows={2} onChange={(event) => setSampleNote(event.target.value)} /></label>
+                      <button
+                        className="button workflow-action role-kanei"
+                        type="button"
+                        disabled={sampleBulkBusy}
+                        onClick={() => void updateSampleBulk("confirm")}
+                      >{sampleBulkBusy ? "確認中..." : "見積に反映済みとして確認"}</button>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+              {sampleBulkError ? <p className="error" role="alert">{sampleBulkError}</p> : null}
+              {sampleBulk.status !== "confirmed" ? (
+                <p className="film-order-upload-error" role="status">サンプルバルク確認前に内部承認はできません。</p>
+              ) : null}
+            </section>
+          ) : null}
+
           {detailTab === "data" ? (
           <>
             <article className="a4-sheet history-a4 data-report-a4" aria-label="詳細データA4帳票" data-testid="data-report-a4">

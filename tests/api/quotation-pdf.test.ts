@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { QuotationRecord, QuotationRecordInput } from "@/lib/quotation-shared";
+import { buildQuotationPdfFileName } from "@/lib/film-quotation";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-pdf-api-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -175,9 +176,14 @@ describe("quotation PDF API", () => {
 
     expect(retrieved.status).toBe(200);
     expect(retrieved.headers.get("content-type")).toBe("application/pdf");
-    expect(retrieved.headers.get("cache-control")).toBe("private, no-store");
+    expect(retrieved.headers.get("cache-control")).toBe("private, no-cache");
+    expect(retrieved.headers.get("etag")).toMatch(/^"[0-9a-f]{64}"$/u);
     expect(retrieved.headers.get("content-disposition")).toContain(
-      encodeURIComponent("お見積書_PDF_Pouch(PDF_Customer)_261015.pdf"),
+      encodeURIComponent(buildQuotationPdfFileName({
+        issueDate: quotation.issueDate,
+        productName: quotation.productName,
+        customerName: quotation.customerName,
+      })),
     );
     await expect(retrieved.arrayBuffer()).resolves.toEqual(bytes.buffer);
   });

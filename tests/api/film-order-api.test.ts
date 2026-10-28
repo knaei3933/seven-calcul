@@ -126,7 +126,7 @@ describe("film order API permissions and workflow", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "set-customer-design-not-required", reason: "API regression" }),
-      }, kaneiToken),
+      }, sevenToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
 
@@ -134,7 +134,7 @@ describe("film order API permissions and workflow", () => {
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", aiFileUrl: "https://drive.google.com/file/d/api-ai/view", pdfFileName: "API検証パウチ.pdf", pdfFileUrl: "https://drive.google.com/file/d/api-pdf/view" }),
+        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", aiFileUrl: "https://drive.google.com/file/d/api-ai/view", pdfFileName: "API検証パウチ.pdf", pdfFileUrl: "https://drive.google.com/file/d/api-pdf/view", guideAcknowledged: true }),
       }, kaneiToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
@@ -144,7 +144,7 @@ describe("film order API permissions and workflow", () => {
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", aiFileUrl: "https://drive.google.com/file/d/api-ai/view", pdfFileName: "API検証パウチ.pdf", pdfFileUrl: "https://drive.google.com/file/d/api-pdf/view" }),
+        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", aiFileUrl: "https://drive.google.com/file/d/api-ai/view", pdfFileName: "API検証パウチ.pdf", pdfFileUrl: "https://drive.google.com/file/d/api-pdf/view", guideAcknowledged: true }),
       }, sevenToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );

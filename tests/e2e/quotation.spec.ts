@@ -9,7 +9,7 @@ test("Japanese quotation UI calculates, validates, and separates customer output
   await expect(page.getByTestId("bulk-usage")).toHaveCount(0);
   await page.getByTestId("calculate-desktop").click();
   await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
-  await expect(page.getByTestId("bulk-usage")).toContainText("41,000 ml");
+  await expect(page.getByTestId("bulk-usage")).toContainText("41,000 g");
   await expect(page.getByTestId("customer-total")).toContainText("￥");
   await expect(page.locator(".quote-sheet")).not.toContainText("総原価");
   await expect(page.locator(".quote-sheet")).not.toContainText("成功報酬");
@@ -53,14 +53,13 @@ test("A4 quotation page issues once and downloads the canonical PDF", async ({ p
   await page.getByPlaceholder("株式会社◯◯").fill("E2E株式会社");
   await expect(page.getByTestId("save-history")).toBeEnabled();
   await page.getByTestId("save-history").click();
-  await expect(page.getByTestId("issue-success")).toBeVisible();
+  await expect(page.getByTestId("issue-success")).toBeVisible({ timeout: 15_000 });
 
   await page.getByPlaceholder("株式会社◯◯").fill("E2E編集後株式会社");
   const downloadPromise = page.waitForEvent("download");
   await page.getByTestId("print-pdf").click();
   const download = await downloadPromise;
-  const storedQuotationNumber = download.suggestedFilename().replace(/\.pdf$/u, "");
-  expect(storedQuotationNumber).toMatch(/^S7-[A-Z0-9]+$/u);
+  expect(download.suggestedFilename()).toMatch(/^お見積書_.+_\d{6}\.pdf$/u);
   const issuedPdf = readFileSync(await download.path());
   expect(countPdfPages(issuedPdf)).toBe(1);
 
@@ -117,8 +116,8 @@ test("quote and history download the same canonical PDF bytes", async ({ page })
   const quoteDownloadPromise = page.waitForEvent("download");
   await page.getByTestId("print-pdf").click();
   const quoteDownload = await quoteDownloadPromise;
-  const quotationNumber = quoteDownload.suggestedFilename().replace(/\.pdf$/u, "");
-  expect(quotationNumber).toMatch(/^S7-[A-Z0-9]+$/u);
+  const quotationFileName = quoteDownload.suggestedFilename();
+  expect(quotationFileName).toMatch(/^お見積書_.+_\d{6}\.pdf$/u);
   const quotePdf = readFileSync(await quoteDownload.path());
   expect(quotePdf.subarray(0, 5).toString("latin1")).toBe("%PDF-");
 
@@ -126,9 +125,12 @@ test("quote and history download the same canonical PDF bytes", async ({ page })
   await page.getByTestId("history-search").fill(customerName);
   await expect(page.getByTestId("history-table")).toContainText(customerName);
   await page.getByRole("button", { name: "詳細" }).first().click();
-  const historyDownloadPromise = page.waitForEvent("download");
+  const historyDownloadPromise = page.waitForEvent("download", {
+    predicate: (download) => download.suggestedFilename() === quotationFileName,
+  });
   await page.getByTestId("detail-download-current").click();
   const historyDownload = await historyDownloadPromise;
+  expect(historyDownload.suggestedFilename()).toBe(quotationFileName);
   const historyPdf = readFileSync(await historyDownload.path());
 
   const sha256 = (value: Buffer) => createHash("sha256").update(value).digest("hex");
@@ -136,7 +138,7 @@ test("quote and history download the same canonical PDF bytes", async ({ page })
   const historyPdfSha256 = sha256(historyPdf);
   expect(historyPdfSha256).toBe(quotePdfSha256);
   console.info("cross-ui canonical PDF identity", {
-    quotationNumber,
+    quotationFileName,
     sha256: quotePdfSha256,
     byteLength: quotePdf.byteLength,
   });

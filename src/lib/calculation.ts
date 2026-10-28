@@ -43,16 +43,20 @@ export interface CostResult {
   machineVariablePerPiece: string;
   variableProcessingPerPiece: string;
   variableProcessingTotal: string;
-  fixedLotCost: string;
-  fixedCostPerPiece: string;
-  customCharge: string;
-  sellerProfitBaseCost: string;
+    fixedLotCost: string;
+    fixedCostPerPiece: string;
+    customCharge: string;
+    setupCost: string;
+    setupCostPerPiece: string;
+    setupCostUnit: string;
+    setupQuantity: string;
+    sellerProfitBaseCost: string;
   sellerProfitRate: string;
   sellerProfitCost: string;
   totalCostPerPiece: string;
   costTotal: string;
-  costComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom", string>;
-  costPerPieceComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom", string>;
+  costComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom" | "setup", string>;
+  costPerPieceComponents: Record<"film" | "copperPlate" | "bulk" | "variableProcessing" | "fixedLot" | "custom" | "setup", string>;
   sellingPrices: { margin: string; pricePerPiece: string; totalSales: string; profit: string }[];
   film: FilmCostResult;
   copperPlateCost: string;
@@ -204,6 +208,11 @@ function calculatePouchCostCore(
 ): CostResult {
   const quantityD = D(quantity);
   if (quantityD.lte(0) || D(spec.fillMlPerChamber).lte(0) || spec.fillingLanes <= 0) throw validationError("invalid_positive_input");
+  const setupQuantity = D(spec.setupQuantity ?? "1");
+  if (setupQuantity.lt(0) || !setupQuantity.isInteger()) throw validationError("invalid_setup_quantity");
+  const setupCost = D(spec.setupCost ?? "0");
+  if (setupCost.lt(0)) throw validationError("invalid_setup_cost");
+  const setupCharge = setupCost.times(setupQuantity);
   // 室ごとに異なる液体を充填できる。未指定時は全室同一（従来互換）。
   const chamberFills = resolveChamberFills(spec);
   const maxChamberFill = chamberFills.reduce((max, chamber) => Decimal.max(max, D(chamber.fillMl)), D(0));
@@ -467,6 +476,7 @@ function calculatePouchCostCore(
     variableProcessing: variableTotal,
     fixedLot,
     custom: customCharge,
+    setup: setupCharge,
   };
   const costTotal = sum(Object.values(costComponents));
   const totalPerPiece = roundUp1(D(costTotal).div(quantityD));
@@ -522,6 +532,10 @@ function calculatePouchCostCore(
     fixedLotCost: fixedLot.toString(),
     fixedCostPerPiece: fixedPerPiece.toString(),
     customCharge: customCharge.toString(),
+    setupCost: setupCharge.toString(),
+    setupCostPerPiece: roundUp1(setupCharge.div(quantityD)).toString(),
+    setupCostUnit: setupCost.toString(),
+    setupQuantity: setupQuantity.toString(),
     sellerProfitBaseCost: sellerProfitBaseCost.toString(),
     sellerProfitRate: appliesSellerProfit ? params.sellerProfitRate : "0",
     gravurePricingMode,

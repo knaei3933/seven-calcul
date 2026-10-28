@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -83,6 +84,7 @@ async function registerVerified(label: string): Promise<{ email: string; code: s
   const email = uniqueEmail(label);
   const response = await handlePortalApiRequest(request(registration(email)), "register", {
     now,
+    clientFingerprint: crypto.randomUUID().replaceAll("-", "").repeat(2),
     mailSender: async (message) => {
       sentMail.push(message);
       return {};
@@ -90,6 +92,20 @@ async function registerVerified(label: string): Promise<{ email: string; code: s
   });
   expect(response.status).toBe(201);
   return { email, code: codeFromMail() };
+}
+
+function fingerprint(label: string): string {
+  return createHash("sha256").update(label).digest("hex");
+}
+
+async function registerWithEmailAndFingerprint(email: string, client: string): Promise<Response> {
+  return await handlePortalApiRequest(request(registration(email), {
+    ...authorization,
+    "x-portal-client-fingerprint": client,
+  }), "register", {
+    now,
+    mailSender: async () => ({}),
+  });
 }
 
 beforeAll(async () => {
@@ -107,6 +123,69 @@ afterAll(async () => {
 });
 
 describe("portal v1 auth API", () => {
+  it("uses independent durable account and client rate dimensions", async () => {
+    const sharedClient = fingerprint("shared-registration-client");
+    const emails = Array.from({ length: 5 }, () => uniqueEmail("bucket-email"));
+    for (const email of emails) {
+      expect((await registerWithEmailAndFingerprint(email, sharedClient)).status).toBe(201);
+    }
+    const rotated = uniqueEmail("rotated-email");
+    const clientLimited = await registerWithEmailAndFingerprint(rotated, sharedClient);
+    expect(clientLimited.status).toBe(429);
+    expect(await json(clientLimited)).toEqual({ error: "rate_limited" });
+
+    const db = await getPortalIdentityDatabase();
+    const clientRow = await db.get<{ count: number }>(
+      "SELECT count FROM portal_rate_limits WHERE bucket_key LIKE ?",
+      [`portal-register:client:${sharedClient}:%`],
+    );
+    expect(Number(clientRow?.count)).toBe(6);
+    const accountRows = await db.all<{ count: number }>(`
+      SELECT count FROM portal_rate_limits
+      WHERE bucket_key LIKE 'portal-register:%'
+        AND bucket_key NOT LIKE 'portal-register:client:%'
+    `);
+    expect(accountRows).toHaveLength(6);
+    expect(accountRows.map((row) => Number(row.count))).toEqual([1, 1, 1, 1, 1, 1]);
+
+    const target = emails[0]!;
+    for (let index = 0; index < 4; index += 1) {
+      const response = await registerWithEmailAndFingerprint(
+        target,
+        fingerprint(`different-client-${index}`),
+      );
+      expect(response.status).toBe(409);
+    }
+    const accountLimited = await registerWithEmailAndFingerprint(
+      target,
+      fingerprint("different-client-final"),
+    );
+    expect(accountLimited.status).toBe(429);
+    const accountRow = await db.get<{ count: number }>(
+      "SELECT count FROM portal_rate_limits WHERE bucket_key LIKE ?",
+      [`portal-register:${target}:%`],
+    );
+    expect(Number(accountRow?.count)).toBe(6);
+
+    const dbBefore = await getPortalIdentityDatabase();
+    const unknownBefore = Number((await dbBefore.get<{ count: number }>(
+      "SELECT count FROM portal_rate_limits WHERE bucket_key LIKE 'portal-register:client:unknown:%'",
+    ))?.count ?? 0);
+    const arbitraryHeader = await handlePortalApiRequest(
+      request(registration(uniqueEmail("arbitrary-header")), {
+        ...authorization,
+        "x-portal-client-fingerprint": "browser-supplied-arbitrary-value",
+      }),
+      "register",
+      { now, mailSender: async () => ({}) },
+    );
+    expect(arbitraryHeader.status).toBe(201);
+    const unknownAfter = Number((await dbBefore.get<{ count: number }>(
+      "SELECT count FROM portal_rate_limits WHERE bucket_key LIKE 'portal-register:client:unknown:%'",
+    ))?.count ?? 0);
+    expect(unknownAfter).toBe(unknownBefore + 1);
+  });
+
   it("registers, verifies, provisions a new kanei customer, and returns only safe fields", async () => {
     const email = uniqueEmail("success");
     const registered = await handlePortalApiRequest(
@@ -216,8 +295,8 @@ describe("portal v1 auth API", () => {
       "login",
       { now },
     );
-    expect(denied.status).toBe(401);
-    expect(await json(denied)).toEqual({ error: "unauthorized" });
+    expect(denied.status).toBe(403);
+    expect(await json(denied)).toEqual({ error: "email_unverified" });
 
     const serviceActor = await handlePortalApiRequest(
       request({ email: "portal-service@system.invalid", password: "anything-here" }),
@@ -327,19 +406,25 @@ describe("portal v1 auth API", () => {
 
     const me = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": session.token,
+      "x-portal-session-token": session.token,
     }), "me", { now });
+    const aliasMe = await handlePortalApiRequest(request(undefined, {
+      ...authorization,
+      "x-portal-session-legacy": session.token,
+    }), "me", { now });
+    expect(aliasMe.status).toBe(401);
+    expect(await json(aliasMe)).toEqual({ error: "session_expired" });
     expect(me.status).toBe(200);
     expect(((await json(me)).user as Record<string, unknown>).email).toBe(target.email);
 
     const logout = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": session.token,
+      "x-portal-session-token": session.token,
     }), "logout", { now });
     expect(logout.status).toBe(200);
     const afterLogout = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": session.token,
+      "x-portal-session-token": session.token,
     }), "me", { now });
     expect(afterLogout.status).toBe(401);
     expect(await json(afterLogout)).toEqual({ error: "session_expired" });
@@ -365,11 +450,11 @@ describe("portal v1 auth API", () => {
 
     const firstMe = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": firstToken,
+      "x-portal-session-token": firstToken,
     }), "me", { now });
     const secondMe = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": secondToken,
+      "x-portal-session-token": secondToken,
     }), "me", { now });
     expect(((await json(firstMe)).user as Record<string, unknown>).email).toBe(first.email);
     expect(((await json(secondMe)).user as Record<string, unknown>).email).toBe(second.email);
@@ -377,7 +462,7 @@ describe("portal v1 auth API", () => {
     const missing = await handlePortalApiRequest(request(undefined, authorization), "me", { now });
     const invalid = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": `${firstToken}invalid`,
+      "x-portal-session-token": `${firstToken}invalid`,
     }), "me", { now });
     expect(missing.status).toBe(401);
     expect(invalid.status).toBe(401);

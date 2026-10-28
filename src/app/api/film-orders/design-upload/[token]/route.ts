@@ -60,6 +60,7 @@ function errorStatus(message: string): number {
     message === "invalid_file_name"
     || message === "unsupported_file_type"
     || message === "invalid_upload_request"
+    || message === "upload_guide_acknowledgement_required"
     || message === "uploaded_file_mismatch"
   ) return 400;
   return 502;
@@ -88,6 +89,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       uploader?: unknown;
       note?: unknown;
       fileId?: unknown;
+      guideAcknowledged?: unknown;
     };
     const action = typeof body.action === "string" ? body.action : "";
     const order = await getFilmOrderForCustomerDesign(token, request);
@@ -144,6 +146,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       fileUrl: url,
       uploader: typeof body.uploader === "string" ? body.uploader : undefined,
       note: typeof body.note === "string" ? body.note : undefined,
+      guideAcknowledged: body.guideAcknowledged === true,
       metadata: {
         fileSizeBytes: candidate.sizeBytes,
         contentType: candidate.mimeType,

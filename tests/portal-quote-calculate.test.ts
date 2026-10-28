@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import contract from "../contracts/portal-api-v1.json" with { type: "json" };
+import type { SqlClient } from "@/lib/db";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "portal-quote-calculate-"));
 const previous = {
@@ -24,8 +25,20 @@ process.env.ADMIN_NAME = "Portal Admin";
 process.env.PORTAL_SERVICE_TOKEN = "portal-quote-service-token-at-least-32-chars";
 process.env.GRAVURE_SNAPSHOT_ISSUANCE_ENABLED = "true";
 
-const { createPortalEmailVerificationWithCooldown, createPortalSession, createPortalUser, getPortalIdentityDatabase, verifyPortalUserAndProvisionCustomer } = await import("@/lib/portal/identity-store");
-const { getPortalQuoteDatabaseForTest, resetPortalQuoteStoreForTest } = await import("@/lib/portal/quote-calculation-store");
+const {
+  createPortalEmailVerificationWithCooldown,
+  createPortalSession,
+  createPortalUser,
+  getPortalIdentityDatabase,
+  getPortalServiceActorId,
+  verifyPortalUserAndProvisionCustomer,
+} = await import("@/lib/portal/identity-store");
+const {
+  createPortalQuoteWithMapping,
+  getPortalQuoteDatabaseForTest,
+  PortalQuoteIdempotencyConflictError,
+  resetPortalQuoteStoreForTest,
+} = await import("@/lib/portal/quote-calculation-store");
 const { calculatePortalQuote } = await import("@/lib/portal/quote-calculation");
 const { calculatePouchCost } = await import("@/lib/calculation");
 const { upsertFilmPrice } = await import("@/lib/film-price-store");
@@ -105,8 +118,12 @@ async function createVerifiedUser(label: string, customerCode: string): Promise<
   return user;
 }
 
-function authFor(user: { token: string }): Record<string, string> {
-  return { ...authorization, "x-portal-session-token": user.token };
+function authFor(user: { id?: number; token: string }): Record<string, string> {
+  return {
+    ...authorization,
+    "x-portal-client-fingerprint": String(user.id ?? 0).padStart(64, "0"),
+    "x-portal-session-token": user.token,
+  };
 }
 
 async function counts(): Promise<{ quotations: number; mappings: number }> {
@@ -230,7 +247,10 @@ describe("portal quote calculation G004", () => {
 
   it("calculates digital admin-side, persists complete internal data, and returns only the safe projection", async () => {
     const user = await createVerifiedUser("digital", "PDIGITAL");
-    const response = await calculatePortalQuote(authRequest(user, requestBody({ idempotencyKey: "digital-success" })));
+    const response = await calculatePortalQuote(
+      authRequest(user, requestBody({ idempotencyKey: "digital-success" })),
+      { now },
+    );
     expect(response.status).toBe(201);
     const body = await json(response);
     assertCustomerSafe(body);
@@ -273,7 +293,7 @@ describe("portal quote calculation G004", () => {
     const resolveFilmPrices = vi.fn(async () => overriddenPrices);
     const response = await calculatePortalQuote(
       authRequest(user, requestBody({ idempotencyKey: "server-pricing" })),
-      { calculate, resolveFilmPrices },
+      { calculate, resolveFilmPrices, now },
     );
     expect(response.status).toBe(201);
     expect(resolveFilmPrices).toHaveBeenCalledWith("2026-10-23", expect.any(Object));
@@ -308,6 +328,21 @@ describe("portal quote calculation G004", () => {
     const db = await getPortalQuoteDatabaseForTest();
     const rows = await db.all("SELECT * FROM portal_quote_mappings WHERE idempotency_key = 'same-key'");
     expect(rows).toHaveLength(1);
+  });
+
+  it("accepts only the canonical portal session header for calculation", async () => {
+    const user = await createVerifiedUser("canonical-header", "PCANONICAL");
+    const body = requestBody({ idempotencyKey: "canonical-header-key" });
+    const aliasResponse = await calculatePortalQuote(request(body, [], {
+      ...authorization,
+      "x-portal-session-legacy": user.token,
+    }));
+    expect(aliasResponse.status).toBe(401);
+    expect(await json(aliasResponse)).toEqual({ error: "unauthorized" });
+
+    const canonicalResponse = await calculatePortalQuote(authRequest(user, body));
+    expect(canonicalResponse.status).toBe(201);
+    expect(await json(canonicalResponse)).toHaveProperty("publicId");
   });
 
   it("rejects a reused idempotency key with different business input", async () => {
@@ -351,6 +386,124 @@ describe("portal quote calculation G004", () => {
     expect(await json(second)).toEqual(await json(first));
     const db = await getPortalQuoteDatabaseForTest();
     expect((await db.all("SELECT * FROM portal_quote_mappings WHERE idempotency_key = 'race-key'")).length).toBe(1);
+  });
+
+  it("conflicts when a unique-idempotency race has a different request fingerprint", async () => {
+    const user = await createVerifiedUser("race-conflict", "PRACECONFLICT");
+    const [created, conflicted] = await Promise.all([
+      calculatePortalQuote(authRequest(user, requestBody({
+        idempotencyKey: "race-conflict-key",
+        quantity: "10000",
+      }))),
+      calculatePortalQuote(authRequest(user, requestBody({
+        idempotencyKey: "race-conflict-key",
+        quantity: "20000",
+      }))),
+    ]);
+    const responses = [created, conflicted];
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+    const conflict = responses.find((response) => response.status === 409)!;
+    expect(await json(conflict)).toMatchObject({ error: "conflict" });
+
+    const db = await getPortalQuoteDatabaseForTest();
+    const mappings = await db.all<{ quantity: string }>(
+      `SELECT quotations.quantity AS quantity
+       FROM portal_quote_mappings
+         INNER JOIN quotations ON quotations.id = portal_quote_mappings.quotation_id
+       WHERE portal_quote_mappings.idempotency_key = 'race-conflict-key'`,
+    );
+    expect(mappings).toHaveLength(1);
+    expect(mappings[0].quantity).toBe("10000");
+  });
+
+  it("conflicts in unique-race recovery when fingerprints differ", async () => {
+    const user = await createVerifiedUser("unique-recovery", "PUNIQUERECOVERY");
+    const db = await getPortalQuoteDatabaseForTest();
+    const idempotencyKey = "unique-recovery-key";
+    const quotation = {
+      status: "draft" as const,
+      issueDate: "2026-10-23",
+      validUntil: "2026-11-06",
+      customerName: "ユニークリカバリー株式会社",
+      customerContact: "ポータル太郎",
+      productName: "リカバリーテスト",
+      sizeSummary: "50×60mm",
+      quantity: "10000",
+      fillingCostPerPiece: "1",
+      filmCostPerPiece: "1",
+      filmMeterPrice: "1",
+      filmOrderLengthM: "1",
+      targetMargin: "0.1",
+      taxRatePercent: "0.1",
+      pricePerPiece: "10",
+      subtotal: "100000",
+      tax: "10000",
+      grandTotal: "110000",
+      deliveryDate: "別途相談",
+      paymentTerms: "月末締め翌月末払い",
+      notes: "",
+      calculationVersion: "test",
+      resultHash: "test-hash",
+      payload: { quantity: "10000" },
+    };
+    const input = (requestFingerprint: string) => ({
+      quotation,
+      actorId: user.id,
+      portalUserId: user.id,
+      ownerDomain: "kanei" as const,
+      customerCode: user.customerCode,
+      idempotencyKey,
+      requestFingerprint,
+      buildResponse: ({ publicId, quotationNumber }: { publicId: string; quotationNumber: string }) => ({
+        publicId,
+        quotationNumber,
+      }),
+    });
+
+    const actorId = await getPortalServiceActorId();
+    expect(actorId).not.toBeNull();
+    const committed = await createPortalQuoteWithMapping({
+      ...input("fingerprint-a"),
+      actorId: actorId!,
+    });
+    const raceInput = (requestFingerprint: string) => ({
+      ...input(requestFingerprint),
+      actorId: actorId!,
+    });
+    const actualTransaction = db.transaction.bind(db);
+    Object.defineProperty(db, "transaction", {
+      configurable: true,
+      writable: true,
+      value: async (operation: (tx: SqlClient) => Promise<unknown>) => actualTransaction(async (tx) => {
+        const hiddenMappingTx: SqlClient = Object.create(tx);
+        hiddenMappingTx.get = async (sql: string, params: unknown[] = []) => {
+          if (sql.includes("FROM portal_quote_mappings") && params[2] === idempotencyKey) return undefined;
+          return tx.get(sql, params);
+        };
+        return operation(hiddenMappingTx);
+      }),
+    });
+
+    try {
+      const [sameFingerprint, differentFingerprint] = await Promise.allSettled([
+        createPortalQuoteWithMapping(raceInput("fingerprint-a")),
+        createPortalQuoteWithMapping(raceInput("fingerprint-b")),
+      ]);
+      expect(sameFingerprint.status).toBe("fulfilled");
+      expect(differentFingerprint.status).toBe("rejected");
+      if (sameFingerprint.status === "fulfilled") {
+        expect(sameFingerprint.value.publicId).toBe(committed.publicId);
+      }
+      if (differentFingerprint.status === "rejected") {
+        expect(differentFingerprint.reason).toBeInstanceOf(PortalQuoteIdempotencyConflictError);
+      }
+    } finally {
+      Object.defineProperty(db, "transaction", {
+        configurable: true,
+        writable: true,
+        value: actualTransaction,
+      });
+    }
   });
 
   it("rolls back quote and mapping together when mapping persistence fails", async () => {
@@ -431,6 +584,7 @@ describe("portal quote calculation G004", () => {
     process.env.GRAVURE_SNAPSHOT_ISSUANCE_ENABLED = "true";
     const response = await calculatePortalQuote(
       request(requestBody({ idempotencyKey: "gravure-enabled", printingMethod: "gravure" }), [], authFor(user)),
+      { now },
     );
     expect(response.status).toBe(201);
     const body = await json(response);

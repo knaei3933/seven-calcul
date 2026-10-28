@@ -4,6 +4,7 @@ import {
   approveQuotationGate,
   getQuotation,
   QuotationApprovalTransitionError,
+  SampleBulkConfirmationRequiredError,
   type QuotationApprovalGate,
 } from "@/lib/quotation-store";
 import {
@@ -48,6 +49,9 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     const approved = await approveQuotationGate(quotationId, gate, user.id);
     return NextResponse.json({ record: approved, gate, filmOrderSynced: false });
   } catch (error) {
+    if (error instanceof SampleBulkConfirmationRequiredError) {
+      return NextResponse.json({ error: "sample_bulk_confirmation_required" }, { status: 409 });
+    }
     if (error instanceof QuotationApprovalTransitionError) {
       return NextResponse.json({ error: "invalid_approval_transition" }, { status: 409 });
     }

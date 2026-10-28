@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { getSqlClient, isUniqueViolation, type SqlClient } from "@/lib/db";
 import {
   hashPortalPassword,
@@ -168,10 +168,10 @@ const SQLITE_SCHEMA = `
       token_hash TEXT NOT NULL UNIQUE,
       expires_at TEXT NOT NULL,
       revoked_at TEXT,
-      created_ip TEXT NOT NULL DEFAULT '',
+      created_ip_hash TEXT NOT NULL DEFAULT '',
       created_user_agent TEXT NOT NULL DEFAULT '',
       last_seen_at TEXT,
-      last_seen_ip TEXT,
+      last_seen_ip_hash TEXT,
       last_seen_user_agent TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY (portal_user_id) REFERENCES portal_users(id) ON DELETE CASCADE
@@ -227,10 +227,10 @@ const POSTGRES_SCHEMA = `
       token_hash TEXT NOT NULL UNIQUE,
       expires_at TEXT NOT NULL,
       revoked_at TEXT,
-      created_ip TEXT NOT NULL DEFAULT '',
+      created_ip_hash TEXT NOT NULL DEFAULT '',
       created_user_agent TEXT NOT NULL DEFAULT '',
       last_seen_at TEXT,
-      last_seen_ip TEXT,
+      last_seen_ip_hash TEXT,
       last_seen_user_agent TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY (portal_user_id) REFERENCES portal_users(id) ON DELETE CASCADE
@@ -253,6 +253,62 @@ export function portalIdentitySchemas(): { sqlite: string; postgres: string } {
 
 export function normalizePortalEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+export function hashPortalSessionIp(ipAddress: string | null | undefined): string | null {
+  const environment = process.env as Record<string, string | undefined>;
+  const configuredPepper = environment.PORTAL_CLIENT_FINGERPRINT_PEPPER?.trim() ?? "";
+  const production = environment.NODE_ENV === "production" || environment.VERCEL_ENV === "production";
+  if (production && configuredPepper.length < 32) {
+    throw new Error("portal_client_fingerprint_pepper_required");
+  }
+  const value = ipAddress?.trim();
+  if (!value) return null;
+  return createHmac("sha256", configuredPepper || "shapepouch-local-portal-client-fingerprint-pepper-v1")
+    .update(`portal-session-ip:v1:${value}`, "utf8")
+    .digest("hex");
+}
+
+async function migratePortalSessionIpHashColumns(db: SqlClient): Promise<void> {
+  const columns = db.dialect === "sqlite"
+    ? await db.all<{ name: string }>("PRAGMA table_info(portal_sessions)")
+    : await db.all<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = 'portal_sessions'
+    `);
+  const has = (name: string): boolean => columns.some((column) =>
+    ("name" in column ? column.name : column.column_name) === name
+  );
+  for (const suffix of ["created", "last_seen"] as const) {
+    const rawColumn = `${suffix}_ip`;
+    const hashColumn = `${suffix}_ip_hash`;
+    if (!has(rawColumn)) continue;
+    await db.transaction(async (tx) => {
+      if (!has(hashColumn)) {
+        await tx.exec(
+          suffix === "created"
+            ? `ALTER TABLE portal_sessions ADD COLUMN ${hashColumn} TEXT NOT NULL DEFAULT ''`
+            : `ALTER TABLE portal_sessions ADD COLUMN ${hashColumn} TEXT`,
+        );
+      }
+      const legacyRows = await tx.all<{ id: number; [key: string]: unknown }>(`
+        SELECT id, ${rawColumn}, ${hashColumn}
+        FROM portal_sessions
+      `);
+      for (const row of legacyRows) {
+        const rawValue = String(row[rawColumn] ?? "");
+        const existingHash = row[hashColumn];
+        if (!rawValue || (typeof existingHash === "string" && existingHash !== "")) continue;
+        await tx.run(`
+          UPDATE portal_sessions
+          SET ${hashColumn} = ?
+          WHERE id = ?
+        `, [hashPortalSessionIp(rawValue), Number(row.id)]);
+      }
+      await tx.exec(`ALTER TABLE portal_sessions DROP COLUMN ${rawColumn}`);
+    });
+  }
 }
 
 function isEmail(email: string): boolean {
@@ -289,16 +345,23 @@ function sha256(value: string): string {
 }
 
 export async function getPortalIdentityDatabase(): Promise<SqlClient> {
-  schemaReady ??= (async () => {
+  const initialization = (async () => {
     const db = await getSqlClient("customers");
     // Customer-store owns the customers schema. Reading through its API both
     // initializes that schema and proves the two modules share one store.
     const { getCustomer } = await import("@/lib/customer-store");
     await getCustomer("kanei", "__portal_schema_bootstrap__");
     await db.exec(db.dialect === "postgres" ? POSTGRES_SCHEMA : SQLITE_SCHEMA);
+    await migratePortalSessionIpHashColumns(db);
     return db;
   })();
-  return schemaReady;
+  schemaReady = initialization;
+  try {
+    return await schemaReady;
+  } catch (error) {
+    if (schemaReady === initialization) schemaReady = null;
+    throw error;
+  }
 }
 
 export async function resetPortalIdentityStoreForTest(): Promise<void> {
@@ -333,6 +396,8 @@ export async function createPortalUser(input: PortalUserInput): Promise<PublicPo
   const now = new Date().toISOString();
   const passwordHash = await hashPortalPassword(input.password);
   const db = await getPortalIdentityDatabase();
+  // Reserve the non-login quotation service actor before portal users, so IDs never collide.
+  await ensureQuotationPortalServiceActor();
   try {
     await db.run(`
       INSERT INTO portal_users (
@@ -409,6 +474,30 @@ export async function authenticatePortalUser(
   const user = mapPortalUser(row);
   if (!user.isActive || !user.isVerified) return null;
   return user;
+}
+
+export type PortalLoginState =
+  | { status: "authenticated"; user: PublicPortalUser }
+  | { status: "unverified" }
+  | { status: "invalid" };
+
+export async function authenticatePortalUserWithState(
+  email: string,
+  password: string,
+): Promise<PortalLoginState> {
+  const normalized = normalizePortalEmail(email);
+  if (normalized === PORTAL_SERVICE_ACTOR_EMAIL) return { status: "invalid" };
+  const db = await getPortalIdentityDatabase();
+  const row = await db.get<PortalUserRow & { password_hash: string }>(
+    "SELECT * FROM portal_users WHERE email = ?",
+    [normalized],
+  );
+  if (!row || !(await verifyPortalPassword(password, row.password_hash))) {
+    return { status: "invalid" };
+  }
+  const user = mapPortalUser(row);
+  if (!user.isActive) return { status: "invalid" };
+  return user.isVerified ? { status: "authenticated", user } : { status: "unverified" };
 }
 
 async function issuePortalEmailVerification(input: {
@@ -757,13 +846,13 @@ export async function createPortalSession(
   const createdAt = now.toISOString();
   await db.run(`
     INSERT INTO portal_sessions (
-      portal_user_id,token_hash,expires_at,created_ip,created_user_agent,created_at
+      portal_user_id,token_hash,expires_at,created_ip_hash,created_user_agent,created_at
     ) VALUES (?,?,?,?,?,?)
   `, [
     userId,
     sha256(token),
     expiresAt,
-    options.metadata?.ipAddress?.slice(0, 100) ?? "",
+    hashPortalSessionIp(options.metadata?.ipAddress)?.slice(0, 100) ?? "",
     options.metadata?.userAgent?.slice(0, 500) ?? "",
     createdAt,
   ]);
@@ -793,11 +882,11 @@ export async function authenticatePortalSession(
 
   await db.run(`
     UPDATE portal_sessions
-    SET last_seen_at = ?, last_seen_ip = ?, last_seen_user_agent = ?
+    SET last_seen_at = ?, last_seen_ip_hash = ?, last_seen_user_agent = ?
     WHERE token_hash = ? AND revoked_at IS NULL
   `, [
     nowText,
-    options.metadata?.ipAddress?.slice(0, 100) ?? null,
+    hashPortalSessionIp(options.metadata?.ipAddress),
     options.metadata?.userAgent?.slice(0, 500) ?? null,
     sha256(token),
   ]);

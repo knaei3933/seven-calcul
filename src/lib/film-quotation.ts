@@ -1,4 +1,4 @@
-import { D, Decimal, parseDecimal } from "./decimal";
+import { D, Decimal } from "./decimal";
 
 export const kaneiTrade = {
   name: "金井貿易株式会社",
@@ -51,21 +51,25 @@ function sanitizePdfFileNamePart(value: string, maxLength = 60): string {
   return cleaned || "無題";
 }
 
-export function buildQuotationPdfFileName(input: {
+export function buildFilmQuotationPdfFileName(input: {
   issueDate: string;
   productName: string;
   customerName: string;
 }): string {
   const dateText = input.issueDate.slice(0, 10);
-  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateText);
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(dateText);
   const datePart = dateMatch
-    ? `${dateMatch[1].slice(2)}${dateMatch[2]}${dateMatch[3]}`
+    ? `${dateMatch[1]!.slice(2)}${dateMatch[2]}${dateMatch[3]}`
     : new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).replaceAll("-", "").slice(2);
   return `お見積書_${sanitizePdfFileNamePart(input.productName)}(${sanitizePdfFileNamePart(input.customerName)})_${datePart}`;
 }
 
-export function buildFilmQuotationPdfFileName(input: Parameters<typeof buildQuotationPdfFileName>[0]): string {
-  return buildQuotationPdfFileName(input);
+export function buildQuotationPdfFileName(input: {
+  issueDate: string;
+  productName: string;
+  customerName: string;
+}): string {
+  return `${buildFilmQuotationPdfFileName(input)}.pdf`;
 }
 
 export function buildFilmQuotationFromRecord(record: {
@@ -101,25 +105,18 @@ export function buildFilmQuotationFromRecord(record: {
   };
   const snapshot = payload.calculationChecklistSnapshot;
   const orderLength = snapshot?.film?.orderLengthM ?? payload.filmOrderLengthM ?? record.filmOrderLengthM;
-  const orderLengthD = parseDecimal(orderLength);
-  if (!orderLengthD || orderLengthD.lte(0)) return null;
+  if (!orderLength || Number(orderLength) <= 0) return null;
 
   const storedFilmTotal = snapshot?.film?.filmTotal ?? payload.calculationFilmTotal;
   // 明細の単価は物流・通関費を含む総額換算にする。snapshot.unitPrice は材料単価のみのケースがある。
   const materialUnitPrice = snapshot?.film?.unitPrice ?? payload.filmUnitDisplay ?? record.filmMeterPrice ?? "0";
-  const materialUnitD = parseDecimal(materialUnitPrice);
-  const materialUnit = materialUnitD && materialUnitD.gt(0) ? materialUnitD : D(0);
-  const storedTotalD = parseDecimal(storedFilmTotal);
-  const storedTotal = storedTotalD && storedTotalD.gt(0) ? storedTotalD : null;
-  const filmTotalD = storedTotal ?? (
-    materialUnit.gt(0)
-      ? materialUnit.times(orderLengthD).toDecimalPlaces(0, Decimal.ROUND_CEIL)
-      : D(0)
-  );
-  const filmTotal = filmTotalD.toString();
-  const unitPrice = filmTotalD.gt(0)
-    ? filmTotalD.div(orderLengthD).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toString()
-    : materialUnit.toString();
+  const filmTotal = storedFilmTotal
+    ?? (D(materialUnitPrice).gt(0)
+      ? D(materialUnitPrice).times(D(orderLength)).toDecimalPlaces(0, Decimal.ROUND_CEIL).toString()
+      : "0");
+  const unitPrice = D(orderLength).gt(0) && D(filmTotal).gt(0)
+    ? D(filmTotal).div(D(orderLength)).toString()
+    : materialUnitPrice;
   const webWidth = String(payload.purchaseOrder?.webWidthMm ?? snapshot?.materialWidthMm ?? "");
   const composition = (typeof payload.filmComposition === "string" && payload.filmComposition.trim())
     || payload.purchaseOrder?.filmComposition
@@ -177,7 +174,7 @@ export function buildFilmQuotationFromRecord(record: {
         `単価条件：フィルム製作・国内輸送・海外輸送・通関費込み`,
       ].join("\n"),
       webWidthMm: webWidth,
-      orderLengthM: orderLengthD.toString(),
+      orderLengthM: orderLength,
       unitPriceYenPerM: unitPrice,
       amountYen: filmTotal,
     }],

@@ -187,7 +187,7 @@ function isCostResult(value: unknown): value is CostResult {
       "inspectionHours", "bulkLossRate", "initialChargeMl", "testFillMl", "bulkUsageMl", "bulkCost",
       "bulkCostPerPiece", "materialCostPerPiece", "variableLaborPerPiece", "machineVariablePerPiece",
       "variableProcessingPerPiece", "variableProcessingTotal", "fixedLotCost", "fixedCostPerPiece",
-      "customCharge", "sellerProfitBaseCost", "sellerProfitRate", "sellerProfitCost", "totalCostPerPiece",
+      "customCharge", "setupCost", "setupCostPerPiece", "setupCostUnit", "setupQuantity", "sellerProfitBaseCost", "sellerProfitRate", "sellerProfitCost", "totalCostPerPiece",
       "costTotal", "costComponents", "costPerPieceComponents", "sellingPrices", "film",
       "copperPlateCost", "copperPlateCostPerPiece", "gravurePricingMode", "warnings", "audit",
     ])
@@ -201,7 +201,7 @@ function isCostResult(value: unknown): value is CostResult {
     "effectiveProductionSpeed", "productionRunQuantity", "productionHours", "inspectionHours", "bulkLossRate",
     "initialChargeMl", "testFillMl", "bulkUsageMl", "bulkCost", "bulkCostPerPiece", "materialCostPerPiece",
     "variableLaborPerPiece", "machineVariablePerPiece", "variableProcessingPerPiece", "variableProcessingTotal",
-    "fixedLotCost", "fixedCostPerPiece", "customCharge", "sellerProfitBaseCost", "sellerProfitRate",
+    "fixedLotCost", "fixedCostPerPiece", "customCharge", "setupCost", "setupCostPerPiece", "setupCostUnit", "setupQuantity", "sellerProfitBaseCost", "sellerProfitRate",
     "sellerProfitCost", "totalCostPerPiece", "costTotal", "copperPlateCost", "copperPlateCostPerPiece",
   ] as const;
   if (
@@ -218,7 +218,7 @@ function isCostResult(value: unknown): value is CostResult {
     return false;
   }
 
-  const costComponentKeys = ["film", "copperPlate", "bulk", "variableProcessing", "fixedLot", "custom"] as const;
+  const costComponentKeys = ["film", "copperPlate", "bulk", "variableProcessing", "fixedLot", "custom", "setup"] as const;
   if (
     !hasRequiredFields(result.costComponents, costComponentKeys)
     || !costComponentKeys.every((key) => isFiniteNumberString(result.costComponents[key]))
@@ -1019,6 +1019,8 @@ export default function QuotationPage({
     targetMargin: "0.4" as TargetMargin,
     customMargin: "0.45",
     bulkPrice: "0",
+    setupCost: "0",
+    setupQuantity: "1",
     chambers: [] as { name: string; fill: string; price: string }[],
     chamberLiquidsEnabled: false,
     skuCount: "1",
@@ -1384,12 +1386,14 @@ export default function QuotationPage({
       })),
       lossRate: parameters.lossRate,
       bulkUnitPrice: form.bulkPrice,
+      setupCost: form.setupCost,
+      setupQuantity: form.setupQuantity,
       gravureParameters: normalizedGravureParameters,
     });
     const checklistSnapshotJson = JSON.stringify(preliminarySnapshot);
     sessionStorage.setItem(CURRENT_CHECKLIST_SNAPSHOT_KEY, checklistSnapshotJson);
     localStorage.setItem("pouch-current-checklist-snapshot-persistent-v1", checklistSnapshotJson);
-  }, [effectiveParameters, effectiveSize, form.bulkPrice, form.lengthMm, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate]);
+  }, [effectiveParameters, effectiveSize, form.bulkPrice, form.lengthMm, form.setupCost, form.setupQuantity, form.skus, form.widthMm, normalizedGravureParameters, parameters.lossRate]);
 
   const selectCandidate = async (candidate: PrintCandidate) => {
     if (!serverResult || pending || selecting) return;
@@ -1916,6 +1920,8 @@ export default function QuotationPage({
           parameters: effectiveParameters,
           lossRate: parameters.lossRate,
           bulkUnitPrice: form.bulkPrice,
+          setupCost: form.setupCost,
+          setupQuantity: form.setupQuantity,
           webWidthMm: activeMaterialWidthMm(quotationDraftResult, effectiveSize.webWidthMm) ?? effectiveSize.webWidthMm,
           lanes: effectiveSize.lanes,
           pitchMm: D(effectiveSize.lengthMm).plus(effectiveSize.pitchAddMm).toString(),
@@ -2372,9 +2378,22 @@ export default function QuotationPage({
                 <p className="help">1回に作れる製品数は1連=4個／2連=2個／3連・4連=1個です。3列でも4列でも1回に1個しか出来ないため、3連と4連の速度は同じ（基準速度の1/4）になります。</p>
               </div>
             </div>
-            {chamberConfigActive
-              ? <p className="help" data-testid="bulk-price-note">バルク単価は室ごとの液体設定の各行で入力します（ここでは入力しません）。</p>
-              : <Field label="バルク単価 (円/g)" htmlFor="bulk"><input id="bulk" inputMode="decimal" value={form.bulkPrice} onChange={(e) => set("bulkPrice", e.target.value)} /></Field>}
+            <div className="field-row">
+              {chamberConfigActive
+                ? <div className="field"><span>バルク単価 (円/g)</span><p className="help" data-testid="bulk-price-note">バルク単価は室ごとの液体設定の各行で入力します（ここでは入力しません）。</p></div>
+                : <Field label="バルク単価 (円/g)" htmlFor="bulk"><input id="bulk" inputMode="decimal" value={form.bulkPrice} onChange={(e) => set("bulkPrice", e.target.value)} /></Field>}
+            </div>
+            <div className="setup-input-group" data-testid="setup-input-group">
+              <p className="setup-input-title">セットアップ費用</p>
+              <div className="setup-input-grid">
+                <Field label="費用 (円/個)" htmlFor="setup-cost">
+                  <input id="setup-cost" inputMode="decimal" value={form.setupCost} onChange={(e) => set("setupCost", e.target.value)} />
+                </Field>
+                <Field label="数 (個)" htmlFor="setup-quantity">
+                  <input id="setup-quantity" inputMode="numeric" value={form.setupQuantity} onChange={(e) => set("setupQuantity", e.target.value)} />
+                </Field>
+              </div>
+            </div>
             <details className="parameters" data-testid="parameters">
               <summary>計算パラメータ調整</summary>
                   {parameterGroups.map((group) => (
@@ -2756,6 +2775,16 @@ export default function QuotationPage({
                   <details className="cost-block" data-testid="cost-custom">
                     <summary><h3>⑤ カスタム費用</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.custom))}</span></summary>
                     <p className="chain">カスタム区分（自由なサイズ）を選択したときは、ロット1回あたり {formatCurrency(displayAmount(parameters.customPouchCharge))} を加算します。標準サイズの場合は ¥0 です。</p>
+                  </details>
+                  <details className="cost-block" data-testid="cost-setup">
+                    <summary><h3>⑥ セットアップ費用</h3><span className="subtotal">{formatCurrency(displayAmount(resultShown.costComponents.setup))}<small>（{formatCurrency(displayAmount(resultShown.costPerPieceComponents.setup))} /枚）</small></span></summary>
+                    <table className="table breakdown-table">
+                      <thead><tr><th scope="col">項目</th><th scope="col">単価</th><th scope="col">数量</th><th scope="col">金額</th></tr></thead>
+                      <tbody>
+                        <tr><td>セットアップ</td><td data-testid="setup-cost-unit">{formatCurrency(displayAmount(form.setupCost))} /個</td><td data-testid="setup-cost-quantity">{formatNumber(form.setupQuantity)} 個</td><td data-testid="setup-cost-amount">{formatCurrency(displayAmount(resultShown.costComponents.setup))}</td></tr>
+                      </tbody>
+                    </table>
+                    <p className="chain">セットアップ費用＝費用 (円/個) × 数 (個)。総原価と見積候補に含まれます。</p>
                   </details>
                 </div>
                 {resultShown.film.skuCosts.length > 1 ? (

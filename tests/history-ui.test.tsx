@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -121,13 +121,13 @@ describe("quotation history ownership UI", () => {
     expect(screen.getByText(/異形パウチ専用フィルム/)).toBeInTheDocument();
     expect(screen.getAllByText("History Test").length).toBeGreaterThan(0);
     expect(screen.queryByText("最終損益サマリー")).not.toBeInTheDocument();
-    expect(screen.getByTestId("detail-print-current")).toHaveTextContent("PDF出力・印刷");
+    expect(screen.getByTestId("detail-print-current")).toHaveTextContent("フィルム見積書PDF");
 
     const printSpy = vi.spyOn(window, "print").mockImplementation(() => {});
     await user.click(screen.getByRole("button", { name: "詳細データ" }));
     expect(screen.getByTestId("data-report-a4")).toBeVisible();
     expect(screen.getByTestId("data-report-a4")).toHaveTextContent("内部管理用");
-    expect(screen.getByTestId("detail-print-current")).toHaveTextContent("PDF出力・印刷");
+    expect(screen.getByTestId("detail-print-current")).toHaveTextContent("詳細データPDF");
     await user.click(screen.getByTestId("detail-print-current"));
     await waitFor(() => expect(printSpy).toHaveBeenCalledTimes(1));
     printSpy.mockRestore();
@@ -193,8 +193,7 @@ describe("quotation history ownership UI", () => {
     await screen.findByText("S7-HISTORY-OWNER");
     await user.click(screen.getByRole("button", { name: "詳細" }));
     expect(screen.getByTestId("history-customer-email")).toHaveValue("");
-    expect(screen.getByTestId("history-auto-send")).toBeDisabled();
-    expect(screen.getByTestId("history-auto-send")).toHaveAttribute("title", "送信前にカネイ貿易側の内部承認が必要です。");
+    expect(screen.queryByTestId("history-auto-send")).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("history-email-edit"));
     await user.type(screen.getByTestId("history-customer-email"), "legacy@example.test");
@@ -206,28 +205,64 @@ describe("quotation history ownership UI", () => {
     expect(screen.getByTestId("history-auto-send")).toBeInTheDocument();
   });
 
-  it("keeps 成約 visible but blocks selection without internal approval", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (
-      Response.json({ records: [ownerRecord] }, { status: 200 })
-    ));
+  it("disables the sales contract option until internal approval is recorded", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ records: [ownerRecord] }, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    const user = userEvent.setup();
     render(<HistoryClient currentUser={currentUser} />);
 
-    await screen.findByText("S7-HISTORY-OWNER");
-    const select = screen.getByLabelText("S7-HISTORY-OWNER の状態");
-    expect(select).toHaveDisplayValue("下書き");
-    expect(within(select).getByRole("option", { name: "成約" })).toBeInTheDocument();
-    await user.selectOptions(select, "approved");
+    const statusSelect = await screen.findByLabelText("S7-HISTORY-OWNER の状態");
+    const approvedOption = statusSelect.querySelector('option[value="approved"]');
+    expect(approvedOption).toBeDisabled();
+    expect(approvedOption).toHaveTextContent("成約（内部承認後に選択可）");
+    expect(statusSelect).toHaveAttribute("title", "成約にするには、詳細画面で内部承認を完了してください");
+  });
 
-    expect(screen.getByTestId("history-action-error")).toHaveTextContent(
-      "まだカネイ貿易側で承認されていません。お急ぎの場合はカネイ貿易へお電話ください。",
+  it("shows why internal approval is unavailable for another Kanei user", async () => {
+    const kaneiUser: AuthenticatedUser = {
+      ...currentUser,
+      email: "other@kanei-trade.co.jp",
+      name: "Other Kanei",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ records: [ownerRecord] }, { status: 200 })));
+    render(<HistoryClient currentUser={kaneiUser} />);
+
+    await screen.findByText("S7-HISTORY-OWNER");
+    await userEvent.setup().click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    const button = await screen.findByTestId("history-internal-approve");
+    expect(button).toBeDisabled();
+    expect(screen.getByTestId("history-internal-approval-blocked-reason")).toHaveTextContent(
+      "内部承認はKimのみ実行できます。",
     );
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/quotations/2",
-      expect.objectContaining({ method: "PATCH" }),
-    );
-    expect(select).toHaveDisplayValue("下書き");
+  });
+
+  it("shows why internal approval is blocked while sample bulk is unconfirmed for Kim", async () => {
+    const kimUser: AuthenticatedUser = {
+      ...currentUser,
+      email: "kim@kanei-trade.co.jp",
+      name: "Kim",
+    };
+    const pendingSampleRecord = {
+      ...ownerRecord,
+      payload: {
+        sampleBulkConfirmation: {
+          required: true,
+          status: "pending" as const,
+          sampleQuantityMl: "5000",
+          receivedMl: null,
+          receivedAt: null,
+          confirmedAt: null,
+          note: "",
+        },
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ records: [pendingSampleRecord] }, { status: 200 })));
+    render(<HistoryClient currentUser={kimUser} />);
+
+    await screen.findByText("S7-HISTORY-OWNER");
+    await userEvent.setup().click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    const button = await screen.findByTestId("history-internal-approve");
+    expect(button).toBeEnabled();
+    expect(screen.queryByTestId("history-internal-approval-blocked-reason")).not.toBeInTheDocument();
   });
 
   it("shows the sales contract action for an internally approved draft without customer approval", async () => {
@@ -401,7 +436,7 @@ describe("quotation history ownership UI", () => {
     const displayUrl = iframe.getAttribute("src") ?? "";
     expect(displayUrl).toMatch(/^blob:stored-pdf-1$/);
     expect(objectsByBlobUrl.get(displayUrl)).toBe(pdfBlob);
-    expect(fetchMock).toHaveBeenCalledWith("/api/quotations/1/pdf", { cache: "no-store" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/quotations/1/pdf", { cache: "default" });
     expect(screen.queryByRole("article", { name: "見積書A4" })).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("detail-download-current"));

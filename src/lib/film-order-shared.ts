@@ -149,6 +149,7 @@ export interface FilmOrderRow {
   film_shipment_note: string;
   film_delivery_document_name: string;
   film_delivery_document_url: string;
+  film_delivery_documents_json: string;
   film_delivered_on: string | null;
   film_delivered_at: string | null;
   film_delivery_note: string;
@@ -167,11 +168,19 @@ export interface FilmOrderRow {
   ship_to_phone: string;
   ship_to_email: string;
   ship_to_note: string;
+  ship_to_requested_at: string | null;
+  ship_to_requested_by: string;
   ship_to_registered_at: string | null;
   ship_to_registered_by: string;
   ship_to_saved_to_master: number | boolean;
   ship_to_confirmed_at: string | null;
   ship_to_confirmed_by: string;
+  production_plan_status: ProductionPlanStatus;
+  production_plan_start_date: string | null;
+  production_plan_end_date: string | null;
+  production_plan_note: string;
+  production_plan_updated_at: string | null;
+  production_plan_updated_by: string;
   proof_upload_token: string | null;
   proof_upload_expires_at: string | null;
   status: FilmOrderStatus;
@@ -192,6 +201,14 @@ export interface FilmOrderRow {
   customer_proof_approved_at: string | null;
   customer_proof_correction_count: number;
   customer_proof_correction_reason: string;
+  supplier_approval_status: "pending" | "approved" | "legacy_exempt";
+  supplier_approval_at: string | null;
+  supplier_approval_by: string;
+  supplier_approval_note: string;
+  buyer_approval_status: "pending" | "approved";
+  buyer_approval_at: string | null;
+  buyer_approval_by: string;
+  supplier_order_note: string;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -215,6 +232,13 @@ export interface CustomerProofTracking {
   approvedAt: string | null;
   correctionCount: number;
   correctionReason: string;
+  supplierApprovalStatus: "pending" | "approved" | "legacy_exempt";
+  supplierApprovalAt: string | null;
+  supplierApprovalBy: string;
+  supplierApprovalNote: string;
+  buyerApprovalStatus: "pending" | "approved";
+  buyerApprovalAt: string | null;
+  buyerApprovalBy: string;
 }
 
 export interface FilmDeliveryTracking {
@@ -225,12 +249,18 @@ export interface FilmDeliveryTracking {
   shipmentNote: string;
   deliveryDocumentName: string;
   deliveryDocumentUrl: string;
+  documents: DeliveryDocument[];
   deliveredOn: string | null;
   deliveredAt: string | null;
   deliveryNote: string;
   receivedAt: string | null;
   receivedNote: string;
   receivedByEmail: string;
+}
+
+export interface DeliveryDocument {
+  name: string;
+  url: string;
 }
 
 export const SHIP_TO_STATUSES = [
@@ -247,6 +277,22 @@ export const shipToStatusLabels: Record<ShipToStatus, string> = {
   confirmed: "納品先確認済み",
 };
 
+export const PRODUCTION_PLAN_STATUSES = [
+  "not_set",
+  "tentative",
+  "confirmed",
+  "adjusted",
+] as const;
+
+export type ProductionPlanStatus = typeof PRODUCTION_PLAN_STATUSES[number];
+
+export const productionPlanStatusLabels: Record<ProductionPlanStatus, string> = {
+  not_set: "生産予定未登録",
+  tentative: "生産可能予定（暫定）",
+  confirmed: "生産予定確定",
+  adjusted: "生産予定調整済み",
+};
+
 export interface ShipToTracking {
   status: ShipToStatus;
   destinationId: number | null;
@@ -260,6 +306,8 @@ export interface ShipToTracking {
   phone: string;
   email: string;
   note: string;
+  requestedAt: string | null;
+  requestedBy: string;
   registeredAt: string | null;
   registeredBy: string;
   savedToMaster: boolean;
@@ -272,9 +320,19 @@ export type FilmOrder = FilmOrderRow & {
   sampleBulk: SampleBulkTracking;
   customerDesign: CustomerDesignTracking;
   customerProof: CustomerProofTracking;
+  productionPlan: ProductionPlanTracking;
   delivery: FilmDeliveryTracking;
   shipTo: ShipToTracking;
 };
+
+export interface ProductionPlanTracking {
+  status: ProductionPlanStatus;
+  startDate: string | null;
+  endDate: string | null;
+  note: string;
+  updatedAt: string | null;
+  updatedBy: string;
+}
 
 export interface SampleBulkTracking {
   status: SampleBulkStatus;

@@ -20,7 +20,7 @@ import type { QuotationRecord, QuotationRecordInput } from "@/lib/quotation-shar
 import { getSessionUser } from "@/lib/api-auth";
 import { getQuotationByNumber } from "@/lib/quotation-store";
 import type { AuthenticatedUser } from "@/lib/auth-store";
-import { buildFilmQuotationFromRecord } from "@/lib/film-quotation";
+import { buildFilmQuotationFromRecord, buildQuotationPdfFileName } from "@/lib/film-quotation";
 import {
   GravureDurableDatabaseRequiredError,
   GravureInfrastructureError,
@@ -446,7 +446,11 @@ export async function POST(request: Request): Promise<NextResponse> {
         message: "発行にはA4 PDF（10MB以内）を含めて送信してください。",
       }, { status: 400 });
     }
-    const fileName = `${input.quotationNumber}.pdf`;
+    const fileName = buildQuotationPdfFileName({
+      issueDate: input.issueDate,
+      productName: input.productName,
+      customerName: input.customerName,
+    });
     const issued = await saveIssuedQuotation(
       input,
       user.id,
