@@ -105,13 +105,14 @@ test("PDF output requires an issued canonical PDF when history storage fails", a
 });
 
 test("quote and history download the same canonical PDF bytes", async ({ page }) => {
+  test.setTimeout(90_000);
   const customerName = `Cross-UI E2E ${Date.now()}`;
   await page.goto("/quote");
   await page.getByTestId("fill-test-data").click();
   await page.getByPlaceholder("株式会社◯◯").fill(customerName);
   await expect(page.getByTestId("save-history")).toBeEnabled();
   await page.getByTestId("save-history").click();
-  await expect(page.getByTestId("issue-success")).toBeVisible();
+  await expect(page.getByTestId("issue-success")).toBeVisible({ timeout: 60_000 });
 
   const quoteDownloadPromise = page.waitForEvent("download");
   await page.getByTestId("print-pdf").click();

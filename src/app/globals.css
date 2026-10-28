@@ -1226,6 +1226,30 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 3mm; }
   .history-controls { width: 100%; grid-template-columns: 1fr; }
   .history-detail-layer { grid-template-columns: 1fr; }
   .history-detail-panel { grid-column: 1; margin: 0; height: 100dvh; border-radius: 0; }
+  .history-detail-header { max-height: min(78dvh, 680px); overflow: auto; }
+  .history-detail-header .detail-header-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    gap: 8px;
+  }
+  .history-detail-header .detail-header-actions .button,
+  .history-detail-header .detail-header-actions a.button {
+    width: 100%;
+    min-width: 0;
+  }
+  .history-detail-header .history-email-editor {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+    order: 2;
+  }
+  .history-detail-header .history-email-editor .button { width: 100%; }
+  .history-detail-header [data-testid="detail-download-current"] { order: 1; }
+  .history-detail-header [data-testid="detail-print-current"] { order: 3; }
+  .history-detail-header [data-testid="history-mail-link"] { order: 4; }
+  .history-detail-header [data-testid="history-internal-approve"] { order: 5; }
+  .history-detail-header [data-testid="history-auto-send"] { order: 6; }
   .profit-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .profit-summary-head { grid-template-columns: 1fr; }
   .profit-summary-total { justify-items: start; text-align: left; }
