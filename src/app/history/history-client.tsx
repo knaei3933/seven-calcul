@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import { CALCULATION_VERSION, sizeMaster } from "@/lib/constants";
-import { buildFilmQuotationFromRecord, filmQuotationNumberFor, kaneiTrade } from "@/lib/film-quotation";
+import { buildFilmQuotationFromRecord, buildFilmQuotationPdfFileName, buildQuotationPdfFileName, filmQuotationNumberFor, kaneiTrade } from "@/lib/film-quotation";
 import { D, Decimal } from "@/lib/decimal";
 import { analyzeQuotation, filmCompositionOf, printingMethodOf } from "@/lib/quotation-history";
 import { fileNameFromContentDisposition } from "@/lib/content-disposition";
@@ -14,6 +14,7 @@ import {
   QUOTATION_RESTORE_KEY,
   quotationStatuses,
   type QuotationRecord,
+  type QuotationSampleBulkConfirmation,
   type QuotationStatus,
   type UserSummary,
 } from "@/lib/quotation-shared";
@@ -28,7 +29,7 @@ const statusLabels: Record<QuotationStatus, string> = {
   expired: "期限切れ",
 };
 
-type HistoryDetailTab = "document" | "film" | "data";
+type HistoryDetailTab = "document" | "film" | "sample" | "data";
 type QuotationApprovalGate = "internal" | "customerApproval";
 
 function requestedHistoryRecordId(): number | null {
@@ -39,8 +40,8 @@ function requestedHistoryRecordId(): number | null {
 
 function requestedHistoryDetailTab(): HistoryDetailTab {
   if (typeof window === "undefined") return "document";
-  const tab = new URLSearchParams(window.location.search).get("tab");
-  return tab === "film" || tab === "data" ? tab : "document";
+  const tab = new URLSearchParams(window.location.search).get("tab") ?? "";
+  return ["film", "sample", "data"].includes(tab) ? tab as HistoryDetailTab : "document";
 }
 
 export default function HistoryClient({ currentUser }: { currentUser: AuthenticatedUser }) {
@@ -430,6 +431,10 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
             canApproveInternally={currentUser.email.trim().toLowerCase() === "kim@kanei-trade.co.jp"}
             canRecordCustomerApproval={isKaneiTradeUser(currentUser.email)}
             sendingEmail={sendingEmail}
+            onSampleBulkUpdated={(updated) => {
+              setRecords((old) => old.map((item) => (item.id === updated.id ? updated : item)));
+              setSelectedId(updated.id);
+            }}
           />
           {emailMessage ? <p className="help" role="status" data-testid="email-message" style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 999, background: "white", padding: "8px 16px", borderRadius: 8, border: "1px solid #cbd5e1" }}>{emailMessage}</p> : null}
         </>
@@ -444,7 +449,7 @@ async function fetchStoredQuotationPdf(
   recordId: number,
   fallbackFileName: string,
 ): Promise<{ blob: Blob; fileName: string }> {
-  const response = await fetch(`/api/quotations/${recordId}/pdf`, { cache: "no-store" });
+  const response = await fetch(`/api/quotations/${recordId}/pdf`, { cache: "default" });
   if (response.status === 404) {
     throw new StoredQuotationPdfUnavailableError("見積書PDFが見つかりません。");
   }
@@ -494,9 +499,10 @@ function QuotationDetailModal({
   canApproveInternally,
   canRecordCustomerApproval,
   sendingEmail,
+  onSampleBulkUpdated,
 }: {
   record: QuotationRecord;
-  initialTab?: "document" | "film" | "data";
+  initialTab?: "document" | "film" | "sample" | "data";
   onClose: () => void;
   onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void;
   onSendEmail: (record: QuotationRecord) => void;
@@ -513,6 +519,7 @@ function QuotationDetailModal({
   canApproveInternally: boolean;
   canRecordCustomerApproval: boolean;
   sendingEmail: boolean;
+  onSampleBulkUpdated: (record: QuotationRecord) => void;
 }) {
   const [storedPdf, setStoredPdf] = useState<{ url: string; blob: Blob; fileName: string } | null>(null);
   const [storedPdfStatus, setStoredPdfStatus] = useState<"loading" | "available" | "unavailable">("loading");
@@ -531,12 +538,58 @@ function QuotationDetailModal({
     || !storedFilmQuotation.items[0]?.specification
     || storedFilmQuotation.pouchQuotationNumber !== record.quotationNumber
     || storedFilmQuotation.quotationNumber !== expectedFilmQuotationNumber;
+  // 旧保存分は材料単価（252円/m）と物流込合計（363,000円）が混在することがある。
+  // 金額の整合がない保存分は常に物流・通関費込みの再生成値で表示する。
+  const hasInconsistentStoredPricing = Boolean(storedFilmQuotation?.items.some((item) => {
+    const length = Number(item.orderLengthM);
+    const amount = Number(item.amountYen);
+    const unit = Number(item.unitPriceYenPerM);
+    return Number.isFinite(length) && length > 0
+      && Number.isFinite(amount) && amount > 0
+      && Number.isFinite(unit)
+      && Math.abs(amount - unit * length) > 1;
+  }));
+  const shouldRegenerateFilmQuotation = legacyFilmQuotation || hasInconsistentStoredPricing;
   const filmQuotation = legacyFilmQuotation
+    || hasInconsistentStoredPricing
     ? buildFilmQuotationFromRecord(record)
     : storedFilmQuotation;
-  const [detailTab, setDetailTab] = useState<"document" | "film" | "data">(
+  const sampleBulkConfirmation = typeof record.payload.sampleBulkConfirmation === "object"
+    && record.payload.sampleBulkConfirmation !== null
+    ? record.payload.sampleBulkConfirmation as QuotationSampleBulkConfirmation
+    : null;
+  const [detailTab, setDetailTab] = useState<"document" | "film" | "sample" | "data">(
     initialTab === "film" && !filmQuotation ? "document" : initialTab,
   );
+  const [sampleBulk, setSampleBulk] = useState<QuotationSampleBulkConfirmation | null>(sampleBulkConfirmation);
+  const [sampleBulkBusy, setSampleBulkBusy] = useState(false);
+  const [sampleBulkError, setSampleBulkError] = useState("");
+  const [sampleReceivedMl, setSampleReceivedMl] = useState("");
+  const [sampleNote, setSampleNote] = useState("");
+
+  const updateSampleBulk = async (action: "record-received" | "confirm") => {
+    if (sampleBulkBusy) return;
+    setSampleBulkBusy(true);
+    setSampleBulkError("");
+    try {
+      const response = await fetch(`/api/quotations/${record.id}/sample-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, receivedMl: sampleReceivedMl, note: sampleNote }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.record) throw new Error(payload.error ?? "failed");
+      const updated = payload.record as QuotationRecord;
+      setSampleBulk(updated.payload.sampleBulkConfirmation as QuotationSampleBulkConfirmation);
+      setSampleReceivedMl("");
+      setSampleNote("");
+      onSampleBulkUpdated(updated);
+    } catch (caught) {
+      setSampleBulkError(caught instanceof Error && caught.message !== "failed" ? caught.message : "サンプルバルク状態を更新できませんでした。");
+    } finally {
+      setSampleBulkBusy(false);
+    }
+  };
   const calculationChecklistSnapshot = record.payload.calculationChecklistSnapshot as {
     fillMlPerChamber?: string;
     connectedChambers?: number;
@@ -628,7 +681,11 @@ function QuotationDetailModal({
     let objectUrl: string | null = null;
     const loadStoredPdf = async () => {
       try {
-        const pdf = await fetchStoredQuotationPdf(record.id, `${record.quotationNumber}.pdf`);
+        const pdf = await fetchStoredQuotationPdf(record.id, buildQuotationPdfFileName({
+          issueDate: record.issueDate,
+          productName: record.productName,
+          customerName: record.customerName,
+        }));
         if (!active) return;
         objectUrl = URL.createObjectURL(pdf.blob);
         setStoredPdf({
@@ -678,14 +735,18 @@ function QuotationDetailModal({
       window.removeEventListener("afterprint", resetFit);
       printMedia?.removeEventListener("change", handleMediaChange);
     };
-  }, [record.id, record.quotationNumber]);
+  }, [record.customerName, record.id, record.issueDate, record.productName, record.quotationNumber]);
 
   const loadStoredQuotationPdf = async (): Promise<{ blob: Blob; fileName: string } | null> => {
     if (storedPdfBusyRef.current) return null;
     storedPdfBusyRef.current = true;
     setStoredPdfError("");
     try {
-      return await fetchStoredQuotationPdf(record.id, `${record.quotationNumber}.pdf`);
+      return await fetchStoredQuotationPdf(record.id, buildQuotationPdfFileName({
+        issueDate: record.issueDate,
+        productName: record.productName,
+        customerName: record.customerName,
+      }));
     } catch (error) {
       setStoredPdfStatus("unavailable");
       setStoredPdfError(error instanceof StoredQuotationPdfUnavailableError
@@ -700,10 +761,15 @@ function QuotationDetailModal({
   const downloadStoredPdf = async () => {
     const pdf = await loadStoredQuotationPdf();
     if (!pdf) return;
+    const fileName = buildQuotationPdfFileName({
+      issueDate: record.issueDate,
+      productName: record.productName,
+      customerName: record.customerName,
+    });
     const objectUrl = URL.createObjectURL(pdf.blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
-    anchor.download = pdf.fileName;
+    anchor.download = fileName;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
@@ -739,8 +805,23 @@ function QuotationDetailModal({
         }
       }),
     );
+    // ブラウザの「PDFとして保存」の初期ファイル名は document.title から作られる。
+    const previousTitle = document.title;
+    document.title = detailTab === "film" && filmQuotation
+      ? buildFilmQuotationPdfFileName({
+          issueDate: filmQuotation.issueDate || record.issueDate,
+          productName: filmQuotation.productName || record.productName,
+          customerName: filmQuotation.endCustomerName || record.customerName,
+        })
+      : previousTitle;
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.print());
+      requestAnimationFrame(() => {
+        try {
+          window.print();
+        } finally {
+          document.title = previousTitle;
+        }
+      });
     });
   };
 
@@ -776,6 +857,14 @@ function QuotationDetailModal({
                   {record.customerApproval ? `顧客承認済み（${new Date(record.customerApproval.approvedAt).toLocaleString("ja-JP")}）` : "顧客承認待ち"}
                 </span>
               </div>
+              {detailTab === "document" ? (
+                <span
+                  className={storedPdfStatus === "available" ? "pdf-status-chip available" : "pdf-status-chip"}
+                  data-testid="history-pdf-status"
+                >
+                  {storedPdfStatus === "loading" ? "PDF準備中" : storedPdfStatus === "available" ? "PDF利用可能" : "PDFなし"}
+                </span>
+              ) : null}
             </div>
           </div>
           <div className="detail-header-actions">
@@ -848,7 +937,8 @@ function QuotationDetailModal({
               <button
                 className="button small"
                 type="button"
-                disabled={approvingGate}
+                disabled={approvingGate || Boolean(sampleBulk?.required && sampleBulk.status !== "confirmed")}
+                title={sampleBulk?.required && sampleBulk.status !== "confirmed" ? "先にサンプルバルク確認を完了してください。" : undefined}
                 onClick={() => onApproveGate(record, "internal")}
                 data-testid="history-internal-approve"
               >{approvingGate ? "承認中..." : "内部承認する"}</button>
@@ -896,6 +986,15 @@ function QuotationDetailModal({
                 aria-current={detailTab === "film"}
                 data-testid="film-quote-tab"
               >フィルム見積書</button>
+            ) : null}
+            {sampleBulk?.required ? (
+              <button
+                className={detailTab === "sample" ? "active" : ""}
+                type="button"
+                onClick={() => setDetailTab("sample")}
+                aria-current={detailTab === "sample"}
+                data-testid="sample-bulk-quote-tab"
+              >サンプルバルク</button>
             ) : null}
             <button
               className={detailTab === "data" ? "active" : ""}
@@ -1066,6 +1165,57 @@ function QuotationDetailModal({
             </p>
           )
           ) : null}
+          {detailTab === "sample" && sampleBulk?.required ? (
+            <section className="panel sample-bulk-quote-panel" aria-label="サンプルバルク確認">
+              <h2>サンプルバルク確認（見積前工程）</h2>
+              <p className="help">
+                顧客バルクの到着量を確認し、充填方法と見積金額へ反映した後に内部承認してください。
+              </p>
+              <dl className="sample-bulk-quote-state">
+                <div><dt>状態</dt><dd data-testid="sample-bulk-quote-status">
+                  {sampleBulk.status === "confirmed" ? "確認済み" : sampleBulk.status === "received" ? "受領済み" : "未受領"}
+                </dd></div>
+                {sampleBulk.sampleQuantityMl ? <div><dt>依頼量</dt><dd>{sampleBulk.sampleQuantityMl}ml</dd></div> : null}
+                {sampleBulk.receivedMl ? <div><dt>受領量</dt><dd>{sampleBulk.receivedMl}ml</dd></div> : null}
+                {sampleBulk.receivedAt ? <div><dt>受領日時</dt><dd>{new Date(sampleBulk.receivedAt).toLocaleString("ja-JP")}</dd></div> : null}
+                {sampleBulk.confirmedAt ? <div><dt>確認日時</dt><dd>{new Date(sampleBulk.confirmedAt).toLocaleString("ja-JP")}</dd></div> : null}
+                {sampleBulk.note ? <div><dt>メモ</dt><dd>{sampleBulk.note}</dd></div> : null}
+              </dl>
+
+              {record.status === "draft" && !record.internalApproval && canApproveInternally ? (
+                <div className="sample-bulk-quote-actions">
+                  {sampleBulk.status === "pending" ? (
+                    <>
+                      <label>受領量 (ml)<input value={sampleReceivedMl} inputMode="decimal" onChange={(event) => setSampleReceivedMl(event.target.value)} /></label>
+                      <label>メモ<textarea value={sampleNote} rows={2} onChange={(event) => setSampleNote(event.target.value)} /></label>
+                      <button
+                        className="button workflow-action role-customer"
+                        type="button"
+                        disabled={sampleBulkBusy}
+                        onClick={() => void updateSampleBulk("record-received")}
+                      >{sampleBulkBusy ? "登録中..." : "受領を記録"}</button>
+                    </>
+                  ) : null}
+                  {sampleBulk.status === "received" ? (
+                    <>
+                      <label>反映メモ<textarea value={sampleNote} rows={2} onChange={(event) => setSampleNote(event.target.value)} /></label>
+                      <button
+                        className="button workflow-action role-kanei"
+                        type="button"
+                        disabled={sampleBulkBusy}
+                        onClick={() => void updateSampleBulk("confirm")}
+                      >{sampleBulkBusy ? "確認中..." : "見積に反映済みとして確認"}</button>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+              {sampleBulkError ? <p className="error" role="alert">{sampleBulkError}</p> : null}
+              {sampleBulk.status !== "confirmed" ? (
+                <p className="film-order-upload-error" role="status">サンプルバルク確認前に内部承認はできません。</p>
+              ) : null}
+            </section>
+          ) : null}
+
           {detailTab === "data" ? (
           <>
             <article className="a4-sheet history-a4 data-report-a4" aria-label="詳細データA4帳票" data-testid="data-report-a4">
