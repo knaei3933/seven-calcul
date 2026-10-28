@@ -1,8 +1,9 @@
 /**
  * フィルム発注ワークフローの権限。
- * 見積を作成した会社（発注側）と、供給側（金井貿易 or 外部メーカー）で操作権限が決まる。
- * - Seven Chemical (@727.co.jp) が発注側: 入稿・承認はセブン化学、校正登録等は金井貿易
- * - Kanei Trade (@kanei-trade.co.jp) が発注側（カネイ自身の営業）: すべて金井貿易が操作
+ * 商流は「顧客 → セブン化学（パウチ充填製造） → 金井貿易（フィルム調達） → フィルムメーカー」。
+ * 見積の営業チャネル所有者が誰であっても、フィルム発注主は Seven Chemical (@727.co.jp)。
+ * - セブン化学: Buyer操作（発注書送信・入稿・Buyer最終承認・受領）
+ * - 金井貿易: フィルム調達・校正データ登録・金井貿易承認・メーカー発注
  */
 export const SEVEN_CHEMICAL_EMAIL_DOMAIN = "@727.co.jp";
 export const KANEI_TRADE_EMAIL_DOMAIN = "@kanei-trade.co.jp";
@@ -46,7 +47,7 @@ export function buyerDomainOf(createdByEmail: string | null | undefined): "seven
   return isSevenChemicalUser(createdByEmail) ? "seven" : "kanei";
 }
 
-export type FilmOrderActionSide = "buyer" | "kanei";
+export type FilmOrderActionSide = "buyer" | "kanei" | "buyer_and_kanei";
 
 const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
   "mark-ordered": "buyer",
@@ -55,29 +56,32 @@ const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
   "resend-receiving-notice": "buyer",
   approve: "buyer",
   "request-re-proof": "buyer",
-  "request-sample-bulk": "kanei",
-  "register-sample-bulk": "buyer",
-  "confirm-sample-bulk": "kanei",
-  "request-sample-bulk-adjustment": "kanei",
-  "request-customer-design-upload": "kanei",
-  "confirm-customer-design": "kanei",
-  "request-customer-design-correction": "kanei",
-  "set-customer-design-not-required": "kanei",
+  "request-customer-design-upload": "buyer",
+  "confirm-customer-design": "buyer",
+  "request-customer-design-correction": "buyer",
+  "set-customer-design-not-required": "buyer",
   "send-customer-proof-review": "kanei",
   "record-customer-proof-approval": "kanei",
   "register-proof": "kanei",
   "send-proof-notice": "kanei",
   "rotate-supplier-proof-token": "kanei",
   "set-supplier": "kanei",
+  "update-supplier-order-note": "kanei",
+  "preview-supplier-po": "kanei",
   "send-po": "kanei",
-  "register-ship-to": "buyer",
-  "confirm-ship-to": "buyer",
+  "request-ship-to-registration": "buyer_and_kanei",
+  "register-ship-to": "buyer_and_kanei",
+  "confirm-ship-to": "buyer_and_kanei",
+  "save-production-plan": "buyer",
+  "confirm-production-plan": "buyer",
+  "request-production-plan": "kanei",
+  "resend-supplier-links": "kanei",
   "confirm-film-receipt": "buyer",
 };
 
 /**
- * 発注側会社のアカウントが buyer 操作を、金井貿易が seller 側操作を行う。
- * 金井貿易が発注側の場合は seller 操作も金井貿易が行う。
+ * セブン化学が buyer 操作を、金井貿易が seller 側操作を行う。
+ * buyer_domain が旧データで空/金井の場合も、現行商流では互換目的に限定する。
  */
 export function canPerformFilmOrderAction(
   action: string,
@@ -90,6 +94,9 @@ export function canPerformFilmOrderAction(
   if (side === "buyer") {
     return buyer === "seven" ? isSevenChemicalUser(actorEmail) : isKaneiTradeUser(actorEmail);
   }
+  if (side === "buyer_and_kanei") {
+    return isSevenChemicalUser(actorEmail) || isKaneiTradeUser(actorEmail);
+  }
   return isKaneiTradeUser(actorEmail);
 }
 
@@ -98,7 +105,9 @@ export function canViewFilmOrderRow(
   orderBuyerDomain: string,
   actorEmail: string | null | undefined,
 ): boolean {
-  return orderBuyerDomain === "seven" ? isSevenChemicalUser(actorEmail) : isKaneiTradeUser(actorEmail);
+  return orderBuyerDomain.includes("727")
+    ? isSevenChemicalUser(actorEmail) || isKaneiTradeUser(actorEmail)
+    : isKaneiTradeUser(actorEmail);
 }
 
 // ---- 後方互換用（ページ表示など） ----

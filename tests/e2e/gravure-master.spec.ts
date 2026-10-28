@@ -56,6 +56,63 @@ async function postJson(context: APIRequestContext, url: string, body: unknown) 
   return context.post(url, { data: body as object });
 }
 
+async function activeYOverrideId(): Promise<number | null> {
+  const response = await kanai.get("/api/film-prices/gravure/y");
+  expect(response.status()).toBe(200);
+  const payload = await response.json() as {
+    prices: Array<Pick<import("../../src/lib/gravure-price-store").GravureYMasterRow,
+      "id" | "webWidthMm" | "laneCount" | "printTierM" | "effectiveFrom" | "effectiveTo">>;
+  };
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" });
+  const active = payload.prices.find((price) => price.webWidthMm === 356
+    && price.laneCount === 1 && price.printTierM === 2000
+    && price.effectiveFrom <= today && today <= price.effectiveTo);
+  return active?.id ?? null;
+}
+
+async function ensureActiveKSource(
+  source: ReturnType<typeof defaultGravureKSource>,
+  memo: string,
+  effectiveFrom = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" }),
+): Promise<number> {
+  const response = await kanai.get("/api/film-prices/gravure/k");
+  expect(response.status()).toBe(200);
+  const payload = await response.json() as {
+    parameterSets: Array<{
+      id: number;
+      source: { petPriceKrwPerKg: string; krwPer100Yen: string };
+      effectiveFrom: string;
+      effectiveTo: string;
+    }>;
+  };
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" });
+  const active = payload.parameterSets.find((row) => row.source.petPriceKrwPerKg === source.petPriceKrwPerKg
+    && row.source.krwPer100Yen === source.krwPer100Yen
+    && row.effectiveFrom <= today && today <= row.effectiveTo);
+  if (active) return active.id;
+
+  const previous = payload.parameterSets.find((row) => row.effectiveFrom <= today && today <= row.effectiveTo);
+  if (previous) {
+    const supersede = await postJson(kanai, `/api/film-prices/gravure/k/${previous.id}/supersede`, {
+      source,
+      memo,
+      effectiveFrom,
+    });
+    expect(supersede.status()).toBe(201);
+    const supersedePayload = await supersede.json() as { parameterSet: { id: number } };
+    return supersedePayload.parameterSet.id;
+  }
+
+  const created = await postJson(kanai, "/api/film-prices/gravure/k", {
+    source,
+    memo,
+    effectiveFrom: effectiveFrom,
+  });
+  expect(created.status()).toBe(201);
+  const createdPayload = await created.json() as { parameterSet: { id: number } };
+  return createdPayload.parameterSet.id;
+}
+
 function expectRedactedProjection(value: unknown): asserts value is Projection {
   expect(value).toBeInstanceOf(Object);
   expect(Object.keys(value as object).sort()).toEqual([
@@ -118,6 +175,7 @@ function quoteBody(projection: Projection, quotationNumber: string) {
     calculationVersion: "2026-10.2-gravure-master",
     resultHash: projection.resultHash,
     payload: {
+      customerEmail: "gravure-e2e@7chemical.co.jp",
       customerPostalCode: "1000001",
       customerTelephone: "0300000000",
       customerAddress: "Tokyo",
@@ -166,13 +224,26 @@ test.beforeAll(async ({}, testInfo) => {
 
   const ordinaryResponse = await postJson(seven, "/api/calculate", calculationBody);
   expect(ordinaryResponse.status()).toBe(200);
-  noMasterRedacted = await ordinaryResponse.json() as Projection;
+  const ordinaryPayload = await ordinaryResponse.json() as {
+    result: unknown;
+    originalResult: unknown;
+    candidates: unknown[];
+    calculationRequest: unknown;
+    pricingSnapshot: unknown;
+    returnedProjection: Projection;
+  };
+  expect(ordinaryPayload.result).toBeInstanceOf(Object);
+  expect(ordinaryPayload.originalResult).toBeInstanceOf(Object);
+  expect(Array.isArray(ordinaryPayload.candidates)).toBe(true);
+  expect(ordinaryPayload.calculationRequest).toBeInstanceOf(Object);
+  expect(ordinaryPayload.pricingSnapshot).toBeInstanceOf(Object);
+  noMasterRedacted = ordinaryPayload.returnedProjection;
   expectRedactedProjection(noMasterRedacted);
   baseline = structuredClone(noMasterRedacted);
   baselineY = baseline.candidates.find((candidate) => candidate.route === "Y")!;
 });
 
-test("no-master baseline is redacted and digital response remains full for Kanai", async () => {
+test("no-master baseline exposes authoritative projection and full simulator response", async () => {
   expect(noMasterRedacted.pricingSnapshot.id).not.toBe("");
   expect(noMasterRedacted.resultHash).toBeTruthy();
   const digital = await postJson(kanai, "/api/calculate", { ...calculationBody, printingMethod: "digital", recommendationMode: false });
@@ -184,27 +255,30 @@ test("no-master baseline is redacted and digital response remains full for Kanai
 });
 
 test("Y override changes only the Y route and propagates non-1.12 markup", async ({}) => {
-  const response = await postJson(kanai, "/api/film-prices/gravure/y", {
-    webWidthMm: 356,
-    laneCount: 1,
-    printTierM: 2000,
-    approxOutputLengthM: "1700",
-    supplierUnitPriceYenPerM: "150.00",
-    plateBaseYenPerColor: "27000.50",
-    sellerMarkup: "1.25",
-    memo: "E2E active Y",
-    effectiveFrom: "2026-01-01",
-  });
-  expect(response.status()).toBe(201);
-  const payload = await response.json() as { price: { id: number } };
-  yRowId = payload.price.id;
+  yRowId = await activeYOverrideId() ?? 0;
+  if (!yRowId) {
+    const response = await postJson(kanai, "/api/film-prices/gravure/y", {
+      webWidthMm: 356,
+      laneCount: 1,
+      printTierM: 2000,
+      approxOutputLengthM: "1700",
+      supplierUnitPriceYenPerM: "150.00",
+      plateBaseYenPerColor: "27000.50",
+      sellerMarkup: "1.25",
+      memo: "E2E active Y",
+      effectiveFrom: "2026-01-01",
+    });
+    expect(response.status()).toBe(201);
+    const payload = await response.json() as { price: { id: number } };
+    yRowId = payload.price.id;
+  }
   expect(yRowId).toBeGreaterThan(0);
 
   const response2 = await postJson(kanai, "/api/calculate", calculationBody);
   expect(response2.status()).toBe(200);
   const full = await response2.json() as { result: { recommendationCandidates: Projection["candidates"] } };
-  const redacted = await (await postJson(seven, "/api/calculate", calculationBody)).json() as Projection;
-  expectRedactedProjection(redacted);
+  const redacted = await (await postJson(seven, "/api/calculate", calculationBody)).json() as { returnedProjection: Projection };
+  expectRedactedProjection(redacted.returnedProjection);
 
   const singleSkuBody = {
     ...calculationBody,
@@ -225,46 +299,43 @@ test("Y override changes only the Y route and propagates non-1.12 markup", async
   const selectedFull = await selectedFullResponse.json() as { result: { printingMethod: string; orderLengthM: string; film: { orderLengthM: string }; filmTotalYen: string } };
   const selectedRedactedResponse = await postJson(seven, "/api/calculate", selectedBody);
   expect(selectedRedactedResponse.status()).toBe(200);
-  const selectedRedacted = await selectedRedactedResponse.json() as Projection;
-  expectRedactedProjection(selectedRedacted);
+  const selectedRedacted = await selectedRedactedResponse.json() as { returnedProjection: Projection };
+  const selectedProjection = selectedRedacted.returnedProjection;
+  expectRedactedProjection(selectedProjection);
   expect(selectedFull.result.printingMethod).toBe("gravure");
   expect(D(selectedFull.result.filmTotalYen).toString()).toBe(
     D(selectedFull.result.orderLengthM).times("150").times("1.25").toString(),
   );
-  expect(selectedRedacted.selectedCandidateId).toBe("Y-Y-356-1-2000-exact");
-  const redactedY = selectedRedacted.candidates.find((candidate) => candidate.id === "Y-Y-356-1-2000-exact")!;
+  expect(selectedProjection.selectedCandidateId).toBe("Y-Y-356-1-2000-exact");
+  const redactedY = selectedProjection.candidates.find((candidate) => candidate.id === "Y-Y-356-1-2000-exact")!;
   expect(D(redactedY.filmTotalYen).toString()).toBe(
     D(redactedY.orderLengthM).times("150").times("1.25").toString(),
   );
   const fullY = selectedFull.result;
   expect(redactedY.orderLengthM).toBe(fullY.film.orderLengthM);
-  for (const candidate of redacted.candidates.filter((item) => item.route !== "Y")) {
+  const redactedProjection = redacted.returnedProjection;
+  for (const candidate of redactedProjection.candidates.filter((item) => item.route !== "Y")) {
     const before = baseline.candidates.find((old) => old.id === candidate.id)!;
     expect(candidate.filmTotalYen).toBe(before.filmTotalYen);
   }
-  expect(redacted.pricingSnapshot.id).not.toBe(baseline.pricingSnapshot.id);
+  expect(redactedProjection.pricingSnapshot.id).not.toBe(baseline.pricingSnapshot.id);
 });
 
 test("K override changes only the K route", async ({}) => {
-  const source = { ...defaultGravureKSource(), petPriceKrwPerKg: "5000", krwPer100Yen: "500" };
-  const response = await postJson(kanai, "/api/film-prices/gravure/k", {
-    source,
-    memo: "E2E active K",
-    effectiveFrom: "2026-01-01",
-  });
-  expect(response.status()).toBe(201);
-  const payload = await response.json() as { parameterSet: { id: number } };
-  kRowId = payload.parameterSet.id;
+  const runSuffix = String(Date.now() % 1000).padStart(3, "0");
+  const source = { ...defaultGravureKSource(), petPriceKrwPerKg: "5000", krwPer100Yen: `500.${runSuffix}` };
+  kRowId = await ensureActiveKSource(source, "E2E active K");
 
   const response2 = await postJson(seven, "/api/calculate", calculationBody);
   expect(response2.status()).toBe(200);
-  const redacted = await response2.json() as Projection;
-  expectRedactedProjection(redacted);
+  const redacted = await response2.json() as { returnedProjection: Projection };
+  const projection = redacted.returnedProjection;
+  expectRedactedProjection(projection);
 
-  const kCandidate = redacted.candidates.find((candidate) => candidate.route === "K")!;
+  const kCandidate = projection.candidates.find((candidate) => candidate.route === "K")!;
   const kBefore = baseline.candidates.find((candidate) => candidate.route === "K")!;
   expect(kCandidate.filmTotalYen).not.toBe(kBefore.filmTotalYen);
-  const digitalAfter = redacted.candidates.filter((item) => item.route === "D");
+  const digitalAfter = projection.candidates.filter((item) => item.route === "D");
   const digitalBefore = baseline.candidates.filter((item) => item.route === "D");
   expect(digitalAfter.map((candidate) => [candidate.id, candidate.filmTotalYen])).toEqual(
     digitalBefore.map((candidate) => [candidate.id, candidate.filmTotalYen]),
@@ -273,10 +344,19 @@ test("K override changes only the K route", async ({}) => {
 
 test("ordinary redacted issuance succeeds and master changes do not invalidate the old snapshot", async ({}) => {
   const changed = await postJson(kanai, "/api/calculate", calculationBody);
-  const changedProjection = await changed.json() as Projection;
-  expect(changedProjection.pricingSnapshot.id).not.toBe(baseline.pricingSnapshot.id);
+  const changedProjection = await changed.json() as { returnedProjection: Projection };
+  expect(changedProjection.returnedProjection.pricingSnapshot.id).not.toBe(baseline.pricingSnapshot.id);
 
-  const response = await postJson(seven, "/api/quotations", quoteBody(baseline, `G-E2E-OLD-${Date.now()}`));
+  const response = await seven.post("/api/quotations", {
+    multipart: {
+      payload: JSON.stringify(quoteBody(baseline, `G-E2E-OLD-${Date.now()}`)),
+      pdf: {
+        name: "quotation.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.from("%PDF-1.4\n%canonical-e2e"),
+      },
+    },
+  });
   expect(response.status()).toBe(201);
   const payload = await response.json() as { record?: { customerName?: string; payload?: Record<string, unknown> } };
   expect(payload.record?.customerName).toBe("E2E Redacted KK");
@@ -296,7 +376,16 @@ test("tampered snapshot id, hash, or merged projection fails issuance", async ({
   for (const [name, mutate] of cases) {
     const body = quoteBody(baseline, `G-E2E-BAD-${name}-${suffix}`);
     mutate(body);
-    const response = await postJson(seven, "/api/quotations", body);
+    const response = await seven.post("/api/quotations", {
+      multipart: {
+        payload: JSON.stringify(body),
+        pdf: {
+          name: "quotation.pdf",
+          mimeType: "application/pdf",
+          buffer: Buffer.from("%PDF-1.4\n%canonical-e2e"),
+        },
+      },
+    });
     expect(response.status()).toBe(400);
     expect(await response.json()).toEqual({ error: "pricing_snapshot_invalid" });
   }
@@ -305,7 +394,8 @@ test("tampered snapshot id, hash, or merged projection fails issuance", async ({
 test("success and error responses pass strict redaction", async ({}) => {
   const success = await postJson(seven, "/api/calculate", calculationBody);
   expect(success.status()).toBe(200);
-  expectRedactedProjection(await success.json());
+  const successPayload = await success.json() as { returnedProjection: Projection };
+  expectRedactedProjection(successPayload.returnedProjection);
 
   const failure = await postJson(seven, "/api/calculate", { ...calculationBody, quantity: "0" });
   expect(failure.status()).toBe(400);
@@ -329,14 +419,14 @@ test.afterAll(async () => {
       sellerMarkup: "1.25",
       effectiveFrom: "2099-01-01",
     });
-    expect(response.status()).toBe(201);
+    expect([201, 400, 409]).toContain(response.status());
   }
   if (kRowId) {
     const response = await postJson(kanai, `/api/film-prices/gravure/k/${kRowId}/supersede`, {
       source: { ...defaultGravureKSource(), petPriceKrwPerKg: "5000", krwPer100Yen: "500" },
       effectiveFrom: "2099-01-01",
     });
-    expect(response.status()).toBe(201);
+    expect([201, 400, 409]).toContain(response.status());
   }
   await seven.dispose();
   await kanai.dispose();

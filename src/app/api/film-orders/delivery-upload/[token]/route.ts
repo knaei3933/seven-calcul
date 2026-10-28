@@ -62,6 +62,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       trackingNumber?: unknown;
       note?: unknown;
       fileId?: unknown;
+      recordShipment?: unknown;
     };
     const action = body.action === "session" || body.action === "complete" ? body.action : "";
     if (!action) return NextResponse.json({ error: "unknown_action" }, { status: 400 });
@@ -114,6 +115,18 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     }
 
     const documentUrl = `https://drive.google.com/file/d/${candidate.id}/view`;
+    if (body.recordShipment === false) {
+      return NextResponse.json({
+        document: {
+          fileName: candidate.name,
+          url: documentUrl,
+          fileId: candidate.id,
+          sizeBytes: candidate.sizeBytes,
+          mimeType: candidate.mimeType,
+          checksum: candidate.checksum,
+        },
+      });
+    }
     const updated = await updateFilmDeliveryFromToken(token, {
       kind: "shipment",
       date: shipmentDate,

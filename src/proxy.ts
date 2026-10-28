@@ -10,6 +10,7 @@ function isPublicPath(pathname: string): boolean {
     || pathname.startsWith("/quote-approvals/")
     || pathname.startsWith("/film-orders/upload/")
     || pathname.startsWith("/film-orders/design-upload/")
+    || pathname.startsWith("/film-orders/ship-to/")
     || pathname.startsWith("/film-orders/proof-review/")
     || pathname.startsWith("/film-orders/purchase-order/");
 }

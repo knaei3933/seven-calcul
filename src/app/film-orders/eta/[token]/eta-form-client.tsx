@@ -23,7 +23,7 @@ const TEXT = {
     deliveryDate: "납품일(필수)",
     carrier: "운송사",
     tracking: "운송장 번호",
-    document: "납품서 PDF(필수)",
+    document: "납품서·인보이스 PDF（최대 3개, 1개 필수）",
     report: "보고 등록",
     shipmentRequired: "납품 보고 전에 출하 보고를 등록해 주십시오.",
   },
@@ -45,7 +45,7 @@ const TEXT = {
     deliveryDate: "納品日（必須）",
     carrier: "運送会社",
     tracking: "追跡番号",
-    document: "納品書PDF（必須）",
+    document: "納品書・インボイスPDF（最大3通、1通必須）",
     report: "報告を登録",
     shipmentRequired: "納品報告の前に出荷報告を登録してください。",
   },
@@ -75,9 +75,8 @@ export default function EtaFormClient({
   const [carrier, setCarrier] = useState(delivery.carrier);
   const [trackingNumber, setTrackingNumber] = useState(delivery.trackingNumber);
   const [shipmentNote, setShipmentNote] = useState(delivery.shipmentNote);
-  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentFiles, setDocumentFiles] = useState<File[]>([]);
   const [driveReady, setDriveReady] = useState(false);
-  const [uploadId, setUploadId] = useState("");
   const [deliveredDate, setDeliveredDate] = useState(delivery.deliveredOn ?? "");
   const [deliveryNote, setDeliveryNote] = useState(delivery.deliveryNote);
 
@@ -103,12 +102,10 @@ export default function EtaFormClient({
     return () => { active = false; };
   }, [token]);
 
-  const uploadShipment = async () => {
-    if (!documentFile || !shipmentDate || busy) return;
+  const uploadDeliveryDocument = async (documentFile: File, shipmentDate: string) => {
+    const uploadId = crypto.randomUUID().replaceAll("-", "");
     if (!documentFile.name.toLowerCase().endsWith(".pdf")) throw new Error("invalid_delivery_document_type");
     if (documentFile.size <= 0 || documentFile.size > 15 * 1024 * 1024) throw new Error("file_too_large");
-    const nextUploadId = uploadId || crypto.randomUUID().replaceAll("-", "");
-    setUploadId(nextUploadId);
     const sessionResponse = await fetch(`/api/film-orders/delivery-upload/${encodeURIComponent(token)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -116,7 +113,7 @@ export default function EtaFormClient({
         action: "session",
         originalFileName: documentFile.name,
         shipmentDate,
-        uploadId: nextUploadId,
+        uploadId,
         sizeBytes: documentFile.size,
         contentType: documentFile.type || "application/pdf",
       }),
@@ -139,15 +136,37 @@ export default function EtaFormClient({
         fileId: uploaded.id,
         originalFileName: documentFile.name,
         shipmentDate,
-        uploadId: nextUploadId,
-        carrier,
-        trackingNumber,
-        note: shipmentNote,
+        uploadId,
+        recordShipment: false,
       }),
     });
     const complete = await completeResponse.json();
-    if (!completeResponse.ok) throw new Error(complete.error ?? "complete_failed");
-    applyDelivery(complete.order?.delivery);
+    if (!completeResponse.ok || !complete.document) throw new Error(complete.error ?? "complete_failed");
+    return complete.document as { name: string; url: string };
+  };
+
+  const uploadShipment = async () => {
+    if (!documentFiles.length || !shipmentDate || busy) return;
+    if (documentFiles.length > 3) throw new Error("too_many_delivery_documents");
+    const documents = [];
+    for (const documentFile of documentFiles) {
+      documents.push(await uploadDeliveryDocument(documentFile, shipmentDate));
+    }
+    const response = await fetch(`/api/film-orders/eta/${encodeURIComponent(token)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "shipment",
+        date: shipmentDate,
+        carrier,
+        trackingNumber,
+        note: shipmentNote,
+        documents,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error ?? "failed");
+    applyDelivery(payload.order?.delivery);
   };
 
   const submitDeliveryReport = async () => {
@@ -245,12 +264,33 @@ export default function EtaFormClient({
               <input value={trackingNumber} onChange={(event) => setTrackingNumber(event.target.value)} />
             </label>
             <label>{t.document}
-              <input type="file" accept=".pdf,application/pdf" onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} />
+              <input
+                type="file"
+                accept=".pdf,application/pdf"
+                multiple
+                onChange={(event) => setDocumentFiles(Array.from(event.target.files ?? []).slice(0, 3))}
+              />
             </label>
+            {documentFiles.length ? (
+              <ul>
+                {documentFiles.map((file, index) => (
+                  <li key={`${file.name}-${index}`}>
+                    {index + 1}. {file.name}（{Math.round(file.size / 1024)}KB）
+                    <button
+                      className="button small secondary"
+                      type="button"
+                      onClick={() => setDocumentFiles((old) => old.filter((_, itemIndex) => itemIndex !== index))}
+                    >
+                      削除
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <label>메모 / メモ
               <textarea value={shipmentNote} rows={2} onChange={(event) => setShipmentNote(event.target.value)} />
             </label>
-            <button className="button" type="submit" disabled={busy || !shipmentDate || !documentFile || !driveReady}>
+            <button className="button" type="submit" disabled={busy || !shipmentDate || !documentFiles.length || !driveReady}>
               {busy ? t.submitting : t.report}
             </button>
             {!driveReady ? <p className="help">Drive upload is not configured.（Driveアップロード未設定）</p> : null}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFilmQuotationFromRecord, filmQuotationNumberFor } from "@/lib/film-quotation";
+import { buildFilmQuotationFromRecord, buildFilmQuotationPdfFileName, buildQuotationPdfFileName, filmQuotationNumberFor } from "@/lib/film-quotation";
 
 describe("film quotation linkage", () => {
   it("creates a paired film number and shows the product and film printing specification", () => {
@@ -33,12 +33,70 @@ describe("film quotation linkage", () => {
     expect(quotation?.items[0]?.specification).toContain("印刷色数：4色");
     expect(quotation?.printingMethodLabel).toBe("グラビア印刷（ロール）");
     expect(quotation?.colorCountLabel).toBe("4色");
+    expect(quotation?.items[0]?.specification).toContain("単価条件：フィルム製作・国内輸送・海外輸送・通関費込み");
     expect(quotation?.subtotal).toBe("141001");
     expect(quotation?.grandTotal).toBe("155102");
+  });
+
+  it("shows the film unit price including shipping and customs costs", () => {
+    const quotation = buildFilmQuotationFromRecord({
+      quotationNumber: "KT-202610-003",
+      customerName: "株式会社フォーライフ",
+      issueDate: "2026-10-22",
+      validUntil: "2026-11-21",
+      productName: "レディエイドルプリカント",
+      quantity: "50000",
+      payload: {
+        filmOrderLengthM: "1200",
+        calculationFilmTotal: "363000",
+        filmUnitDisplay: "252",
+        calculationChecklistSnapshot: {
+          printingMethod: "digital",
+          film: {
+            requiredLengthM: "1194.4444444444445",
+            orderLengthM: "1200",
+            unitPrice: "252",
+            filmTotal: "363000",
+          },
+          materialWidthMm: "556",
+        },
+      },
+    });
+
+    // 252×1200=302,400＋国内配送6,000＋海外配送48,000＋通関6,600＝363,000
+    expect(quotation?.items[0]?.orderLengthM).toBe("1200");
+    expect(quotation?.items[0]?.unitPriceYenPerM).toBe("302.5");
+    expect(quotation?.items[0]?.amountYen).toBe("363000");
+    expect(quotation?.subtotal).toBe("363000");
+    expect(quotation?.grandTotal).toBe("399300");
   });
 });
 
 describe("film quotation numbering", () => {
+  it("builds the automatic print-to-PDF filename from the issued date", () => {
+    expect(buildFilmQuotationPdfFileName({
+      issueDate: "2026-10-14",
+      productName: "レディエイドルプリカント",
+      customerName: "株式会社フォーライフ",
+    })).toBe("お見積書_レディエイドルプリカント(株式会社フォーライフ)_261014");
+  });
+
+  it("removes file-system reserved characters from automatic PDF names", () => {
+    expect(buildFilmQuotationPdfFileName({
+      issueDate: "2026-10-14T09:00:00.000Z",
+      productName: "Product/Name:1",
+      customerName: "Customer\nName",
+    })).toBe("お見積書_ProductName1(Customer_Name)_261014");
+  });
+
+  it("adds .pdf only for the canonical stored/download file name", () => {
+    expect(buildQuotationPdfFileName({
+      issueDate: "2026-10-14",
+      productName: "マウスクリーナー",
+      customerName: "株式会社フォーライフ",
+    })).toBe("お見積書_マウスクリーナー(株式会社フォーライフ)_261014.pdf");
+  });
+
   it("keeps legacy sequential numbers paired", () => {
     expect(filmQuotationNumberFor("S7-202610-073", "2026-10-10")).toBe("K-202610-073-F");
   });

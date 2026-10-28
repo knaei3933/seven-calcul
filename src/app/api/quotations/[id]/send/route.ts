@@ -9,6 +9,7 @@ import {
 import { sendMail, isSmtpConfigured } from "@/lib/mail-sender";
 import { buildCustomerApprovalToken } from "@/lib/quotation-approval-token";
 import { buildCustomerQuotationEmail } from "@/lib/quotation-email";
+import { buildQuotationPdfFileName } from "@/lib/film-quotation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +48,11 @@ export async function POST(request: Request, context: Context): Promise<NextResp
 
     const pdf = await getQuotationPdf(quotationId);
     if (!pdf) return NextResponse.json({ error: "quotation_pdf_not_found" }, { status: 409 });
-    const fileName = pdf.fileName || `${record.quotationNumber}.pdf`;
+    const fileName = buildQuotationPdfFileName({
+      issueDate: record.issueDate,
+      productName: record.productName,
+      customerName: record.customerName,
+    });
     const approvalUrl = `${originOf(request)}/quote-approvals/${encodeURIComponent(buildCustomerApprovalToken(record))}`;
     const { subject, body } = buildCustomerQuotationEmail(record, approvalUrl, fileName);
 
@@ -55,6 +60,14 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       to: email,
       subject,
       body,
+      templateKey: "quotation_customer_send",
+      templateVars: {
+        quotationNumber: record.quotationNumber,
+        productName: record.productName,
+        customerName: record.customerName,
+        approvalUrl,
+        fileName,
+      },
       attachments: [{
         filename: fileName,
         content: pdf.data,

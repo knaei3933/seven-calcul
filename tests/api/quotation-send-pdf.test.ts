@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+import { buildQuotationPdfFileName } from "@/lib/film-quotation";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-send-pdf-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -85,6 +86,14 @@ beforeAll(async () => {
   await approveQuotationGate(record.id, "internal", owner.id);
 });
 
+function expectedPdfFileName() {
+  return buildQuotationPdfFileName({
+    issueDate: record.issueDate,
+    productName: record.productName,
+    customerName: record.customerName,
+  });
+}
+
 beforeEach(() => {
   sendMailMock.mockReset();
   sendMailMock.mockResolvedValue({
@@ -116,7 +125,7 @@ describe("quotation send API with canonical PDF attachment", () => {
     expect(payload.sentTo).toBe("kim@kanei-trade.co.jp");
     expect(payload.recipientOverridden).toBe(true);
     expect(payload.attachment).toEqual({
-      fileName: `${record.quotationNumber}.pdf`,
+      fileName: expectedPdfFileName(),
       sizeBytes: storedPdf!.data.byteLength,
     });
     expect(payload.approvalUrl).toMatch(/^http:\/\/localhost\/quote-approvals\/[\w.-]+$/u);
@@ -129,7 +138,7 @@ describe("quotation send API with canonical PDF attachment", () => {
     expect(mail.body).toContain("【ご承認のお願い】");
     expect(mail.body).toContain(payload.approvalUrl);
     expect(mail.attachments).toHaveLength(1);
-    expect(mail.attachments[0].filename).toBe(`${record.quotationNumber}.pdf`);
+    expect(mail.attachments[0].filename).toBe(expectedPdfFileName());
     expect(mail.attachments[0].contentType).toBe("application/pdf");
     expect(Buffer.from(mail.attachments[0].content)).toEqual(storedPdf!.data);
     await expect(getQuotation(record.id)).resolves.toMatchObject({ status: "sent" });

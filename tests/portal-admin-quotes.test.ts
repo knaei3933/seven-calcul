@@ -235,6 +235,10 @@ describe("portal quote admin projection", () => {
       grandTotal: secondQuote.displayedGrandTotal,
     });
     expect(newest.pdfAvailable).toBe(true);
+    const oldest = page.quotes[1]!;
+    expect(oldest.pdfAvailable).toBe(false);
+    expect(newest.status).toBe("draft");
+    expect(oldest.status).toBe("draft");
     expect(Object.keys(newest).sort()).toEqual([
       "customer",
       "customerCode",

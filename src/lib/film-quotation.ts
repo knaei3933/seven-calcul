@@ -43,6 +43,35 @@ export function filmQuotationNumberFor(
   return `K-${sourceId || Date.now().toString(36).toUpperCase()}-F`;
 }
 
+function sanitizePdfFileNamePart(value: string, maxLength = 60): string {
+  const cleaned = value
+    .replace(/\s+/g, "_")
+    .replace(/[\\/:*?"<>|]/g, "")
+    .slice(0, maxLength);
+  return cleaned || "無題";
+}
+
+export function buildFilmQuotationPdfFileName(input: {
+  issueDate: string;
+  productName: string;
+  customerName: string;
+}): string {
+  const dateText = input.issueDate.slice(0, 10);
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(dateText);
+  const datePart = dateMatch
+    ? `${dateMatch[1]!.slice(2)}${dateMatch[2]}${dateMatch[3]}`
+    : new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).replaceAll("-", "").slice(2);
+  return `お見積書_${sanitizePdfFileNamePart(input.productName)}(${sanitizePdfFileNamePart(input.customerName)})_${datePart}`;
+}
+
+export function buildQuotationPdfFileName(input: {
+  issueDate: string;
+  productName: string;
+  customerName: string;
+}): string {
+  return `${buildFilmQuotationPdfFileName(input)}.pdf`;
+}
+
 export function buildFilmQuotationFromRecord(record: {
   quotationNumber: string;
   customerName?: string;
@@ -78,12 +107,16 @@ export function buildFilmQuotationFromRecord(record: {
   const orderLength = snapshot?.film?.orderLengthM ?? payload.filmOrderLengthM ?? record.filmOrderLengthM;
   if (!orderLength || Number(orderLength) <= 0) return null;
 
-  const unitPrice = snapshot?.film?.unitPrice ?? payload.filmUnitDisplay ?? record.filmMeterPrice ?? "0";
   const storedFilmTotal = snapshot?.film?.filmTotal ?? payload.calculationFilmTotal;
+  // 明細の単価は物流・通関費を含む総額換算にする。snapshot.unitPrice は材料単価のみのケースがある。
+  const materialUnitPrice = snapshot?.film?.unitPrice ?? payload.filmUnitDisplay ?? record.filmMeterPrice ?? "0";
   const filmTotal = storedFilmTotal
-    ?? (D(unitPrice).gt(0) && D(orderLength).gt(0)
-      ? D(unitPrice).times(D(orderLength)).toDecimalPlaces(0, Decimal.ROUND_CEIL).toString()
+    ?? (D(materialUnitPrice).gt(0)
+      ? D(materialUnitPrice).times(D(orderLength)).toDecimalPlaces(0, Decimal.ROUND_CEIL).toString()
       : "0");
+  const unitPrice = D(orderLength).gt(0) && D(filmTotal).gt(0)
+    ? D(filmTotal).div(D(orderLength)).toString()
+    : materialUnitPrice;
   const webWidth = String(payload.purchaseOrder?.webWidthMm ?? snapshot?.materialWidthMm ?? "");
   const composition = (typeof payload.filmComposition === "string" && payload.filmComposition.trim())
     || payload.purchaseOrder?.filmComposition
@@ -138,6 +171,7 @@ export function buildFilmQuotationFromRecord(record: {
         `フィルム構成：${composition}`,
         `印刷方式：${printingMethodLabel}`,
         `印刷色数：${colorCountLabel}`,
+        `単価条件：フィルム製作・国内輸送・海外輸送・通関費込み`,
       ].join("\n"),
       webWidthMm: webWidth,
       orderLengthM: orderLength,

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { extractText } from "unpdf";
+import { buildQuotationPdfFileName } from "@/lib/film-quotation";
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "portal-quote-pdf-"));
 const previous = {
@@ -332,7 +333,7 @@ describe("portal-owned canonical quotation PDF API", () => {
     const publicId = String(quote.publicId);
     const aliasHeaders = {
       ...serviceAuthorization,
-      "x-portal-session": owner.token,
+      "x-portal-session-legacy": owner.token,
     };
 
     const aliasGenerate = await generatePortalQuotePdfApi(
@@ -432,7 +433,11 @@ describe("portal-owned canonical quotation PDF API", () => {
       "x-content-type-options": "nosniff",
     });
     expect(response.headers.get("content-disposition")).toBe(
-      `attachment; filename="quote.pdf"; filename*=UTF-8''${encodeURIComponent(`${String(generatedQuote.quotationNumber)}.pdf`)}`,
+      `attachment; filename="quote.pdf"; filename*=UTF-8''${encodeURIComponent(buildQuotationPdfFileName({
+        issueDate: String(generatedQuote.issueDate),
+        productName: String(generatedQuote.productName),
+        customerName: String(generatedQuote.customerName),
+      }))}`,
     );
     const mapping = await mappingFor(generatedPublicId);
     const stored = await storedPdf(Number(mapping.quotation_id));

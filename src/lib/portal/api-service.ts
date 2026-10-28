@@ -262,6 +262,8 @@ async function register(
     to: input.email,
     subject: "ポータル本登録の確認",
     body: `確認コード: ${verification.code}\n有効期限: ${verification.expiresAt}`,
+    templateKey: "portal_register_confirm",
+    templateVars: { confirmationUrl: `確認コード: ${verification.code}` },
   });
   return NextResponse.json({ user: userProjection(user) }, { status: 201 });
 }
@@ -319,6 +321,8 @@ async function resend(
     to: email,
     subject: "ポータル確認コードの再送",
     body: `確認コード: ${verification.code}\n有効期限: ${verification.expiresAt}`,
+    templateKey: "portal_register_code",
+    templateVars: { code: verification.code },
   });
   return NextResponse.json({ accepted: true });
 }

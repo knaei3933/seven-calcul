@@ -102,3 +102,13 @@ export interface CustomerDeliveryDestination extends CustomerDeliveryDestination
 export type ChecklistAudience = "CUSTOMER" | "INTERNAL_QA";
 
 export const checklistAudiences: ChecklistAudience[] = ["CUSTOMER", "INTERNAL_QA"];
+
+export interface QuotationSampleBulkConfirmation {
+  required: boolean;
+  status: "pending" | "received" | "confirmed";
+  sampleQuantityMl?: string;
+  receivedMl?: string;
+  receivedAt?: string;
+  confirmedAt?: string;
+  note?: string;
+}

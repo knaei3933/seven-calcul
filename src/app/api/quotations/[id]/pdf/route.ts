@@ -3,10 +3,13 @@ import { getSessionUser } from "@/lib/api-auth";
 import {
   getQuotation,
   getQuotationPdf,
+  getQuotationPdfDownload,
+  getQuotationPdfDownloadMeta,
   MAX_QUOTATION_PDF_BYTES,
   QuotationPdfIntegrityError,
   saveQuotationPdf,
 } from "@/lib/quotation-store";
+import { buildQuotationPdfFileName } from "@/lib/film-quotation";
 import type { AuthenticatedUser } from "@/lib/auth-store";
 
 export const runtime = "nodejs";
@@ -27,7 +30,9 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     return NextResponse.json({ error: "invalid_id" }, { status: 400 });
   }
   try {
+    const recordStartedAt = performance.now();
     const record = await getQuotation(quotationId);
+    const recordMs = performance.now() - recordStartedAt;
     if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
     if (!canManageQuotation(user, record.createdBy.id)) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
@@ -54,7 +59,11 @@ export async function POST(request: Request, context: Context): Promise<NextResp
         message: "PDFが不正です。A4形式のPDF（10MB以内）を添付してください。",
       }, { status: 400 });
     }
-    const saved = await saveQuotationPdf(quotationId, buffer, `${record.quotationNumber}.pdf`);
+    const saved = await saveQuotationPdf(quotationId, buffer, buildQuotationPdfFileName({
+      issueDate: record.issueDate,
+      productName: record.productName,
+      customerName: record.customerName,
+    }));
     if (!saved) {
       const canonical = await getQuotationPdf(quotationId);
       if (canonical) {
@@ -73,6 +82,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
 }
 
 export async function GET(request: Request, context: Context): Promise<Response> {
+  const startedAt = performance.now();
   const { id } = await context.params;
   const user = await getSessionUser(request);
   if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
@@ -81,14 +91,34 @@ export async function GET(request: Request, context: Context): Promise<Response>
     return NextResponse.json({ error: "invalid_id" }, { status: 400 });
   }
   try {
-    const pdf = await getQuotationPdf(quotationId);
+    const pdfStartedAt = performance.now();
+    const pdfMeta = await getQuotationPdfDownloadMeta(quotationId);
+    const metaMs = performance.now() - pdfStartedAt;
+    if (!pdfMeta) return NextResponse.json({ error: "pdf_not_found" }, { status: 404 });
+    const etag = `"${pdfMeta.sha256}"`;
+    if ((request.headers.get("if-none-match") ?? "").includes(etag)) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          "Cache-Control": "private, no-cache",
+          "Server-Timing": `auth;dur=${(pdfStartedAt - startedAt).toFixed(1)},meta;dur=${metaMs.toFixed(1)},pdf;dur=0`,
+        },
+      });
+    }
+    const pdf = await getQuotationPdfDownload(quotationId);
+    const pdfMs = performance.now() - pdfStartedAt;
     if (!pdf) return NextResponse.json({ error: "pdf_not_found" }, { status: 404 });
+    const totalMs = performance.now() - startedAt;
+    console.info("[quotation-pdf] download timing", { quotationId, bytes: pdf.data.byteLength, authMs: pdfStartedAt - startedAt, metaMs, pdfMs, totalMs, cached: false });
     return new Response(new Uint8Array(pdf.data), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(pdf.fileName)}`,
-        "Cache-Control": "private, no-store",
+        "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(pdf.downloadName)}`,
         "Content-Length": String(pdf.data.byteLength),
+        ETag: etag,
+        "Cache-Control": "private, no-cache",
+        "Server-Timing": `auth;dur=${(pdfStartedAt - startedAt).toFixed(1)},meta;dur=${metaMs.toFixed(1)},pdf;dur=${(pdfMs - metaMs).toFixed(1)}`,
       },
     });
   } catch (error) {

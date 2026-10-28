@@ -134,6 +134,38 @@ describe("quotation history ownership UI", () => {
     vi.unstubAllGlobals();
   });
 
+  it("uses the automatic film PDF filename in the print dialog", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => (
+      String(input).endsWith("/pdf")
+        ? Response.json({ error: "pdf_not_found" }, { status: 404 })
+        : Response.json({ records: [adminRecord] }, { status: 200 })
+    )));
+    const user = userEvent.setup();
+    const previousTitle = document.title;
+    render(<HistoryClient currentUser={currentUser} />);
+
+    await screen.findByText("S7-HISTORY-ADMIN");
+    await user.click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    await user.click(screen.getByTestId("film-quote-tab"));
+
+    let titleDuringPrint = "";
+    const printSpy = vi.spyOn(window, "print").mockImplementation(() => {
+      titleDuringPrint = document.title;
+    });
+    await user.click(screen.getByTestId("detail-print-current"));
+
+    await waitFor(() => expect(titleDuringPrint).toBe("お見積書_History_Pouch(History_Test)_260920"));
+    await waitFor(() => expect(document.title).toBe(previousTitle));
+    printSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
   it("lets an owner correct a missing customer email on an issued draft", async () => {
     const noEmailRecord = { ...ownerRecord, payload: {} };
     const updatedRecord = {
@@ -171,6 +203,66 @@ describe("quotation history ownership UI", () => {
     expect(screen.getByTestId("history-customer-email")).toHaveValue("legacy@example.test");
     expect(screen.getByTestId("history-customer-email")).toHaveProperty("readOnly", true);
     expect(screen.getByTestId("history-auto-send")).toBeInTheDocument();
+  });
+
+  it("disables the sales contract option until internal approval is recorded", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ records: [ownerRecord] }, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HistoryClient currentUser={currentUser} />);
+
+    const statusSelect = await screen.findByLabelText("S7-HISTORY-OWNER の状態");
+    const approvedOption = statusSelect.querySelector('option[value="approved"]');
+    expect(approvedOption).toBeDisabled();
+    expect(approvedOption).toHaveTextContent("成約（内部承認後に選択可）");
+    expect(statusSelect).toHaveAttribute("title", "成約にするには、詳細画面で内部承認を完了してください");
+  });
+
+  it("shows why internal approval is unavailable for another Kanei user", async () => {
+    const kaneiUser: AuthenticatedUser = {
+      ...currentUser,
+      email: "other@kanei-trade.co.jp",
+      name: "Other Kanei",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ records: [ownerRecord] }, { status: 200 })));
+    render(<HistoryClient currentUser={kaneiUser} />);
+
+    await screen.findByText("S7-HISTORY-OWNER");
+    await userEvent.setup().click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    const button = await screen.findByTestId("history-internal-approve");
+    expect(button).toBeDisabled();
+    expect(screen.getByTestId("history-internal-approval-blocked-reason")).toHaveTextContent(
+      "内部承認はKimのみ実行できます。",
+    );
+  });
+
+  it("shows why internal approval is blocked while sample bulk is unconfirmed for Kim", async () => {
+    const kimUser: AuthenticatedUser = {
+      ...currentUser,
+      email: "kim@kanei-trade.co.jp",
+      name: "Kim",
+    };
+    const pendingSampleRecord = {
+      ...ownerRecord,
+      payload: {
+        sampleBulkConfirmation: {
+          required: true,
+          status: "pending" as const,
+          sampleQuantityMl: "5000",
+          receivedMl: null,
+          receivedAt: null,
+          confirmedAt: null,
+          note: "",
+        },
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ records: [pendingSampleRecord] }, { status: 200 })));
+    render(<HistoryClient currentUser={kimUser} />);
+
+    await screen.findByText("S7-HISTORY-OWNER");
+    await userEvent.setup().click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    const button = await screen.findByTestId("history-internal-approve");
+    expect(button).toBeEnabled();
+    expect(screen.queryByTestId("history-internal-approval-blocked-reason")).not.toBeInTheDocument();
   });
 
   it("shows the sales contract action for an internally approved draft without customer approval", async () => {
@@ -235,6 +327,69 @@ describe("quotation history ownership UI", () => {
     vi.unstubAllGlobals();
   });
 
+  it("regenerates a stored film quotation whose unit price excludes shipping and customs", async () => {
+    const inconsistentRecord: QuotationRecord = {
+      ...adminRecord,
+      payload: {
+        calculationChecklistSnapshot: {
+          printingMethod: "digital",
+          film: {
+            requiredLengthM: "1194.4444444444445",
+            orderLengthM: "1200",
+            unitPrice: "252",
+            filmTotal: "363000",
+          },
+          materialWidthMm: "556",
+          skus: [{ name: "History Pouch", quantity: "10000", orderLengthM: "1200", colorCount: "4" }],
+        },
+        filmQuotation: {
+          quotationNumber: "K-HISTORY-ADMIN-F",
+          pouchQuotationNumber: adminRecord.quotationNumber,
+          endCustomerName: "History Test",
+          productName: "History Pouch",
+          filmComposition: "PET12+AL7+PET12+LLDPE50μ",
+          printingMethodLabel: "デジタル印刷",
+          colorCountLabel: "4色",
+          quantity: "10000",
+          issueDate: adminRecord.issueDate,
+          validUntil: adminRecord.validUntil,
+          items: [{
+            description: "異形パウチ専用フィルム",
+            specification: "",
+            webWidthMm: "556",
+            orderLengthM: "1200",
+            unitPriceYenPerM: "252",
+            amountYen: "363000",
+          }],
+          subtotal: "363000",
+          tax: "36300",
+          grandTotal: "399300",
+          notes: [],
+        },
+      } as never,
+    };
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => (
+      String(input).endsWith("/pdf")
+        ? Response.json({ error: "pdf_not_found" }, { status: 404 })
+        : Response.json({ records: [inconsistentRecord] }, { status: 200 })
+    )));
+    const user = userEvent.setup();
+    render(<HistoryClient currentUser={currentUser} />);
+
+    await screen.findByText("S7-HISTORY-ADMIN");
+    await user.click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    await user.click(screen.getByTestId("film-quote-tab"));
+
+    expect(screen.getByText(/302\.5/)).toBeInTheDocument();
+    expect(screen.getByText(/単価条件：フィルム製作・国内輸送・海外輸送・通関費込み/)).toBeInTheDocument();
+  });
+
   it("displays, downloads, and prints only the canonical stored quotation PDF", async () => {
     vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
       matches: false,
@@ -281,7 +436,7 @@ describe("quotation history ownership UI", () => {
     const displayUrl = iframe.getAttribute("src") ?? "";
     expect(displayUrl).toMatch(/^blob:stored-pdf-1$/);
     expect(objectsByBlobUrl.get(displayUrl)).toBe(pdfBlob);
-    expect(fetchMock).toHaveBeenCalledWith("/api/quotations/1/pdf", { cache: "no-store" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/quotations/1/pdf", { cache: "default" });
     expect(screen.queryByRole("article", { name: "見積書A4" })).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("detail-download-current"));

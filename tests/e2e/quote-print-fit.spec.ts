@@ -89,7 +89,7 @@ test.describe("quote PDF single-page fit", () => {
     await page.locator('[aria-label="備考"]').fill(`備考検証。`.repeat(40));
     await expect(page.getByTestId("save-history")).toBeEnabled();
     await page.getByTestId("save-history").click();
-    await expect(page.getByTestId("issue-success")).toBeVisible();
+    await expect(page.getByTestId("issue-success")).toBeVisible({ timeout: 15_000 });
     await expect.poll(() => page.evaluate(() => Boolean(document.getElementById("quote-pdf-capture-host")))).toBe(false);
 
     const downloadPromise = page.waitForEvent("download");

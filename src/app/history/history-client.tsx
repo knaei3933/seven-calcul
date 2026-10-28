@@ -371,10 +371,22 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
                       aria-label={`${record.quotationNumber} の状態`}
                       value={record.status}
                       disabled={!canManage(record)}
-                      title={canManage(record) ? undefined : "作成者または管理者のみ変更できます"}
+                      title={canManage(record)
+                        ? (record.internalApproval ? undefined : "成約にするには、詳細画面で内部承認を完了してください")
+                        : "作成者または管理者のみ変更できます"}
                       onChange={(event) => void changeStatus(record, event.target.value as QuotationStatus)}
                     >
-                      {manualStatusOptions(record).map((item) => <option key={item} value={item}>{statusLabels[item]}</option>)}
+                      {manualStatusOptions(record).map((item) => (
+                        <option
+                          key={item}
+                          value={item}
+                          disabled={item === "approved" && !record.internalApproval}
+                        >
+                          {item === "approved" && !record.internalApproval
+                            ? "成約（内部承認後に選択可）"
+                            : statusLabels[item]}
+                        </option>
+                      ))}
                     </select>
                   </td>
                   <td className="history-actions">
@@ -473,10 +485,6 @@ function manualStatusOptions(record: QuotationRecord): QuotationStatus[] {
     rejected: ["rejected"],
     expired: ["expired"],
   };
-  // 顧客承認は成約の必須条件ではない。ただし成約は内部承認後のみ許可する。
-  if (!record.internalApproval) {
-    return base[record.status].filter((status) => status !== "approved");
-  }
   return base[record.status];
 }
 
@@ -933,15 +941,30 @@ function QuotationDetailModal({
             {mailtoLink ? (
               <a className="button small" href={mailtoLink} data-testid="history-mail-link">メール作成</a>
             ) : null}
-            {record.status === "draft" && !record.internalApproval && canApproveInternally ? (
-              <button
-                className="button small"
-                type="button"
-                disabled={approvingGate || Boolean(sampleBulk?.required && sampleBulk.status !== "confirmed")}
-                title={sampleBulk?.required && sampleBulk.status !== "confirmed" ? "先にサンプルバルク確認を完了してください。" : undefined}
-                onClick={() => onApproveGate(record, "internal")}
-                data-testid="history-internal-approve"
-              >{approvingGate ? "承認中..." : "内部承認する"}</button>
+            {record.status === "draft" && !record.internalApproval && canRecordCustomerApproval ? (
+              (() => {
+                const sampleBulkConfirmed = !sampleBulk?.required || sampleBulk.status === "confirmed";
+                const blockedReason = !canApproveInternally
+                  ? "内部承認はKimのみ実行できます。"
+                  : "";
+                return (
+                  <>
+                    <button
+                      className="button small"
+                      type="button"
+                      disabled={approvingGate || Boolean(blockedReason)}
+                      title={blockedReason || undefined}
+                      onClick={() => onApproveGate(record, "internal")}
+                      data-testid="history-internal-approve"
+                    >{approvingGate ? "承認中..." : "内部承認する"}</button>
+                    {blockedReason ? (
+                      <span className="approval-block-reason" data-testid="history-internal-approval-blocked-reason">
+                        {blockedReason}
+                      </span>
+                    ) : null}
+                  </>
+                );
+              })()
             ) : null}
             {record.status === "draft" && typeof record.payload.customerEmail === "string" && record.payload.customerEmail.trim() ? (
               <button
@@ -1169,7 +1192,7 @@ function QuotationDetailModal({
             <section className="panel sample-bulk-quote-panel" aria-label="サンプルバルク確認">
               <h2>サンプルバルク確認（見積前工程）</h2>
               <p className="help">
-                顧客バルクの到着量を確認し、充填方法と見積金額へ反映した後に内部承認してください。
+                顧客バルクの到着量を確認し、充填方法と見積金額へ反映してください。サンプル確認は任意運用であり、内部承認の必須条件ではありません。
               </p>
               <dl className="sample-bulk-quote-state">
                 <div><dt>状態</dt><dd data-testid="sample-bulk-quote-status">
@@ -1182,7 +1205,7 @@ function QuotationDetailModal({
                 {sampleBulk.note ? <div><dt>メモ</dt><dd>{sampleBulk.note}</dd></div> : null}
               </dl>
 
-              {record.status === "draft" && !record.internalApproval && canApproveInternally ? (
+              {record.status === "draft" && canApproveInternally ? (
                 <div className="sample-bulk-quote-actions">
                   {sampleBulk.status === "pending" ? (
                     <>

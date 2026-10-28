@@ -16,3 +16,9 @@ __pycache__/
 # Production database backups
 backups/*.dump
 backups/*.sql
+
+# Maintenance snapshots and local verification scripts
+backups/
+test-vector-issue-*.cjs
+test-vector-issue-*.mjs
+verify-latest-vector-pdf.mjs

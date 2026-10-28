@@ -24,6 +24,7 @@ const {
   isGravureSnapshotIssuanceEnabled,
   listGravureKMasterRows,
   listGravureYMasterRows,
+  resolveGravureMasters,
   sha256Canonical,
   supersedeGravureKMasterRow,
   supersedeGravureYMasterRow,
@@ -588,5 +589,36 @@ describe("gravure master foundation", () => {
     expect(governed.totalCostPerPiece).toBe(baseline.totalCostPerPiece);
     expect(governed.audit.governedInputJson).not.toBe(baseline.audit.governedInputJson);
     expect(governed.audit.resultJsonSha256).not.toBe(baseline.audit.resultJsonSha256);
+  });
+
+  it("keeps the current Y override effective until a future replacement starts", async () => {
+    const currentInput = validateGravureYMasterInput({
+      ...yInput,
+      webWidthMm: 620,
+      laneCount: 1,
+      printTierM: 2000,
+      effectiveFrom: "2026-10-01",
+    });
+    const current = await createGravureYMasterRow(currentInput, "kanai@kanei-trade.co.jp");
+    const replacement = await supersedeGravureYMasterRow(current.id, validateGravureYMasterInput({
+      ...currentInput,
+      supplierUnitPriceYenPerM: "180.00",
+      sellerMarkup: "1.300000",
+      effectiveFrom: "2026-11-01",
+    }), "kanai@kanei-trade.co.jp");
+
+    const duringCurrent = await resolveGravureMasters("2026-10-15");
+    const duringReplacement = await resolveGravureMasters("2026-11-15");
+    expect(duringCurrent.yRows.find((row) => row.id === current.id)?.supplierUnitPriceYenPerM).toBe("150");
+    expect(duringReplacement.yRows.find((row) => row.id === replacement.id)?.supplierUnitPriceYenPerM).toBe("180");
+
+    const immediateReplacement = await supersedeGravureYMasterRow(current.id, validateGravureYMasterInput({
+      ...currentInput,
+      supplierUnitPriceYenPerM: "170.00",
+      sellerMarkup: "1.280000",
+      effectiveFrom: "2026-10-20",
+    }), "kanai@kanei-trade.co.jp");
+    const duringImmediate = await resolveGravureMasters("2026-10-25");
+    expect(duringImmediate.yRows.find((row) => row.id === immediateReplacement.id)?.supplierUnitPriceYenPerM).toBe("170");
   });
 });

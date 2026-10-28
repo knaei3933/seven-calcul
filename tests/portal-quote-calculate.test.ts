@@ -247,7 +247,10 @@ describe("portal quote calculation G004", () => {
 
   it("calculates digital admin-side, persists complete internal data, and returns only the safe projection", async () => {
     const user = await createVerifiedUser("digital", "PDIGITAL");
-    const response = await calculatePortalQuote(authRequest(user, requestBody({ idempotencyKey: "digital-success" })));
+    const response = await calculatePortalQuote(
+      authRequest(user, requestBody({ idempotencyKey: "digital-success" })),
+      { now },
+    );
     expect(response.status).toBe(201);
     const body = await json(response);
     assertCustomerSafe(body);
@@ -290,7 +293,7 @@ describe("portal quote calculation G004", () => {
     const resolveFilmPrices = vi.fn(async () => overriddenPrices);
     const response = await calculatePortalQuote(
       authRequest(user, requestBody({ idempotencyKey: "server-pricing" })),
-      { calculate, resolveFilmPrices },
+      { calculate, resolveFilmPrices, now },
     );
     expect(response.status).toBe(201);
     expect(resolveFilmPrices).toHaveBeenCalledWith("2026-10-23", expect.any(Object));
@@ -332,7 +335,7 @@ describe("portal quote calculation G004", () => {
     const body = requestBody({ idempotencyKey: "canonical-header-key" });
     const aliasResponse = await calculatePortalQuote(request(body, [], {
       ...authorization,
-      "x-portal-session": user.token,
+      "x-portal-session-legacy": user.token,
     }));
     expect(aliasResponse.status).toBe(401);
     expect(await json(aliasResponse)).toEqual({ error: "unauthorized" });
@@ -581,6 +584,7 @@ describe("portal quote calculation G004", () => {
     process.env.GRAVURE_SNAPSHOT_ISSUANCE_ENABLED = "true";
     const response = await calculatePortalQuote(
       request(requestBody({ idempotencyKey: "gravure-enabled", printingMethod: "gravure" }), [], authFor(user)),
+      { now },
     );
     expect(response.status).toBe(201);
     const body = await json(response);

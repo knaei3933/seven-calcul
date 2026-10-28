@@ -84,9 +84,10 @@ describe("film proof AI/PDF registration", () => {
     const order = orders.find((item) => item.quotation_number === input.quotationNumber)!;
     orderId = order.id;
     await runFilmOrderAction(orderId, "mark-ordered", {}, "seven@727.co.jp");
-    await runFilmOrderAction(orderId, "set-customer-design-not-required", { reason: "AI+PDF regression" }, "kanei@kanei-trade.co.jp");
+    await runFilmOrderAction(orderId, "set-customer-design-not-required", { reason: "AI+PDF regression" }, "seven@727.co.jp");
     await runFilmOrderAction(orderId, "register-receiving", {
       aiFileName: "入稿.ai",
+      guideAcknowledged: true,
       aiFileUrl: "https://drive.google.com/file/d/receivingai/view",
     }, "seven@727.co.jp");
   });

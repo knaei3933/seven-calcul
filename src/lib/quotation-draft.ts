@@ -17,6 +17,7 @@ export const sevenChemical = {
   postalCode: "〒582-0017",
   address: "大阪府柏原市太平寺1丁目12番1号",
   telephone: "TEL 072-971-0726",
+  fax: "FAX 072-971-5800",
   website: "https://7chemical.co.jp/",
 } as const;
 
@@ -30,6 +31,8 @@ export interface QuotationDraft {
   pricingFillingCostPerPiece?: string;
   customLotCost: string;
   customQuantity: string;
+  setupCost?: string;
+  setupQuantity?: string;
   filmCostPerPiece: string;
   filmMeterPrice: string;
   filmOrderLengthM: string;
@@ -108,6 +111,8 @@ export function buildQuotationDraft(
     }[];
     lossRate: string;
     bulkUnitPrice: string;
+    setupCost?: string;
+    setupQuantity?: string;
     gravureParameters?: GravureRollParameters;
     calculationRequest?: CalculationInput;
     originalQuantity?: string;
@@ -164,6 +169,8 @@ export function buildQuotationDraft(
     targetMargin: context.targetMargin,
     customLotCost: result.customCharge,
     customQuantity: "1",
+    setupCost: context.setupCost ?? "0",
+    setupQuantity: context.setupQuantity ?? "1",
     // 見積書の充填・加工はバルクを除いた加工のみ。バルクは bulkCostPerPiece で別管理。
     fillingCostPerPiece: D(result.costPerPieceComponents.variableProcessing)
       .plus(result.costPerPieceComponents.fixedLot)
@@ -220,6 +227,8 @@ export function buildQuotationDraft(
       skus: context.skus,
       lossRate: context.lossRate,
       bulkUnitPrice: context.bulkUnitPrice,
+      setupCost: context.setupCost,
+      setupQuantity: context.setupQuantity,
       gravureParameters: context.gravureParameters,
     }),
   };
@@ -264,6 +273,8 @@ export function buildRedactedQuotationDraft(
     targetMargin: context.targetMargin,
     customLotCost: "0",
     customQuantity: "1",
+    setupCost: "0",
+    setupQuantity: "1",
     fillingCostPerPiece: "0",
     bulkCostPerPiece: "0",
     pricingFillingCostPerPiece: "0",

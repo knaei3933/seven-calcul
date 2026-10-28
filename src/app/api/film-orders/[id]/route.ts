@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
-import { canViewFilmOrders, canPerformFilmOrderAction, isKaneiTradeUser, isSevenChemicalUser } from "@/lib/film-order-access";
+import { canViewFilmOrders, canPerformFilmOrderAction, canViewFilmOrderRow } from "@/lib/film-order-access";
 import { getFilmOrder } from "@/lib/film-orders";
 import { runFilmOrderAction, type FilmOrderAction } from "@/lib/film-orders";
 
@@ -20,10 +20,9 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
   }
   try {
     const order = await getFilmOrder(orderId);
-    // カネイ側は供給管理のため全件閲覧できる。セブン側は自社発注のみ。
-    const visible = isKaneiTradeUser(user.email)
-      || (order != null && isSevenChemicalUser(order.created_by_email));
-    if (!order || !visible) return NextResponse.json({ error: "film_order_not_found" }, { status: 404 });
+    if (!order || !canViewFilmOrderRow(order.buyer_domain, user.email)) {
+      return NextResponse.json({ error: "film_order_not_found" }, { status: 404 });
+    }
     return NextResponse.json({ order });
   } catch {
     return NextResponse.json({ error: "film_order_get_failed" }, { status: 500 });
@@ -39,6 +38,7 @@ function statusForError(message: string): number {
     message.startsWith("invalid_")
     || message === "re_proof_comment_required"
     || message === "unknown_action"
+    || message === "upload_guide_acknowledgement_required"
     || message === "sample_bulk_not_required"
     || message === "sample_bulk_quantity_required"
     || message === "sample_bulk_quantity_mismatch"
@@ -61,6 +61,8 @@ function statusForError(message: string): number {
     || message === "ship_to_confirmation_required"
     || message === "ship_to_not_registered"
     || message === "invalid_ship_to"
+    || message === "invalid_production_plan_date"
+    || message === "invalid_production_plan_range"
     || message === "delivery_destination_not_found"
     || message === "customer_code_required"
     || message === "sample_bulk_quantity_mismatch"

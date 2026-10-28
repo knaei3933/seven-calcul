@@ -410,7 +410,7 @@ describe("portal v1 auth API", () => {
     }), "me", { now });
     const aliasMe = await handlePortalApiRequest(request(undefined, {
       ...authorization,
-      "x-portal-session": session.token,
+      "x-portal-session-legacy": session.token,
     }), "me", { now });
     expect(aliasMe.status).toBe(401);
     expect(await json(aliasMe)).toEqual({ error: "session_expired" });

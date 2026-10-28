@@ -33,11 +33,33 @@ describe("mail routing override", () => {
     expect(() => resolveMailRoute("customer@example.test")).toThrow("invalid_mail_recipient_override");
   });
 
+  it("prefers enabled settings test mode over the environment override", async () => {
+    process.env.MAIL_RECIPIENT_OVERRIDE = "env@example.test";
+    const { resolveMailRoute } = await import("@/lib/mail-routing");
+    expect(resolveMailRoute("customer@example.test", {
+      enabled: true,
+      recipient: "kim@kanei-trade.co.jp",
+    })).toEqual({
+      to: "kim@kanei-trade.co.jp",
+      overridden: true,
+    });
+  });
+
+  it("returns the business recipient when settings test mode is disabled and no environment override remains", async () => {
+    delete process.env.MAIL_RECIPIENT_OVERRIDE;
+    const { resolveMailRoute } = await import("@/lib/mail-routing");
+    expect(resolveMailRoute("supplier@example.co.kr", { enabled: false, recipient: "" })).toEqual({
+      to: "supplier@example.co.kr",
+      overridden: false,
+    });
+  });
+
   it("passes attachments and reports the actual recipient in the quotation mailer", async () => {
     process.env.MAIL_RECIPIENT_OVERRIDE = "kim@kanei-trade.co.jp";
     process.env.SMTP_HOST = "smtp.test";
     process.env.SMTP_USER = "sender@test";
     process.env.SMTP_PASS = "password";
+    process.env.MAIL_DRY_RUN = "";
     const delivered: any[] = [];
     vi.doMock("nodemailer", () => ({
       default: {
@@ -64,6 +86,8 @@ describe("mail routing override", () => {
       recipientOverridden: true,
     });
     expect(delivered[0].to).toBe("kim@kanei-trade.co.jp");
+    expect(delivered[0].subject).toBe("[お客様]quotation");
+    expect(delivered[0].cc).toEqual([]);
     expect(Buffer.from(delivered[0].attachments[0].content)).toEqual(pdf);
   });
 

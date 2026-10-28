@@ -329,7 +329,7 @@ describe("portal own-quote read APIs", () => {
     const publicId = String(quote.publicId);
     const aliasHeaders = {
       ...authorization,
-      "x-portal-session": user.token,
+      "x-portal-session-legacy": user.token,
     };
 
     const aliasList = await listPortalQuotesApi(listRequest(user, "", aliasHeaders));

@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import {
+  allUploadGuidesChecked,
+  UploadGuideAcknowledgement,
+} from "@/components/upload-guide-acknowledgement";
 
 interface DesignInfo {
   order: {
@@ -28,6 +32,7 @@ export default function CustomerDesignUploadClient({ token }: { token: string })
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [uploader, setUploader] = useState("");
   const [note, setNote] = useState("");
+  const [guideChecks, setGuideChecks] = useState<boolean[]>([false, false, false]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -82,6 +87,7 @@ export default function CustomerDesignUploadClient({ token }: { token: string })
         fileId: uploaded.id,
         uploader: uploader.trim() || undefined,
         note: note.trim() || undefined,
+        guideAcknowledged: allUploadGuidesChecked(guideChecks),
       }),
     });
     const complete = await completeResponse.json();
@@ -90,7 +96,7 @@ export default function CustomerDesignUploadClient({ token }: { token: string })
   };
 
   const submit = async () => {
-    if (!aiFile || busy || !info?.canUpload) return;
+    if (!aiFile || busy || !info?.canUpload || !allUploadGuidesChecked(guideChecks)) return;
     if (aiFile.size > info.policy.maxBytes) {
       setError(`AIファイルサイズが上限（${Math.floor(info.policy.maxBytes / 1024 / 1024)}MB）を超えています。`);
       return;
@@ -143,9 +149,13 @@ export default function CustomerDesignUploadClient({ token }: { token: string })
                 <label>確認用PDF（任意）
                   <input type="file" accept=".pdf" onChange={(event) => setPdfFile(event.target.files?.[0] ?? null)} />
                 </label>
+                <UploadGuideAcknowledgement
+                  checks={guideChecks}
+                  onChange={(index, checked) => setGuideChecks((old) => old.map((value, itemIndex) => itemIndex === index ? checked : value))}
+                />
                 <label>担当者名（任意）<input value={uploader} onChange={(event) => setUploader(event.target.value)} /></label>
                 <label>備考（任意）<textarea value={note} rows={3} onChange={(event) => setNote(event.target.value)} /></label>
-                <button className="button" type="button" disabled={!aiFile || busy} onClick={() => void submit()}>
+                <button className="button" type="button" disabled={!aiFile || busy || !allUploadGuidesChecked(guideChecks)} onClick={() => void submit()}>
                   {busy ? "アップロード中..." : "デザインデータを入稿"}
                 </button>
               </div>

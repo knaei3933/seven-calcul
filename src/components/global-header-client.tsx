@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import type { PublicUser } from "@/lib/auth-store";
 import { CALCULATION_VERSION } from "@/lib/constants";
 import { isKaneiTradeUser } from "@/lib/film-order-access";
@@ -16,6 +18,35 @@ const menuItems = [
 export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement | null>(null);
+
+  const settingsItems = [
+    user?.role === "admin" ? { href: "/admin/users", label: "ユーザー管理" } : null,
+    user?.role === "admin" && isKaneiTradeUser(user.email)
+      ? { href: "/admin/film-prices", label: "フィルム単価" }
+      : null,
+    user && isKaneiTradeUser(user.email)
+      ? { href: "/settings/mail", label: "メール設定" }
+      : null,
+  ].filter((item): item is { href: Route; label: string } => item != null);
+
+  const settingsActive = settingsItems.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!settingsRef.current?.contains(event.target as Node)) setSettingsOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSettingsOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -54,6 +85,36 @@ export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
       </nav>
 
       <div className="global-user-area">
+        {settingsItems.length ? (
+          <div className="header-settings" ref={settingsRef}>
+            <button
+              className={`button secondary small header-settings-button ${settingsActive ? "active" : ""}`}
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={settingsOpen}
+              onClick={() => setSettingsOpen((open) => !open)}
+              data-testid="header-settings-button"
+            >
+              設定
+              <span aria-hidden="true">{settingsOpen ? "▲" : "▼"}</span>
+            </button>
+            {settingsOpen ? (
+              <div className="header-settings-menu" role="menu" aria-label="設定メニュー">
+                {settingsItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    role="menuitem"
+                    aria-current={pathname === item.href ? "page" : undefined}
+                    onClick={() => setSettingsOpen(false)}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <span className="version-badge">Decimal計算コア {CALCULATION_VERSION}</span>
         {user ? (
           <>

@@ -396,6 +396,8 @@ export async function createPortalUser(input: PortalUserInput): Promise<PublicPo
   const now = new Date().toISOString();
   const passwordHash = await hashPortalPassword(input.password);
   const db = await getPortalIdentityDatabase();
+  // Reserve the non-login quotation service actor before portal users, so IDs never collide.
+  await ensureQuotationPortalServiceActor();
   try {
     await db.run(`
       INSERT INTO portal_users (

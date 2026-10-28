@@ -9,6 +9,7 @@ import {
   type PublicPortalUser,
 } from "@/lib/portal/identity-store";
 import { projectPortalQuote, type PortalQuoteProjection } from "@/lib/portal/quote-projection";
+import { buildQuotationPdfFileName } from "@/lib/film-quotation";
 import {
   generatePortalQuotePdf,
   PortalQuotePdfGenerationError,
@@ -239,8 +240,12 @@ function isPublicId(value: string): boolean {
   return PUBLIC_ID_PATTERN.test(value);
 }
 
-function safeJapaneseDisposition(quotationNumber: string): string {
-  const fileName = `${quotationNumber}.pdf`;
+function safeJapaneseDisposition(quote: PortalQuoteProjection): string {
+  const fileName = buildQuotationPdfFileName({
+    issueDate: quote.issueDate,
+    productName: quote.productName,
+    customerName: quote.customerName,
+  });
   return `attachment; filename="quote.pdf"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
 
@@ -301,7 +306,11 @@ export async function generatePortalQuotePdfApi(
     const fontBytes = dependencies.fontBytes ?? await readBrandFont();
     const generated = await generatePdf(quote.projection, fontBytes);
     const savePdf = dependencies.savePdf ?? saveQuotationPdf;
-    const saved = await savePdf(quote.internalQuotationId, generated, `${quote.projection.quotationNumber}.pdf`);
+    const saved = await savePdf(quote.internalQuotationId, generated, buildQuotationPdfFileName({
+      issueDate: quote.projection.issueDate,
+      productName: quote.projection.productName,
+      customerName: quote.projection.customerName,
+    }));
     if (!saved) throw new PortalPdfConflictError();
     return NextResponse.json({
       saved: true,
@@ -348,7 +357,7 @@ export async function downloadPortalQuotePdfApi(
       headers: {
         "Content-Type": "application/pdf",
         "Content-Length": String(pdf.data.byteLength),
-        "Content-Disposition": safeJapaneseDisposition(quote.projection.quotationNumber),
+        "Content-Disposition": safeJapaneseDisposition(quote.projection),
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
       },

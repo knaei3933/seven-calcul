@@ -1,11 +1,12 @@
 import type { SqlClient } from "./db";
 import { getSqlClient } from "./db";
 import { createHash } from "node:crypto";
-import { quotationStatuses, type QuotationStatus } from "./quotation-shared";
+import { quotationStatuses, type QuotationSampleBulkConfirmation, type QuotationStatus } from "./quotation-shared";
 import { verifyCustomerApprovalToken } from "./quotation-approval-token";
 import { QUOTATION_RESTORE_KEY } from "./quotation-shared";
 import { D } from "./decimal";
 import { ensureAdministratorSeed, type UserRole } from "./auth-store";
+import { buildQuotationPdfFileName } from "./film-quotation";
 import type { QuotationRecord, QuotationRecordInput, ChecklistAudience } from "./quotation-shared";
 import {
   buildChecklistItems,
@@ -808,6 +809,32 @@ export async function updateQuotationCustomerEmail(
 
 export type QuotationApprovalGate = "internal" | "customerApproval";
 
+export class SampleBulkConfirmationRequiredError extends Error {
+  constructor() {
+    super("sample_bulk_confirmation_required");
+    this.name = "SampleBulkConfirmationRequiredError";
+  }
+}
+
+function sampleBulkConfirmationOf(record: QuotationRecord): QuotationSampleBulkConfirmation | null {
+  const value = record.payload.sampleBulkConfirmation;
+  if (!value || typeof value !== "object") return null;
+  const confirmation = value as Partial<QuotationSampleBulkConfirmation>;
+  if (confirmation.required !== true) return null;
+  const status = confirmation.status === "received" || confirmation.status === "confirmed"
+    ? confirmation.status
+    : "pending";
+  return {
+    required: true,
+    status,
+    sampleQuantityMl: typeof confirmation.sampleQuantityMl === "string" ? confirmation.sampleQuantityMl : undefined,
+    receivedMl: typeof confirmation.receivedMl === "string" ? confirmation.receivedMl : undefined,
+    receivedAt: typeof confirmation.receivedAt === "string" ? confirmation.receivedAt : undefined,
+    confirmedAt: typeof confirmation.confirmedAt === "string" ? confirmation.confirmedAt : undefined,
+    note: typeof confirmation.note === "string" ? confirmation.note : undefined,
+  };
+}
+
 export class QuotationApprovalTransitionError extends Error {
   constructor() {
     super("invalid_approval_transition");
@@ -827,6 +854,55 @@ export class CustomerApprovalExpiredError extends Error {
     super("customer_approval_expired");
     this.name = "CustomerApprovalExpiredError";
   }
+}
+
+export async function updateQuotationSampleBulkConfirmation(
+  id: number,
+  action: "record-received" | "confirm",
+  input: { sampleQuantityMl?: unknown; receivedMl?: unknown; note?: unknown },
+  actorId: number,
+): Promise<QuotationRecord> {
+  const record = await getQuotation(id);
+  if (!record || record.status !== "draft") throw new QuotationApprovalTransitionError();
+  const current = sampleBulkConfirmationOf(record) ?? {
+    required: true,
+    status: "pending" as const,
+  };
+  const now = new Date().toISOString();
+  const text = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : undefined;
+  let next: QuotationSampleBulkConfirmation = { ...current, required: true };
+  if (action === "record-received") {
+    const receivedMl = text(input.receivedMl, 40);
+    if (!receivedMl || !/^[0-9]+(?:\.[0-9]+)?$/u.test(receivedMl) || Number(receivedMl) <= 0) {
+      throw new Error("sample_bulk_quantity_required");
+    }
+    next = {
+      ...next,
+      status: "received",
+      sampleQuantityMl: text(input.sampleQuantityMl, 40) || next.sampleQuantityMl,
+      receivedMl,
+      receivedAt: now,
+      note: text(input.note, 2000) || next.note,
+    };
+  } else {
+    if (!current.receivedAt) throw new Error("sample_bulk_receipt_required");
+    next = {
+      ...next,
+      status: "confirmed",
+      confirmedAt: now,
+      note: text(input.note, 2000) || current.note,
+    };
+  }
+  const db = await getDatabase();
+  const result = await db.run(`
+    UPDATE quotations
+    SET payload_json = ?, updated_by = ?, updated_at = ?
+    WHERE id = ? AND status = 'draft'
+  `, [JSON.stringify({ ...record.payload, sampleBulkRequired: true, sampleBulkConfirmation: next }), actorId, now, id]);
+  if (Number(result.changes) !== 1) throw new QuotationApprovalTransitionError();
+  const updated = await getQuotation(id);
+  if (!updated) throw new QuotationApprovalTransitionError();
+  return updated;
 }
 
 export async function approveQuotationGate(
@@ -1177,4 +1253,71 @@ export async function getQuotationPdf(quotationId: number): Promise<{ data: Buff
     throw new QuotationPdfIntegrityError();
   }
   return { data, fileName: row.pdf_file_name ?? "" };
+}
+
+export async function getQuotationPdfDownload(
+  quotationId: number,
+): Promise<{
+  data: Buffer;
+  fileName: string;
+  downloadName: string;
+  sha256: string;
+} | null> {
+  if (!Number.isInteger(quotationId) || quotationId <= 0) return null;
+  const db = await getDatabase();
+  const row = await db.get<{
+    pdf_data: Uint8Array;
+    pdf_file_name: string | null;
+    pdf_sha256: string | null;
+    issue_date: string;
+    product_name: string;
+    customer_name: string;
+  }>(`
+    SELECT pdf_data, pdf_file_name, pdf_sha256, issue_date, product_name, customer_name
+    FROM quotations
+    WHERE id = ? AND pdf_data IS NOT NULL
+  `, [quotationId]);
+  if (!row?.pdf_data || row.pdf_data.byteLength === 0) return null;
+  const data = Buffer.from(row.pdf_data);
+  const expectedDigest = row.pdf_sha256?.trim();
+  if (!expectedDigest || sha256Pdf(data) !== expectedDigest) {
+    throw new QuotationPdfIntegrityError();
+  }
+  return {
+    data,
+    fileName: row.pdf_file_name ?? "",
+    downloadName: buildQuotationPdfFileName({
+      issueDate: row.issue_date,
+      productName: row.product_name,
+      customerName: row.customer_name,
+    }),
+    sha256: expectedDigest,
+  };
+}
+
+export async function getQuotationPdfDownloadMeta(
+  quotationId: number,
+): Promise<{ sha256: string; downloadName: string } | null> {
+  if (!Number.isInteger(quotationId) || quotationId <= 0) return null;
+  const db = await getDatabase();
+  const row = await db.get<{
+    pdf_sha256: string | null;
+    issue_date: string;
+    product_name: string;
+    customer_name: string;
+  }>(`
+    SELECT pdf_sha256, issue_date, product_name, customer_name
+    FROM quotations
+    WHERE id = ? AND pdf_data IS NOT NULL
+  `, [quotationId]);
+  const sha256 = row?.pdf_sha256?.trim();
+  if (!row || !sha256) return null;
+  return {
+    sha256,
+    downloadName: buildQuotationPdfFileName({
+      issueDate: row.issue_date,
+      productName: row.product_name,
+      customerName: row.customer_name,
+    }),
+  };
 }
