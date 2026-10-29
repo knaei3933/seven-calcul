@@ -517,6 +517,7 @@ export default function PrintableQuotationPage({
   const [customerSearchStatus, setCustomerSearchStatus] = useState<"idle" | "loading" | "error">("idle");
   const [customerCodeGenerating, setCustomerCodeGenerating] = useState(false);
   const [generatedCustomerCode, setGeneratedCustomerCode] = useState("");
+  const customerInputsBeforeCodeIssueRef = useRef<Partial<QuoteForm> | null>(null);
 
   const searchCustomerMaster = async (query: string) => {
     const requestId = ++customerSearchRequestRef.current;
@@ -571,13 +572,33 @@ export default function PrintableQuotationPage({
   const generateCustomerCode = async () => {
     setCustomerCodeGenerating(true);
     setCustomerMasterStatus({ loading: false, found: false, message: "", saving: false });
+    // 비동기 요청 중에 다른 초기화가 끼어들어도 입력값을 되돌릴 수 있도록 클릭 시점 상태를 보관한다.
+    customerInputsBeforeCodeIssueRef.current = {
+      customerName: form.customerName,
+      customerPostalCode: form.customerPostalCode,
+      customerAddress: form.customerAddress,
+      customerContact: form.customerContact,
+      customerTelephone: form.customerTelephone,
+      customerFax: form.customerFax,
+      customerEmail: form.customerEmail,
+    };
     try {
       const response = await fetch("/api/customers/next-code", { cache: "no-store" });
       const payload = await response.json();
       const code = typeof payload.customerCode === "string" ? payload.customerCode : "";
       if (!response.ok || !code) throw new Error("generate_failed");
-      // 新規番号のみ差し替える。先に入力済みの得意先情報は保持する。
-      applyPatch({ customerCode: code });
+      const backup = customerInputsBeforeCodeIssueRef.current;
+      setForm((current) => ({
+        ...current,
+        customerCode: code,
+        customerName: current.customerName.trim() || backup?.customerName || "",
+        customerPostalCode: current.customerPostalCode.trim() || backup?.customerPostalCode || "",
+        customerAddress: current.customerAddress.trim() || backup?.customerAddress || "",
+        customerContact: current.customerContact.trim() || backup?.customerContact || "",
+        customerTelephone: current.customerTelephone.trim() || backup?.customerTelephone || "",
+        customerFax: current.customerFax.trim() || backup?.customerFax || "",
+        customerEmail: current.customerEmail.trim() || backup?.customerEmail || "",
+      }));
       setCustomerSearchTerm(code);
       setGeneratedCustomerCode(code);
       setCustomerMasterStatus({
@@ -594,6 +615,7 @@ export default function PrintableQuotationPage({
         saving: false,
       });
     } finally {
+      customerInputsBeforeCodeIssueRef.current = null;
       setCustomerCodeGenerating(false);
     }
   };

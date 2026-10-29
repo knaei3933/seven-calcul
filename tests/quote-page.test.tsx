@@ -577,16 +577,20 @@ describe("quotation page stale draft", () => {
     await user.type(screen.getByLabelText("会社名 ★"), "保持株式会社");
     await user.type(screen.getByLabelText("郵便番号 ★"), "650-0001");
     await user.type(screen.getByLabelText("電話番号 ★"), "078-000-0000");
+    await user.type(screen.getByLabelText("FAX"), "078-000-0001");
     await user.type(screen.getByTestId("customer-email-input"), "keep@example.co.jp");
     await user.type(screen.getByLabelText("住所 ★"), "兵庫県神戸市保持1-2-3");
+    await user.type(screen.getByLabelText("製品名（SKU-1）★"), "保持製品");
     await user.click(screen.getByTestId("generate-customer-code"));
 
     await waitFor(() => expect(screen.getByTestId("customer-search-input")).toHaveValue("K-0107"));
     expect(screen.getByLabelText("会社名 ★")).toHaveValue("保持株式会社");
     expect(screen.getByLabelText("郵便番号 ★")).toHaveValue("650-0001");
     expect(screen.getByLabelText("電話番号 ★")).toHaveValue("078-000-0000");
+    expect(screen.getByLabelText("FAX")).toHaveValue("078-000-0001");
     expect(screen.getByTestId("customer-email-input")).toHaveValue("keep@example.co.jp");
     expect(screen.getByLabelText("住所 ★")).toHaveValue("兵庫県神戸市保持1-2-3");
+    expect(screen.getByLabelText("製品名（SKU-1）★")).toHaveValue("保持製品");
     expect(screen.getByText(/入力済みの得意先情報を保持しています/)).toBeVisible();
   });
 
