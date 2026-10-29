@@ -10,6 +10,7 @@ import { sendMail, isSmtpConfigured } from "@/lib/mail-sender";
 import { buildCustomerApprovalToken } from "@/lib/quotation-approval-token";
 import { buildCustomerQuotationEmail } from "@/lib/quotation-email";
 import { buildQuotationPdfFileName } from "@/lib/film-quotation";
+import { findCustomerDesignAttachments, readCustomerDesignAttachments } from "@/lib/customer-design-data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,25 +55,49 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       customerName: record.customerName,
     });
     const approvalUrl = `${originOf(request)}/quote-approvals/${encodeURIComponent(buildCustomerApprovalToken(record))}`;
-    const { subject, body } = buildCustomerQuotationEmail(record, approvalUrl, fileName);
+    const composeInput = await request.json().catch(() => null) as {
+      subject?: unknown;
+      body?: unknown;
+    } | null;
+    const designFiles = await findCustomerDesignAttachments(record);
+    if (!designFiles.length) {
+      return NextResponse.json({ error: "customer_design_data_not_found" }, { status: 409 });
+    }
+    const designAttachments = await readCustomerDesignAttachments(record);
+    const automatic = buildCustomerQuotationEmail(
+      record,
+      approvalUrl,
+      fileName,
+      designAttachments.map((file) => file.filename),
+    );
+    const subject = typeof composeInput?.subject === "string" && composeInput.subject.trim()
+      ? composeInput.subject.trim().slice(0, 300)
+      : automatic.subject;
+    const body = typeof composeInput?.body === "string" && composeInput.body.trim()
+      ? composeInput.body.trim()
+      : automatic.body;
+    const usesAutomaticText = subject === automatic.subject && body === automatic.body;
 
     const result = await sendMail({
       to: email,
       subject,
       body,
-      templateKey: "quotation_customer_send",
-      templateVars: {
+      templateKey: usesAutomaticText ? "quotation_customer_send" : undefined,
+      templateVars: usesAutomaticText ? {
         quotationNumber: record.quotationNumber,
         productName: record.productName,
         customerName: record.customerName,
         approvalUrl,
         fileName,
-      },
-      attachments: [{
-        filename: fileName,
-        content: pdf.data,
-        contentType: "application/pdf",
-      }],
+      } : undefined,
+      attachments: [
+        {
+          filename: fileName,
+          content: pdf.data,
+          contentType: "application/pdf",
+        },
+        ...designAttachments,
+      ],
     });
     const updated = await updateQuotationStatus(quotationId, "sent", user.id);
     if (!updated) return NextResponse.json({ error: "status_update_failed" }, { status: 500 });
@@ -85,10 +110,18 @@ export async function POST(request: Request, context: Context): Promise<NextResp
         fileName,
         sizeBytes: pdf.data.byteLength,
       },
+      designAttachments: designFiles.map((file) => ({
+        fileName: file.fileName,
+        sizeBytes: file.sizeBytes,
+        revision: file.revision,
+      })),
     });
   } catch (error) {
     if (error instanceof QuotationPdfIntegrityError) {
       return NextResponse.json({ error: "quotation_pdf_integrity_failed" }, { status: 500 });
+    }
+    if (error instanceof Error && error.message === "design_file_too_large") {
+      return NextResponse.json({ error: "design_file_too_large" }, { status: 413 });
     }
     if (error instanceof Error && error.message === "smtp_not_configured") {
       return NextResponse.json({ error: "smtp_not_configured" }, { status: 503 });

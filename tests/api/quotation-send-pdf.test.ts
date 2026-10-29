@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +12,8 @@ process.env.ADMIN_EMAIL = "admin@send-pdf.test";
 process.env.ADMIN_PASSWORD = "admin-send-pdf-password";
 process.env.ADMIN_NAME = "Send PDF Admin";
 process.env.MAIL_RECIPIENT_OVERRIDE = "kim@kanei-trade.co.jp";
+const designDataRoot = join(databaseDirectory, "design-data");
+process.env.DESIGN_DATA_ROOT = designDataRoot;
 
 const sendMailMock = vi.fn();
 vi.mock("@/lib/mail-sender", () => ({
@@ -74,6 +76,10 @@ let record: Awaited<ReturnType<typeof saveQuotation>>;
 let owner: Awaited<ReturnType<typeof createUser>>;
 
 beforeAll(async () => {
+  const designDirectory = join(designDataRoot, "RDA5090_1");
+  await mkdir(designDirectory, { recursive: true });
+  await writeFile(join(designDirectory, "RDA5090_1_7_C.ai"), "%AI-canonical-design");
+  await writeFile(join(designDirectory, "RDA5090_1_7_C.pdf"), "%PDF-canonical-design");
   owner = await createUser({
     email: "owner@send-pdf.test",
     name: "PDF Mail Owner",
@@ -128,6 +134,10 @@ describe("quotation send API with canonical PDF attachment", () => {
       fileName: expectedPdfFileName(),
       sizeBytes: storedPdf!.data.byteLength,
     });
+    expect(payload.designAttachments.map((file: { fileName: string }) => file.fileName)).toEqual([
+      "RDA5090_1_7_C.ai",
+      "RDA5090_1_7_C.pdf",
+    ]);
     expect(payload.approvalUrl).toMatch(/^http:\/\/localhost\/quote-approvals\/[\w.-]+$/u);
     expect(sendMailMock).toHaveBeenCalledTimes(1);
     const mail = sendMailMock.mock.calls[0][0];
@@ -137,9 +147,14 @@ describe("quotation send API with canonical PDF attachment", () => {
     expect(mail.body).toContain("【お見積り概要】");
     expect(mail.body).toContain("【ご承認のお願い】");
     expect(mail.body).toContain(payload.approvalUrl);
-    expect(mail.attachments).toHaveLength(1);
+    expect(mail.body).toContain("【入庫用データ（版下データ）】");
+    expect(mail.body).toContain("アップロード用URLを別途ご案内");
+    expect(mail.attachments).toHaveLength(3);
     expect(mail.attachments[0].filename).toBe(expectedPdfFileName());
     expect(mail.attachments[0].contentType).toBe("application/pdf");
+    expect(mail.attachments[1].filename).toBe("RDA5090_1_7_C.ai");
+    expect(mail.attachments[1].contentType).toBe("application/postscript");
+    expect(mail.attachments[2].filename).toBe("RDA5090_1_7_C.pdf");
     expect(Buffer.from(mail.attachments[0].content)).toEqual(storedPdf!.data);
     await expect(getQuotation(record.id)).resolves.toMatchObject({ status: "sent" });
 

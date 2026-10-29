@@ -19,6 +19,7 @@ export function buildCustomerQuotationEmail(
   record: QuotationRecord,
   approvalUrl: string,
   attachmentName: string,
+  designAttachmentNames: string[] = [],
 ): QuotationEmailDocument {
   const subject = `お見積書 ${record.quotationNumber}（${record.productName || "お見積り"}）のご送付とご承認のお願い`;
   const body = [
@@ -40,6 +41,13 @@ export function buildCustomerQuotationEmail(
     "【お見積書PDF】",
     `添付ファイル：${attachmentName}`,
     "お手数ですが、金額・数量・仕様・納期条件は添付のお見積書をご確認ください。",
+    ...(designAttachmentNames.length ? [
+      "",
+      "【入庫用データ（版下データ）】",
+      ...designAttachmentNames.map((name) => `添付ファイル：${name}`),
+      "デザイン・サイズがご依頼内容どおりか、入庫用データでご確認ください。",
+      "入庫用データのご確認後、正式発注時にアップロード用URLを別途ご案内いたします。",
+    ] : []),
     "",
     "【ご承認のお願い】",
     "ご内容をご確認のうえ、承認いただける場合は下記専用ページよりお手続きください。",

@@ -31,6 +31,13 @@ const statusLabels: Record<QuotationStatus, string> = {
 
 type HistoryDetailTab = "document" | "film" | "sample" | "data";
 type QuotationApprovalGate = "internal" | "customerApproval";
+type QuotationEmailDraft = { subject: string; body: string };
+type QuotationEmailDraftState = QuotationEmailDraft & {
+  internalApproved: boolean;
+  quotePdf: { fileName: string; sizeBytes: number } | null;
+  designLabel: string | null;
+  designAttachments: Array<{ fileName: string; sizeBytes: number; revision: number }>;
+};
 
 function requestedHistoryRecordId(): number | null {
   if (typeof window === "undefined") return null;
@@ -227,15 +234,20 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
     }
   };
 
-  const sendQuotationEmail = async (record: QuotationRecord) => {
+  const sendQuotationEmail = async (record: QuotationRecord, draft?: QuotationEmailDraft): Promise<boolean> => {
     setSendingEmail(true);
     setEmailMessage("");
     try {
-      const response = await fetch(`/api/quotations/${record.id}/send`, { method: "POST" });
+      const response = await fetch(`/api/quotations/${record.id}/send`, {
+        method: "POST",
+        headers: draft ? { "Content-Type": "application/json" } : undefined,
+        body: draft ? JSON.stringify(draft) : undefined,
+      });
       const payload = await response.json();
       if (response.ok) {
         setRecords((old) => old.map((item) => (item.id === record.id ? payload.record as QuotationRecord : item)));
         setEmailMessage(`${record.quotationNumber} を ${payload.sentTo} に送信しました。`);
+        return true;
       } else if (payload.error === "smtp_not_configured") {
         setEmailMessage("SMTPが設定されていません。.env に SMTP_HOST / SMTP_USER / SMTP_PASS を設定してください。");
       } else if (payload.error === "customer_email_required") {
@@ -246,6 +258,10 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
         setEmailMessage("保存済みPDFの整合性確認に失敗しました。送信を中止しました。");
       } else if (payload.error === "quotation_validity_expired") {
         setEmailMessage("有効期限が切れています。復元して新しい見積番号で再発行してください。");
+      } else if (payload.error === "customer_design_data_not_found") {
+        setEmailMessage("見積書サイズ・型に一致する版下データ（AI/PDF）が見つからないため送信を中止しました。");
+      } else if (payload.error === "design_file_too_large") {
+        setEmailMessage("版下データが大きすぎて送信できません。ファイルサイズを確認してください。");
       } else {
         setEmailMessage("送信に失敗しました。");
       }
@@ -254,6 +270,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
     } finally {
       setSendingEmail(false);
     }
+    return false;
   };
 
   const startEmailEdit = (record: QuotationRecord) => {
@@ -429,7 +446,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
             initialTab={initialDetailTab}
             onClose={() => setSelectedId(null)}
             onStatusChange={(record, nextStatus) => { void changeStatus(record, nextStatus); }}
-            onSendEmail={(record) => { void sendQuotationEmail(record); }}
+            onSendEmail={(record, draft) => sendQuotationEmail(record, draft)}
             onApproveGate={(record, gate) => { void approveGate(record, gate); }}
             canEditEmail={canManage(selectedRecord) && ["draft", "sent"].includes(selectedRecord.status)}
             editingEmail={editingEmailId === selectedRecord.id}
@@ -513,7 +530,7 @@ function QuotationDetailModal({
   initialTab?: "document" | "film" | "sample" | "data";
   onClose: () => void;
   onStatusChange: (record: QuotationRecord, nextStatus: QuotationStatus) => void;
-  onSendEmail: (record: QuotationRecord) => void;
+  onSendEmail: (record: QuotationRecord, draft?: QuotationEmailDraft) => Promise<boolean>;
   onApproveGate: (record: QuotationRecord, gate: QuotationApprovalGate) => void;
   canEditEmail: boolean;
   editingEmail: boolean;
@@ -534,6 +551,8 @@ function QuotationDetailModal({
   const [storedPdfError, setStoredPdfError] = useState("");
   const [storedPdfPopupBlocked, setStoredPdfPopupBlocked] = useState(false);
   const storedPdfBusyRef = useRef(false);
+  const [emailDraft, setEmailDraft] = useState<QuotationEmailDraftState | null>(null);
+  const [emailDraftStatus, setEmailDraftStatus] = useState<"idle" | "loading" | "error">("idle");
   const analysis = analyzeQuotation(record);
   // 발행 시 자동 생성된 필름 견적서(payload 저장분)를 우선 사용, 없으면 조회 시 생성
   const storedFilmQuotation = record.payload.filmQuotation as import("@/lib/film-quotation").FilmQuotationData | undefined;
@@ -890,17 +909,26 @@ function QuotationDetailModal({
   };
 
   const customerEmail = record.payload.customerEmail;
-  const mailtoLink = (() => {
-    if (typeof customerEmail !== "string" || !customerEmail.trim()) return null;
-    const subject = encodeURIComponent(`お見積書 ${record.quotationNumber} のご案内`);
-    const body = encodeURIComponent(
-      `${record.customerName} 御中\n\nお見積書 ${record.quotationNumber} をご案内いたします。\n` +
-      `品名：${record.productName}\n数量：${formatNumber(Number(record.quantity))} 枚\n` +
-      `税込合計：${formatCurrency(record.grandTotal, 0)}\n有効期限：${record.validUntil || "-"}\n\n` +
-      `ご確認のほどよろしくお願いいたします。\nパッケージラボ\n`,
-    );
-    return `mailto:${customerEmail.trim()}?subject=${subject}&body=${body}`;
-  })();
+  const openEmailComposer = async () => {
+    setEmailDraftStatus("loading");
+    setEmailDraft(null);
+    try {
+      const response = await fetch(`/api/quotations/${record.id}/email-draft`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "draft_failed");
+      setEmailDraft({
+        subject: payload.subject,
+        body: payload.body,
+        internalApproved: payload.internalApproved === true,
+        quotePdf: payload.quotePdf ?? null,
+        designLabel: payload.designLabel ?? null,
+        designAttachments: Array.isArray(payload.designAttachments) ? payload.designAttachments : [],
+      });
+      setEmailDraftStatus("idle");
+    } catch {
+      setEmailDraftStatus("error");
+    }
+  };
 
   return (
     <div className="history-detail-layer printable-detail" role="dialog" aria-modal="true" aria-labelledby="history-detail-title">
@@ -994,8 +1022,13 @@ function QuotationDetailModal({
                 : detailTab === "film" ? "フィルム見積書PDF"
                   : "詳細データPDF"}
             </button>
-            {mailtoLink ? (
-              <a className="button small" href={mailtoLink} data-testid="history-mail-link">メール作成</a>
+            {typeof customerEmail === "string" && customerEmail.trim() ? (
+              <button
+                className="button small"
+                type="button"
+                onClick={() => { void openEmailComposer(); }}
+                data-testid="history-mail-link"
+              >メール作成</button>
             ) : null}
             {record.status === "draft" && !record.internalApproval && canRecordCustomerApproval ? (
               (() => {
@@ -1621,6 +1654,96 @@ function QuotationDetailModal({
           </>) : null}
         </div>
       </div>
+
+      {emailDraftStatus !== "idle" ? (
+        <div className="quotation-email-compose-layer" role="dialog" aria-modal="true" aria-label="見積メール作成">
+          <article className="quotation-email-compose-panel">
+            <header>
+              <div><span>QUOTATION MAIL</span><h3>メール作成</h3></div>
+            </header>
+            <div className="quotation-email-compose-body">
+              {emailDraftStatus === "loading" ? <p>メール内容と添付データを確認しています。</p> : <p>メール内容を取得できませんでした。</p>}
+            </div>
+            <footer><button className="button secondary" type="button" onClick={() => setEmailDraftStatus("idle")}>閉じる</button></footer>
+          </article>
+        </div>
+      ) : null}
+      {emailDraft ? (
+        <div className="quotation-email-compose-layer" role="dialog" aria-modal="true" aria-label="見積メール作成">
+          <article className="quotation-email-compose-panel">
+            <header>
+              <div>
+                <span>QUOTATION MAIL</span>
+                <h3>{record.quotationNumber} メール作成</h3>
+              </div>
+              <small>{typeof customerEmail === "string" ? customerEmail : ""}</small>
+            </header>
+            <div className="quotation-email-compose-body">
+              <label>
+                <span>宛先</span>
+                <input value={typeof customerEmail === "string" ? customerEmail : ""} readOnly />
+              </label>
+              <label>
+                <span>件名</span>
+                <input
+                  value={emailDraft.subject}
+                  onChange={(event) => setEmailDraft((old) => old ? { ...old, subject: event.target.value } : old)}
+                  data-testid="quotation-email-subject"
+                />
+              </label>
+              <label>
+                <span>本文</span>
+                <textarea
+                  value={emailDraft.body}
+                  rows={14}
+                  onChange={(event) => setEmailDraft((old) => old ? { ...old, body: event.target.value } : old)}
+                  data-testid="quotation-email-body"
+                />
+              </label>
+              <section>
+                <h4>添付ファイル</h4>
+                <ul>
+                  <li>
+                    お見積書PDF：{emailDraft.quotePdf
+                      ? `${emailDraft.quotePdf.fileName}（${formatNumber(emailDraft.quotePdf.sizeBytes, 0)} bytes）`
+                      : "なし"}
+                  </li>
+                  <li>対象条件：{emailDraft.designLabel ?? "-"}</li>
+                  {emailDraft.designAttachments.map((file) => (
+                    <li key={file.fileName}>
+                      版下データ：{file.fileName}（rev.{file.revision} ／ {formatNumber(file.sizeBytes, 0)} bytes）
+                    </li>
+                  ))}
+                  {!emailDraft.designAttachments.length ? <li>版下データ：一致するAI/PDFがありません</li> : null}
+                </ul>
+              </section>
+            </div>
+            <footer>
+              <p>
+                {!emailDraft.internalApproved ? "内部承認後に送信できます。"
+                  : !emailDraft.quotePdf ? "見積書PDFがないため送信できません。"
+                  : emailDraft.designAttachments.length < 2 ? "版下データAI/PDFが揃わないため送信できません。"
+                  : "SMTPで送信し、見積書PDFと版下データAI/PDFを添付します。"}
+              </p>
+              <div>
+                <button className="button secondary" type="button" onClick={() => setEmailDraft(null)}>閉じる</button>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={sendingEmail || !emailDraft.internalApproved || !emailDraft.quotePdf || emailDraft.designAttachments.length < 2}
+                  onClick={() => {
+                    void onSendEmail(record, { subject: emailDraft.subject, body: emailDraft.body })
+                      .then((sent) => { if (sent) setEmailDraft(null); });
+                  }}
+                  data-testid="quotation-email-send"
+                >
+                  {sendingEmail ? "送信中..." : "SMTP送信"}
+                </button>
+              </div>
+            </footer>
+          </article>
+        </div>
+      ) : null}
       {/* pointerdown prevents a slow list refresh from swapping the table row
           under the pointer and turning the original "詳細" click into a click
           on the newly appeared overlay. */}
