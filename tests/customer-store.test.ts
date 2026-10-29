@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const databaseDirectory = await mkdtemp(join(tmpdir(), "customer-store-test-"));
 process.env.POUCH_CUSTOMER_DB = join(databaseDirectory, "customers.db");
 
-const { deleteCustomer, getCustomer, listCustomers, recordCustomerSelection, saveCustomer, validateCustomerInput } = await import("@/lib/customer-store");
+const { deleteCustomer, generateNextCustomerCode, getCustomer, listCustomers, recordCustomerSelection, saveCustomer, validateCustomerInput } = await import("@/lib/customer-store");
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
@@ -180,5 +180,29 @@ describe("customer master persistence and search", () => {
       .toEqual(["CA%A", "CA-B", "CA-NO-FAX"]);
     expect((await listCustomers("", 100, "seven", "other@example.test")).map((item) => item.customerCode))
       .toEqual(["CA%A", "CA-B", "CA-NO-FAX"]);
+  });
+
+  it("generates independent owner-specific customer code sequences", async () => {
+    await saveCustomer("kanei", {
+      customerCode: "K-0012",
+      customerName: "採番テスト金井",
+      customerPostalCode: "",
+      customerAddress: "",
+      customerContact: "",
+      customerTelephone: "",
+      customerEmail: "",
+    });
+    await saveCustomer("seven", {
+      customerCode: "S-0004",
+      customerName: "採番テストセブン",
+      customerPostalCode: "",
+      customerAddress: "",
+      customerContact: "",
+      customerTelephone: "",
+      customerEmail: "",
+    });
+
+    expect(await generateNextCustomerCode("kanei")).toBe("K-0013");
+    expect(await generateNextCustomerCode("seven")).toBe("S-0005");
   });
 });

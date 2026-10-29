@@ -543,6 +543,27 @@ describe("quotation page stale draft", () => {
     expect(container.querySelectorAll(".customer-search-result-row")).toHaveLength(100);
   });
 
+  it("issues the signed-in company's next customer code for a new customer", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", withFontFetch(vi.fn(async (url: RequestInfo | URL) => {
+      const target = String(url);
+      if (target === "/api/customers/next-code") {
+        return Response.json({ customerCode: "K-0107" });
+      }
+      if (target.startsWith("/api/customers?")) {
+        return Response.json({ customers: [] });
+      }
+      return Response.json({}, { status: 404 });
+    })));
+
+    render(<QuotePage />);
+    await user.click(screen.getByTestId("generate-customer-code"));
+
+    await waitFor(() => expect(screen.getByTestId("customer-search-input")).toHaveValue("K-0107"));
+    expect(screen.getByLabelText("会社名 ★")).toHaveValue("");
+    expect(screen.getByText(/新規顧客コード K-0107 を発行しました/)).toBeVisible();
+  });
+
   it("keeps an active restored revision across quote page navigation", async () => {
     const user = userEvent.setup();
     sessionStorage.setItem("pouch-quotation-restore-v1", JSON.stringify({

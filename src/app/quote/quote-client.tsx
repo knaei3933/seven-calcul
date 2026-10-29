@@ -515,6 +515,7 @@ export default function PrintableQuotationPage({
   const pdfDownloadInFlightRef = useRef(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [customerSearchStatus, setCustomerSearchStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [customerCodeGenerating, setCustomerCodeGenerating] = useState(false);
 
   const searchCustomerMaster = async (query: string) => {
     const requestId = ++customerSearchRequestRef.current;
@@ -563,6 +564,43 @@ export default function PrintableQuotationPage({
       setCustomerMasterStatus({ found: false,  loading: false, message: `顧客コード ${code} を読み込みました。`, saving: false });
     } catch {
       setCustomerMasterStatus({ loading: false, found: false, message: "登録されていない顧客コードです。入力後に保存できます。", saving: false });
+    }
+  };
+
+  const generateCustomerCode = async () => {
+    setCustomerCodeGenerating(true);
+    setCustomerMasterStatus({ loading: false, found: false, message: "", saving: false });
+    try {
+      const response = await fetch("/api/customers/next-code", { cache: "no-store" });
+      const payload = await response.json();
+      const code = typeof payload.customerCode === "string" ? payload.customerCode : "";
+      if (!response.ok || !code) throw new Error("generate_failed");
+      applyPatch({
+        customerCode: code,
+        customerName: "",
+        customerPostalCode: "",
+        customerAddress: "",
+        customerContact: "",
+        customerTelephone: "",
+        customerFax: "",
+        customerEmail: "",
+      });
+      setCustomerSearchTerm(code);
+      setCustomerMasterStatus({
+        loading: false,
+        found: false,
+        message: `新規顧客コード ${code} を発行しました。会社名以下を入力して保存してください。`,
+        saving: false,
+      });
+    } catch {
+      setCustomerMasterStatus({
+        loading: false,
+        found: false,
+        message: "顧客コードを発行できませんでした。",
+        saving: false,
+      });
+    } finally {
+      setCustomerCodeGenerating(false);
     }
   };
 
@@ -1960,6 +1998,15 @@ export default function PrintableQuotationPage({
                   </div>
                 ) : null}
               </div>
+              <button
+                className="button secondary"
+                type="button"
+                data-testid="generate-customer-code"
+                disabled={customerCodeGenerating || customerMasterStatus.saving}
+                onClick={() => void generateCustomerCode()}
+              >
+                {customerCodeGenerating ? "発行中..." : "新規コード発行"}
+              </button>
               <button
                 className="button secondary"
                 type="button"

@@ -465,6 +465,27 @@ export async function getCustomer(ownerDomain: CustomerOwnerDomain, code: string
   return row ? mapRow(row) : null;
 }
 
+/**
+ * 会社別に独立した採番を返す。
+ * - Kanei: 既存 K-0001〜 を継続（例: K-0107）
+ * - Seven: 新体系 S-0001〜 を使用（旧 K-... は互換データとして保持）
+ */
+export async function generateNextCustomerCode(ownerDomain: CustomerOwnerDomain): Promise<string> {
+  const owner = normalizeOwnerDomain(ownerDomain);
+  const prefix = owner === "kanei" ? "K" : "S";
+  const pattern = new RegExp(`^${prefix}-([0-9]+)$`, "i");
+  const db = await getDatabase();
+  const rows = await db.all<{ customer_code: string }>(
+    "SELECT customer_code FROM customers WHERE owner_domain = ?",
+    [owner],
+  );
+  const next = rows.reduce((max, row) => {
+    const match = pattern.exec(row.customer_code);
+    return match ? Math.max(max, Number.parseInt(match[1], 10)) : max;
+  }, 0) + 1;
+  return `${prefix}-${String(next).padStart(4, "0")}`;
+}
+
 export async function deleteCustomer(ownerDomain: CustomerOwnerDomain, code: string): Promise<boolean> {
   const owner = normalizeOwnerDomain(ownerDomain);
   if (!code.trim()) return false;
