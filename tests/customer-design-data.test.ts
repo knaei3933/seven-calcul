@@ -41,4 +41,25 @@ describe("customer design data lookup", () => {
     ]);
     expect(files.every((file) => file.revision === 4)).toBe(true);
   });
+
+  it("matches a decimal-width XRA folder through its 3890 data files", async () => {
+    const dir = join(databaseDirectory, "XRA38.590_1");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "XRA3890_1_1_C.ai"), "%AI-xra");
+    await writeFile(join(dir, "XRA3890_1_1_C.pdf"), "%PDF-xra");
+    const xraRecord = {
+      quotationNumber: "KT-XRA",
+      sizeSummary: "38.5×90mm / 1連",
+      payload: {
+        calculationRequest: { spec: { sizeKey: "xra-38.5x90" } },
+      },
+    } as unknown as QuotationRecord;
+
+    const files = await findCustomerDesignAttachments(xraRecord);
+    expect(files.map((file) => file.fileName)).toEqual([
+      "XRA3890_1_1_C.ai",
+      "XRA3890_1_1_C.pdf",
+    ]);
+    expect(files.every((file) => file.designLabel === "Xraラウンド型／38.5×90mm")).toBe(true);
+  });
 });
