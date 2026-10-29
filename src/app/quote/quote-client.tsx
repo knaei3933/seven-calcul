@@ -271,6 +271,11 @@ function pouchDesignLabel(calculationRequestJson: string): string {
   }
 }
 
+// 旧draftで保存された「先払い」を新しい基本条件へ置き換える。
+// 履歴レコードは書き換えず、見積書編集画面の表示・新規発行値のみ対象。
+const normalizeQuotePaymentTerms = (value: string): string =>
+  value.trim() === "先払い" ? "従来通り" : value;
+
 const defaultQuote: QuoteForm = {
   quotationNumber: "",
   revisionOf: "",
@@ -358,7 +363,7 @@ const defaultQuote: QuoteForm = {
   targetMargin: "0.4",
   taxRatePercent: "10",
   deliveryDate: "データ校了後約２か月",
-  paymentTerms: "先払い",
+  paymentTerms: "従来通り",
   shippingTerms: "御社1か所納品",
   notes: [
     "初回製作時は、バルクサンプルを株式会社セブン化学 責任技術者：福井　健二 宛にご送付ください。",
@@ -746,6 +751,7 @@ export default function PrintableQuotationPage({
         const restoredForm = { ...defaultQuote, ...(active.form ?? {}) };
         if (!Array.isArray(restoredForm.skuNames) || restoredForm.skuNames.length === 0) restoredForm.skuNames = [""];
         if (typeof restoredForm.revisionOf !== "string") restoredForm.revisionOf = "";
+        restoredForm.paymentTerms = normalizeQuotePaymentTerms(restoredForm.paymentTerms);
         setForm(restoredForm);
         setPurchaseOrder(active.purchaseOrder ?? null);
         setCalculationChecklistSnapshot(active.calculationChecklistSnapshot ?? null);
@@ -779,6 +785,7 @@ export default function PrintableQuotationPage({
         }
         if (typeof restored.revisionOf === "string") restoredForm.revisionOf = restored.revisionOf;
         restoredForm.quotationNumber = restoredForm.quotationNumber || initialQuotationNumber;
+        restoredForm.paymentTerms = normalizeQuotePaymentTerms(restoredForm.paymentTerms);
         restoredForm.calculationRequestJson = restored.calculationRequest
           ? JSON.stringify(restored.calculationRequest)
           : "";
@@ -1175,7 +1182,7 @@ export default function PrintableQuotationPage({
   if ((form.pricingFillingCostPerPiece.trim() !== "" && !parseDecimal(form.pricingFillingCostPerPiece))
     || (form.bulkCostPerPiece.trim() !== "" && !parseDecimal(form.bulkCostPerPiece))) invalidCalculationFields.push("連携原価（充填・バルク）");
   if (!parsedSetupCost || parsedSetupCost.lt(0)) invalidCalculationFields.push("セットアップ費用");
-  if (!parsedSetupQuantity || parsedSetupQuantity.lte(0)) invalidCalculationFields.push("セットアップ数");
+  if (parsedSetupCost.gt(0) && (!parsedSetupQuantity || parsedSetupQuantity.lte(0))) invalidCalculationFields.push("セットアップ数");
   if (!parsedFilmCost || parsedFilmCost.lt(0)) invalidCalculationFields.push("フィルム原価");
   if (!parsedFilmMeterPrice || parsedFilmMeterPrice.lt(0)) invalidCalculationFields.push("フィルムm単価");
   if (!parsedFilmOrderLength || parsedFilmOrderLength.lt(0)) invalidCalculationFields.push("フィルム発注長");
@@ -1200,7 +1207,7 @@ export default function PrintableQuotationPage({
   const issueButtonDisabled = !issueReady || saving || quoteDraftStale;
 
   const totals = (() => {
-    if (!valid || !parsedQuantity || !parsedTargetMargin || !parsedTaxRatePercent || !parsedFillingCost || !parsedFilmCost || !parsedCopperCost || !parsedCustomLotCost || !parsedCustomQuantity || !parsedSetupCost || !parsedSetupQuantity || !parsedFilmMeterPrice || !parsedFilmOrderLength) return null;
+    if (!valid || !parsedQuantity || !parsedTargetMargin || !parsedTaxRatePercent || !parsedFillingCost || !parsedFilmCost || !parsedCopperCost || !parsedCustomLotCost || !parsedCustomQuantity || !parsedFilmMeterPrice || !parsedFilmOrderLength) return null;
     const quantity = parsedQuantity;
     const margin = parsedTargetMargin;
     const taxRate = parsedTaxRatePercent.div(100);
@@ -1222,11 +1229,14 @@ export default function PrintableQuotationPage({
     const customSellingUnit = ceilTo(customLotSaleBase, 1000);
     const customSaleTotal = customSellingUnit.times(parsedCustomQuantity);
     const customSalePerPiece = customSaleTotal.div(quantity);
+    const setupQuantity = parsedSetupQuantity && parsedSetupQuantity.gt(0)
+      ? parsedSetupQuantity
+      : D(1);
     const setupSaleTotal = parsedSetupCost
-      .times(parsedSetupQuantity)
+      .times(setupQuantity)
       .div(D(1).minus(margin))
       .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-    const setupSellingUnit = parsedSetupQuantity.gt(0) ? setupSaleTotal.div(parsedSetupQuantity) : D(0);
+    const setupSellingUnit = setupQuantity.gt(0) ? setupSaleTotal.div(setupQuantity) : D(0);
     const setupSalePerPiece = setupSaleTotal.div(quantity);
     const filmMeterDisplayUnit = parsedFilmMeterPrice;
     // 充填・加工の残額配分対象には、別ラインのバルク売上を含めない。
@@ -1245,7 +1255,7 @@ export default function PrintableQuotationPage({
       customUnit: customSellingUnit,
       customSaleTotal,
       setupCost: parsedSetupCost,
-      setupQuantity: parsedSetupQuantity,
+      setupQuantity,
       setupSellingUnit,
       setupSaleTotal,
       filmMeterDisplayUnit,
@@ -1585,12 +1595,12 @@ export default function PrintableQuotationPage({
 
   const commitSetupQuantity = (raw: string, node: HTMLElement) => {
     const quantity = parseDisplayedNumber(raw);
-    if (!shownTotals || !quantity || !quantity.gt(0)) {
+    if (!shownTotals || (parsedSetupCost.gt(0) && (!quantity || !quantity.gt(0)))) {
       rejectInvalidNumber(node, numberDisplay(form.setupQuantity));
       return;
     }
     applyPatch({
-      setupQuantity: quantity.toString(),
+      setupQuantity: quantity && quantity.gt(0) ? quantity.toString() : "",
       setupUnitDisplay: "",
       setupAmountDisplay: "",
       pricePerPieceDisplay: "",

@@ -166,7 +166,7 @@ describe("quotation page stale draft", () => {
     expect(sheet.getAllByText(/超過分×充填単価/).length).toBeGreaterThan(0);
     const terms = within(document.getElementById("quote-preview")!);
     expect(terms.getByText("データ校了後約２か月")).toBeVisible();
-    expect(terms.getByText("先払い")).toBeVisible();
+    expect(terms.getByText("従来通り")).toBeVisible();
     expect(terms.getByText("運送条件")).toBeVisible();
     expect(terms.getByText("御社1か所納品")).toBeVisible();
     expect(sheet.getAllByText(/初回製作時は、バルクサンプルを株式会社セブン化学/).length).toBeGreaterThan(0);
@@ -297,6 +297,8 @@ describe("quotation page stale draft", () => {
       quantity: "10000",
       targetMargin: "0.4",
       fillingCostPerPiece: "53.8",
+      setupCost: "0",
+      setupQuantity: "",
       filmCostPerPiece: "20.1",
       filmMeterPrice: "402",
       filmOrderLengthM: "500",
@@ -429,6 +431,9 @@ describe("quotation page stale draft", () => {
     await waitFor(() => expect(screen.getByTestId("filling-unit-price")).toBeVisible());
     // 客給（バルク原価なし）の場合はバルクラインを表示しない。
     expect(screen.queryByTestId("bulk-line")).not.toBeInTheDocument();
+    // セットアップなしの場合は数量が空でも金額計算を妨げない。
+    expect(screen.queryByTestId("calc-invalid-fields")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("setup-line")).not.toBeInTheDocument();
   });
 
   it("adds a target-margin setup line from simulator inputs", async () => {
@@ -502,6 +507,7 @@ describe("quotation page stale draft", () => {
     await user.click(screen.getByTestId("fill-test-data"));
     expect((screen.getByLabelText("会社名 ★") as HTMLInputElement).value).toMatch("テスト顧客株式会社");
     expect(screen.getByLabelText("FAX")).toHaveValue("");
+    expect(screen.getByLabelText("お支払い条件")).toHaveTextContent("従来通り");
     expect(screen.queryByTestId("calc-invalid-fields")).not.toBeInTheDocument();
     expect(screen.getByTestId("issue-required-fields")).toBeVisible();
     expect(screen.getByRole("button", { name: "見積書を発行" })).toBeEnabled();
