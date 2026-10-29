@@ -1268,6 +1268,8 @@ export default function QuotationPage({
     bulkUnitPrice: chamberConfigActive && form.chambers[0] && isNonNegativeDecimalInput(form.chambers[0].price)
       ? form.chambers[0].price
       : form.bulkPrice,
+    setupCost: form.setupCost,
+    setupQuantity: form.setupQuantity,
     ...(chamberConfigActive && chamberFillsValid ? {
       chambers: form.chambers.map((chamber) => ({
         liquidName: chamber.name,
