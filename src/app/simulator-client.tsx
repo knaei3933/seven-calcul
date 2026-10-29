@@ -1189,6 +1189,11 @@ export default function QuotationPage({
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((old) => ({ ...old, [key]: value }));
   const patchForm = (patch: Partial<typeof form>) => setForm((old) => ({ ...old, ...patch }));
+  const connectedChambersForSizeKey = (sizeKey: SizeKey): "1" | "2" | "3" | "4" => {
+    if (sizeKey === "round-60x80-2") return "2";
+    if (sizeKey === "round-70x120-3") return "3";
+    return "1";
+  };
   const standardSize = sizeMaster[form.sizeKey];
   const dimensionMismatch = !form.custom && (form.widthMm !== standardSize.widthMm || form.lengthMm !== standardSize.lengthMm);
   const customDimensionsValid = isPositiveDecimalInput(form.widthMm) && isPositiveDecimalInput(form.lengthMm);
@@ -2189,7 +2194,7 @@ export default function QuotationPage({
         <form onSubmit={submit} className="layout" noValidate data-testid="quotation-form" data-state={staleResult ? "stale" : "current"}>
           <section className="panel" aria-labelledby="input-title">
             <h2 id="input-title">製品情報</h2>
-            <Field label="サイズ" htmlFor="size"><select id="size" value={form.sizeKey} onChange={(e) => { const key = e.target.value as SizeKey; const s = sizeMaster[key]; set("sizeKey", key); patchForm({ widthMm: s.widthMm, lengthMm: s.lengthMm }); }}>{Object.values(sizeMaster).map((size) => <option key={size.key} value={size.key}>{size.label}</option>)}</select></Field>
+            <Field label="サイズ" htmlFor="size"><select id="size" value={form.sizeKey} onChange={(e) => { const key = e.target.value as SizeKey; const s = sizeMaster[key]; set("sizeKey", key); patchForm({ widthMm: s.widthMm, lengthMm: s.lengthMm, connected: connectedChambersForSizeKey(key) }); }}>{Object.values(sizeMaster).map((size) => <option key={size.key} value={size.key}>{size.label}</option>)}</select></Field>
             <div className="field"><label htmlFor="custom"><input id="custom" type="checkbox" checked={form.custom} onChange={(e) => { const checked = e.target.checked; if (checked) patchForm({ custom: true }); else patchForm({ custom: false, widthMm: standardSize.widthMm, lengthMm: standardSize.lengthMm }); }} /> カスタム区分</label><p className="help">チェックすると左右幅・長さを自由入力できます。列数は選択サイズを引き継ぎ、原反幅・価格帯・配送単位は幅から自動判定します（参考計算）。</p></div>
             <div className="field-row">
               <Field label="左右幅 (mm)" htmlFor="width"><input id="width" inputMode="decimal" readOnly={!form.custom} aria-readonly={!form.custom} aria-describedby={dimensionMismatch ? "dimension-error" : undefined} value={form.widthMm} onChange={(e) => set("widthMm", e.target.value)} /></Field>
