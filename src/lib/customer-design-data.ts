@@ -96,6 +96,17 @@ function sizeCodes(widthMm: number, lengthMm: number): Set<string> {
   return new Set([...codes].filter((code) => /^\d{3,5}$/u.test(code)));
 }
 
+function connectedChambersOf(record: QuotationRecord): number {
+  const request = record.payload.calculationRequest as {
+    spec?: { connectedChambers?: unknown };
+  } | null | undefined;
+  const requestValue = numberOr(request?.spec?.connectedChambers, 0);
+  if (requestValue >= 1 && requestValue <= 4) return Math.round(requestValue);
+  const summaryMatch = /([1-4])\s*連/u.exec(record.sizeSummary ?? "");
+  if (summaryMatch) return Number(summaryMatch[1]);
+  return 1;
+}
+
 async function walk(root: string, current = root, depth = 0): Promise<string[]> {
   if (depth > 2) return [];
   let entries;
@@ -131,6 +142,7 @@ export async function findCustomerDesignAttachments(record: QuotationRecord): Pr
   const prefix = DESIGN_PREFIXES[spec.design];
   const sizes = sizeCodes(spec.widthMm, spec.lengthMm);
   const designLabel = customerDesignLabel(record) ?? "";
+  const connectedChambers = connectedChambersOf(record);
   const stems = new Map<string, { ai?: CustomerDesignAttachmentInfo; pdf?: CustomerDesignAttachmentInfo }>();
   for (const path of await walk(root)) {
     const directory = relative(root, dirname(path)).split(/[\\/]/)[0] ?? "";
@@ -141,6 +153,9 @@ export async function findCustomerDesignAttachments(record: QuotationRecord): Pr
     const [, filePrefix, sizeCode, variant, revision] = match;
     const extension = match[5].toLowerCase() as "ai" | "pdf";
     if (filePrefix.toUpperCase() !== prefix || !sizes.has(sizeCode)) continue;
+    // 60x80 のように 1連/2連が混在するサイズでは、ファイル variant を充填室数と一致させる。
+    // RDA6080_1_1_C=1連 / RDA6080_2_2_C=2連。
+    if (variant && Number(variant) !== connectedChambers) continue;
     const candidate: CustomerDesignAttachmentInfo = {
       fileName: path.split(/[\\/]/).pop() ?? path,
       sizeBytes: 0,

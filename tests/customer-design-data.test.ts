@@ -30,6 +30,10 @@ describe("customer design data lookup", () => {
     await writeFile(join(dir, "RDA6080_1_4_C.ai"), "%AI-latest");
     await writeFile(join(dir, "RDA6080_1_4_C.pdf"), "%PDF-latest");
     await writeFile(join(dir, "RDA6080_1_2_A.pdf"), "%PDF-not-c");
+    const twoChamberDir = join(databaseDirectory, "RDA6080_2");
+    await mkdir(twoChamberDir, { recursive: true });
+    await writeFile(join(twoChamberDir, "RDA6080_2_2_C.ai"), "%AI-two-chamber");
+    await writeFile(join(twoChamberDir, "RDA6080_2_2_C.pdf"), "%PDF-two-chamber");
   });
 
   it("selects the highest revision C AI and PDF files", async () => {
@@ -40,6 +44,31 @@ describe("customer design data lookup", () => {
       "RDA6080_1_4_C.pdf",
     ]);
     expect(files.every((file) => file.revision === 4)).toBe(true);
+  });
+
+  it("does not attach a 2-chamber design to a 1-chamber quotation", async () => {
+    const files = await findCustomerDesignAttachments(record);
+    expect(files.map((file) => file.fileName)).not.toContain("RDA6080_2_2_C.ai");
+    expect(files.map((file) => file.fileName)).not.toContain("RDA6080_2_2_C.pdf");
+    expect(files.every((file) => file.fileName.startsWith("RDA6080_1_"))).toBe(true);
+  });
+
+  it("selects the matching 2-chamber design for a 2-chamber quotation", async () => {
+    const twoChamberRecord = {
+      ...record,
+      sizeSummary: "60×80mm / 2連",
+      payload: {
+        calculationRequest: {
+          spec: { sizeKey: "round-60x80", connectedChambers: 2 },
+        },
+      },
+    } as unknown as QuotationRecord;
+
+    const files = await findCustomerDesignAttachments(twoChamberRecord);
+    expect(files.map((file) => file.fileName)).toEqual([
+      "RDA6080_2_2_C.ai",
+      "RDA6080_2_2_C.pdf",
+    ]);
   });
 
   it("matches a decimal-width XRA folder through its 3890 data files", async () => {
