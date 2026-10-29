@@ -62,4 +62,27 @@ describe("customer design data lookup", () => {
     ]);
     expect(files.every((file) => file.designLabel === "Xraラウンド型／38.5×90mm")).toBe(true);
   });
+
+  it("does not pair an AI with an unrelated archive PDF when only the latter has a C file", async () => {
+    const primary = join(databaseDirectory, "TUA3580_1");
+    const archive = join(databaseDirectory, "other");
+    await mkdir(primary, { recursive: true });
+    await mkdir(archive, { recursive: true });
+    await writeFile(join(primary, "TUA3580_1_C.ai"), "%AI-tua");
+    await writeFile(join(primary, "TUA3580_1_C.pdf"), "%PDF-tua");
+    await writeFile(join(archive, "TUA3580_4_1_C.pdf"), "%PDF-archive-only");
+    const tubeRecord = {
+      quotationNumber: "KT-TUA",
+      sizeSummary: "35×80mm / 1連",
+      payload: {
+        calculationRequest: { spec: { sizeKey: "tube-35x80" } },
+      },
+    } as unknown as QuotationRecord;
+
+    const files = await findCustomerDesignAttachments(tubeRecord);
+    expect(files.map((file) => file.fileName)).toEqual([
+      "TUA3580_1_C.ai",
+      "TUA3580_1_C.pdf",
+    ]);
+  });
 });

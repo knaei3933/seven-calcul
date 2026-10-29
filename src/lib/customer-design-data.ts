@@ -1,5 +1,5 @@
 import { access, readFile, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import type { MailAttachment } from "./mail-sender";
 import type { QuotationRecord } from "./quotation-shared";
 import { sizeMaster } from "./constants";
@@ -119,6 +119,7 @@ export interface CustomerDesignAttachmentInfo {
   contentType: string;
   sourcePath: string;
   revision: number;
+  stem: string;
   designLabel: string;
   designRoot: string;
 }
@@ -130,11 +131,14 @@ export async function findCustomerDesignAttachments(record: QuotationRecord): Pr
   const prefix = DESIGN_PREFIXES[spec.design];
   const sizes = sizeCodes(spec.widthMm, spec.lengthMm);
   const designLabel = customerDesignLabel(record) ?? "";
-  const selected = new Map<"ai" | "pdf", CustomerDesignAttachmentInfo>();
+  const stems = new Map<string, { ai?: CustomerDesignAttachmentInfo; pdf?: CustomerDesignAttachmentInfo }>();
   for (const path of await walk(root)) {
+    const directory = relative(root, dirname(path)).split(/[\\/]/)[0] ?? "";
+    // other / 未作成 は現行候補ではなく保管・未完成データ扱いとする。
+    if (directory === "other" || directory === "未作成") continue;
     const match = C_SUFFIX_PATTERN.exec(path.split(/[\\/]/).pop() ?? "");
     if (!match) continue;
-    const [, filePrefix, sizeCode, , revision] = match;
+    const [, filePrefix, sizeCode, variant, revision] = match;
     const extension = match[5].toLowerCase() as "ai" | "pdf";
     if (filePrefix.toUpperCase() !== prefix || !sizes.has(sizeCode)) continue;
     const candidate: CustomerDesignAttachmentInfo = {
@@ -142,17 +146,30 @@ export async function findCustomerDesignAttachments(record: QuotationRecord): Pr
       sizeBytes: 0,
       contentType: extension === "pdf" ? "application/pdf" : "application/postscript",
       sourcePath: path,
-      revision: Number(revision ?? 0),
+      // C直前の番号を revision として扱う: _1_3_C -> 3, _1_C -> 1。
+      revision: Number(revision ?? variant ?? 0),
+      stem: basename(path, `.${extension}`),
       designLabel,
       designRoot: root,
     };
-    const current = selected.get(extension);
-    const fileSize = (await stat(path)).size;
-    if (!current || candidate.revision > current.revision) selected.set(extension, candidate);
-    else if (candidate.revision === current.revision && fileSize > current.sizeBytes) selected.set(extension, candidate);
-    if (selected.get(extension) === candidate) candidate.sizeBytes = fileSize;
+    const grouped = stems.get(candidate.stem) ?? {};
+    grouped[extension] = candidate;
+    stems.set(candidate.stem, grouped);
   }
-  return [...selected.values()];
+  // AI/PDFが同一ファイル stem で揃う候補のみ送付する。片方だけの旧データを混在させない。
+  const paired = [...stems.entries()]
+    .filter(([, files]) => Boolean(files.ai && files.pdf))
+    .map(([stem, files]) => ({ stem, ai: files.ai!, pdf: files.pdf! }));
+  if (!paired.length) return [];
+  paired.sort((left, right) =>
+    right.ai.revision - left.ai.revision
+    || right.pdf.revision - left.pdf.revision
+    || left.stem.localeCompare(right.stem, "ja"));
+  const selected = paired[0];
+  for (const file of [selected.ai, selected.pdf]) {
+    file.sizeBytes = (await stat(file.sourcePath)).size;
+  }
+  return [selected.ai, selected.pdf];
 }
 
 export async function readCustomerDesignAttachments(
