@@ -576,22 +576,14 @@ export default function PrintableQuotationPage({
       const payload = await response.json();
       const code = typeof payload.customerCode === "string" ? payload.customerCode : "";
       if (!response.ok || !code) throw new Error("generate_failed");
-      applyPatch({
-        customerCode: code,
-        customerName: "",
-        customerPostalCode: "",
-        customerAddress: "",
-        customerContact: "",
-        customerTelephone: "",
-        customerFax: "",
-        customerEmail: "",
-      });
+      // 新規番号のみ差し替える。先に入力済みの得意先情報は保持する。
+      applyPatch({ customerCode: code });
       setCustomerSearchTerm(code);
       setGeneratedCustomerCode(code);
       setCustomerMasterStatus({
         loading: false,
         found: false,
-        message: `新規顧客コード ${code} を発行しました。会社名以下を入力して保存してください。`,
+        message: `新規顧客コード ${code} を発行しました。入力済みの得意先情報を保持しています。`,
         saving: false,
       });
     } catch {

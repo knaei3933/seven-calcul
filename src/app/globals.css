@@ -2737,10 +2737,11 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 3mm; }
 
 
 .issue-workbench {
+  width: 100%;
   position: sticky;
   top: 65px;
   z-index: 30;
-  max-width: 1100px;
+  max-width: 1440px;
   margin: 0 auto 14px;
   overflow: visible;
   border: 1px solid #94a3b8;

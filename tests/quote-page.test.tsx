@@ -564,6 +564,32 @@ describe("quotation page stale draft", () => {
     expect(screen.getByText(/新規顧客コード K-0107 を発行しました/)).toBeVisible();
   });
 
+  it("keeps customer details already entered when issuing a new customer code", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", withFontFetch(vi.fn(async (url: RequestInfo | URL) => {
+      const target = String(url);
+      if (target === "/api/customers/next-code") return Response.json({ customerCode: "K-0107" });
+      if (target.startsWith("/api/customers?")) return Response.json({ customers: [] });
+      return Response.json({}, { status: 404 });
+    })));
+    render(<QuotePage />);
+
+    await user.type(screen.getByLabelText("会社名 ★"), "保持株式会社");
+    await user.type(screen.getByLabelText("郵便番号 ★"), "650-0001");
+    await user.type(screen.getByLabelText("電話番号 ★"), "078-000-0000");
+    await user.type(screen.getByTestId("customer-email-input"), "keep@example.co.jp");
+    await user.type(screen.getByLabelText("住所 ★"), "兵庫県神戸市保持1-2-3");
+    await user.click(screen.getByTestId("generate-customer-code"));
+
+    await waitFor(() => expect(screen.getByTestId("customer-search-input")).toHaveValue("K-0107"));
+    expect(screen.getByLabelText("会社名 ★")).toHaveValue("保持株式会社");
+    expect(screen.getByLabelText("郵便番号 ★")).toHaveValue("650-0001");
+    expect(screen.getByLabelText("電話番号 ★")).toHaveValue("078-000-0000");
+    expect(screen.getByTestId("customer-email-input")).toHaveValue("keep@example.co.jp");
+    expect(screen.getByLabelText("住所 ★")).toHaveValue("兵庫県神戸市保持1-2-3");
+    expect(screen.getByText(/入力済みの得意先情報を保持しています/)).toBeVisible();
+  });
+
   it("reissues the next code when a generated customer code is taken concurrently", async () => {
     const user = userEvent.setup();
     let issued = 0;
