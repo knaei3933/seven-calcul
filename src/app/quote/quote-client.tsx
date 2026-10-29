@@ -516,6 +516,7 @@ export default function PrintableQuotationPage({
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [customerSearchStatus, setCustomerSearchStatus] = useState<"idle" | "loading" | "error">("idle");
   const [customerCodeGenerating, setCustomerCodeGenerating] = useState(false);
+  const [generatedCustomerCode, setGeneratedCustomerCode] = useState("");
 
   const searchCustomerMaster = async (query: string) => {
     const requestId = ++customerSearchRequestRef.current;
@@ -586,6 +587,7 @@ export default function PrintableQuotationPage({
         customerEmail: "",
       });
       setCustomerSearchTerm(code);
+      setGeneratedCustomerCode(code);
       setCustomerMasterStatus({
         loading: false,
         found: false,
@@ -647,8 +649,25 @@ export default function PrintableQuotationPage({
           customerTelephone: form.customerTelephone,
           customerFax: form.customerFax,
           customerEmail: form.customerEmail,
+          mode: code === generatedCustomerCode ? "create" : "update",
         }),
       });
+      if (response.status === 409) {
+        const nextResponse = await fetch("/api/customers/next-code", { cache: "no-store" });
+        const nextPayload = await nextResponse.json();
+        const nextCode = typeof nextPayload.customerCode === "string" ? nextPayload.customerCode : "";
+        if (!nextResponse.ok || !nextCode) throw new Error("regenerate_failed");
+        setGeneratedCustomerCode(nextCode);
+        applyPatch({ customerCode: nextCode });
+        setCustomerSearchTerm(nextCode);
+        setCustomerMasterStatus({
+          loading: false,
+          found: false,
+          message: `顧客コード ${code} は既に使用されています。${nextCode} に変更して保存してください。`,
+          saving: false,
+        });
+        return;
+      }
       if (!response.ok) throw new Error();
       await searchCustomerMaster("");
       setCustomerMasterStatus({ found: false,  loading: false, message: `顧客コード ${code} を保存しました。`, saving: false });
@@ -670,6 +689,7 @@ export default function PrintableQuotationPage({
       cache: "no-store",
     }).catch(() => undefined);
     clearCustomerSearch();
+    setGeneratedCustomerCode("");
     setCustomerSearchTerm(customer.customerCode);
     applyPatch({
       customerCode: customer.customerCode,

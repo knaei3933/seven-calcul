@@ -564,6 +564,32 @@ describe("quotation page stale draft", () => {
     expect(screen.getByText(/新規顧客コード K-0107 を発行しました/)).toBeVisible();
   });
 
+  it("reissues the next code when a generated customer code is taken concurrently", async () => {
+    const user = userEvent.setup();
+    let issued = 0;
+    vi.stubGlobal("fetch", withFontFetch(vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(url);
+      if (target === "/api/customers/next-code") {
+        issued += 1;
+        return Response.json({ customerCode: `K-010${issued + 6}` });
+      }
+      if (target === "/api/customers" && init?.method === "POST") {
+        return Response.json({ error: "customer_code_already_used" }, { status: 409 });
+      }
+      if (target.startsWith("/api/customers?")) return Response.json({ customers: [] });
+      return Response.json({}, { status: 404 });
+    })));
+
+    render(<QuotePage />);
+    await user.click(screen.getByTestId("generate-customer-code"));
+    await waitFor(() => expect(screen.getByTestId("customer-search-input")).toHaveValue("K-0107"));
+    await user.type(screen.getByLabelText("会社名 ★"), "競合テスト株式会社");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(screen.getByTestId("customer-search-input")).toHaveValue("K-0108"));
+    expect(screen.getByText(/K-0107 は既に使用されています。K-0108 に変更/)).toBeVisible();
+  });
+
   it("keeps an active restored revision across quote page navigation", async () => {
     const user = userEvent.setup();
     sessionStorage.setItem("pouch-quotation-restore-v1", JSON.stringify({
