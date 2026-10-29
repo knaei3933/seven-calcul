@@ -17,6 +17,8 @@ export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ id: string }> };
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+
 function originOf(request: Request): string {
   const forwardedHost = request.headers.get("x-forwarded-host");
   const forwardedProto = request.headers.get("x-forwarded-proto");
@@ -54,11 +56,23 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       productName: record.productName,
       customerName: record.customerName,
     });
-    const approvalUrl = `${originOf(request)}/quote-approvals/${encodeURIComponent(buildCustomerApprovalToken(record))}`;
     const composeInput = await request.json().catch(() => null) as {
+      to?: unknown;
       subject?: unknown;
       body?: unknown;
     } | null;
+    const recipient = typeof composeInput?.to === "string" && composeInput.to.trim()
+      ? composeInput.to.trim()
+      : email;
+    if (!EMAIL_PATTERN.test(recipient)) {
+      return NextResponse.json({ error: "invalid_recipient_email" }, { status: 400 });
+    }
+    // 팝업에서 한 번만 변경한 수신처도 승인 토큰 메타데이터와 일치시킨다.
+    const approvalTokenRecord = recipient === email ? record : {
+      ...record,
+      payload: { ...record.payload, customerEmail: recipient },
+    };
+    const approvalUrl = `${originOf(request)}/quote-approvals/${encodeURIComponent(buildCustomerApprovalToken(approvalTokenRecord))}`;
     const designFiles = await findCustomerDesignAttachments(record);
     if (!designFiles.length) {
       return NextResponse.json({ error: "customer_design_data_not_found" }, { status: 409 });
@@ -79,7 +93,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     const usesAutomaticText = subject === automatic.subject && body === automatic.body;
 
     const result = await sendMail({
-      to: email,
+      to: recipient,
       subject,
       body,
       templateKey: usesAutomaticText ? "quotation_customer_send" : undefined,

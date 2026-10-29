@@ -205,6 +205,60 @@ describe("quotation history ownership UI", () => {
     expect(screen.getByTestId("history-auto-send")).toBeInTheDocument();
   });
 
+  it("sends a popup-edited one-time recipient with the quotation email", async () => {
+    const emailRecord = {
+      ...ownerRecord,
+      internalApproval: { approvedAt: "2026-09-21T00:00:00.000Z", approvedBy: null },
+      payload: { customerEmail: "stored@example.test" },
+    };
+    let sentBody: Record<string, unknown> | null = null;
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target.endsWith("/email-draft")) {
+        return Response.json({
+          to: "stored@example.test",
+          subject: "draft subject",
+          body: "draft body",
+          internalApproved: true,
+          quotePdf: { fileName: "quote.pdf", sizeBytes: 100 },
+          designLabel: "ラウンド型／50×90mm",
+          designAttachments: [
+            { fileName: "design.ai", sizeBytes: 100, revision: 1 },
+            { fileName: "design.pdf", sizeBytes: 100, revision: 1 },
+          ],
+        });
+      }
+      if (target === "/api/quotations/2/send" && init?.method === "POST") {
+        sentBody = JSON.parse(String(init.body));
+        expect(sentBody).toMatchObject({ to: "manual@example.test", subject: "edited subject" });
+        return Response.json({ record: emailRecord, sentTo: "manual@example.test" });
+      }
+      if (target.endsWith("/pdf")) return Response.json({ error: "pdf_not_found" }, { status: 404 });
+      return Response.json({ records: [emailRecord] });
+    }));
+    const user = userEvent.setup();
+    render(<HistoryClient currentUser={currentUser} />);
+
+    await screen.findByText("S7-HISTORY-OWNER");
+    await user.click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    await user.click(screen.getByTestId("history-mail-link"));
+    await waitFor(() => expect(screen.getByTestId("quotation-email-recipient")).toHaveValue("stored@example.test"));
+    await user.clear(screen.getByTestId("quotation-email-recipient"));
+    await user.type(screen.getByTestId("quotation-email-recipient"), "manual@example.test");
+    await user.clear(screen.getByTestId("quotation-email-subject"));
+    await user.type(screen.getByTestId("quotation-email-subject"), "edited subject");
+    await user.click(screen.getByTestId("quotation-email-send"));
+
+    await waitFor(() => expect(sentBody).not.toBeNull());
+    await waitFor(() => expect(screen.getByTestId("email-message")).toHaveTextContent("manual@example.test に送信しました"));
+    vi.unstubAllGlobals();
+  });
+
   it("disables the sales contract option until internal approval is recorded", async () => {
     const fetchMock = vi.fn(async () => Response.json({ records: [ownerRecord] }, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

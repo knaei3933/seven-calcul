@@ -31,7 +31,7 @@ const statusLabels: Record<QuotationStatus, string> = {
 
 type HistoryDetailTab = "document" | "film" | "sample" | "data";
 type QuotationApprovalGate = "internal" | "customerApproval";
-type QuotationEmailDraft = { subject: string; body: string };
+type QuotationEmailDraft = { to: string; subject: string; body: string };
 type QuotationEmailDraftState = QuotationEmailDraft & {
   internalApproved: boolean;
   quotePdf: { fileName: string; sizeBytes: number } | null;
@@ -252,6 +252,8 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
         setEmailMessage("SMTPが設定されていません。.env に SMTP_HOST / SMTP_USER / SMTP_PASS を設定してください。");
       } else if (payload.error === "customer_email_required") {
         setEmailMessage("得意先のメールアドレスが登録されていません。");
+      } else if (payload.error === "invalid_recipient_email") {
+        setEmailMessage("宛先メールアドレスが不正です。");
       } else if (payload.error === "quotation_pdf_not_found") {
         setEmailMessage("添付できる見積書PDFがありません。先にPDFを発行してください。");
       } else if (payload.error === "quotation_pdf_integrity_failed") {
@@ -553,6 +555,8 @@ function QuotationDetailModal({
   const storedPdfBusyRef = useRef(false);
   const [emailDraft, setEmailDraft] = useState<QuotationEmailDraftState | null>(null);
   const [emailDraftStatus, setEmailDraftStatus] = useState<"idle" | "loading" | "error">("idle");
+  const emailRecipientIsValid = Boolean(emailDraft?.to.trim()
+    && /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(emailDraft.to.trim()));
   const analysis = analyzeQuotation(record);
   // 발행 시 자동 생성된 필름 견적서(payload 저장분)를 우선 사용, 없으면 조회 시 생성
   const storedFilmQuotation = record.payload.filmQuotation as import("@/lib/film-quotation").FilmQuotationData | undefined;
@@ -917,6 +921,7 @@ function QuotationDetailModal({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "draft_failed");
       setEmailDraft({
+        to: typeof payload.to === "string" ? payload.to : "",
         subject: payload.subject,
         body: payload.body,
         internalApproved: payload.internalApproved === true,
@@ -1676,12 +1681,17 @@ function QuotationDetailModal({
                 <span>QUOTATION MAIL</span>
                 <h3>{record.quotationNumber} メール作成</h3>
               </div>
-              <small>{typeof customerEmail === "string" ? customerEmail : ""}</small>
+              <small>登録済み: {typeof customerEmail === "string" ? customerEmail || "-" : "-"}</small>
             </header>
             <div className="quotation-email-compose-body">
               <label>
-                <span>宛先</span>
-                <input value={typeof customerEmail === "string" ? customerEmail : ""} readOnly />
+                <span>宛先（この送信のみ変更）</span>
+                <input
+                  type="email"
+                  value={emailDraft.to}
+                  onChange={(event) => setEmailDraft((old) => old ? { ...old, to: event.target.value } : old)}
+                  data-testid="quotation-email-recipient"
+                />
               </label>
               <label>
                 <span>件名</span>
@@ -1721,6 +1731,7 @@ function QuotationDetailModal({
             <footer>
               <p>
                 {!emailDraft.internalApproved ? "内部承認後に送信できます。"
+                  : !emailRecipientIsValid ? "宛先メールアドレスが不正です。"
                   : !emailDraft.quotePdf ? "見積書PDFがないため送信できません。"
                   : emailDraft.designAttachments.length < 2 ? "版下データAI/PDFが揃わないため送信できません。"
                   : "SMTPで送信し、見積書PDFと版下データAI/PDFを添付します。"}
@@ -1730,9 +1741,14 @@ function QuotationDetailModal({
                 <button
                   className="button"
                   type="button"
-                  disabled={sendingEmail || !emailDraft.internalApproved || !emailDraft.quotePdf || emailDraft.designAttachments.length < 2}
+                  disabled={sendingEmail || !emailDraft.internalApproved || !emailRecipientIsValid
+                    || !emailDraft.quotePdf || emailDraft.designAttachments.length < 2}
                   onClick={() => {
-                    void onSendEmail(record, { subject: emailDraft.subject, body: emailDraft.body })
+                    void onSendEmail(record, {
+                      to: emailDraft.to.trim(),
+                      subject: emailDraft.subject,
+                      body: emailDraft.body,
+                    })
                       .then((sent) => { if (sent) setEmailDraft(null); });
                   }}
                   data-testid="quotation-email-send"

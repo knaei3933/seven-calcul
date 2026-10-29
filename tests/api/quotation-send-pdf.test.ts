@@ -116,6 +116,21 @@ afterAll(async () => {
 });
 
 describe("quotation send API with canonical PDF attachment", () => {
+  it("rejects an invalid recipient edited in the mail popup before dispatch", async () => {
+    const response = await sendQuotation(
+      new Request(`http://localhost/api/quotations/${record.id}/send`, {
+        method: "POST",
+        headers: { cookie: `pouch_session=${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ to: "not-an-email", subject: "manual", body: "manual" }),
+      }),
+      context(record.id),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "invalid_recipient_email" });
+    expect(sendMailMock).not.toHaveBeenCalled();
+  });
+
   it("sends a formal attached quotation with a customer approval link and records customer approval", async () => {
     const storedPdf = await getQuotationPdf(record.id);
     expect(storedPdf).not.toBeNull();
