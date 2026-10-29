@@ -1,4 +1,4 @@
-import { access, readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { MailAttachment } from "./mail-sender";
 import type { QuotationRecord } from "./quotation-shared";
@@ -147,7 +147,10 @@ export async function findCustomerDesignAttachments(record: QuotationRecord): Pr
       designRoot: root,
     };
     const current = selected.get(extension);
+    const fileSize = (await stat(path)).size;
     if (!current || candidate.revision > current.revision) selected.set(extension, candidate);
+    else if (candidate.revision === current.revision && fileSize > current.sizeBytes) selected.set(extension, candidate);
+    if (selected.get(extension) === candidate) candidate.sizeBytes = fileSize;
   }
   return [...selected.values()];
 }

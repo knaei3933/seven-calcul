@@ -34,7 +34,10 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
       productName: record.productName,
       customerName: record.customerName,
     });
-    const approvalUrl = `${originOf(request)}/quote-approvals/${encodeURIComponent(buildCustomerApprovalToken(record))}`;
+    // 내부승인 전에도 메일 초안은 열 수 있어야 한다. 승인 토큰은 발송 가능 시점에만 생성한다.
+    const approvalUrl = record.internalApproval
+      ? `${originOf(request)}/quote-approvals/${encodeURIComponent(buildCustomerApprovalToken(record))}`
+      : "※内部承認後に承認専用URLを発行します";
     const automatic = buildCustomerQuotationEmail(record, approvalUrl, fileName);
     let designFiles: Awaited<ReturnType<typeof findCustomerDesignAttachments>> = [];
     try {

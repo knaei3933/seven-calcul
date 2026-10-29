@@ -22,6 +22,7 @@ vi.mock("@/lib/mail-sender", () => ({
 }));
 
 const { POST: sendQuotation } = await import("@/app/api/quotations/[id]/send/route");
+const { GET: getQuotationEmailDraft } = await import("@/app/api/quotations/[id]/email-draft/route");
 const { GET: getCustomerApproval, POST: postCustomerApproval } = await import("@/app/api/quotations/approvals/[token]/route");
 const { createSession, createUser, closeDatabaseForTest } = await import("@/lib/auth-store");
 const {
@@ -213,6 +214,31 @@ describe("quotation send API with canonical PDF attachment", () => {
     await expect(response.json()).resolves.toEqual({ error: "internal_approval_required" });
     expect(sendMailMock).not.toHaveBeenCalled();
     await expect(getQuotation(noPdfRecord.id)).resolves.toMatchObject({ status: "draft" });
+  });
+
+  it("opens a pending-internal-approval mail draft without generating an approval URL", async () => {
+    const owner = await createUser({
+      email: "pending-draft@send-pdf.test",
+      name: "Pending Draft Owner",
+      password: "pending-draft-password",
+      role: "user",
+    });
+    const pendingRecord = await saveQuotation({
+      ...baseInput,
+      quotationNumber: "S7-SEND-PDF-005",
+    }, owner.id, "user");
+    const response = await getQuotationEmailDraft(
+      new Request(`http://localhost/api/quotations/${pendingRecord.id}/email-draft`, {
+        headers: { cookie: `pouch_session=${token}` },
+      }),
+      context(pendingRecord.id),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.internalApproved).toBe(false);
+    expect(payload.subject).toContain(pendingRecord.quotationNumber);
+    expect(payload.body).toContain("※内部承認後に承認専用URLを発行します");
   });
 
   it("keeps the draft status when SMTP dispatch fails", async () => {
