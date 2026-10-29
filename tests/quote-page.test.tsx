@@ -501,6 +501,8 @@ describe("quotation page stale draft", () => {
 
     await user.click(screen.getByTestId("fill-test-data"));
     expect((screen.getByLabelText("会社名 ★") as HTMLInputElement).value).toMatch("テスト顧客株式会社");
+    expect(screen.getByLabelText("FAX")).toHaveValue("");
+    expect(screen.queryByTestId("calc-invalid-fields")).not.toBeInTheDocument();
     expect(screen.getByTestId("issue-required-fields")).toBeVisible();
     expect(screen.getByRole("button", { name: "見積書を発行" })).toBeEnabled();
   });

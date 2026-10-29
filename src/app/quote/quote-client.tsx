@@ -1167,16 +1167,22 @@ export default function PrintableQuotationPage({
   const parsedFilmMeterPrice = parseDecimal(form.filmMeterPrice);
   const parsedFilmOrderLength = parseDecimal(form.filmOrderLengthM);
 
-  const valid = !!parsedQuantity && parsedQuantity.gt(0)
-    && !!parsedFillingCost && parsedFillingCost.gte(0)
-    && !!parsedFilmCost && parsedFilmCost.gte(0)
-    && !!parsedCopperCost && parsedCopperCost.gte(0)
-  && !!parsedCustomLotCost && parsedCustomLotCost.gte(0)
-  && !!parsedCustomQuantity && parsedCustomQuantity.gt(0)
-  && !!parsedSetupCost && parsedSetupCost.gte(0)
-  && !!parsedSetupQuantity && parsedSetupQuantity.gt(0)
-    && !!parsedTargetMargin && parsedTargetMargin.gt(0) && parsedTargetMargin.lt(1)
-    && !!parsedTaxRatePercent && parsedTaxRatePercent.gte(0);
+  const invalidCalculationFields: string[] = [];
+  if (!parsedQuantity || parsedQuantity.lte(0)) invalidCalculationFields.push("数量");
+  if (!parsedTargetMargin || parsedTargetMargin.lte(0) || parsedTargetMargin.gte(1)) invalidCalculationFields.push("目標利益率");
+  if (!parsedTaxRatePercent || parsedTaxRatePercent.lt(0)) invalidCalculationFields.push("消費税率");
+  if (!parsedFillingCost || parsedFillingCost.lt(0)) invalidCalculationFields.push("充填・加工原価");
+  if ((form.pricingFillingCostPerPiece.trim() !== "" && !parseDecimal(form.pricingFillingCostPerPiece))
+    || (form.bulkCostPerPiece.trim() !== "" && !parseDecimal(form.bulkCostPerPiece))) invalidCalculationFields.push("連携原価（充填・バルク）");
+  if (!parsedSetupCost || parsedSetupCost.lt(0)) invalidCalculationFields.push("セットアップ費用");
+  if (!parsedSetupQuantity || parsedSetupQuantity.lte(0)) invalidCalculationFields.push("セットアップ数");
+  if (!parsedFilmCost || parsedFilmCost.lt(0)) invalidCalculationFields.push("フィルム原価");
+  if (!parsedFilmMeterPrice || parsedFilmMeterPrice.lt(0)) invalidCalculationFields.push("フィルムm単価");
+  if (!parsedFilmOrderLength || parsedFilmOrderLength.lt(0)) invalidCalculationFields.push("フィルム発注長");
+  if (!parsedCopperCost || parsedCopperCost.lt(0)) invalidCalculationFields.push("銅版原価");
+  if (!parsedCustomLotCost || parsedCustomLotCost.lt(0)) invalidCalculationFields.push("金型費用");
+  if (!parsedCustomQuantity || parsedCustomQuantity.lte(0)) invalidCalculationFields.push("金型数");
+  const valid = invalidCalculationFields.length === 0;
   // 発行必須: 顧客名・郵便番号・電話番号・住所・メール + 全SKU品名。
   const missingIssueFields: string[] = [];
   if (!form.customerName.trim()) missingIssueFields.push("会社名");
@@ -2266,7 +2272,10 @@ export default function PrintableQuotationPage({
               </section>
             </>
           ) : (
-            <p className="error sheet-error">金額計算に必要な入力が不正です。右側の編集パネルを確認してください。</p>
+            <p className="error sheet-error" data-testid="calc-invalid-fields">
+              金額計算に必要な入力が不正です：{invalidCalculationFields.join("・")}
+              <br />右側の編集パネルで該当項目を確認してください。
+            </p>
           )}
 
           <section className="terms">
