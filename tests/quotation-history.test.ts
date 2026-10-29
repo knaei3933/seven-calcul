@@ -283,6 +283,31 @@ describe("quotation history analysis", () => {
       .toBe(analysis.subtotal.minus(analysis.costUnit.times(analysis.quantity)).toNumber());
   });
 
+  it("reconstructs blank bulk displays using the quote's per-gram selling rule", () => {
+    const analysis = analyzeQuotation({
+      ...baseRecord,
+      payload: {
+        ...baseRecord.payload,
+        quantity: "10000",
+        fillingCostPerPiece: "5.2",
+        bulkCostPerPiece: "55.8",
+        setupCost: "100",
+        setupQuantity: "1000",
+        filmCostPerPiece: "18.3",
+        targetMargin: "0.4",
+        pricePerPieceDisplay: "133.7867",
+        subtotalDisplay: "1337867",
+        calculationChecklistSnapshot: { bulkUsageMl: "41000" },
+      },
+    });
+
+    // 55.8×10,000=558,000원 → ×1.4=781,200원, 41,000g 기준 단가는 소수 1자리 올림 19.1원/g.
+    expect(analysis.bulkAmount.toNumber()).toBe(781200);
+    expect(analysis.bulkUnit.toFixed(1)).toBe("19.1");
+    expect(analysis.bulkCostPerGram.toFixed(6)).toBe("13.609756");
+    expect(analysis.costUnit.toFixed(4)).toBe("89.3000");
+  });
+
   it("uses the displayed-value snapshot without recomputing rounded quote lines", () => {
     const analysis = analyzeQuotation({
       ...baseRecord,

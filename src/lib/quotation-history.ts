@@ -1,6 +1,6 @@
 import { D, Decimal, parseDecimal, roundUp1 } from "./decimal";
 import { DEFAULT_FILM_COMPOSITION } from "./quotation-shared";
-import { COPPER_SELLING_MARKUP } from "./quotation-pricing";
+import { BULK_SELLING_MARKUP, COPPER_SELLING_MARKUP } from "./quotation-pricing";
 import type { QuotationRecord } from "./quotation-shared";
 
 const storedNumber = (value: unknown): Decimal => {
@@ -121,7 +121,7 @@ export function analyzeQuotation(record: QuotationRecord) {
     D(0),
   );
   const targetBulkSalePerPiece = separatedBulkCostUnit
-    ? separatedBulkCostUnit.div(marginDivider)
+    ? separatedBulkCostUnit.times(BULK_SELLING_MARKUP)
     : D(0);
   const targetSetupSalePerPiece = quantity.gt(0) ? targetSetupSaleTotal.div(quantity) : D(0);
   const targetSetupSalePerSetup = setupQuantity.gt(0) ? targetSetupSaleTotal.div(setupQuantity) : D(0);
@@ -149,10 +149,6 @@ export function analyzeQuotation(record: QuotationRecord) {
 
   const fillingUnit = editedNumber(payload.fillingUnitDisplay)
     ?? (legacyFillingAmount && quantity.gt(0) ? legacyFillingAmount.div(quantity) : targetFillingUnit);
-  // 신규 형식의 バルク販売 ラ인（客給 시 0＝비표시）。
-  const bulkUnit = editedNumber(payload.bulkUnitDisplay)
-    ?? (separatedBulkCostUnit ? separatedBulkCostUnit.div(marginDivider) : D(0));
-  const bulkAmount = editedNumber(payload.bulkAmountDisplay) ?? bulkUnit.times(quantity);
   const filmUnit = editedNumber(payload.filmPouchUnitDisplay)
     ?? (legacyFilmAmount && quantity.gt(0) ? legacyFilmAmount.div(quantity) : targetFilmUnit);
   const displayedCopperAmount = editedNumber(payload.copperAmountDisplay);
@@ -176,9 +172,21 @@ export function analyzeQuotation(record: QuotationRecord) {
   const customAmount = editedNumber(payload.customAmountDisplay) ?? customUnit.times(customQuantity);
   const setupUnit = editedNumber(payload.setupUnitDisplay) ?? targetSetupSalePerSetup;
   const setupAmount = editedNumber(payload.setupAmountDisplay) ?? setupUnit.times(setupQuantity);
-  const bulkUsage = editedNumber((payload.calculationChecklistSnapshot as { bulkUsageMl?: unknown } | null | undefined)?.bulkUsageMl)
-    ?? (bulkUnit.gt(0) ? bulkAmount.div(bulkUnit) : D(0));
   const bulkCostTotal = bulkCostUnit.times(quantity);
+  const displayedBulkUnit = editedNumber(payload.bulkUnitDisplay);
+  const displayedBulkAmount = editedNumber(payload.bulkAmountDisplay);
+  const bulkUsage = editedNumber((payload.calculationChecklistSnapshot as { bulkUsageMl?: unknown } | null | undefined)?.bulkUsageMl)
+    ?? (displayedBulkUnit && displayedBulkUnit.gt(0) && displayedBulkAmount
+      ? displayedBulkAmount.div(displayedBulkUnit)
+      : D(0));
+  // 신규 견적은 バルク原価×1.4を別ライン金額とし、単価は使用量(g)基準で表示する。
+  // 旧payloadは表示overrideを優先し、blankの場合はquote側の自動金額と一致させる。
+  const bulkUnit = displayedBulkUnit
+    ?? (separatedBulkCostUnit && bulkUsage.gt(0)
+      ? bulkCostTotal.times(BULK_SELLING_MARKUP).div(bulkUsage).toDecimalPlaces(1, Decimal.ROUND_UP)
+      : D(0));
+  const bulkAmount = displayedBulkAmount
+    ?? (separatedBulkCostUnit ? bulkCostTotal.times(BULK_SELLING_MARKUP) : D(0));
   const bulkCostPerGram = bulkUsage.gt(0) ? bulkCostTotal.div(bulkUsage) : D(0);
   const profitUnit = sellingUnit.minus(costUnit);
   const profitRate = sellingUnit.gt(0) ? profitUnit.div(sellingUnit).times(100) : D(0);
