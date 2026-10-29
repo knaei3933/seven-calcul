@@ -1251,7 +1251,7 @@ export default function QuotationPage({
     && positiveParameters(effectiveParameters)
     && (form.printingMethod !== "gravure" || positiveGravureParameters(normalizedGravureParameters))
     && skuQuantitiesValid;
-  const blocker = !skuInputsReady || !skuQuantitiesValid || dimensionMismatch || !marginValid || !positive;
+  const blocker = !skuInputsReady || !skuQuantitiesValid || dimensionMismatch || !marginValid || !positive || !kMasterReady;
 
   const spec = useCallback((): PouchSpec => ({
     sizeKey: form.sizeKey,
@@ -2498,11 +2498,6 @@ export default function QuotationPage({
           </section>
           <section className="panel" aria-labelledby="result-title">
 	            <p className="input-summary" data-testid="input-summary">{`${form.widthMm}×${form.lengthMm} / ${form.connected}連 / ${formatNumber(form.quantity)}枚 / ${resultPrintingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"} / SKU ${form.skuCount}件（${form.skus.map((sku, index) => `${skuDisplayName(index)} ${formatNumber(sku.quantity)}枚`).join("＋")}）`}</p>
-	            {serverResult && kMasterApplied ? (
-	              <div className="stale-recalc-banner" role="alert" data-testid="k-master-recalculation-required">
-	                <strong>Kマスター適用中。</strong> 既存表示を更新するため再計算してください。
-	              </div>
-	            ) : null}
 	            {serverResult && staleResult ? (
 	              <div className="stale-recalc-banner" role="alert" data-testid="stale-input-warning">
 	                <div>
