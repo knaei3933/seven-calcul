@@ -2025,7 +2025,7 @@ export default function PrintableQuotationPage({
                 disabled={customerCodeGenerating || customerMasterStatus.saving}
                 onClick={() => void generateCustomerCode()}
               >
-                {customerCodeGenerating ? "発行中..." : "新規コード発行"}
+                新規コード発行
               </button>
               <button
                 className="button secondary"
@@ -2033,7 +2033,7 @@ export default function PrintableQuotationPage({
                 disabled={customerSearchStatus === "loading" || !customerSearchTerm.trim()}
                 onClick={() => void searchCustomerMaster(customerSearchTerm.trim())}
               >
-                {customerSearchStatus === "loading" ? "検索中..." : "検索"}
+                検索
               </button>
               <button
                 className="button secondary"
@@ -2050,16 +2050,19 @@ export default function PrintableQuotationPage({
                 title={!form.customerCode.trim() || !form.customerName.trim() ? "顧客コードと会社名を入力してください" : ""}
                 onClick={() => void saveCustomerMaster()}
               >
-                {customerMasterStatus.saving ? "保存中..." : "保存"}
+                保存
               </button>
               <button className="button" type="button" data-testid="fill-test-data" onClick={fillTestData}>
                 テスト用入力
               </button>
             </form>
-            {!form.customerName.trim() && form.customerCode.trim() ? (
-              <p className="customer-master-status" role="status">↓ 会社名を入力すると保存できます</p>
-            ) : null}
-            {customerMasterStatus.message ? <p className="customer-master-status" role="status">{customerMasterStatus.message}</p> : null}
+            <div className="customer-master-status-slot" aria-live="polite">
+              {customerMasterStatus.message ? (
+                <p className="customer-master-status" role="status">{customerMasterStatus.message}</p>
+              ) : !form.customerName.trim() && form.customerCode.trim() ? (
+                <p className="customer-master-status">↓ 会社名を入力すると保存できます</p>
+              ) : null}
+            </div>
           </div>
           <div className="issue-fields-grid">
             <label className={form.customerName.trim() ? "filled" : "required"}>
