@@ -246,6 +246,43 @@ describe("quotation history analysis", () => {
     })).toBe("PET12/AL7");
   });
 
+  it("analyzes optional setup costs without breaking displayed totals", () => {
+    const analysis = analyzeQuotation({
+      ...baseRecord,
+      payload: {
+        ...baseRecord.payload,
+        quantity: "10000",
+        fillingCostPerPiece: "5.2",
+        bulkCostPerPiece: "55.8",
+        setupCost: "100",
+        setupQuantity: "1000",
+        filmCostPerPiece: "18.3",
+        targetMargin: "0.4",
+        bulkUnitDisplay: "78.12",
+        bulkAmountDisplay: "781200",
+        setupUnitDisplay: "166.6667",
+        setupAmountDisplay: "166667",
+        pricePerPieceDisplay: "133.7867",
+        subtotalDisplay: "1337867",
+        taxDisplay: "133787",
+        grandTotalDisplay: "1471654",
+      },
+    });
+
+    // 原価＝充填5.2＋バルク55.8＋フィルム18.3＋セットアップ10＝89.3 /枚。
+    expect(analysis.setupCostPerSetup.toNumber()).toBe(100);
+    expect(analysis.setupCostTotal.toNumber()).toBe(100000);
+    expect(analysis.setupCostUnit.toFixed(6)).toBe("10.000000");
+    expect(analysis.setupUnit.toNumber()).toBeCloseTo(166.6667, 4);
+    expect(analysis.targetSetupSalePerSetup.toNumber()).toBe(166.667);
+    expect(analysis.targetSetupSalePerPiece.toNumber()).toBe(16.6667);
+    expect(analysis.setupAmount.toNumber()).toBe(166667);
+    expect(analysis.costUnit.toFixed(4)).toBe("89.3000");
+    expect(analysis.sellingUnit.toFixed(4)).toBe("133.7867");
+    expect(analysis.profitUnit.times(analysis.quantity).toNumber())
+      .toBe(analysis.subtotal.minus(analysis.costUnit.times(analysis.quantity)).toNumber());
+  });
+
   it("uses the displayed-value snapshot without recomputing rounded quote lines", () => {
     const analysis = analyzeQuotation({
       ...baseRecord,

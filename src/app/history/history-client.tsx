@@ -625,8 +625,46 @@ function QuotationDetailModal({
   const finalProfitPerPiece = analysis.quantity.gt(0)
     ? finalProfit.div(analysis.quantity)
     : analysis.profitUnit;
+  const fillingCostTotal = analysis.fillingCostUnit.times(analysis.quantity);
+  const processingCostTotal = analysis.processingCostUnit.times(analysis.quantity);
+  const bulkCostTotal = analysis.bulkCostUnit.times(analysis.quantity);
+  const filmCostTotal = analysis.filmCostUnit.times(analysis.quantity);
+  const copperCostTotal = analysis.copperCostUnit.times(analysis.quantity);
+  const customCostTotal = analysis.customCostUnit.times(analysis.quantity);
+  const setupCostTotal = analysis.setupCostUnit.times(analysis.quantity);
+  const customLotCostValue = typeof record.payload.customLotCost === "string" && record.payload.customLotCost.trim()
+    ? record.payload.customLotCost
+    : "0";
+  const customCostPerSetup = analysis.customQuantity.gt(0)
+    ? D(customLotCostValue).div(analysis.customQuantity)
+    : D(0);
+  const copperColorCountValue = (() => {
+    const value = Number(record.payload.copperColorCount ?? 1);
+    return Number.isFinite(value) && value > 0 ? D(value) : D(1);
+  })();
+  const filmMeterCost = analysis.filmOrderLength.gt(0)
+    ? filmCostTotal.div(analysis.filmOrderLength)
+    : D(0);
+  const copperCostPerColor = copperColorCountValue.gt(0) ? copperCostTotal.div(copperColorCountValue) : D(0);
+  const saleLinesTotal = analysis.fillingAmount
+    .plus(analysis.bulkAmount)
+    .plus(analysis.filmAmount)
+    .plus(analysis.copperAmount)
+    .plus(analysis.setupAmount)
+    .plus(analysis.customAmount);
+  const subtotalReconciliationDifference = analysis.subtotal
+    .minus(saleLinesTotal.plus(analysis.adjustment));
 
   const rows = [
+    ...(analysis.hasSeparatedBulkLine && analysis.bulkAmount.gt(0) ? [{
+      name: "バルク費用",
+      cost: analysis.bulkCostPerGram,
+      selling: analysis.bulkUnit,
+      profit: analysis.bulkUnit.minus(analysis.bulkCostPerGram),
+      quantity: `${formatNumber(analysis.bulkUsage.toNumber(), 0)} g`,
+      amount: analysis.bulkAmount,
+      totalProfit: analysis.bulkUnit.minus(analysis.bulkCostPerGram).times(analysis.bulkUsage),
+    }] : []),
     {
       name: "充填・加工",
       cost: analysis.fillingCostUnit,
@@ -634,24 +672,56 @@ function QuotationDetailModal({
       profit: analysis.fillingUnit.minus(analysis.fillingCostUnit),
       quantity: `${formatNumber(analysis.quantity.toNumber(), 0)} 枚`,
       amount: analysis.fillingAmount,
+      totalProfit: analysis.fillingUnit.minus(analysis.fillingCostUnit).times(analysis.quantity),
     },
-    { name: "フィルム", cost: analysis.filmCostUnit, selling: analysis.filmUnit, profit: analysis.filmUnit.minus(analysis.filmCostUnit), quantity: `${formatNumber(analysis.filmOrderLength.toNumber(), 0)} m`, amount: analysis.filmAmount },
+    {
+      name: "フィルム",
+      cost: filmMeterCost,
+      selling: analysis.displayedFilmMeterUnit ?? (analysis.filmOrderLength.gt(0) ? analysis.filmAmount.div(analysis.filmOrderLength) : D(0)),
+      profit: (analysis.displayedFilmMeterUnit ?? (analysis.filmOrderLength.gt(0) ? analysis.filmAmount.div(analysis.filmOrderLength) : D(0)))
+        .minus(filmMeterCost),
+      quantity: `${formatNumber(analysis.filmOrderLength.toNumber(), 0)} m`,
+      amount: analysis.filmAmount,
+      totalProfit: (analysis.displayedFilmMeterUnit ?? (analysis.filmOrderLength.gt(0) ? analysis.filmAmount.div(analysis.filmOrderLength) : D(0)))
+        .minus(filmMeterCost)
+        .times(analysis.filmOrderLength),
+    },
   ];
   if (printingMethodOf(record) === "gravure") {
     rows.push({
-      name: "新規銅版", cost: analysis.copperCostUnit, selling: analysis.copperUnit,
-      profit: analysis.copperUnit.minus(analysis.copperCostUnit),
-      quantity: `${formatNumber(analysis.quantity.toNumber(), 0)} 枚`, amount: analysis.copperAmount,
+      name: "新規銅版",
+      cost: copperCostPerColor,
+      selling: analysis.copperColorUnit ?? (copperColorCountValue.gt(0) ? analysis.copperAmount.div(copperColorCountValue) : D(0)),
+      profit: (analysis.copperColorUnit ?? (copperColorCountValue.gt(0) ? analysis.copperAmount.div(copperColorCountValue) : D(0)))
+        .minus(copperCostPerColor),
+      quantity: `${formatNumber(copperColorCountValue.toNumber(), 0)} 色`,
+      amount: analysis.copperAmount,
+      totalProfit: (analysis.copperColorUnit ?? (copperColorCountValue.gt(0) ? analysis.copperAmount.div(copperColorCountValue) : D(0)))
+        .minus(copperCostPerColor)
+        .times(copperColorCountValue),
     });
   }
-  if (analysis.hasSeparatedBulkLine && analysis.bulkAmount.gt(0)) {
+  if (analysis.setupAmount.gt(0)) {
     rows.push({
-      name: "バルク費用",
-      cost: analysis.bulkCostUnit,
-      selling: analysis.bulkUnit,
-      profit: analysis.bulkUnit.minus(analysis.bulkCostUnit),
-      quantity: `${formatNumber(analysis.quantity.toNumber(), 0)} 枚`,
-      amount: analysis.bulkAmount,
+      name: "セットアップ費用",
+      cost: analysis.setupCostPerSetup,
+      selling: analysis.setupUnit,
+      profit: analysis.setupUnit.minus(analysis.setupCostPerSetup),
+      quantity: `${formatNumber(analysis.setupQuantity.toNumber(), 0)} 個`,
+      amount: analysis.setupAmount,
+      totalProfit: analysis.setupUnit.minus(analysis.setupCostPerSetup).times(analysis.setupQuantity),
+    });
+  }
+  if (analysis.customCostUnit.gt(0) || analysis.customAmount.gt(0)) {
+    rows.push({
+      name: "金型",
+      cost: customCostPerSetup,
+      selling: analysis.customUnit,
+      profit: analysis.customUnit.minus(customCostPerSetup),
+      quantity: `${formatNumber(analysis.customQuantity.toNumber(), 0)} 式`,
+      amount: analysis.customAmount,
+      totalProfit: analysis.customUnit.minus(customCostPerSetup)
+        .times(analysis.customQuantity),
     });
   }
   const payloadText = (key: string, fallback = "") => {
@@ -665,20 +735,6 @@ function QuotationDetailModal({
   const issuerTelephone = payloadText("issuerTelephone", "TEL 072-971-0726");
   const issuerWebsite = payloadText("issuerWebsite", "https://7chemical.co.jp/");
   const issuerRepresentative = payloadText("representative", "代表取締役社長 吾藤 靖");
-  const copperColorCountValue = (() => {
-    const value = Number(record.payload.copperColorCount ?? 1);
-    return Number.isFinite(value) && value > 0 ? D(value) : D(1);
-  })();
-  const fillingCostTotal = analysis.fillingCostUnit.times(analysis.quantity);
-  const processingCostTotal = analysis.processingCostUnit.times(analysis.quantity);
-  const bulkCostTotal = analysis.bulkCostUnit.times(analysis.quantity);
-  const filmCostTotal = analysis.filmCostUnit.times(analysis.quantity);
-  const copperCostTotal = analysis.copperCostUnit.times(analysis.quantity);
-  const customCostTotal = analysis.customCostUnit.times(analysis.quantity);
-  const filmMeterCost = analysis.filmOrderLength.gt(0)
-    ? filmCostTotal.div(analysis.filmOrderLength)
-    : D(0);
-  const copperCostPerColor = copperColorCountValue.gt(0) ? copperCostTotal.div(copperColorCountValue) : D(0);
   const storedCostDifference = analysis.costUnit.minus(analysis.storedCostUnit);
   const profitVerificationDifference = finalProfit.minus(analysis.storedProfitUnit.times(analysis.quantity));
   const fitContentRefs = useRef<Array<HTMLDivElement | null>>([]);
@@ -1285,21 +1341,23 @@ function QuotationDetailModal({
                 <section className="history-a4-section">
                   <header><span>02</span><h2>損益サマリー</h2></header>
                   <table className="data-report-table">
-                    <thead><tr><th>項目</th><th>原価 /枚</th><th>見積 /枚</th><th>差益 /枚</th><th>差益率</th><th>差益総額</th></tr></thead>
+                    <thead><tr><th>項目</th><th>数量</th><th>原価単価</th><th>見積単価</th><th>差益単価</th><th>差益率</th><th>見積金額</th><th>差益総額</th></tr></thead>
                     <tbody>
                       {rows.map((row) => (
                         <tr key={row.name}>
                           <th scope="row">{row.name}</th>
+                          <td className="num">{row.quantity}</td>
                           <td className="num">{formatCurrency(row.cost.toFixed(2), 2)}</td>
                           <td className="num">{formatCurrency(row.selling.toFixed(2), 2)}</td>
                           <td className="num">{formatCurrency(row.profit.toFixed(2), 2)}</td>
                           <td className="num">{row.selling.gt(0) ? `${formatNumber(row.profit.div(row.selling).times(100).toNumber(), 2)}%` : "-"}</td>
-                          <td className="num">{formatCurrency(row.profit.times(analysis.quantity).toFixed(0), 0)}</td>
+                          <td className="num">{formatCurrency(row.amount.toFixed(0), 0)}</td>
+                          <td className="num">{formatCurrency(row.totalProfit.toFixed(0), 0)}</td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
-                      <tr><th scope="row">合計</th><td className="num">{formatCurrency(analysis.costUnit.toFixed(2), 2)}</td><td className="num">{formatCurrency(analysis.sellingUnit.toFixed(2), 2)}</td><td className="num">{formatCurrency(analysis.profitUnit.toFixed(2), 2)}</td><td className="num">{formatNumber(finalProfitRate.toNumber(), 2)}%</td><td className="num">{formatCurrency(finalProfit.toFixed(0), 0)}</td></tr>
+                    <tr><th scope="row">合計</th><td className="num">{formatNumber(analysis.quantity.toNumber(), 0)} 枚</td><td className="num">{formatCurrency(analysis.costUnit.toFixed(2), 2)}</td><td className="num">{formatCurrency(analysis.sellingUnit.toFixed(2), 2)}</td><td className="num">{formatCurrency(analysis.profitUnit.toFixed(2), 2)}</td><td className="num">{formatNumber(finalProfitRate.toNumber(), 2)}%</td><td className="num">{formatCurrency(analysis.subtotal.toFixed(0), 0)}</td><td className="num">{formatCurrency(finalProfit.toFixed(0), 0)}</td></tr>
                     </tfoot>
                   </table>
                   <p className="data-report-note">総原価 {formatCurrency(costTotal.toFixed(0), 0)} 円 ／ 税抜見積 {formatCurrency(analysis.subtotal.toFixed(0), 0)} 円 ／ 最終利益 {formatCurrency(finalProfit.toFixed(0), 0)} 円</p>
@@ -1309,9 +1367,16 @@ function QuotationDetailModal({
                   <header><span>03</span><h2>原価・金額検証</h2></header>
                   <dl className="history-facts">
                     <div><dt>充填・加工原価</dt><dd>{formatCurrency(analysis.fillingCostUnit.toFixed(2), 2)} /枚</dd></div>
+                    <div><dt>バルク原価</dt><dd>{formatCurrency(analysis.bulkCostPerGram.toFixed(2), 2)} /g（{formatNumber(analysis.bulkUsage.toNumber(), 0)} g）</dd></div>
+                    <div><dt>バルク原価合計</dt><dd>{formatCurrency(analysis.bulkCostTotal.toFixed(0), 0)} 円</dd></div>
+                    <div><dt>セットアップ原価</dt><dd>{formatCurrency(analysis.setupCostPerSetup.toFixed(2), 2)} /個 × {formatNumber(analysis.setupQuantity.toNumber(), 0)} 個</dd></div>
+                    <div><dt>セットアップ原価合計</dt><dd>{formatCurrency(analysis.setupCostTotal.toFixed(0), 0)} 円</dd></div>
                     <div><dt>フィルム購入原価</dt><dd>{formatCurrency(analysis.filmMeterPrice.toFixed(2), 2)} /m</dd></div>
                     <div><dt>フィルム発注長</dt><dd>{formatNumber(analysis.filmOrderLength.toNumber(), 0)} m</dd></div>
                     <div><dt>フィルム原価</dt><dd>{formatCurrency(filmCostTotal.toFixed(0), 0)} 円</dd></div>
+                    <div><dt>総原価</dt><dd>{formatCurrency(costTotal.toFixed(0), 0)} 円</dd></div>
+                    <div><dt>売上明細合計</dt><dd>{formatCurrency(saleLinesTotal.toFixed(0), 0)} 円</dd></div>
+                    <div><dt>明細検算差</dt><dd>{formatCurrency(subtotalReconciliationDifference.toFixed(0), 0)} 円</dd></div>
                     <div><dt>目標利益率</dt><dd>{formatNumber(analysis.targetMargin.times(100).toNumber(), 2)}%</dd></div>
                     <div><dt>端数調整</dt><dd>{displayedAdjustment}</dd></div>
                     <div><dt>小計 / 消費税</dt><dd>{formatCurrency(analysis.subtotal.toFixed(0), 0)} / {formatCurrency(analysis.tax.toFixed(0), 0)}</dd></div>

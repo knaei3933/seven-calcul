@@ -943,7 +943,19 @@ export default function PrintableQuotationPage({
       const copperCostUnitAudit = storedCopperCostTotal && totals.quantity.gt(0)
         ? storedCopperCostTotal.div(totals.quantity)
         : D(form.copperPlateCostPerPiece);
-      const costUnit = D(form.fillingCostPerPiece).plus(D(form.bulkCostPerPiece || "0")).plus(D(form.setupCost || "0")).plus(form.filmCostPerPiece).plus(copperCostUnitAudit).plus(D(form.customLotCost).div(customQuantity));
+      const customCostUnitAudit = totals.quantity.gt(0)
+        ? D(form.customLotCost).div(totals.quantity)
+        : D(0);
+      const setupQuantity = D(form.setupQuantity || "1");
+      const setupCostUnitAudit = totals.quantity.gt(0)
+        ? D(form.setupCost || "0").times(setupQuantity).div(totals.quantity)
+        : D(0);
+      const costUnit = D(form.fillingCostPerPiece)
+        .plus(D(form.bulkCostPerPiece || "0"))
+        .plus(setupCostUnitAudit)
+        .plus(form.filmCostPerPiece)
+        .plus(copperCostUnitAudit)
+        .plus(customCostUnitAudit);
       const sellingUnit = totals.quantity.gt(0)
         ? D(shownTotals.subtotal).div(totals.quantity)
         : D(shownTotals.pricePerPiece);

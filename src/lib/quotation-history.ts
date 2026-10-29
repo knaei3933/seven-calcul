@@ -85,7 +85,9 @@ export function analyzeQuotation(record: QuotationRecord) {
   const customCostUnit = customLotCost.div(quantity);
   const setupLotCost = storedNumber(payload.setupCost);
   const setupQuantity = positiveNumber(payload.setupQuantity) ?? D(1);
-  const setupCostUnit = setupLotCost.div(quantity);
+  const setupCostTotal = setupLotCost.times(setupQuantity);
+  const setupCostUnit = setupCostTotal.div(quantity);
+  const setupCostPerSetup = setupLotCost;
   const costUnit = fillingCostUnit
     .plus(separatedBulkCostUnit ?? D(0))
     .plus(filmCostUnit)
@@ -118,13 +120,22 @@ export function analyzeQuotation(record: QuotationRecord) {
     setupLotCost.times(setupQuantity).div(marginDivider).toDecimalPlaces(0, Decimal.ROUND_HALF_UP),
     D(0),
   );
-  const targetSetupUnit = quantity.gt(0) ? targetSetupSaleTotal.div(quantity) : D(0);
+  const targetBulkSalePerPiece = separatedBulkCostUnit
+    ? separatedBulkCostUnit.div(marginDivider)
+    : D(0);
+  const targetSetupSalePerPiece = quantity.gt(0) ? targetSetupSaleTotal.div(quantity) : D(0);
+  const targetSetupSalePerSetup = setupQuantity.gt(0) ? targetSetupSaleTotal.div(setupQuantity) : D(0);
 
   // record側の単価・合計は保存時に見積書表示値として確定しているため、
   // 旧payload（表示snapshotがない履歴）でも必ずrecord値をfallbackにする。
   const sellingUnit = editedNumber(payload.pricePerPieceDisplay)
     ?? editedNumber(record.pricePerPiece)
-    ?? targetFillingUnit.plus(targetFilmUnit).plus(targetCopperUnit).plus(targetCustomSalePerPiece);
+    ?? targetFillingUnit
+      .plus(targetBulkSalePerPiece)
+      .plus(targetFilmUnit)
+      .plus(targetCopperUnit)
+      .plus(targetSetupSalePerPiece)
+      .plus(targetCustomSalePerPiece);
 
   const displayedFilmMeterUnit = editedNumber(payload.filmUnitDisplay)
     ?? legacyRecommendedFilmMeterUnit(payload.filmOrderLengthM ?? record.filmOrderLengthM);
@@ -163,6 +174,12 @@ export function analyzeQuotation(record: QuotationRecord) {
   const customUnit = editedNumber(payload.customUnitDisplay)
     ?? targetCustomUnit;
   const customAmount = editedNumber(payload.customAmountDisplay) ?? customUnit.times(customQuantity);
+  const setupUnit = editedNumber(payload.setupUnitDisplay) ?? targetSetupSalePerSetup;
+  const setupAmount = editedNumber(payload.setupAmountDisplay) ?? setupUnit.times(setupQuantity);
+  const bulkUsage = editedNumber((payload.calculationChecklistSnapshot as { bulkUsageMl?: unknown } | null | undefined)?.bulkUsageMl)
+    ?? (bulkUnit.gt(0) ? bulkAmount.div(bulkUnit) : D(0));
+  const bulkCostTotal = bulkCostUnit.times(quantity);
+  const bulkCostPerGram = bulkUsage.gt(0) ? bulkCostTotal.div(bulkUsage) : D(0);
   const profitUnit = sellingUnit.minus(costUnit);
   const profitRate = sellingUnit.gt(0) ? profitUnit.div(sellingUnit).times(100) : D(0);
   const markupRate = costUnit.gt(0) ? profitUnit.div(costUnit).times(100) : D(0);
@@ -187,7 +204,12 @@ export function analyzeQuotation(record: QuotationRecord) {
     ?? subtotal.plus(tax);
 
   const storedSellingUnit = storedNumber(record.pricePerPiece);
-  const storedCostUnit = storedNumber(record.fillingCostPerPiece).plus(record.filmCostPerPiece).plus(storedNumber(record.payload.customLotCost).div(storedNumber(record.payload.quantity || record.quantity)));
+  const storedCostUnit = storedNumber(record.fillingCostPerPiece)
+    .plus(storedNumber(record.payload.bulkCostPerPiece))
+    .plus(record.filmCostPerPiece)
+    .plus(storedNumber(record.payload.copperPlateCostPerPiece))
+    .plus(storedNumber(record.payload.setupCost).times(positiveNumber(record.payload.setupQuantity) ?? D(1)).div(storedNumber(record.payload.quantity || record.quantity)))
+    .plus(storedNumber(record.payload.customLotCost).div(storedNumber(record.payload.quantity || record.quantity)));
   const storedProfitUnit = storedSellingUnit.minus(storedCostUnit);
   const storedProfitRate = storedSellingUnit.gt(0) ? storedProfitUnit.div(storedSellingUnit).times(100) : D(0);
 
@@ -197,6 +219,7 @@ export function analyzeQuotation(record: QuotationRecord) {
     "filmAmountDisplay", "adjustmentDisplay", "pricePerPieceDisplay", "subtotalDisplay",
     "taxDisplay", "grandTotalDisplay",
     "customUnitDisplay", "customAmountDisplay",
+    "setupUnitDisplay", "setupAmountDisplay",
   ].filter((key) => editedNumber(payload[key]) !== null);
 
   return {
@@ -206,13 +229,19 @@ export function analyzeQuotation(record: QuotationRecord) {
     hasSeparatedBulkLine,
     processingCostUnit,
     bulkCostUnit,
+    bulkCostTotal,
+    bulkCostPerGram,
+    bulkUsage,
     filmCostUnit,
     copperCostUnit,
     customCostUnit,
     customQuantity,
     setupCostUnit,
+    setupCostTotal,
+    setupCostPerSetup,
     setupQuantity,
-    targetSetupUnit,
+    targetSetupSalePerPiece,
+    targetSetupSalePerSetup,
     displayedFilmMeterUnit,
     orderPatternCount: storedNumber(payload.orderPatternCount),
     deliverablePatternLengthM: storedNumber(payload.deliverablePatternLengthM),
@@ -230,6 +259,8 @@ export function analyzeQuotation(record: QuotationRecord) {
     fillingUnit,
     bulkUnit,
     bulkAmount,
+    setupUnit,
+    setupAmount,
     filmUnit,
     copperUnit,
     copperColorUnit: copperColorUnit ?? D(0),
