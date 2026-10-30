@@ -25,6 +25,17 @@ describe("film order action mapping", () => {
     expect(canViewFilmOrderRow("727.co.jp", "kanei@kanei-trade.co.jp")).toBe(true);
   });
 
+  it("shares every film order row with Seven and Kanei while separating buyer actions", () => {
+    expect(canViewFilmOrderRow("727.co.jp", "seven@727.co.jp")).toBe(true);
+    expect(canViewFilmOrderRow("727.co.jp", "kanei@kanei-trade.co.jp")).toBe(true);
+    expect(canViewFilmOrderRow("kanei-trade.co.jp", "seven@727.co.jp")).toBe(true);
+    expect(canViewFilmOrderRow("kanei-trade.co.jp", "kanei@kanei-trade.co.jp")).toBe(true);
+    expect(canPerformFilmOrderAction("register-receiving", "seven@727.co.jp", "727.co.jp")).toBe(true);
+    expect(canPerformFilmOrderAction("register-receiving", "kanei@kanei-trade.co.jp", "727.co.jp")).toBe(false);
+    expect(canPerformFilmOrderAction("register-receiving", "seven@727.co.jp", "kanei-trade.co.jp")).toBe(false);
+    expect(canPerformFilmOrderAction("register-receiving", "kanei@kanei-trade.co.jp", "kanei-trade.co.jp")).toBe(true);
+  });
+
   it("shows buyer actions only to the buyer company", () => {
     const seven = order("727.co.jp");
     expect(nextActionOf(seven, true, false).kind).toBe("run");

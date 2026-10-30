@@ -100,14 +100,14 @@ export function canPerformFilmOrderAction(
   return isKaneiTradeUser(actorEmail);
 }
 
-/** 発注ワークフロー一覧の閲覧範囲。Seven は自社発注のみ、カネイは全件（供給側として関与）。 */
+/** 発注ワークフロー一覧は Seven/Kanei が共有する。処理権限は buyer/seller role で分離する。 */
 export function canViewFilmOrderRow(
   orderBuyerDomain: string,
   actorEmail: string | null | undefined,
 ): boolean {
-  return orderBuyerDomain.includes("727")
-    ? isSevenChemicalUser(actorEmail) || isKaneiTradeUser(actorEmail)
-    : isKaneiTradeUser(actorEmail);
+  // orderBuyerDomain は処理区分のためだけに使用し、閲覧は両社共有とする。
+  void orderBuyerDomain;
+  return isSevenChemicalUser(actorEmail) || isKaneiTradeUser(actorEmail);
 }
 
 // ---- 後方互換用（ページ表示など） ----
