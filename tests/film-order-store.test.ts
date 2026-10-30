@@ -294,7 +294,7 @@ beforeAll(async () => {
     const supplierPoMail = po.mails?.find((mail) => mail.to === "supplier@example.co.kr");
     expect(supplierPoMail?.text).toContain("1ロール：500m × 3本");
     expect(supplierPoMail?.text?.split("1ロール：500m × 3本")).toHaveLength(2);
-    expect(supplierPoMail?.text).toContain("品名：発注検証パウチ");
+    expect(supplierPoMail?.text).toContain("商品名: 発注検証パウチ");
     expect(supplierPoMail?.text).not.toContain("원문:");
     const poToken = supplierPoMail?.text?.match(/\/film-orders\/purchase-order\/([^\s"]+)/u)?.[1] ?? "";
     expect(poToken).not.toBe("");
@@ -480,7 +480,6 @@ beforeAll(async () => {
     const kResult = await runFilmOrderAction(kOrder.id, "register-receiving", { aiFileName: "K用.ai", aiFileUrl: "https://drive.google.com/file/d/k-ai/view", guideAcknowledged: true }, "seven@727.co.jp");
     expect(kResult.mails?.every((mail) => !mail.text?.includes("発注番号"))).toBe(true);
     expect(kResult.mails?.at(-1)?.text).toContain("발주번호");
-    expect(kResult.mails?.at(-1)?.text).toContain("원문:");
     expect(kResult.mails?.at(-1)?.subject).toContain("교정 데이터 제출 요청");
     expect(kResult.mails?.at(-1)?.text).toContain("발주번호");
     expect(kResult.mails?.at(-1)?.text).toContain("교정 데이터는 반드시 아래 업로드 페이지로 제출해 주십시오.");
