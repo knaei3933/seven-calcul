@@ -832,7 +832,21 @@ async function getDatabase(): Promise<SqlClient> {
       ["film_orders"],
     );
     // マーカーがある環境では、コールドスタート毎のDDL検査を省略する。
-    if (marker?.version === FILM_SCHEMA_VERSION) return db;
+    if (marker?.version === FILM_SCHEMA_VERSION) {
+      // 現行商流では Seven Chemical が buyer。旧データが kanei/空でも毎回正規化する。
+      await db.exec(`
+        UPDATE film_orders
+        SET buyer_domain = '727.co.jp'
+        WHERE buyer_domain IS NULL OR buyer_domain = '' OR buyer_domain NOT LIKE '%727%'
+      `);
+      await db.run(`
+        UPDATE film_orders
+        SET seven_contact_email = ?
+        WHERE buyer_domain LIKE '%727%'
+          AND (seven_contact_email IS NULL OR seven_contact_email = '' OR seven_contact_email NOT LIKE '%@727.co.jp')
+      `, [sevenChemicalContactEmail()]);
+      return db;
+    }
     await db.exec(db.dialect === "postgres" ? POSTGRES_SCHEMA : BASE_SCHEMA);
     const migrations: Array<[string, string]> = [
       ["film_order_files", "ALTER TABLE film_order_files ADD COLUMN url TEXT NOT NULL DEFAULT ''"],
