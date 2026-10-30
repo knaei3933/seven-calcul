@@ -225,12 +225,19 @@ export const MAIL_TEMPLATE_DEFAULTS: Record<string, { subject: string; body: str
     ].join("\n"),
   },
   film_purchase_order_internal: {
-    subject: "【発注送信完了】{{orderNumber}} {{productName}}",
+    subject: "【フィルム発注送信のご連絡】{{orderNumber}} {{productName}}",
     body: [
-      "{{orderNumber}} の発注書をメーカーへ送信しました。",
+      "株式会社セブン化学 ご担当者様",
       "",
+      "いつも大変お世話になっております。パッケージラボでございます。",
+      "",
+      "下記発注の発注書をフィルムメーカーへ送信いたしました。",
+      "",
+      "【納期見込みの確認】",
       "メーカーからの納期見込みは下記フォームに反映されます。",
       "{{etaUrl}}",
+      "",
+      "今後ともよろしくお願い申し上げます。",
     ].join("\n"),
   },
   film_supplier_links_resend: {
@@ -250,7 +257,7 @@ export const MAIL_TEMPLATE_DEFAULTS: Record<string, { subject: string; body: str
     ].join("\n"),
   },
   film_production_plan_request: {
-    subject: "【충진 생산 예정 확인 요청】{{orderNumber}} {{productName}}",
+    subject: "【充填生産予定ご確認のお願い】{{orderNumber}} {{productName}}",
     body: [
       "株式会社セブン化学 ご担当者様",
       "",

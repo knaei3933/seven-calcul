@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { getSqlClient, type SqlClient } from "./db";
 import { sendMail, type MailSendResult } from "./mailer";
-import { japaneseDisplayNameKoWithSource, registeredJapaneseDisplayNameKo } from "./japanese-text-ko";
+import { registeredJapaneseDisplayNameKo } from "./japanese-text-ko";
 import { withRecipientSubjectPrefix, type MailAudience } from "./mail-subject";
 import type { PurchaseOrderSnapshot } from "./purchase-order";
 import type { QuotationRecord } from "./quotation-shared";
@@ -1365,6 +1365,22 @@ function mailBodyBase(order: FilmOrder): string {
   ].join("\n");
 }
 
+function filmOrderBaseMailVars(order: FilmOrder): Record<string, string> {
+  return {
+    orderNumber: order.order_number,
+    quotationNumber: order.quotation_number,
+    productName: order.product_name || "",
+    customerName: order.customer_name || "",
+    quantity: order.pouch_quantity ? `${Number(order.pouch_quantity).toLocaleString("ja-JP")}枚` : "-",
+    printingMethod: order.printing_method || "-",
+    filmComposition: order.film_composition || "-",
+    webWidthMm: order.web_width_mm || "-",
+    orderLengthM: order.order_length_m || "-",
+    supplierName: order.supplier_name || "",
+    buyerLabel: buyerCompanyLabelOfOrder(order),
+  };
+}
+
 async function addEvent(db: SqlClient, orderId: number, type: string, detail: string, actorEmail: string): Promise<void> {
   await db.run(
     "INSERT INTO film_order_events (order_id,type,detail,actor_email,created_at) VALUES (?,?,?,?,?)",
@@ -1525,30 +1541,9 @@ async function sendReceivingNotice(
   const destination = supplierDestinationFor(order);
   const locale = supplierLocale(order);
   const designTo = filmDesignNotificationTo();
-  const designSubject = locale === "ko"
-    ? `【입고 데이터 등록】${order.order_number} ${order.product_name}`
-    : `【入稿登録】${order.order_number} ${order.product_name}`;
-  const designText = locale === "ko"
-    ? [
-      "필름 제작용 입고 데이터가 등록되었습니다. 아래 내용을 확인하신 후 교정 데이터 제작을 진행해 주십시오.",
-      "",
-      "【제작 정보】",
-      localizedMailBody(order, locale),
-      "",
-      "【입고 데이터】",
-      `AI(필수)：${aiFileName}${aiFileUrl ? `\n${aiFileUrl}` : ""}`,
-      pdfFileName ? `PDF(참고)：${pdfFileName}${pdfFileUrl ? `\n${pdfFileUrl}` : ""}` : "PDF(참고)：없음",
-      "",
-      "【보관 위치】",
-      `입고 데이터 폴더：${FILM_RECEIVING_FOLDER_URL}`,
-      `교정 데이터 반환 폴더：${FILM_PROOF_FOLDER_URL}`,
-      "",
-      "【요청 사항】",
-      "1. 입고 AI 데이터의 도면 배치·색분해·문자 아웃라인 상태를 확인해 주십시오.",
-      "2. 제작 가능 여부와 예상 납기를 확인한 후 교정 데이터를 반환해 주십시오.",
-      "3. 입고 내용에 제작상 문제가 있다면 진행 전에 알려주십시오.",
-    ].join("\n")
-    : [
+  // designToは金井貿易の内部通知のため、供給先の韓国語ロケールに追随させない。
+  const designSubject = `【入稿登録】${order.order_number} ${order.product_name}`;
+  const designText = [
       "フィルム製作用の入稿データが登録されました。下記内容をご確認のうえ、校正データ作成をご手配ください。",
       "",
       "【案件情報】",
@@ -1843,10 +1838,17 @@ function buildSupplierPurchaseOrderMailParts(
       "お忙しいところ恐れ入りますが、何卒よろしくお願い申し上げます。",
     ].join("\n");
   const japaneseText = [
-    `${order.order_number} の発注書をメーカーへ送信しました。`,
+    "株式会社セブン化学 ご担当者様",
     "",
+    "いつも大変お世話になっております。パッケージラボでございます。",
+    "",
+    `下記発注（${order.order_number}）の発注書をフィルムメーカーへ送信いたしました。`,
+    "",
+    "【納期見込みの確認】",
     "メーカーからの納期見込みは下記フォームに反映されます。",
     etaUrl,
+    "",
+    "今後ともよろしくお願い申し上げます。",
   ].join("\n");
   return { locale, subject, supplierText, japaneseText };
 }
@@ -1885,14 +1887,23 @@ async function sendPurchaseOrderMail(
   const destination = supplierDestinationFor(order);
   if (!destination.to) throw new Error("supplier_destination_missing");
   const parts = buildSupplierPurchaseOrderMailParts(order, etaUrl, purchaseOrderUrl, supplierOrderNote);
-  const mails = [await sendMail({ to: destination.to, subject: parts.subject, text: parts.supplierText, audience: "supplier", templateKey: "film_purchase_order_supplier" })];
+  const purchaseOrderVars = {
+    ...filmOrderBaseMailVars(order),
+    // supplierTextには追加指示も含むため、テンプレートで二重表示にならないよう明細のみ渡す。
+    orderDetails: localizedMailBody(order, parts.locale),
+    extraInstructions: supplierOrderNote,
+    etaUrl,
+    purchaseOrderUrl,
+  };
+  const mails = [await sendMail({ to: destination.to, subject: parts.subject, text: parts.supplierText, audience: "supplier", templateKey: "film_purchase_order_supplier", templateVars: purchaseOrderVars })];
   mails.push(await sendMail({
     to: externalTo(order.seven_contact_email),
     audience: "seven",
     configuredRecipientKey: "seven",
-    subject: `【発注送信完了】${order.order_number} ${order.product_name}`,
+    subject: `【フィルム発注送信のご連絡】${order.order_number} ${order.product_name}`,
     text: parts.japaneseText,
     templateKey: "film_purchase_order_internal",
+    templateVars: purchaseOrderVars,
   }));
   return mails;
 }
@@ -2323,8 +2334,8 @@ function localizedMailBody(order: FilmOrder, locale: MailLocale): string {
     return [
       `발주번호：${order.order_number}`,
       `견적번호：${order.quotation_number}`,
-      `품목：${japaneseDisplayNameKoWithSource(productName)}`,
-      `고객명：${japaneseDisplayNameKoWithSource(customerName)}`,
+      `품목：${productName}`,
+      `고객명：${customerName}`,
       `인쇄 방식：${printingMethodText(order, locale)}`,
       `원단 폭：${order.web_width_mm ? `${order.web_width_mm}mm` : "-"}`,
       `발주 길이：${order.order_length_m ? `${Number(order.order_length_m).toLocaleString("ja-JP")}m` : "-"}`,
@@ -3024,7 +3035,7 @@ export async function runFilmOrderAction(
     if (!refreshed) throw new Error("film_order_update_failed");
     const mails = [await sendMail({
       to: externalTo(refreshed.seven_contact_email),
-      subject: `【충진 생산 예정 확인 요청】${refreshed.order_number} ${refreshed.product_name || ""}`.trim(),
+      subject: `【充填生産予定ご確認のお願い】${refreshed.order_number} ${refreshed.product_name || ""}`.trim(),
       text: [
         "株式会社セブン化学 ご担当者様",
         "",

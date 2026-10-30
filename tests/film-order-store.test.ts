@@ -291,7 +291,11 @@ beforeAll(async () => {
     expect(po.order.po_sent_at).toBeTruthy();
     expect(po.order.eta_token).toBeTruthy();
     expect(po.mails?.map((mail) => mail.to)).toContain("supplier@example.co.kr");
-    expect(po.mails?.find((mail) => mail.to === "supplier@example.co.kr")?.text).toContain("1ロール：500m × 3本");
+    const supplierPoMail = po.mails?.find((mail) => mail.to === "supplier@example.co.kr");
+    expect(supplierPoMail?.text).toContain("1ロール：500m × 3本");
+    expect(supplierPoMail?.text?.split("1ロール：500m × 3本")).toHaveLength(2);
+    expect(supplierPoMail?.text).toContain("品名：発注検証パウチ");
+    expect(supplierPoMail?.text).not.toContain("원문:");
     const supplierPoMail = po.mails?.find((mail) => mail.to === "supplier@example.co.kr");
     const poToken = supplierPoMail?.text?.match(/\/film-orders\/purchase-order\/([^\s"]+)/u)?.[1] ?? "";
     expect(poToken).not.toBe("");
@@ -363,7 +367,7 @@ beforeAll(async () => {
     }, "kanei@kanei-trade.co.jp");
     expect(planRequest.mails).toHaveLength(1);
     expect(planRequest.mails?.[0]?.to).toBe("seven@727.co.jp");
-    expect(planRequest.mails?.[0]?.subject).toContain("충진 생산 예정 확인 요청");
+    expect(planRequest.mails?.[0]?.subject).toContain("充填生産予定ご確認のお願い");
     expect(planRequest.mails?.[0]?.text).toContain("充填生産予定（開始日・終了日）");
     await expect(updateFilmDeliveryFromToken(etaToken, { kind: "shipment", date: "2026/10/30" }))
       .rejects.toThrow("invalid_delivery_date");
