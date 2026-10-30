@@ -296,7 +296,6 @@ beforeAll(async () => {
     expect(supplierPoMail?.text?.split("1ロール：500m × 3本")).toHaveLength(2);
     expect(supplierPoMail?.text).toContain("品名：発注検証パウチ");
     expect(supplierPoMail?.text).not.toContain("원문:");
-    const supplierPoMail = po.mails?.find((mail) => mail.to === "supplier@example.co.kr");
     const poToken = supplierPoMail?.text?.match(/\/film-orders\/purchase-order\/([^\s"]+)/u)?.[1] ?? "";
     expect(poToken).not.toBe("");
     expect(supplierPoMail?.text).not.toContain("【발주서 URL(인쇄용)】");
