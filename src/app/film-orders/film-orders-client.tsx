@@ -1164,6 +1164,13 @@ function ProductionPlanPanel({
   const [startDate, setStartDate] = useState(plan.startDate ?? "");
   const [endDate, setEndDate] = useState(plan.endDate ?? "");
   const [note, setNote] = useState(plan.note);
+  const planConfirmed = plan.status === "confirmed";
+  const [expanded, setExpanded] = useState(!planConfirmed);
+  const [confirmedBefore, setConfirmedBefore] = useState(planConfirmed);
+  if (planConfirmed && !confirmedBefore) {
+    setConfirmedBefore(true);
+    setExpanded(false);
+  }
 
   const save = (confirm: boolean) => {
     if (busy || !startDate || !endDate) return;
@@ -1177,48 +1184,68 @@ function ProductionPlanPanel({
 
   return (
     <section className="film-order-section role-seven" aria-label="生産予定" data-testid="production-plan-panel">
-      <div className="film-order-section-head">
-        <h3>충진 생산 예정（任意）</h3>
-        <WorkflowRoleBadge role="seven" />
-      </div>
-      <dl>
-        <div><dt>状態</dt><dd>{productionPlanStatusLabels[plan.status]}</dd></div>
-        <div><dt>生産可能期間</dt><dd>{plan.startDate && plan.endDate ? `${plan.startDate} 〜 ${plan.endDate}` : "-"}</dd></div>
-        <div><dt>フィルム入荷予定</dt><dd>{order.eta_date ?? "-"}</dd></div>
-        {plan.note ? <div><dt>メモ</dt><dd>{plan.note}</dd></div> : null}
-        {plan.updatedAt ? <div><dt>更新</dt><dd>{plan.updatedBy} / {new Date(plan.updatedAt).toLocaleString("ja-JP")}</dd></div> : null}
-      </dl>
-      <p className="help">
-        この項目は任意です。未入力でもフィルム発注ワークフローは止まりません。セブン化学が登録すると金井貿易にも共有され、必要な場合はカネイ側から確認依頼を送れます。
-      </p>
-      {isSeven ? (
-        <div className="film-order-form">
-          <label>生産可能 開始日
-            <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required />
-          </label>
-          <label>生産可能 終了日
-            <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} required />
-          </label>
-          <label>生産計画メモ
-            <textarea value={note} rows={2} onChange={(event) => setNote(event.target.value)} />
-          </label>
+      <details
+        className="production-plan-details"
+        open={expanded}
+        onToggle={(event) => setExpanded(event.currentTarget.open)}
+      >
+        <summary>
+          <span className="production-plan-summary-title">
+            충진 생산 예정（任意）
+            <WorkflowRoleBadge role="seven" />
+          </span>
+          <span className="production-plan-summary-state">
+            {planConfirmed
+              ? `${productionPlanStatusLabels[plan.status]}${plan.startDate && plan.endDate ? `／${plan.startDate} 〜 ${plan.endDate}` : ""}`
+              : productionPlanStatusLabels[plan.status]}
+            <span aria-hidden="true">{expanded ? "▲" : "▼"}</span>
+          </span>
+        </summary>
+        <div className="film-order-section-head">
+          <h3>生産予定の詳細</h3>
+          <span className="production-plan-edit-hint">
+            {planConfirmed ? "確定済みのため折りたたみ表示中。開くと変更できます。" : "入力・編集できます。"}
+          </span>
+        </div>
+        <dl>
+          <div><dt>状態</dt><dd>{productionPlanStatusLabels[plan.status]}</dd></div>
+          <div><dt>生産可能期間</dt><dd>{plan.startDate && plan.endDate ? `${plan.startDate} 〜 ${plan.endDate}` : "-"}</dd></div>
+          <div><dt>フィルム入荷予定</dt><dd>{order.eta_date ?? "-"}</dd></div>
+          {plan.note ? <div><dt>メモ</dt><dd>{plan.note}</dd></div> : null}
+          {plan.updatedAt ? <div><dt>更新</dt><dd>{plan.updatedBy} / {new Date(plan.updatedAt).toLocaleString("ja-JP")}</dd></div> : null}
+        </dl>
+        <p className="help">
+          この項目は任意です。未入力でもフィルム発注ワークフローは止まりません。セブン化学が登録すると金井貿易にも共有され、必要な場合はカネイ側から確認依頼を送れます。
+        </p>
+        {isSeven ? (
+          <div className="film-order-form">
+            <label>生産可能 開始日
+              <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required />
+            </label>
+            <label>生産可能 終了日
+              <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} required />
+            </label>
+            <label>生産計画メモ
+              <textarea value={note} rows={2} onChange={(event) => setNote(event.target.value)} />
+            </label>
+            <div className="film-order-inline-actions">
+              <button className="button secondary" type="button" disabled={busy || !startDate || !endDate} onClick={() => save(false)}>
+                {busy ? "保存中..." : "暫定予定を保存"}
+              </button>
+              <button className="button" type="button" disabled={busy || !startDate || !endDate} onClick={() => save(true)}>
+                {busy ? "確定中..." : "生産予定を確定"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {isKanei ? (
           <div className="film-order-inline-actions">
-            <button className="button secondary" type="button" disabled={busy || !startDate || !endDate} onClick={() => save(false)}>
-              {busy ? "保存中..." : "暫定予定を保存"}
-            </button>
-            <button className="button" type="button" disabled={busy || !startDate || !endDate} onClick={() => save(true)}>
-              {busy ? "確定中..." : "生産予定を確定"}
+            <button className="button secondary" type="button" disabled={busy} onClick={() => void onRun({ action: "request-production-plan" }, "セブン化学へ生産予定の確認依頼を送信しました。")}>
+              生産予定を問い合わせる
             </button>
           </div>
-        </div>
-      ) : null}
-      {isKanei ? (
-        <div className="film-order-inline-actions">
-          <button className="button secondary" type="button" disabled={busy} onClick={() => void onRun({ action: "request-production-plan" }, "セブン化学へ生産予定の確認依頼を送信しました。")}>
-            生産予定を問い合わせる
-          </button>
-        </div>
-      ) : null}
+        ) : null}
+      </details>
     </section>
   );
 }
