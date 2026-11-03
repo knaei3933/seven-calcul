@@ -30,6 +30,36 @@ export function mailDryRun(): boolean {
 
 const SMTP_TIMEOUT_MS = 15_000;
 
+function mailFromIdentity(input: {
+  audience?: import("./mail-subject").MailAudience;
+  body: string;
+  settingsSender: { name: string; email: string };
+  fallbackAddress: string;
+}) {
+  if (input.settingsSender.name || input.settingsSender.email) {
+    return {
+      name: input.settingsSender.name || "Package Lab",
+      address: input.settingsSender.email || input.fallbackAddress,
+    };
+  }
+  if (input.audience === "supplier" && /[가-힯]/u.test(input.body)) {
+    return {
+      name: "金井貿易株式会社 / Package Lab（日本発信）",
+      address: input.fallbackAddress,
+    };
+  }
+  if (input.audience === "supplier") {
+    return {
+      name: "金井貿易株式会社 / パッケージラボ（日本）",
+      address: input.fallbackAddress,
+    };
+  }
+  return {
+    name: "パッケージラボ",
+    address: input.fallbackAddress,
+  };
+}
+
 /**
  * XServer SMTP でメールを送信する。
  * MAIL_DRY_RUN=true の場合は実際に送信せず、結果オブジェクトだけ返す（テスト用）。
@@ -70,6 +100,12 @@ export async function sendMail(input: MailInput): Promise<MailSendResult> {
   if (!user || !password) {
     return { ...base, dryRun: false, error: "smtp_credentials_missing" };
   }
+  const fromIdentity = mailFromIdentity({
+    audience: input.audience,
+    body: resolved.body,
+    settingsSender: settings.sender,
+    fallbackAddress: process.env.MAIL_FROM ?? user,
+  });
   try {
     const nodemailer = await import("nodemailer");
     const transporter = nodemailer.createTransport({
@@ -82,7 +118,7 @@ export async function sendMail(input: MailInput): Promise<MailSendResult> {
       socketTimeout: SMTP_TIMEOUT_MS,
     });
     const info = await transporter.sendMail({
-      from: process.env.MAIL_FROM ?? user,
+      from: `"${fromIdentity.name.replace(/"/g, "")}" <${fromIdentity.address}>`,
       to: route.to,
       subject,
       text: resolved.body,

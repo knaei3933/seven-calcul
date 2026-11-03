@@ -59,6 +59,7 @@ describe("mail routing override", () => {
     process.env.SMTP_HOST = "smtp.test";
     process.env.SMTP_USER = "sender@test";
     process.env.SMTP_PASS = "password";
+    process.env.SMTP_PASSWORD = "password";
     process.env.MAIL_DRY_RUN = "";
     const delivered: any[] = [];
     vi.doMock("nodemailer", () => ({
@@ -88,7 +89,46 @@ describe("mail routing override", () => {
     expect(delivered[0].to).toBe("kim@kanei-trade.co.jp");
     expect(delivered[0].subject).toBe("[お客様]quotation");
     expect(delivered[0].cc).toEqual([]);
+    expect(delivered[0].from).toBe('"パッケージラボ" <sender@test>');
     expect(Buffer.from(delivered[0].attachments[0].content)).toEqual(pdf);
+  });
+
+  it("uses a Japan-identified sender for Korean film supplier mail", async () => {
+    process.env.MAIL_RECIPIENT_OVERRIDE = "kim@kanei-trade.co.jp";
+    process.env.SMTP_HOST = "smtp.test";
+    process.env.SMTP_USER = "sender@test";
+    process.env.SMTP_PASS = "password";
+    process.env.SMTP_PASSWORD = "password";
+    process.env.MAIL_DRY_RUN = "";
+    const delivered: any[] = [];
+    vi.resetModules();
+    vi.doMock("nodemailer", () => ({
+      default: {
+        createTransport: () => ({
+          sendMail: async (options: unknown) => {
+            delivered.push(options);
+            return { messageId: "supplier-mail-1" };
+          },
+        }),
+      },
+      createTransport: () => ({
+        sendMail: async (options: unknown) => {
+          delivered.push(options);
+          return { messageId: "supplier-mail-1" };
+        },
+      }),
+    }));
+    const { sendMail } = await import("@/lib/mailer");
+    const result = await sendMail({
+      to: "supplier@example.co.kr",
+      subject: "film order",
+      text: "발주번호：F-202610-001",
+      audience: "supplier",
+    });
+
+    expect(delivered[0].from).toBe(
+      '"金井貿易株式会社 / Package Lab（日本発信）" <sender@test>',
+    );
   });
 
   it("applies the global override before film-workflow dry-run routing", async () => {
