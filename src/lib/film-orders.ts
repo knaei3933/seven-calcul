@@ -1748,7 +1748,8 @@ async function sendReceivingNotice(
       subject: proofRequestSubject(order, locale),
       audience: "supplier",
       text: proofNoticeText(order, supplierLinks, uploadUrl),
-      templateKey: "film_proof_request",
+      // 공급사 언어와 일치하는 직접 본문을 우선한다. 일본어는 별도 일본어 템플릿이 있을 때만 사용한다.
+      templateKey: locale === "ko" ? "film_proof_request" : undefined,
     }));
   }
   if (mails.length === 0) {
@@ -1765,7 +1766,7 @@ async function sendProofNoticeMail(order: FilmOrderView, uploadUrl: string, proo
     subject: proofRequestSubject(order, supplierLocale(order)),
     text: proofNoticeText(order, supplierLinks, uploadUrl),
     audience: destination.to ? "supplier" : "kanei",
-    templateKey: "film_proof_request",
+    templateKey: supplierLocale(order) === "ko" ? "film_proof_request" : undefined,
   });
 }
 
@@ -1818,7 +1819,8 @@ async function sendApprovalMail(order: FilmOrder): Promise<MailSendResult[]> {
   ].join("\n");
   const destination = supplierDestinationFor(order);
   const mails: MailSendResult[] = [];
-  if (destination.to) mails.push(await sendMail({ to: destination.to, subject, text: supplierText, audience: "supplier", templateKey: "film_approval_final" }));
+  // K 공급사는 직접 한국어 본문, Seven/Y는 일본어 템플릿을 사용한다.
+  if (destination.to) mails.push(await sendMail({ to: destination.to, subject, text: supplierText, audience: "supplier", templateKey: locale === "ja" ? "film_approval_final" : undefined }));
   mails.push(await sendMail({ to: externalTo(order.seven_contact_email), subject, text: japaneseText, audience: "seven", templateKey: "film_approval_final" }));
   mails.push(await sendMail({ to: filmDesignNotificationTo(), subject, text: japaneseText, audience: "kanei", templateKey: "film_approval_final" }));
   return mails;
@@ -1904,7 +1906,8 @@ async function sendReProofMail(order: FilmOrderView, internalComment: string, su
   ].join("\n");
   const destination = supplierDestinationFor(order);
   const mails: MailSendResult[] = [];
-  if (destination.to) mails.push(await sendMail({ to: destination.to, subject, text: supplierText, templateKey: "film_reproof_request" }));
+  // K 공급사는 직접 한국어 본문, Y 공급사는 일본어 템플릿을 사용한다.
+  if (destination.to) mails.push(await sendMail({ to: destination.to, subject, text: supplierText, templateKey: locale === "ja" ? "film_reproof_request" : undefined }));
   mails.push(await sendMail({ to: filmDesignNotificationTo(), subject, text: japaneseText, templateKey: "film_reproof_request" }));
   return mails;
 }
@@ -2071,7 +2074,7 @@ async function sendPurchaseOrderMail(
     etaUrl,
     purchaseOrderUrl,
   };
-  const mails = [await sendMail({ to: destination.to, subject: parts.subject, text: parts.supplierText, audience: "supplier", templateKey: "film_purchase_order_supplier", templateVars: purchaseOrderVars })];
+  const mails = [await sendMail({ to: destination.to, subject: parts.subject, text: parts.supplierText, audience: "supplier", templateKey: parts.locale === "ko" ? "film_purchase_order_supplier" : undefined, templateVars: purchaseOrderVars })];
   mails.push(await sendMail({
     to: externalTo(order.seven_contact_email),
     audience: "seven",
@@ -2274,7 +2277,7 @@ export async function updateEtaFromToken(
       `管理画面：${origin}/film-orders`,
     ].filter(Boolean).join("\n");
     const mails: MailSendResult[] = [];
-    if (destination.to) mails.push(await sendMail({ to: destination.to, subject, text: supplierText, audience: "supplier", templateKey: "film_eta_supplier" }));
+    if (destination.to) mails.push(await sendMail({ to: destination.to, subject, text: supplierText, audience: "supplier", templateKey: locale === "ko" ? "film_eta_supplier" : undefined }));
     mails.push(await sendMail({
       to: externalTo(updated.seven_contact_email),
       subject: `【フィルム入荷予定】${date} / ${updated.order_number} ${updated.product_name || ""}`.trim(),
@@ -3253,8 +3256,10 @@ export async function runFilmOrderAction(
       ? [
         "이전에 발주드린 건의 링크를 재전송합니다. 새로운 발주가 아닙니다.",
         "",
-        "【발주 내용】",
-        localizedMailBody(refreshed, locale),
+        "",
+        "【요청 사항】",
+        "1. 아래 발주서 링크에서 내용을 확인해 주십시오.",
+        "2. 아래 전용 페이지에서 납기 전망·출하 보고·납품 보고를 등록해 주십시오.",
         "",
         "【발주서 열람·인쇄 페이지】",
         purchaseOrderUrl,
@@ -3264,6 +3269,10 @@ export async function runFilmOrderAction(
       ].join("\n")
       : [
         "初回送信済み発注のリンクを再送いたします。新しい発注ではありません。",
+        "",
+        "【お願い】",
+        "1. 下記発注書リンクで内容をご確認ください。",
+        "2. 納期見込み・出荷報告・納品報告は専用フォームからご登録ください。",
         "",
         "【発注内容】",
         localizedMailBody(refreshed, locale),
@@ -3617,7 +3626,8 @@ export async function runFilmOrderAction(
           "",
           "今後はパウチ製作へ進めさせていただきます。",
         ].filter(Boolean).join("\n");
-      if (destination.to) mails.push(await sendMail({ to: destination.to, subject: supplierSubject, text: supplierText, audience: "supplier", templateKey: "film_delivery_completed" }));
+      // K 공급사는 직접 한국어 본문, Seven/Y는 일본어 템플릿을 사용한다.
+      if (destination.to) mails.push(await sendMail({ to: destination.to, subject: supplierSubject, text: supplierText, audience: "supplier", templateKey: locale === "ja" ? "film_delivery_completed" : undefined }));
       mails.push(await sendMail({
         to: filmDesignNotificationTo(),
         subject: `【フィルム受領確認完了】${refreshed.order_number} ${refreshed.product_name || ""}`.trim(),
