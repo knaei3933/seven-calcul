@@ -726,6 +726,46 @@ body:has(main.supplier-po-page) .global-header { display: none; }
 }
 .ship-to-current h2 { margin: 0 0 6px; font-size: 13px; color: var(--role-customer-strong); }
 .ship-to-current p { margin: 0; font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.ship-to-registered-list { display: grid; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+.ship-to-registered-item {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #d7dfeb;
+  border-radius: 7px;
+  background: #fbfcfe;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.ship-to-registered-name { font-weight: 750; overflow-wrap: anywhere; }
+.ship-to-registered-meta { color: var(--muted); overflow-wrap: anywhere; }
+.ship-to-confirmed-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--role-customer-bg, #e8f5ee);
+  color: var(--role-customer-strong, #157347);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 800;
+  vertical-align: 1px;
+}
+.ship-to-pending-hint { color: var(--muted); font-size: 12px; }
+.ship-to-entry-list { display: grid; gap: 10px; }
+.ship-to-entry-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d7dfeb;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 10px;
+  margin: 0;
+  min-width: 0;
+}
+.ship-to-entry-card > legend { font-size: 12.5px; font-weight: 800; padding: 0 4px; }
+.ship-to-entry-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ship-to-entry-head label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; }
+.ship-to-entry-head select { min-width: 170px; }
+.ship-to-entry-remove { min-height: 34px; padding: 4px 9px; font-size: 12px; }
 .eta-form .ship-to-options { border: 0; padding: 0; margin: 0; }
 .eta-form .ship-to-options legend { font-size: 13px; font-weight: 800; margin-bottom: 7px; padding: 0; }
 .eta-form .inline-check { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; min-height: 40px; }
@@ -4068,3 +4108,14 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 3mm; }
 .workflow-mail-confirm-body p { margin: 0; font-size: 12.5px; font-weight: 700; overflow-wrap: anywhere; }
 .workflow-mail-confirm-body pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #dbe3ee; border-radius: 9px; background: #fbfcfe; padding: 11px; font-size: 12px; line-height: 1.6; margin: 0; }
 .workflow-mail-confirm-panel footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid #e2e8f0; background: #f8fafc; }
+
+.workflow-mail-routing-note {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid #fbbf24;
+  border-radius: 9px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+}

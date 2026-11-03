@@ -34,6 +34,8 @@ interface MailResult {
   subject: string;
   dryRun: boolean;
   error?: string;
+  requestedTo?: string;
+  recipientOverridden?: boolean;
 }
 
 const STEP_DEFS: Array<{ key: string; label: string }> = [
@@ -264,6 +266,10 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
   const [driveReady, setDriveReady] = useState(false);
   const isSeven = isSevenChemicalUser(userEmail);
   const isKanei = isKaneiTradeUser(userEmail);
+  const [mailRouting, setMailRouting] = useState<{ enabled: boolean; recipient: string }>({
+    enabled: false,
+    recipient: "",
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -312,6 +318,27 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 初回マウント時にサーバーから発注一覧を取得する意図的な処理です。
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/film-orders/mail-routing", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload = await response.json();
+        if (!response.ok) return;
+        setMailRouting({
+          enabled: payload.enabled === true,
+          recipient: typeof payload.recipient === "string" ? payload.recipient : "",
+        });
+      } catch {
+        // 확인용 정보이므로 실패해도 워크플로는 막지 않는다.
+      }
+    })();
+    return () => controller.abort();
+  }, []);
 
   const filtered = useMemo(
     () => statusFilter === "all" ? orders : orders.filter((order) => order.status === statusFilter),
@@ -456,6 +483,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
             isSeven={isSeven}
             isKanei={isKanei}
             driveReady={driveReady}
+            mailRouting={mailRouting}
           />
         ))}
       </div>
@@ -468,8 +496,14 @@ type PendingWorkflowRun = {
   okMessage: string;
 };
 
+type MailRoutingState = {
+  enabled: boolean;
+  recipient: string;
+};
+
 type WorkflowMailNotice = {
   recipients: string[];
+  sender: string;
   subject: string;
   body: string;
 };
@@ -512,6 +546,18 @@ function buildWorkflowMailNotice(order: FilmOrderView, body: Record<string, unkn
   const buyerSeven = buyerDomainOf(order.created_by_email) === "seven";
   let subject = `${number} ${product}`;
   let lines: string[] = [];
+  const koreanSupplierMail = supplierLocaleFor(order) === "ko"
+    && [
+      "resend-supplier-links",
+      "send-po",
+      "request-re-proof",
+      "approve",
+      "send-proof-notice",
+      "confirm-film-receipt",
+    ].includes(action);
+  const sender = koreanSupplierMail
+    ? "金井貿易株式会社 / Package Lab（日本発信）"
+    : "パッケージラボ（日本）";
 
   if (action === "resend-supplier-links") {
     recipients.splice(0, recipients.length, order.supplier_email?.trim() || "フィルムメーカー（設定待ち）");
@@ -592,7 +638,7 @@ function buildWorkflowMailNotice(order: FilmOrderView, body: Record<string, unkn
     lines = ["フィルムの受領を確認しました。以後のパウチ製造を進行します。"];
   }
 
-  return { recipients: [...new Set(recipients)], subject, body: lines.join("\n") };
+  return { recipients: [...new Set(recipients)], sender, subject, body: lines.join("\n") };
 }
 
 function OrderCard({
@@ -606,6 +652,7 @@ function OrderCard({
   isSeven,
   isKanei,
   driveReady,
+  mailRouting,
 }: {
   order: FilmOrderView;
   expanded: boolean;
@@ -617,6 +664,7 @@ function OrderCard({
   isSeven: boolean;
   isKanei: boolean;
   driveReady: boolean;
+  mailRouting: MailRoutingState;
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -649,7 +697,8 @@ function OrderCard({
       if (!response.ok || !payload.order) throw new Error(payload.error ?? "failed");
       onUpdated(order.id, payload as { order: FilmOrderView });
       setMails((payload.mails ?? []) as MailResult[]);
-      setMessage(okMessage);
+      const overridden = (payload.mails ?? []).some((mail: MailResult) => mail.recipientOverridden);
+      setMessage(overridden ? `${okMessage}（テストモードのため kim@kanei-trade.co.jp に送信しました。）` : okMessage);
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : "failed";
       const humanMessages: Record<string, string> = {
@@ -872,8 +921,15 @@ function OrderCard({
             </header>
             <div className="workflow-mail-confirm-body">
               <p><strong>受信対象：</strong>{notice.recipients.join("、")}</p>
+              <p><strong>発信者：</strong>{notice.sender}</p>
               <p><strong>件名：</strong>{notice.subject}</p>
               <pre>{notice.body}</pre>
+              {mailRouting.enabled ? (
+                <p className="workflow-mail-routing-note" data-testid="workflow-mail-test-routing">
+                  <strong>テストモード ON：</strong>
+                  実際の送信先は <span>{mailRouting.recipient}</span> に強制変更されます。
+                </p>
+              ) : null}
               <p className="help">実際のリンクは送信時に最新トークンへ更新されます。</p>
             </div>
             <footer>
@@ -1421,6 +1477,47 @@ function ProductionPlanPanel({
   );
 }
 
+interface ShipToFormEntry {
+  source: "master" | "new";
+  destinationId: number | null;
+  label: string;
+  companyName: string;
+  department: string;
+  contactName: string;
+  postalCode: string;
+  address: string;
+  building: string;
+  phone: string;
+  email: string;
+  note: string;
+  saveToMaster: boolean;
+}
+
+const MAX_SHIP_TO_DESTINATIONS = 10;
+
+function emptyShipToEntry(): ShipToFormEntry {
+  return {
+    source: "new",
+    destinationId: null,
+    label: "",
+    companyName: "",
+    department: "",
+    contactName: "",
+    postalCode: "",
+    address: "",
+    building: "",
+    phone: "",
+    email: "",
+    note: "",
+    saveToMaster: true,
+  };
+}
+
+function shipToEntryCompleteOf(entry: ShipToFormEntry): boolean {
+  if (entry.source === "master") return entry.destinationId != null;
+  return Boolean(entry.companyName && entry.postalCode && entry.address && entry.phone);
+}
+
 function ShipToPanel({
   order,
   isSeven,
@@ -1434,26 +1531,15 @@ function ShipToPanel({
   busy: boolean;
   onRun: (body: Record<string, unknown>, ok: string) => Promise<void>;
 }) {
-  const [destinations, setDestinations] = useState<CustomerDeliveryDestination[]>([]);
-  const [selectedDestinationId, setSelectedDestinationId] = useState<number | null>(null);
+  const [masterDestinations, setMasterDestinations] = useState<CustomerDeliveryDestination[]>([]);
+  const [entries, setEntries] = useState<ShipToFormEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [form, setForm] = useState({
-    label: "",
-    companyName: "",
-    department: "",
-    contactName: "",
-    postalCode: "",
-    address: "",
-    building: "",
-    phone: "",
-    email: "",
-    note: "",
-  });
 
   const load = useCallback(async () => {
     if (!order.customer_code) {
-      setDestinations([]);
+      setMasterDestinations([]);
+      setEntries([emptyShipToEntry()]);
       return;
     }
     setLoading(true);
@@ -1463,10 +1549,14 @@ function ShipToPanel({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "load_failed");
       const loaded = payload.destinations as CustomerDeliveryDestination[];
-      setDestinations(loaded);
-      setSelectedDestinationId((old) => old ?? loaded.find((item) => item.isDefault)?.id ?? loaded[0]?.id ?? null);
+      setMasterDestinations(loaded);
+      const defaultDestination = loaded.find((item) => item.isDefault) ?? loaded[0] ?? null;
+      setEntries(defaultDestination
+        ? [{ ...emptyShipToEntry(), source: "master", destinationId: defaultDestination.id }]
+        : [emptyShipToEntry()]);
     } catch {
-      setDestinations([]);
+      setMasterDestinations([]);
+      setEntries([emptyShipToEntry()]);
       setLoadError("住所録を読み込めませんでした。更新後に再試行してください。");
     } finally {
       setLoading(false);
@@ -1480,32 +1570,58 @@ function ShipToPanel({
 
   const canOperateShipTo = isSeven || isKanei;
   const canEdit = canOperateShipTo && order.shipTo.status !== "confirmed";
-  const useSavedDestination = selectedDestinationId != null;
+  const draftEntries = entries ?? [];
+  const allEntriesComplete = draftEntries.length > 0 && draftEntries.every(shipToEntryCompleteOf);
+  const registered = order.shipTo.destinations;
+  const registrationPending = order.shipTo.status === "not_provided" && Boolean(order.shipTo.requestedAt);
+
+  const updateEntry = (index: number, patch: Partial<ShipToFormEntry>) => {
+    setEntries((old) => (old ?? []).map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry));
+  };
+  const addEntry = () => {
+    setEntries((old) => (old ?? []).length < MAX_SHIP_TO_DESTINATIONS ? [...(old ?? []), emptyShipToEntry()] : old);
+  };
+  const removeEntry = (index: number) => {
+    setEntries((old) => {
+      const next = (old ?? []).filter((_, entryIndex) => entryIndex !== index);
+      return next.length ? next : [emptyShipToEntry()];
+    });
+  };
+  const removeRegisteredDestination = (destinationRowId: number) => {
+    void onRun({ action: "remove-ship-to-destination", destinationRowId }, "納品先を削除しました。").then(() => load());
+  };
 
   const submit = async () => {
-    if (busy || !canEdit) return;
-    const body = useSavedDestination && selectedDestinationId
-      ? { action: "register-ship-to", destinationId: selectedDestinationId }
-      : {
-        action: "register-ship-to",
-        shipToLabel: form.label,
-        shipToCompanyName: form.companyName,
-        shipToDepartment: form.department,
-        shipToContactName: form.contactName,
-        shipToPostalCode: form.postalCode,
-        shipToAddress: form.address,
-        shipToBuilding: form.building,
-        shipToPhone: form.phone,
-        shipToEmail: form.email,
-        shipToNote: form.note,
-        saveShipToMaster: true,
-      };
-    await onRun(body, "納品先を登録しました。顧客マスターへ自動保存しました。");
+    if (busy || !canEdit || !allEntriesComplete) return;
+    const body = {
+      action: "register-ship-to",
+      destinations: draftEntries.map((entry) => entry.source === "master" && entry.destinationId
+        ? { destinationId: entry.destinationId }
+        : {
+          shipToLabel: entry.label,
+          shipToCompanyName: entry.companyName,
+          shipToDepartment: entry.department,
+          shipToContactName: entry.contactName,
+          shipToPostalCode: entry.postalCode,
+          shipToAddress: entry.address,
+          shipToBuilding: entry.building,
+          shipToPhone: entry.phone,
+          shipToEmail: entry.email,
+          shipToNote: entry.note,
+          saveShipToMaster: entry.saveToMaster,
+        }),
+    };
+    await onRun(
+      body,
+      draftEntries.length > 1
+        ? `納品先${draftEntries.length}件を登録しました。顧客マスターへ自動保存しました。`
+        : "納品先を登録しました。顧客マスターへ自動保存しました。",
+    );
     await load();
   };
 
   return (
-      <section className={`film-order-section role-buyer ${buyerRoleOf(order) === "seven" ? "on-seven" : "on-kanei"}`} aria-label="納品先管理" data-testid="ship-to-panel">
+    <section className={`film-order-section role-buyer ${buyerRoleOf(order) === "seven" ? "on-seven" : "on-kanei"}`} aria-label="納品先管理" data-testid="ship-to-panel">
       <div className="film-order-section-head">
         <h3>納品先管理</h3>
         <WorkflowRoleBadge role="mixed" label="セブン化学／金井貿易" />
@@ -1513,87 +1629,156 @@ function ShipToPanel({
       <div className="film-order-columns">
         <dl>
           <div><dt>状態</dt><dd data-testid="ship-to-status">
-            {order.shipTo.status === "not_provided" && order.shipTo.requestedAt ? "顧客登録依頼済み" : shipToStatusLabels[order.shipTo.status]}
+            {registrationPending ? "顧客登録依頼済み" : shipToStatusLabels[order.shipTo.status]}
           </dd></div>
           {order.shipTo.requestedAt ? <div><dt>顧客依頼日時</dt><dd>{new Date(order.shipTo.requestedAt).toLocaleString("ja-JP")}</dd></div> : null}
           {order.shipTo.registeredAt && order.shipTo.registeredBy.startsWith("customer:") ? (
             <div><dt>登録者</dt><dd>顧客（外部リンク）</dd></div>
           ) : null}
-          <div><dt>納品先</dt><dd>{order.shipTo.companyName || "-"}</dd></div>
-          <div><dt>住所</dt><dd>{order.shipTo.postalCode || order.shipTo.address ? `${order.shipTo.postalCode} ${order.shipTo.address}${order.shipTo.building ? ` ${order.shipTo.building}` : ""}` : "-"}</dd></div>
-          <div><dt>電話</dt><dd>{order.shipTo.phone || "-"}</dd></div>
+          {registered.length ? (
+            <div>
+              <dt>納品先（{registered.length}件）</dt>
+              <dd>
+                <ol className="ship-to-registered-list" data-testid="ship-to-registered-list">
+                  {registered.map((destination, index) => (
+                    <li key={destination.id} className="ship-to-registered-item">
+                      <span className="ship-to-registered-name">
+                        {index + 1}. {destination.label ? `${destination.label} / ` : ""}{destination.companyName}
+                        {destination.confirmedAt ? <em className="ship-to-confirmed-badge">確認済</em> : null}
+                      </span>
+                      <span className="ship-to-registered-meta">
+                        {destination.department ? `${destination.department} / ` : ""}
+                        {destination.contactName ? `${destination.contactName} / ` : ""}
+                        〒{destination.postalCode} {destination.address}{destination.building ? ` ${destination.building}` : ""}
+                      </span>
+                      <span className="ship-to-registered-meta">電話：{destination.phone}</span>
+                      {canEdit ? (
+                        <button
+                          className="button danger small ship-to-entry-remove"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => removeRegisteredDestination(destination.id)}
+                        >
+                          この納品先を削除
+                        </button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ol>
+              </dd>
+            </div>
+          ) : (
+            <>
+              <div><dt>納品先</dt><dd>-</dd></div>
+              <div><dt>住所</dt><dd>-</dd></div>
+              <div><dt>電話</dt><dd>-</dd></div>
+              {registrationPending ? (
+                <div><dt /><dd className="ship-to-pending-hint">顧客の登録待ちです。依頼メール送信済みのため、各項目は空欄です。</dd></div>
+              ) : null}
+            </>
+          )}
           {order.shipTo.confirmedAt ? <div><dt>確認</dt><dd>{new Date(order.shipTo.confirmedAt).toLocaleString("ja-JP")}</dd></div> : null}
         </dl>
         <div className="film-order-inline-actions">
           {!order.customer_code ? <p className="help">顧客コードがないため、住所録へ自動保存できません。</p> : null}
           {loading ? <p className="help">住所録を読み込み中...</p> : null}
-          {canEdit ? (
+          {canEdit && entries ? (
             <>
-              {destinations.length ? (
-                <div className="ship-to-options">
-                  {destinations.map((destination) => (
-                    <label key={destination.id}>
-                      <input
-                        type="radio"
-                        name={`ship-to-${order.id}`}
-                        checked={selectedDestinationId === destination.id}
-                        onChange={() => setSelectedDestinationId(destination.id)}
-                      />
-                      <span>
-                        <strong>{destination.label || destination.companyName}</strong>
-                        {destination.isDefault ? "（既定）" : ""}
-                        <small>{`〒${destination.postalCode} ${destination.address}${destination.building ? ` ${destination.building}` : ""}`}</small>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              ) : null}
               {loadError ? <p className="form-error" role="alert">{loadError}</p> : null}
-              {destinations.length ? (
-                <label className="ship-to-new-option">
-                  <input
-                    type="radio"
-                    name={`ship-to-${order.id}`}
-                    checked={selectedDestinationId == null}
-                    onChange={() => setSelectedDestinationId(null)}
-                  />
-                  <span><strong>新しい納品先を入力</strong><small>顧客住所録へ自動保存します</small></span>
-                </label>
-              ) : null}
-              {selectedDestinationId == null ? (
-                <form
-                  className="film-order-form ship-to-form"
-                  onSubmit={(event) => { event.preventDefault(); void submit(); }}
-                  aria-busy={busy}
-                >
-                  <label>ラベル<input name="ship-to-label" value={form.label} onChange={(event) => setForm((old) => ({ ...old, label: event.target.value }))} /></label>
-                  <label>会社名 ★<input name="ship-to-company" autoComplete="organization" value={form.companyName} onChange={(event) => setForm((old) => ({ ...old, companyName: event.target.value }))} required /></label>
-                  <label>部署<input name="ship-to-department" value={form.department} onChange={(event) => setForm((old) => ({ ...old, department: event.target.value }))} /></label>
-                  <label>担当者<input name="ship-to-contact" autoComplete="name" value={form.contactName} onChange={(event) => setForm((old) => ({ ...old, contactName: event.target.value }))} /></label>
-                  <label>郵便番号 ★<input name="ship-to-postal-code" inputMode="numeric" autoComplete="postal-code" placeholder="582-0017" value={form.postalCode} onChange={(event) => setForm((old) => ({ ...old, postalCode: event.target.value }))} required /></label>
-                  <label>住所 ★<input name="ship-to-address" autoComplete="address-line1" value={form.address} onChange={(event) => setForm((old) => ({ ...old, address: event.target.value }))} required /></label>
-                  <label>建物名<input name="ship-to-building" autoComplete="address-line2" value={form.building} onChange={(event) => setForm((old) => ({ ...old, building: event.target.value }))} /></label>
-                  <label>電話番号 ★<input name="ship-to-phone" type="tel" autoComplete="tel" value={form.phone} onChange={(event) => setForm((old) => ({ ...old, phone: event.target.value }))} required /></label>
-                  <label>メール<input name="ship-to-email" type="email" autoComplete="email" value={form.email} onChange={(event) => setForm((old) => ({ ...old, email: event.target.value }))} /></label>
-                  <label>備考<textarea name="ship-to-note" value={form.note} rows={2} onChange={(event) => setForm((old) => ({ ...old, note: event.target.value }))} /></label>
-                  <button
-                    className="button"
-                    type="submit"
-                    disabled={busy}
-                  >
-                    {busy ? "登録中..." : "納品先を登録"}
-                  </button>
-                </form>
+              <div className="ship-to-entry-list" data-testid="ship-to-entry-list">
+                {draftEntries.map((entry, index) => (
+                  <fieldset key={index} className="ship-to-entry-card">
+                    <legend>納品先 {index + 1}</legend>
+                    <div className="ship-to-entry-head">
+                      <label>
+                        入力元
+                        <select
+                          value={entry.source}
+                          onChange={(event) => {
+                            const source = event.target.value === "master" ? "master" : "new";
+                            updateEntry(index, {
+                              source,
+                              destinationId: source === "master"
+                                ? masterDestinations.find((item) => item.isDefault)?.id ?? masterDestinations[0]?.id ?? null
+                                : null,
+                            });
+                          }}
+                        >
+                          <option value="master" disabled={!masterDestinations.length}>住所録から選択</option>
+                          <option value="new">新規入力</option>
+                        </select>
+                      </label>
+                      {draftEntries.length > 1 ? (
+                        <button
+                          className="button danger small ship-to-entry-remove"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => removeEntry(index)}
+                        >
+                          削除
+                        </button>
+                      ) : null}
+                    </div>
+                    {entry.source === "master" ? (
+                      masterDestinations.length ? (
+                        <label>
+                          住所録
+                          <select
+                            value={entry.destinationId ?? ""}
+                            onChange={(event) => updateEntry(index, { destinationId: Number(event.target.value) || null })}
+                          >
+                            {masterDestinations.map((destination) => (
+                              <option key={destination.id} value={destination.id}>
+                                {destination.label || destination.companyName}{destination.isDefault ? "（既定）" : ""}
+                                ：〒{destination.postalCode} {destination.address}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
+                        <p className="help">住所録が空のため、新規入力で登録してください。</p>
+                      )
+                    ) : (
+                      <div className="film-order-form ship-to-form">
+                        <label>ラベル<input value={entry.label} onChange={(event) => updateEntry(index, { label: event.target.value })} /></label>
+                        <label>会社名 ★<input autoComplete="organization" value={entry.companyName} onChange={(event) => updateEntry(index, { companyName: event.target.value })} required /></label>
+                        <label>部署<input value={entry.department} onChange={(event) => updateEntry(index, { department: event.target.value })} /></label>
+                        <label>担当者<input autoComplete="name" value={entry.contactName} onChange={(event) => updateEntry(index, { contactName: event.target.value })} /></label>
+                        <label>郵便番号 ★<input inputMode="numeric" autoComplete="postal-code" placeholder="582-0017" value={entry.postalCode} onChange={(event) => updateEntry(index, { postalCode: event.target.value })} required /></label>
+                        <label>住所 ★<input autoComplete="address-line1" value={entry.address} onChange={(event) => updateEntry(index, { address: event.target.value })} required /></label>
+                        <label>建物名<input autoComplete="address-line2" value={entry.building} onChange={(event) => updateEntry(index, { building: event.target.value })} /></label>
+                        <label>電話番号 ★<input type="tel" autoComplete="tel" value={entry.phone} onChange={(event) => updateEntry(index, { phone: event.target.value })} required /></label>
+                        <label>メール<input type="email" autoComplete="email" value={entry.email} onChange={(event) => updateEntry(index, { email: event.target.value })} /></label>
+                        <label>備考<textarea value={entry.note} rows={2} onChange={(event) => updateEntry(index, { note: event.target.value })} /></label>
+                        <label className="inline-check">
+                          <input
+                            type="checkbox"
+                            checked={entry.saveToMaster}
+                            onChange={(event) => updateEntry(index, { saveToMaster: event.target.checked })}
+                          />
+                          この納品先を顧客住所録に保存
+                        </label>
+                      </div>
+                    )}
+                  </fieldset>
+                ))}
+              </div>
+              {draftEntries.length < MAX_SHIP_TO_DESTINATIONS ? (
+                <button className="button secondary" type="button" disabled={busy} onClick={addEntry}>
+                  ＋ 納品先を追加（最大{MAX_SHIP_TO_DESTINATIONS}件）
+                </button>
               ) : (
+                <p className="help">納品先は最大{MAX_SHIP_TO_DESTINATIONS}件までです。</p>
+              )}
+              <form onSubmit={(event) => { event.preventDefault(); void submit(); }} aria-busy={busy}>
                 <button
                   className="button"
-                  type="button"
-                  disabled={busy || !selectedDestinationId}
-                  onClick={() => void submit()}
+                  type="submit"
+                  disabled={busy || !allEntriesComplete}
                 >
-                  {busy ? "登録中..." : "保存済み納品先を使用"}
+                  {busy ? "登録中..." : draftEntries.length > 1 ? `納品先を登録（${draftEntries.length}件）` : "納品先を登録"}
                 </button>
-              )}
+              </form>
               {order.shipTo.status !== "confirmed" && order.customer_code ? (
                 <button
                   className="button workflow-action role-customer"
@@ -1609,9 +1794,12 @@ function ShipToPanel({
                   className="button secondary"
                   type="button"
                   disabled={busy}
-                  onClick={() => void onRun({ action: "confirm-ship-to" }, "納品先を確認しました。")}
+                  onClick={() => void onRun(
+                    { action: "confirm-ship-to" },
+                    registered.length > 1 ? `納品先${registered.length}件を確認しました。` : "納品先を確認しました。",
+                  )}
                 >
-                  納品先を確認する
+                  {registered.length > 1 ? `納品先を確認する（${registered.length}件）` : "納品先を確認する"}
                 </button>
               ) : null}
             </>
@@ -1621,6 +1809,7 @@ function ShipToPanel({
     </section>
   );
 }
+
 
 function CustomerDesignPanel({
   order,
