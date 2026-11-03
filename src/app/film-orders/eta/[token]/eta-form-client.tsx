@@ -178,14 +178,21 @@ export default function EtaFormClient({
       const response = await fetch(`/api/film-orders/eta/${encodeURIComponent(token)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: deliveredDate, note: deliveryNote }),
+        body: JSON.stringify({ kind: "delivery", date: deliveredDate, note: deliveryNote }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "failed");
       applyDelivery(payload.order?.delivery);
       setMessage("납품 보고를 등록했습니다。 / 納品報告を登録しました。");
     } catch (err) {
-      setError(err instanceof Error && err.message !== "failed" ? `${t.fail}（${err.message}）` : t.fail);
+      const humanMessages: Record<string, string> = {
+        shipment_report_required: t.shipmentRequired,
+        invalid_delivery_date: locale === "ko" ? "납품일이 올바르지 않습니다." : "納品日が正しくありません。",
+        invalid_delivery_transition: locale === "ko" ? "현재 진행 상태에서는 납품 보고를 등록할 수 없습니다." : "現在の状態では納品報告を登録できません。",
+        invalid_eta_input: locale === "ko" ? "입력값을 확인해 주십시오." : "入力内容をご確認ください。",
+      };
+      const key = err instanceof Error ? err.message : "failed";
+      setError(key !== "failed" && humanMessages[key] ? humanMessages[key] : t.fail);
     } finally {
       setBusy(false);
     }
