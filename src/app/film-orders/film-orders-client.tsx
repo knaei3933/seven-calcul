@@ -146,6 +146,14 @@ function workflowOwnerLabelOf(order: Pick<FilmOrderView, "buyer_domain" | "creat
   return buyerCompanyOf(order) === "seven" ? "セブン化学" : "金井貿易";
 }
 
+function supplierLabelOf(order: Pick<FilmOrderView, "supplier_name" | "supplier_email">): string {
+  const name = order.supplier_name?.trim();
+  if (name) return name;
+  const email = order.supplier_email?.trim();
+  if (email.includes("@")) return `フィルムメーカー（${email.split("@")[1] || email}）`;
+  return "フィルムメーカー";
+}
+
 function statusHintOf(order: FilmOrderView): string {
   const owner = workflowOwnerLabelOf(order);
   const selfData = order.customerDesign.status === "not_required";
@@ -166,10 +174,10 @@ function statusHintOf(order: FilmOrderView): string {
       return "デザイン側の再校正データアップロードを待っています。専用URLからの返却は自動反映されます。";
     case "final_approved":
       if (!order.po_sent_at) return "金井貿易が発注書・報告リンクをメーカーへ送信します。";
-      if (!order.eta_date) return "メーカーの納期見込み入力を待っています。";
+      if (!order.eta_date) return `${supplierLabelOf(order)}の納期見込み入力を待っています。`;
       if (order.shipTo.status !== "confirmed") return "納品先の確認が必要です。セブン化学／金井貿易が確認できます。";
-      if (!order.delivery.shippedOn) return "メーカーの出荷報告を待っています。";
-      if (!order.delivery.deliveredOn) return "メーカーの納品報告を待っています。";
+      if (!order.delivery.shippedOn) return `${supplierLabelOf(order)}の出荷報告を待っています。`;
+      if (!order.delivery.deliveredOn) return `${supplierLabelOf(order)}の納品報告を待っています。`;
       if (!order.delivery.receivedAt) return "セブン化学のフィルム受領確認を待っています。";
       return "フィルム受領済み。パウチ製作へ進行します。";
   }
@@ -227,15 +235,15 @@ export function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: bo
       return { kind: "none", label: "デザイン再校正データのアップロード待ち" };
     case "final_approved":
       if (!order.po_sent_at) return { kind: "none", label: "金井貿易の発注書・報告リンク送信待ち" };
-      if (!order.eta_date) return { kind: "none", label: "メーカーの納期見込み入力待ち" };
+      if (!order.eta_date) return { kind: "none", label: `${supplierLabelOf(order)}の納期見込み入力待ち` };
       if (order.shipTo.status === "registered") {
         return buyerCanOperate
           ? { kind: "run", label: "納品先を確認する", body: { action: "confirm-ship-to" }, ok: "納品先を確認しました。" }
           : { kind: "none", label: "納品先の確認待ち" };
       }
       if (order.shipTo.status !== "confirmed") return { kind: "none", label: "納品先の登録待ち" };
-      if (!order.delivery.shippedOn) return { kind: "none", label: "メーカーの出荷報告待ち" };
-      if (!order.delivery.deliveredOn) return { kind: "none", label: "メーカーの納品報告待ち" };
+      if (!order.delivery.shippedOn) return { kind: "none", label: `${supplierLabelOf(order)}の出荷報告待ち` };
+      if (!order.delivery.deliveredOn) return { kind: "none", label: `${supplierLabelOf(order)}の納品報告待ち` };
       if (!order.delivery.receivedAt) {
         return buyerCanOperate
           ? { kind: "run", label: "フィルムを受領確認", body: { action: "confirm-film-receipt" }, ok: "フィルムの受領を確認しました。" }
@@ -272,16 +280,28 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
   });
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
+    const fetchOrders = async () => {
       const response = await fetch("/api/film-orders", {
         cache: "no-store",
         signal: AbortSignal.timeout(20_000),
       });
       const payload = await response.json();
       if (!response.ok || !Array.isArray(payload.orders)) throw new Error();
-      setOrders(payload.orders as FilmOrderView[]);
+      return payload as { orders: FilmOrderView[]; created: number; driveConfigured: boolean };
+    };
+    setLoading(true);
+    setError("");
+    try {
+      let payload;
+      try {
+        payload = await fetchOrders();
+      } catch (error) {
+        // 初回アクセス時のスキーマ移行・dev再コンパイルで 1 回目がタイムアウトすることがあるため、
+        // TimeoutError の場合は 1 回だけ自動で再取得する。
+        if (!(error instanceof DOMException && error.name === "TimeoutError")) throw error;
+        payload = await fetchOrders();
+      }
+      setOrders(payload.orders);
       setCreated(Number(payload.created ?? 0));
       setDriveReady(payload.driveConfigured === true);
     } catch (error) {
@@ -1043,7 +1063,7 @@ function NextStepPanel({
       ) : null}
       {next.kind === "none" && nextRole === "supplier" ? (
         <div className="workflow-mode-note" role="note">
-          <strong>メーカー専用リンクでの報告待ち</strong>
+          <strong>{supplierLabelOf(order)}専用リンクでの報告待ち</strong>
           <span>メーカーが専用URLから出荷・納品報告すると、この発注に自動反映されます。</span>
         </div>
       ) : null}
@@ -1481,7 +1501,7 @@ function ProductionPlanPanel({
 }
 
 interface ShipToFormEntry {
-  source: "master" | "new";
+  source: "basic" | "master" | "new";
   destinationId: number | null;
   label: string;
   companyName: string;
@@ -1493,10 +1513,21 @@ interface ShipToFormEntry {
   phone: string;
   email: string;
   note: string;
-  saveToMaster: boolean;
 }
 
 const MAX_SHIP_TO_DESTINATIONS = 10;
+/** 顧客基本情報（初回登録時の住所）を住所録ラジオで表す際の合成ID。 */
+const SHIP_TO_BASIC_OPTION_ID = -1;
+interface ShipToBasicDestination {
+  companyName: string;
+  department: string;
+  contactName: string;
+  postalCode: string;
+  address: string;
+  building: string;
+  phone: string;
+  email: string;
+}
 
 function emptyShipToEntry(): ShipToFormEntry {
   return {
@@ -1512,11 +1543,11 @@ function emptyShipToEntry(): ShipToFormEntry {
     phone: "",
     email: "",
     note: "",
-    saveToMaster: true,
   };
 }
 
 function shipToEntryCompleteOf(entry: ShipToFormEntry): boolean {
+  if (entry.source === "basic") return true;
   if (entry.source === "master") return entry.destinationId != null;
   return Boolean(entry.companyName && entry.postalCode && entry.address && entry.phone);
 }
@@ -1535,14 +1566,18 @@ function ShipToPanel({
   onRun: (body: Record<string, unknown>, ok: string) => Promise<void>;
 }) {
   const [masterDestinations, setMasterDestinations] = useState<CustomerDeliveryDestination[]>([]);
+  const [basicDestination, setBasicDestination] = useState<ShipToBasicDestination | null>(null);
   const [entries, setEntries] = useState<ShipToFormEntry[] | null>(null);
+  const [selectedMasterId, setSelectedMasterId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
 
   const load = useCallback(async () => {
     if (!order.customer_code) {
       setMasterDestinations([]);
-      setEntries([emptyShipToEntry()]);
+      setBasicDestination(null);
+      setSelectedMasterId(null);
+      setEntries([]);
       return;
     }
     setLoading(true);
@@ -1553,13 +1588,24 @@ function ShipToPanel({
       if (!response.ok) throw new Error(payload.error ?? "load_failed");
       const loaded = payload.destinations as CustomerDeliveryDestination[];
       setMasterDestinations(loaded);
-      const defaultDestination = loaded.find((item) => item.isDefault) ?? loaded[0] ?? null;
-      setEntries(defaultDestination
-        ? [{ ...emptyShipToEntry(), source: "master", destinationId: defaultDestination.id }]
-        : [emptyShipToEntry()]);
+      const basic = payload.basicDestination as ShipToBasicDestination | null | undefined;
+      setBasicDestination(basic ?? null);
+      if (basic) {
+        // 顧客基本情報（初回登録時の住所）を既定の納品先にする。
+        setSelectedMasterId(SHIP_TO_BASIC_OPTION_ID);
+        setEntries([{ ...emptyShipToEntry(), source: "basic" }]);
+      } else {
+        const defaultDestination = loaded.find((item) => item.isDefault) ?? loaded[0] ?? null;
+        setSelectedMasterId(defaultDestination?.id ?? null);
+        setEntries(defaultDestination
+          ? [{ ...emptyShipToEntry(), source: "master", destinationId: defaultDestination.id }]
+          : []);
+      }
     } catch {
       setMasterDestinations([]);
-      setEntries([emptyShipToEntry()]);
+      setBasicDestination(null);
+      setSelectedMasterId(null);
+      setEntries([]);
       setLoadError("住所録を読み込めませんでした。更新後に再試行してください。");
     } finally {
       setLoading(false);
@@ -1577,18 +1623,35 @@ function ShipToPanel({
   const allEntriesComplete = draftEntries.length > 0 && draftEntries.every(shipToEntryCompleteOf);
   const registered = order.shipTo.destinations;
   const registrationPending = order.shipTo.status === "not_provided" && Boolean(order.shipTo.requestedAt);
+  const canAddMore = draftEntries.length < MAX_SHIP_TO_DESTINATIONS;
+  const draftMasterIds = new Set(
+    [
+      ...draftEntries.filter((entry) => entry.source === "basic").map(() => SHIP_TO_BASIC_OPTION_ID),
+      ...draftEntries
+        .filter((entry) => entry.source === "master" && entry.destinationId != null)
+        .map((entry) => entry.destinationId as number),
+    ],
+  );
+  const hasBasicOption = Boolean(basicDestination);
+  const selectedAlreadyAdded = selectedMasterId != null && draftMasterIds.has(selectedMasterId);
 
   const updateEntry = (index: number, patch: Partial<ShipToFormEntry>) => {
     setEntries((old) => (old ?? []).map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry));
   };
-  const addEntry = () => {
-    setEntries((old) => (old ?? []).length < MAX_SHIP_TO_DESTINATIONS ? [...(old ?? []), emptyShipToEntry()] : old);
+  const addFromMaster = () => {
+    if (busy || !canEdit || !canAddMore || selectedMasterId == null || selectedAlreadyAdded) return;
+    if (selectedMasterId === SHIP_TO_BASIC_OPTION_ID) {
+      setEntries((old) => [...(old ?? []), { ...emptyShipToEntry(), source: "basic" }]);
+      return;
+    }
+    setEntries((old) => [...(old ?? []), { ...emptyShipToEntry(), source: "master", destinationId: selectedMasterId }]);
+  };
+  const addManualEntry = () => {
+    if (busy || !canEdit || !canAddMore) return;
+    setEntries((old) => [...(old ?? []), emptyShipToEntry()]);
   };
   const removeEntry = (index: number) => {
-    setEntries((old) => {
-      const next = (old ?? []).filter((_, entryIndex) => entryIndex !== index);
-      return next.length ? next : [emptyShipToEntry()];
-    });
+    setEntries((old) => (old ?? []).filter((_, entryIndex) => entryIndex !== index));
   };
   const removeRegisteredDestination = (destinationRowId: number) => {
     void onRun({ action: "remove-ship-to-destination", destinationRowId }, "納品先を削除しました。").then(() => load());
@@ -1598,9 +1661,10 @@ function ShipToPanel({
     if (busy || !canEdit || !allEntriesComplete) return;
     const body = {
       action: "register-ship-to",
-      destinations: draftEntries.map((entry) => entry.source === "master" && entry.destinationId
-        ? { destinationId: entry.destinationId }
-        : {
+      destinations: draftEntries.map((entry) => {
+        if (entry.source === "basic") return { customerBasic: true };
+        if (entry.source === "master" && entry.destinationId) return { destinationId: entry.destinationId };
+        return {
           shipToLabel: entry.label,
           shipToCompanyName: entry.companyName,
           shipToDepartment: entry.department,
@@ -1611,8 +1675,8 @@ function ShipToPanel({
           shipToPhone: entry.phone,
           shipToEmail: entry.email,
           shipToNote: entry.note,
-          saveShipToMaster: entry.saveToMaster,
-        }),
+        };
+      }),
     };
     await onRun(
       body,
@@ -1688,87 +1752,130 @@ function ShipToPanel({
           {canEdit && entries ? (
             <>
               {loadError ? <p className="form-error" role="alert">{loadError}</p> : null}
-              <div className="ship-to-entry-list" data-testid="ship-to-entry-list">
-                {draftEntries.map((entry, index) => (
-                  <fieldset key={index} className="ship-to-entry-card">
-                    <legend>納品先 {index + 1}</legend>
-                    <div className="ship-to-entry-head">
-                      <label>
-                        入力元
-                        <select
-                          value={entry.source}
-                          onChange={(event) => {
-                            const source = event.target.value === "master" ? "master" : "new";
-                            updateEntry(index, {
-                              source,
-                              destinationId: source === "master"
-                                ? masterDestinations.find((item) => item.isDefault)?.id ?? masterDestinations[0]?.id ?? null
-                                : null,
-                            });
-                          }}
-                        >
-                          <option value="master" disabled={!masterDestinations.length}>住所録から選択</option>
-                          <option value="new">新規入力</option>
-                        </select>
+              {masterDestinations.length || basicDestination ? (
+                <fieldset className="ship-to-master-list" data-testid="ship-to-master-list">
+                  <legend>納品先候補（顧客基本情報・住所録）</legend>
+                  <div className="ship-to-options">
+                    {basicDestination ? (
+                      <label className={selectedMasterId === SHIP_TO_BASIC_OPTION_ID ? "selected" : ""}>
+                        <input
+                          type="radio"
+                          name={`ship-to-master-${order.id}`}
+                          checked={selectedMasterId === SHIP_TO_BASIC_OPTION_ID}
+                          onChange={() => setSelectedMasterId(SHIP_TO_BASIC_OPTION_ID)}
+                        />
+                        <span>
+                          <strong>
+                            顧客基本情報（初回登録時の住所）
+                            {draftMasterIds.has(SHIP_TO_BASIC_OPTION_ID) ? <em className="ship-to-added-badge">追加済み</em> : null}
+                          </strong>
+                          <small>
+                            {basicDestination.contactName ? `${basicDestination.contactName} / ` : ""}
+                            〒{basicDestination.postalCode} {basicDestination.address}
+                          </small>
+                          <small>電話：{basicDestination.phone}{basicDestination.email ? ` ／ ${basicDestination.email}` : ""}</small>
+                        </span>
                       </label>
-                      {draftEntries.length > 1 ? (
-                        <button
-                          className="button danger small ship-to-entry-remove"
-                          type="button"
-                          disabled={busy}
-                          onClick={() => removeEntry(index)}
-                        >
-                          削除
-                        </button>
-                      ) : null}
-                    </div>
-                    {entry.source === "master" ? (
-                      masterDestinations.length ? (
-                        <label>
-                          住所録
-                          <select
-                            value={entry.destinationId ?? ""}
-                            onChange={(event) => updateEntry(index, { destinationId: Number(event.target.value) || null })}
-                          >
-                            {masterDestinations.map((destination) => (
-                              <option key={destination.id} value={destination.id}>
-                                {destination.label || destination.companyName}{destination.isDefault ? "（既定）" : ""}
-                                ：〒{destination.postalCode} {destination.address}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                    ) : null}
+                    {masterDestinations.map((destination) => (
+                      <label key={destination.id} className={selectedMasterId === destination.id ? "selected" : ""}>
+                        <input
+                          type="radio"
+                          name={`ship-to-master-${order.id}`}
+                          checked={selectedMasterId === destination.id}
+                          onChange={() => setSelectedMasterId(destination.id)}
+                        />
+                        <span>
+                          <strong>
+                            {destination.label || destination.companyName}
+                            {destination.isDefault ? "（既定）" : ""}
+                            {draftMasterIds.has(destination.id) ? <em className="ship-to-added-badge">追加済み</em> : null}
+                          </strong>
+                          <small>
+                            {destination.department ? `${destination.department} / ` : ""}
+                            {destination.contactName ? `${destination.contactName} / ` : ""}
+                            〒{destination.postalCode} {destination.address}{destination.building ? ` ${destination.building}` : ""}
+                          </small>
+                          <small>電話：{destination.phone}{destination.email ? ` ／ ${destination.email}` : ""}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    data-testid="ship-to-add-from-master"
+                    disabled={busy || !canAddMore || selectedMasterId == null || selectedAlreadyAdded}
+                    onClick={addFromMaster}
+                  >
+                    {selectedAlreadyAdded ? "選択済みの納品先は追加済みです" : "選択した納品先を追加"}
+                  </button>
+                </fieldset>
+              ) : !loading ? (
+                <p className="help">住所録はまだありません。新規入力で登録すると住所録に保存され、次回から選択できます。</p>
+              ) : null}
+
+              <div className="ship-to-entry-list" data-testid="ship-to-entry-list">
+                {draftEntries.length === 0 ? (
+                  <p className="help">住所録から選ぶか「＋ 新規入力で追加」で納品先を登録してください。</p>
+                ) : null}
+                {draftEntries.map((entry, index) => {
+                  const master = entry.source === "master" && entry.destinationId != null
+                    ? masterDestinations.find((item) => item.id === entry.destinationId)
+                    : null;
+                  const isBasic = entry.source === "basic";
+                  return (
+                    <fieldset key={index} className="ship-to-entry-card">
+                      <legend>納品先 {index + 1}{entry.source === "master" ? "（住所録）" : entry.source === "basic" ? "（顧客基本情報）" : "（新規入力）"}</legend>
+                      {isBasic && basicDestination ? (
+                        <div className="ship-to-entry-summary">
+                          <strong>顧客基本情報（初回登録時の住所）</strong>
+                          <small>
+                            {basicDestination.contactName ? `${basicDestination.contactName} / ` : ""}
+                            〒{basicDestination.postalCode} {basicDestination.address}
+                          </small>
+                          <small>電話：{basicDestination.phone}{basicDestination.email ? ` ／ ${basicDestination.email}` : ""}</small>
+                        </div>
+                      ) : master ? (
+                        <div className="ship-to-entry-summary">
+                          <strong>{master.label || master.companyName}</strong>
+                          <small>
+                            {master.department ? `${master.department} / ` : ""}
+                            {master.contactName ? `${master.contactName} / ` : ""}
+                            〒{master.postalCode} {master.address}{master.building ? ` ${master.building}` : ""}
+                          </small>
+                          <small>電話：{master.phone}{master.email ? ` ／ ${master.email}` : ""}</small>
+                        </div>
                       ) : (
-                        <p className="help">住所録が空のため、新規入力で登録してください。</p>
-                      )
-                    ) : (
-                      <div className="film-order-form ship-to-form">
-                        <label>ラベル<input value={entry.label} onChange={(event) => updateEntry(index, { label: event.target.value })} /></label>
-                        <label>会社名 ★<input autoComplete="organization" value={entry.companyName} onChange={(event) => updateEntry(index, { companyName: event.target.value })} required /></label>
-                        <label>部署<input value={entry.department} onChange={(event) => updateEntry(index, { department: event.target.value })} /></label>
-                        <label>担当者<input autoComplete="name" value={entry.contactName} onChange={(event) => updateEntry(index, { contactName: event.target.value })} /></label>
-                        <label>郵便番号 ★<input inputMode="numeric" autoComplete="postal-code" placeholder="582-0017" value={entry.postalCode} onChange={(event) => updateEntry(index, { postalCode: event.target.value })} required /></label>
-                        <label>住所 ★<input autoComplete="address-line1" value={entry.address} onChange={(event) => updateEntry(index, { address: event.target.value })} required /></label>
-                        <label>建物名<input autoComplete="address-line2" value={entry.building} onChange={(event) => updateEntry(index, { building: event.target.value })} /></label>
-                        <label>電話番号 ★<input type="tel" autoComplete="tel" value={entry.phone} onChange={(event) => updateEntry(index, { phone: event.target.value })} required /></label>
-                        <label>メール<input type="email" autoComplete="email" value={entry.email} onChange={(event) => updateEntry(index, { email: event.target.value })} /></label>
-                        <label>備考<textarea value={entry.note} rows={2} onChange={(event) => updateEntry(index, { note: event.target.value })} /></label>
-                        <label className="inline-check">
-                          <input
-                            type="checkbox"
-                            checked={entry.saveToMaster}
-                            onChange={(event) => updateEntry(index, { saveToMaster: event.target.checked })}
-                          />
-                          この納品先を顧客住所録に保存
-                        </label>
-                      </div>
-                    )}
-                  </fieldset>
-                ))}
+                        <div className="film-order-form ship-to-form">
+                          <label>ラベル<input value={entry.label} onChange={(event) => updateEntry(index, { label: event.target.value })} /></label>
+                          <label>会社名 ★<input autoComplete="organization" value={entry.companyName} onChange={(event) => updateEntry(index, { companyName: event.target.value })} required /></label>
+                          <label>部署<input value={entry.department} onChange={(event) => updateEntry(index, { department: event.target.value })} /></label>
+                          <label>担当者<input autoComplete="name" value={entry.contactName} onChange={(event) => updateEntry(index, { contactName: event.target.value })} /></label>
+                          <label>郵便番号 ★<input inputMode="numeric" autoComplete="postal-code" placeholder="582-0017" value={entry.postalCode} onChange={(event) => updateEntry(index, { postalCode: event.target.value })} required /></label>
+                          <label>住所 ★<input autoComplete="address-line1" value={entry.address} onChange={(event) => updateEntry(index, { address: event.target.value })} required /></label>
+                          <label>建物名<input autoComplete="address-line2" value={entry.building} onChange={(event) => updateEntry(index, { building: event.target.value })} /></label>
+                          <label>電話番号 ★<input type="tel" autoComplete="tel" value={entry.phone} onChange={(event) => updateEntry(index, { phone: event.target.value })} required /></label>
+                          <label>メール<input type="email" autoComplete="email" value={entry.email} onChange={(event) => updateEntry(index, { email: event.target.value })} /></label>
+                          <label>備考<textarea value={entry.note} rows={2} onChange={(event) => updateEntry(index, { note: event.target.value })} /></label>
+                          <p className="help">登録内容は顧客住所録に自動保存され、次回から選択できます。</p>
+                        </div>
+                      )}
+                      <button
+                        className="button danger small ship-to-entry-remove"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => removeEntry(index)}
+                      >
+                        削除
+                      </button>
+                    </fieldset>
+                  );
+                })}
               </div>
-              {draftEntries.length < MAX_SHIP_TO_DESTINATIONS ? (
-                <button className="button secondary" type="button" disabled={busy} onClick={addEntry}>
-                  ＋ 納品先を追加（最大{MAX_SHIP_TO_DESTINATIONS}件）
+              {canAddMore ? (
+                <button className="button secondary" type="button" data-testid="ship-to-add-manual" disabled={busy} onClick={addManualEntry}>
+                  ＋ 新規入力で追加
                 </button>
               ) : (
                 <p className="help">納品先は最大{MAX_SHIP_TO_DESTINATIONS}件までです。</p>
@@ -1812,6 +1919,7 @@ function ShipToPanel({
     </section>
   );
 }
+
 
 
 function CustomerDesignPanel({
