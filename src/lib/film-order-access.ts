@@ -72,6 +72,7 @@ const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
   "request-ship-to-registration": "buyer_and_kanei",
   "register-ship-to": "buyer_and_kanei",
   "confirm-ship-to": "buyer_and_kanei",
+  "remove-ship-to-destination": "buyer_and_kanei",
   "save-production-plan": "buyer",
   "confirm-production-plan": "buyer",
   "request-production-plan": "kanei",

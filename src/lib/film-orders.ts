@@ -1460,6 +1460,7 @@ const FILM_ORDER_SHIP_TO_MAX_DESTINATIONS = 10;
 
 interface ShipToEntryParams {
   destinationId?: unknown;
+  customerBasic?: unknown;
   shipToLabel?: unknown;
   shipToCompanyName?: unknown;
   shipToDepartment?: unknown;
@@ -1473,6 +1474,75 @@ interface ShipToEntryParams {
   saveShipToMaster?: unknown;
 }
 
+/** 登録確定済みの納品先。id は顧客住所録マスタID（顧客基本情報の場合は null）。 */
+export interface ResolvedShipToDestination {
+  id: number | null;
+  label: string;
+  companyName: string;
+  department: string;
+  contactName: string;
+  postalCode: string;
+  address: string;
+  building: string;
+  phone: string;
+  email: string;
+  note: string;
+}
+
+function resolvedShipToDestinationOf(destination: CustomerDeliveryDestination): ResolvedShipToDestination {
+  return {
+    id: destination.id,
+    label: destination.label,
+    companyName: destination.companyName,
+    department: destination.department,
+    contactName: destination.contactName,
+    postalCode: destination.postalCode,
+    address: destination.address,
+    building: destination.building,
+    phone: destination.phone,
+    email: destination.email,
+    note: destination.note,
+  };
+}
+
+/**
+ * 顧客基本情報（初回登録時の住所）を納品先として解決する。
+ * 住所録には保存せず、顧客マスタの値をそのまま使う。
+ */
+async function customerBasicShipToDestinationOf(
+  order: FilmOrder,
+  customerCode: string,
+): Promise<ResolvedShipToDestination | null> {
+  const master = await customerShipToMasterOf(order, customerCode);
+  if (!master) return null;
+  const input = validateDeliveryDestinationInput({
+    label: "",
+    companyName: master.customerName,
+    department: "",
+    contactName: master.customerContact,
+    postalCode: master.customerPostalCode,
+    address: master.customerAddress,
+    building: "",
+    phone: master.customerTelephone,
+    email: master.customerEmail,
+    note: "",
+    isDefault: false,
+  });
+  if (!input) return null;
+  return {
+    id: null,
+    label: "",
+    companyName: input.companyName,
+    department: input.department,
+    contactName: input.contactName,
+    postalCode: input.postalCode,
+    address: input.address,
+    building: input.building,
+    phone: input.phone,
+    email: input.email,
+    note: input.note,
+  };
+}
 /**
  * register-ship-to の納品先入力を正規化する。
  * - destinations 配列（複数対応・新UI）
@@ -1504,7 +1574,7 @@ async function syncPrimaryShipToColumns(
   orderId: number,
   customerCode: string,
   primary: Pick<
-    CustomerDeliveryDestination,
+    ResolvedShipToDestination,
     "id" | "label" | "companyName" | "department" | "contactName" | "postalCode" | "address" | "building" | "phone" | "email" | "note"
   >,
   registeredAt: string,
@@ -3078,14 +3148,20 @@ export async function runFilmOrderAction(
     if (!requestedEntries.length || requestedEntries.length > FILM_ORDER_SHIP_TO_MAX_DESTINATIONS) {
       throw new Error("invalid_ship_to");
     }
-    const resolvedDestinations: CustomerDeliveryDestination[] = [];
+    const resolvedDestinations: ResolvedShipToDestination[] = [];
     for (const entry of requestedEntries) {
+      if (entry.customerBasic === true) {
+        const basic = await customerBasicShipToDestinationOf(order, customerCode);
+        if (!basic) throw new Error("invalid_ship_to");
+        resolvedDestinations.push(basic);
+        continue;
+      }
       const destinationId = Number(entry.destinationId);
       if (Number.isInteger(destinationId) && destinationId > 0) {
         let destination = await getDeliveryDestination(ownerDomain, customerCode, destinationId);
         if (!destination) throw new Error("delivery_destination_not_found");
         destination = await markDeliveryDestinationUsed(ownerDomain, customerCode, destinationId) ?? destination;
-        resolvedDestinations.push(destination);
+        resolvedDestinations.push(resolvedShipToDestinationOf(destination));
       } else {
         const input = validateDeliveryDestinationInput({
           label: entry.shipToLabel,
@@ -3101,7 +3177,7 @@ export async function runFilmOrderAction(
           isDefault: entry.saveShipToMaster === true,
         });
         if (!input) throw new Error("invalid_ship_to");
-        resolvedDestinations.push(await upsertDeliveryDestination(ownerDomain, customerCode, input));
+        resolvedDestinations.push(resolvedShipToDestinationOf(await upsertDeliveryDestination(ownerDomain, customerCode, input)));
       }
     }
 
@@ -3906,6 +3982,15 @@ function customerShipToFormValuesOfDestination(destination: CustomerDeliveryDest
 async function customerShipToMasterOf(order: FilmOrder, customerCode: string): Promise<CustomerMaster | null> {
   const ownerDomain: "seven" | "kanei" = order.buyer_domain.includes("727") ? "seven" : "kanei";
   return getCustomer(ownerDomain, customerCode);
+}
+
+/** 管理画面用: 顧客基本情報（初回登録時の住所）を納品先候補として返す。 */
+export async function getFilmOrderCustomerBasicShipToDestination(orderId: number): Promise<ResolvedShipToDestination | null> {
+  const order = await getFilmOrder(orderId);
+  if (!order) throw new Error("film_order_not_found");
+  const customerCode = await shipToCustomerCodeOf(order);
+  if (!customerCode) return null;
+  return customerBasicShipToDestinationOf(order, customerCode);
 }
 
 export async function getFilmOrderForShipToRequest(

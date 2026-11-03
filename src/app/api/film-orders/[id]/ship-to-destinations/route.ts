@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
 import { canViewFilmOrders, canViewFilmOrderRow } from "@/lib/film-order-access";
 import { listDeliveryDestinations } from "@/lib/customer-store";
-import { getFilmOrder } from "@/lib/film-orders";
+import { getFilmOrder, getFilmOrderCustomerBasicShipToDestination } from "@/lib/film-orders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,11 +26,14 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
       return NextResponse.json({ error: "film_order_not_found" }, { status: 404 });
     }
     if (!order.customer_code) {
-      return NextResponse.json({ destinations: [] });
+      return NextResponse.json({ destinations: [], basicDestination: null });
     }
     const ownerDomain = order.buyer_domain.includes("727") ? "seven" : "kanei";
-    const destinations = await listDeliveryDestinations(ownerDomain, order.customer_code);
-    return NextResponse.json({ destinations });
+    const [destinations, basicDestination] = await Promise.all([
+      listDeliveryDestinations(ownerDomain, order.customer_code),
+      getFilmOrderCustomerBasicShipToDestination(order.id),
+    ]);
+    return NextResponse.json({ destinations, basicDestination });
   } catch {
     return NextResponse.json({ error: "delivery_destinations_load_failed" }, { status: 500 });
   }

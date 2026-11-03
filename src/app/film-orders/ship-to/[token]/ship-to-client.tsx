@@ -29,6 +29,17 @@ interface ShipToRequest {
   expiresAt: string;
   status: "not_provided" | "registered" | "confirmed";
   currentDestination: ShipToValues | null;
+  registeredDestinations: Array<{
+    id: number;
+    label: string;
+    companyName: string;
+    department: string;
+    contactName: string;
+    postalCode: string;
+    address: string;
+    building: string;
+    phone: string;
+  }>;
   defaultDestination: ShipToValues | null;
   destinations: ShipToDestinationOption[];
 }
@@ -137,6 +148,26 @@ export default function ShipToRequestClient({ token }: { token: string }) {
 
         {message ? <p className="eta-ok" role="status">{message}</p> : null}
         {error ? <p className="eta-error" role="alert">{error}</p> : null}
+
+        {request.registeredDestinations?.length ? (
+          <section className="ship-to-current" aria-label="登録済み納品先一覧">
+            <h2>登録済みの納品先（{request.registeredDestinations.length}件）</h2>
+            <ol className="ship-to-registered-list">
+              {request.registeredDestinations.map((destination, index) => (
+                <li key={destination.id} className="ship-to-registered-item">
+                  <span className="ship-to-registered-name">
+                    {index + 1}. {destination.label ? `${destination.label} / ` : ""}{destination.companyName}
+                  </span>
+                  <span className="ship-to-registered-meta">
+                    〒{destination.postalCode} {destination.address}{destination.building ? ` ${destination.building}` : ""}
+                    {destination.phone ? ` ／ 電話：${destination.phone}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <p className="help">別の納品先も下記から追加で登録できます。</p>
+          </section>
+        ) : null}
 
         {current ? (
           <section className="ship-to-current" aria-label="登録済み納品先">

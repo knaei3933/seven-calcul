@@ -752,6 +752,7 @@ body:has(main.supplier-po-page) .global-header { display: none; }
 .ship-to-pending-hint { color: var(--muted); font-size: 12px; }
 .ship-to-entry-list { display: grid; gap: 10px; }
 .ship-to-entry-card {
+  position: relative;
   display: grid;
   gap: 8px;
   border: 1px solid #d7dfeb;
@@ -761,11 +762,61 @@ body:has(main.supplier-po-page) .global-header { display: none; }
   margin: 0;
   min-width: 0;
 }
-.ship-to-entry-card > legend { font-size: 12.5px; font-weight: 800; padding: 0 4px; }
-.ship-to-entry-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.ship-to-entry-head label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; }
-.ship-to-entry-head select { min-width: 170px; }
-.ship-to-entry-remove { min-height: 34px; padding: 4px 9px; font-size: 12px; }
+.ship-to-entry-card > legend { font-size: 12.5px; font-weight: 800; padding: 0 76px 0 4px; }
+.ship-to-entry-card > .ship-to-entry-remove {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  min-height: 34px;
+  padding: 4px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ship-to-master-list {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d7dfeb;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 10px;
+  margin: 0;
+  min-width: 0;
+}
+.ship-to-master-list > legend { font-size: 12.5px; font-weight: 800; padding: 0 4px; }
+.ship-to-added-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--primary-bg, #eef3fb);
+  color: var(--primary-strong);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 800;
+  vertical-align: 1px;
+}
+.ship-to-entry-summary {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: 12px;
+}
+.ship-to-entry-summary small { color: var(--muted); overflow-wrap: anywhere; }
+.film-order-form .inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  grid-column: 1 / -1;
+  font-weight: 600;
+}
+.film-order-form .inline-check input {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--primary);
+}
+.film-order-form .help { grid-column: 1 / -1; margin: 0; }
 .eta-form .ship-to-options { border: 0; padding: 0; margin: 0; }
 .eta-form .ship-to-options legend { font-size: 13px; font-weight: 800; margin-bottom: 7px; padding: 0; }
 .eta-form .inline-check { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; min-height: 40px; }

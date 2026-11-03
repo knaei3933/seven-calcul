@@ -277,6 +277,26 @@ export const shipToStatusLabels: Record<ShipToStatus, string> = {
   confirmed: "納品先確認済み",
 };
 
+export interface ShipToDestinationEntry {
+  id: number;
+  destinationId: number | null;
+  position: number;
+  label: string;
+  companyName: string;
+  department: string;
+  contactName: string;
+  postalCode: string;
+  address: string;
+  building: string;
+  phone: string;
+  email: string;
+  note: string;
+  registeredAt: string;
+  registeredBy: string;
+  confirmedAt: string | null;
+  confirmedBy: string;
+}
+
 export const PRODUCTION_PLAN_STATUSES = [
   "not_set",
   "tentative",
@@ -296,6 +316,8 @@ export const productionPlanStatusLabels: Record<ProductionPlanStatus, string> = 
 export interface ShipToTracking {
   status: ShipToStatus;
   destinationId: number | null;
+  /** 注文に紐づく納品先（複数対応）。1件目が代表納品先として旧カラムに同期される。 */
+  destinations: ShipToDestinationEntry[];
   label: string;
   companyName: string;
   department: string;

@@ -1827,6 +1827,14 @@ function ShipToPanel({
                   return (
                     <fieldset key={index} className="ship-to-entry-card">
                       <legend>納品先 {index + 1}{entry.source === "master" ? "（住所録）" : entry.source === "basic" ? "（顧客基本情報）" : "（新規入力）"}</legend>
+                      <button
+                        className="button danger small ship-to-entry-remove"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => removeEntry(index)}
+                      >
+                        削除
+                      </button>
                       {isBasic && basicDestination ? (
                         <div className="ship-to-entry-summary">
                           <strong>顧客基本情報（初回登録時の住所）</strong>
@@ -1861,14 +1869,6 @@ function ShipToPanel({
                           <p className="help">登録内容は顧客住所録に自動保存され、次回から選択できます。</p>
                         </div>
                       )}
-                      <button
-                        className="button danger small ship-to-entry-remove"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => removeEntry(index)}
-                      >
-                        削除
-                      </button>
                     </fieldset>
                   );
                 })}

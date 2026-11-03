@@ -615,6 +615,133 @@ beforeAll(async () => {
     const savedDefault = destinations.find((item) => item.companyName === "フィルム発注検証株式会社");
     expect(savedDefault?.isDefault).toBe(true);
     expect(savedDefault?.label).toBe("既定倉庫");
+
+    // 複数納品先: 顧客の2件目登録は追加（代表納品先は1件目のまま）
+    const second = await registerShipToFromCustomerToken({
+      token,
+      values: {
+        label: "第二倉庫",
+        companyName: "追加物流株式会社",
+        postalCode: "550-0002",
+        address: "大阪府大阪市テスト2-2-2",
+        phone: "06-1111-1111",
+      },
+      request: { headers: { get: (name) => name.toLowerCase() === "x-forwarded-for" ? "198.51.100.21" : null } },
+    });
+    expect(second.order.shipTo.destinations).toHaveLength(2);
+    expect(second.order.shipTo.destinations[0]?.companyName).toBe("フィルム発注検証株式会社");
+    expect(second.order.shipTo.destinations[1]?.companyName).toBe("追加物流株式会社");
+    expect(second.order.shipTo.companyName).toBe("フィルム発注検証株式会社");
+  });
+
+  it("registers, replaces, removes and confirms multiple delivery destinations", async () => {
+    await saveQuotation({
+      ...input,
+      quotationNumber: "S7-FILM-SHIP-MULTI-001",
+      status: "approved",
+      payload: { customerCode: "FILM-CUSTOMER-001", customerEmail: "film-customer@example.test", purchaseOrder },
+    }, 1, "admin");
+    await syncFilmOrdersFromQuotations("seven@727.co.jp");
+    const orders = await listFilmOrders("seven@727.co.jp");
+    const orderId = orders.find((item) => item.quotation_number === "S7-FILM-SHIP-MULTI-001")!.id;
+
+    const registered = await runFilmOrderAction(orderId, "register-ship-to", {
+      destinations: [
+        {
+          shipToLabel: "本社倉庫",
+          shipToCompanyName: "マルチ物流株式会社",
+          shipToPostalCode: "550-0010",
+          shipToAddress: "大阪府大阪市マルチ1-1-1",
+          shipToPhone: "06-0000-0010",
+          saveShipToMaster: false,
+        },
+        {
+          shipToCompanyName: "第二倉庫株式会社",
+          shipToPostalCode: "550-0020",
+          shipToAddress: "大阪府大阪市マルチ2-2-2",
+          shipToPhone: "06-0000-0020",
+          saveShipToMaster: false,
+        },
+        {
+          shipToCompanyName: "九州倉庫株式会社",
+          shipToPostalCode: "812-0000",
+          shipToAddress: "福岡県福岡市マルチ3-3-3",
+          shipToPhone: "092-000-0003",
+          saveShipToMaster: false,
+        },
+      ],
+    }, "seven@727.co.jp");
+    expect(registered.order.shipTo.status).toBe("registered");
+    expect(registered.order.shipTo.destinations).toHaveLength(3);
+    expect(registered.order.shipTo.destinations.map((destination) => destination.companyName)).toEqual([
+      "マルチ物流株式会社",
+      "第二倉庫株式会社",
+      "九州倉庫株式会社",
+    ]);
+    // 1件目が代表納品先として旧 scalar カラムへ同期される
+    expect(registered.order.shipTo.companyName).toBe("マルチ物流株式会社");
+    expect(registered.order.shipTo.postalCode).toBe("550-0010");
+
+    // 空配列・上限超過は拒否される
+    await expect(runFilmOrderAction(orderId, "register-ship-to", { destinations: [] }, "seven@727.co.jp"))
+      .rejects.toThrow("invalid_ship_to");
+
+    // 再登録で差し替え（3件 → 2件）
+    const replaced = await runFilmOrderAction(orderId, "register-ship-to", {
+      destinations: [
+        { destinationId: registered.order.shipTo.destinations[0]!.destinationId! },
+        {
+          shipToCompanyName: "差し替え倉庫株式会社",
+          shipToPostalCode: "550-0030",
+          shipToAddress: "大阪府大阪市マルチ4-4-4",
+          shipToPhone: "06-0000-0030",
+        },
+      ],
+    }, "seven@727.co.jp");
+    expect(replaced.order.shipTo.destinations).toHaveLength(2);
+    expect(replaced.order.shipTo.destinations[0]?.companyName).toBe("マルチ物流株式会社");
+    expect(replaced.order.shipTo.destinations[1]?.companyName).toBe("差し替え倉庫株式会社");
+
+    // 1件削除 → 残1件が代表納品先になる
+    const removed = await runFilmOrderAction(orderId, "remove-ship-to-destination", {
+      destinationRowId: replaced.order.shipTo.destinations[0]!.id,
+    }, "seven@727.co.jp");
+    expect(removed.order.shipTo.destinations).toHaveLength(1);
+    expect(removed.order.shipTo.companyName).toBe("差し替え倉庫株式会社");
+    expect(removed.order.shipTo.status).toBe("registered");
+
+    // 確認で全件確定
+    const confirmed = await runFilmOrderAction(orderId, "confirm-ship-to", {}, "seven@727.co.jp");
+    expect(confirmed.order.shipTo.status).toBe("confirmed");
+    expect(confirmed.order.shipTo.destinations.every((destination) => destination.confirmedAt)).toBe(true);
+    await expect(runFilmOrderAction(orderId, "remove-ship-to-destination", {
+      destinationRowId: confirmed.order.shipTo.destinations[0]!.id,
+    }, "seven@727.co.jp")).rejects.toThrow("invalid_status_transition");
+  });
+
+  it("defaults to the customer basic address when registering a ship-to", async () => {
+    await saveQuotation({
+      ...input,
+      quotationNumber: "S7-FILM-SHIP-BASIC-001",
+      status: "approved",
+      payload: { customerCode: "FILM-CUSTOMER-001", customerEmail: "film-customer@example.test", purchaseOrder },
+    }, 1, "admin");
+    await syncFilmOrdersFromQuotations("seven@727.co.jp");
+    const orders = await listFilmOrders("seven@727.co.jp");
+    const orderId = orders.find((item) => item.quotation_number === "S7-FILM-SHIP-BASIC-001")!.id;
+
+    const registered = await runFilmOrderAction(orderId, "register-ship-to", {
+      destinations: [{ customerBasic: true }],
+    }, "seven@727.co.jp");
+    expect(registered.order.shipTo.status).toBe("registered");
+    expect(registered.order.shipTo.destinations).toHaveLength(1);
+    // 顧客基本情報は住所録マスタに紐付かない
+    expect(registered.order.shipTo.destinations[0]?.destinationId).toBeNull();
+    // 顧客基本情報（初回登録時の住所）が代表納品先になる
+    expect(registered.order.shipTo.companyName).toBe("フィルム発注検証株式会社");
+    expect(registered.order.shipTo.postalCode).toBe("650-0001");
+    expect(registered.order.shipTo.address).toBe("兵庫県神戸市テスト1-2-3");
+    expect(registered.order.shipTo.phone).toBe("078-000-0000");
   });
 
   it("builds human-readable file names containing the order number", () => {
