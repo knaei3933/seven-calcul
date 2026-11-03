@@ -6,7 +6,7 @@ import type {
   CustomerMaster,
   CustomerMasterInput,
 } from "./quotation-shared";
-import type { CustomerOwnerDomain } from "./film-order-access";
+import { isKaneiTradeUser, isSevenChemicalUser, type CustomerOwnerDomain } from "./film-order-access";
 
 interface CustomerRow {
   owner_domain: CustomerOwnerDomain;
@@ -109,7 +109,10 @@ const DELIVERY_DESTINATION_TABLE_SQL = `
       ON customer_delivery_destinations(owner_domain, customer_code, is_default DESC, last_used_at DESC);
 `;
 
+type CustomerOwnerEvidence = Map<string, Set<CustomerOwnerDomain>>;
+
 const CUSTOMER_SCHEMA_WITH_DELIVERY_DESTINATIONS_VERSION = "2026-10-28-customer-fax-1";
+const CUSTOMER_SCHEMA_WITH_QUOTATION_OWNERSHIP_VERSION = "2026-11-03-owner-merged-customers-1";
 
 /** LIKE/ILIKE 와일드카드를 문자 그대로 검색하기 위해 이스케이프한다. */
 function escapeLikePattern(value: string): string {
@@ -195,6 +198,288 @@ async function migrateLegacyCustomers(db: SqlClient): Promise<void> {
   await db.exec("CREATE INDEX IF NOT EXISTS idx_customers_owner_name ON customers(owner_domain, customer_name)");
 }
 
+
+/**
+ * Legacy owner assignment could place K- codes under Seven. Reconcile K- rows
+ * to Kanei using quotation creators as evidence; Seven-created legacy K rows stay.
+ */
+async function reconcileLegacyCustomerOwnership(
+  db: SqlClient,
+  evidence?: CustomerOwnerEvidence,
+): Promise<void> {
+  const usage = evidence ?? await readCustomerOwnerEvidence();
+  const legacyRows = await db.all<CustomerRow>(`
+    SELECT owner_domain, customer_code
+    FROM customers
+    WHERE owner_domain = ? AND customer_code LIKE ?
+  `, ["seven", "K-%"]);
+  if (!legacyRows.length) return;
+
+  for (const row of legacyRows) {
+    const owners = usage.get(row.customer_code);
+    const owner: CustomerOwnerDomain = owners?.has("seven") ? "seven" : "kanei";
+    if (owner !== "kanei") continue;
+    const duplicate = await db.get<CustomerRow>(
+      "SELECT * FROM customers WHERE owner_domain = ? AND customer_code = ?",
+      ["kanei", row.customer_code],
+    );
+    if (duplicate) {
+      await db.transaction(async (tx) => {
+        const currentDuplicate = await tx.get<CustomerRow>(
+          "SELECT * FROM customers WHERE owner_domain = ? AND customer_code = ?",
+          ["kanei", row.customer_code],
+        );
+        if (!currentDuplicate) return;
+
+        const oldDestinations = await tx.all<DeliveryDestinationRow>(`
+          SELECT * FROM customer_delivery_destinations
+          WHERE owner_domain = ? AND customer_code = ?
+        `, ["seven", row.customer_code]);
+        for (const destination of oldDestinations) {
+          const existing = await tx.get<DeliveryDestinationRow>(`
+            SELECT * FROM customer_delivery_destinations
+            WHERE owner_domain = ? AND customer_code = ? AND destination_fingerprint = ?
+          `, ["kanei", row.customer_code, destination.destination_fingerprint]);
+          if (existing) {
+            await tx.run(`
+              UPDATE customer_delivery_destinations
+              SET use_count = CASE
+                    WHEN use_count > ? THEN use_count ELSE ?
+                  END,
+                  last_used_at = CASE
+                    WHEN COALESCE(last_used_at, '') > COALESCE(?, '') THEN last_used_at ELSE ?
+                  END,
+                  is_default = CASE WHEN ? THEN TRUE ELSE is_default END
+              WHERE id = ?
+            `, [
+              destination.use_count,
+              destination.use_count,
+              destination.last_used_at,
+              destination.last_used_at,
+              destination.is_default,
+              existing.id,
+            ]);
+          }
+          await tx.run(
+            "DELETE FROM customer_delivery_destinations WHERE id = ?",
+            [destination.id],
+          );
+          if (!existing) {
+            await tx.run(`
+              INSERT INTO customer_delivery_destinations
+                (owner_domain,customer_code,destination_fingerprint,label,company_name,department,
+                 contact_name,postal_code,address,building,phone,email,note,is_default,
+                 use_count,last_used_at,created_at,updated_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            `, [
+              "kanei",
+              row.customer_code,
+              destination.destination_fingerprint,
+              destination.label,
+              destination.company_name,
+              destination.department,
+              destination.contact_name,
+              destination.postal_code,
+              destination.address,
+              destination.building,
+              destination.phone,
+              destination.email,
+              destination.note,
+              destination.is_default,
+              destination.use_count,
+              destination.last_used_at,
+              destination.created_at,
+              destination.updated_at,
+            ]);
+          }
+        }
+
+        const selections = await tx.all<{ user_email: string; selection_count: number; last_selected_at: string }>(`
+          SELECT user_email, selection_count, last_selected_at
+          FROM customer_selections
+          WHERE owner_domain = ? AND customer_code = ?
+        `, ["seven", row.customer_code]);
+        await tx.run(`
+          DELETE FROM customer_selections
+          WHERE owner_domain = ? AND customer_code = ?
+        `, ["seven", row.customer_code]);
+        for (const selection of selections) {
+          await tx.run(`
+            INSERT INTO customer_selections
+              (owner_domain,user_email,customer_code,selection_count,last_selected_at)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(owner_domain, user_email, customer_code) DO UPDATE SET
+              selection_count = CASE
+                WHEN customer_selections.selection_count > excluded.selection_count
+                  THEN customer_selections.selection_count
+                ELSE excluded.selection_count
+              END,
+              last_selected_at = CASE
+                WHEN customer_selections.last_selected_at > excluded.last_selected_at
+                  THEN customer_selections.last_selected_at
+                ELSE excluded.last_selected_at
+              END
+          `, ["kanei", selection.user_email, row.customer_code, selection.selection_count, selection.last_selected_at]);
+        }
+
+        if (currentDuplicate.updated_at < row.updated_at) {
+          await tx.run(`
+            UPDATE customers
+            SET customer_name=?,postal_code=?,address=?,contact=?,telephone=?,fax=?,email=?,updated_at=?
+            WHERE owner_domain=? AND customer_code=?
+          `, [
+            row.customer_name,
+            row.postal_code,
+            row.address,
+            row.contact,
+            row.telephone,
+            row.fax,
+            row.email,
+            row.updated_at,
+            "kanei",
+            row.customer_code,
+          ]);
+        }
+        await tx.run(`
+          DELETE FROM customers
+          WHERE owner_domain=? AND customer_code=?
+        `, ["seven", row.customer_code]);
+      });
+      continue;
+    }
+
+    await db.transaction(async (tx) => {
+      if (await tx.get<{ customer_code: string }>(
+        "SELECT customer_code FROM customers WHERE owner_domain = ? AND customer_code = ?",
+        ["kanei", row.customer_code],
+      )) return;
+
+      // Relation tables are not ON UPDATE CASCADE; detach rows before reparenting.
+      const oldDestinations = await tx.all<DeliveryDestinationRow>(`
+        SELECT * FROM customer_delivery_destinations
+        WHERE owner_domain = ? AND customer_code = ?
+      `, ["seven", row.customer_code]);
+      const movableDestinations: DeliveryDestinationRow[] = [];
+      for (const destination of oldDestinations) {
+        const duplicateDestination = await tx.get<{ id: number }>(`
+          SELECT id FROM customer_delivery_destinations
+          WHERE owner_domain = ? AND customer_code = ? AND destination_fingerprint = ?
+        `, ["kanei", row.customer_code, destination.destination_fingerprint]);
+        if (!duplicateDestination) movableDestinations.push(destination);
+        await tx.run(
+          "DELETE FROM customer_delivery_destinations WHERE id = ?",
+          [destination.id],
+        );
+      }
+      await tx.run(`
+        UPDATE customers
+        SET owner_domain = ?
+        WHERE owner_domain = ? AND customer_code = ?
+      `, ["kanei", "seven", row.customer_code]);
+      for (const destination of movableDestinations) {
+        await tx.run(`
+          INSERT INTO customer_delivery_destinations
+            (owner_domain,customer_code,destination_fingerprint,label,company_name,department,
+             contact_name,postal_code,address,building,phone,email,note,is_default,
+             use_count,last_used_at,created_at,updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `, [
+          "kanei",
+          row.customer_code,
+          destination.destination_fingerprint,
+          destination.label,
+          destination.company_name,
+          destination.department,
+          destination.contact_name,
+          destination.postal_code,
+          destination.address,
+          destination.building,
+          destination.phone,
+          destination.email,
+          destination.note,
+          destination.is_default,
+          destination.use_count,
+          destination.last_used_at,
+          destination.created_at,
+          destination.updated_at,
+        ]);
+      }
+
+      const selections = await tx.all<{ user_email: string; selection_count: number; last_selected_at: string }>(`
+        SELECT user_email, selection_count, last_selected_at
+        FROM customer_selections
+        WHERE owner_domain = ? AND customer_code = ?
+      `, ["seven", row.customer_code]);
+      await tx.run(`
+        DELETE FROM customer_selections
+        WHERE owner_domain = ? AND customer_code = ?
+      `, ["seven", row.customer_code]);
+      for (const selection of selections) {
+        await tx.run(`
+          INSERT INTO customer_selections
+            (owner_domain,user_email,customer_code,selection_count,last_selected_at)
+          VALUES (?,?,?,?,?)
+          ON CONFLICT(owner_domain, user_email, customer_code) DO UPDATE SET
+            selection_count = CASE
+              WHEN customer_selections.selection_count > excluded.selection_count
+                THEN customer_selections.selection_count
+              ELSE excluded.selection_count
+            END,
+            last_selected_at = CASE
+              WHEN customer_selections.last_selected_at > excluded.last_selected_at
+                THEN customer_selections.last_selected_at
+              ELSE excluded.last_selected_at
+            END
+        `, ["kanei", selection.user_email, row.customer_code, selection.selection_count, selection.last_selected_at]);
+      }
+    });
+  }
+}
+
+async function readCustomerOwnerEvidence(): Promise<CustomerOwnerEvidence> {
+  const usage: CustomerOwnerEvidence = new Map();
+  try {
+    const quotationsDb = await getSqlClient("quotations");
+    const rows = await quotationsDb.all<{ payload_json: string; creator_email: string | null }>(`
+        SELECT quotations.payload_json,
+               creator.email AS creator_email
+        FROM quotations AS quotations
+        JOIN users AS creator ON creator.id = quotations.created_by
+        WHERE quotations.payload_json LIKE '%customerCode%'
+      `);
+    for (const row of rows) {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const code = typeof payload === "object" && payload !== null
+        && typeof (payload as Record<string, unknown>).customerCode === "string"
+        ? ((payload as Record<string, unknown>).customerCode as string).trim()
+        : "";
+      if (!code) continue;
+      const owner = isKaneiTradeUser(row.creator_email)
+        ? "kanei"
+        : isSevenChemicalUser(row.creator_email) ? "seven" : null;
+      if (!owner) continue;
+      const owners = usage.get(code) ?? new Set<CustomerOwnerDomain>();
+      owners.add(owner);
+      usage.set(code, owners);
+    }
+  } catch {
+    // Missing/uninitialized quotation storage must not block customer reads.
+  }
+  return usage;
+}
+
+export async function reconcileLegacyCustomerOwnershipForTest(
+  evidence?: CustomerOwnerEvidence,
+): Promise<void> {
+  const db = await getDatabase();
+  await reconcileLegacyCustomerOwnership(db, evidence);
+}
+
 async function addCustomerFaxColumn(db: SqlClient): Promise<void> {
   if (db.dialect === "sqlite") {
     const columns = await db.all<{ name: string }>("PRAGMA table_info(customers)");
@@ -226,7 +511,7 @@ async function getDatabase(): Promise<SqlClient> {
       ["customers"],
     );
     // コールドスタート毎の情報スキーマ照会とDDL検査を省略する。
-    if (marker?.version === CUSTOMER_SCHEMA_WITH_DELIVERY_DESTINATIONS_VERSION) return db;
+    if (marker?.version === CUSTOMER_SCHEMA_WITH_QUOTATION_OWNERSHIP_VERSION) return db;
     const table = db.dialect === "postgres"
       ? await db.get<{ table_name: string }>(`
         SELECT table_name
@@ -250,10 +535,11 @@ async function getDatabase(): Promise<SqlClient> {
     } else {
       await db.exec(DELIVERY_DESTINATION_TABLE_SQL);
     }
+    await reconcileLegacyCustomerOwnership(db);
     await db.run(`
       INSERT INTO customer_schema_migrations (slot,version,updated_at) VALUES (?,?,?)
       ON CONFLICT(slot) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at
-    `, ["customers", CUSTOMER_SCHEMA_WITH_DELIVERY_DESTINATIONS_VERSION, new Date().toISOString()]);
+    `, ["customers", CUSTOMER_SCHEMA_WITH_QUOTATION_OWNERSHIP_VERSION, new Date().toISOString()]);
     return db;
   })().catch((error) => {
     schemaReady = null;
