@@ -561,17 +561,19 @@ function buildWorkflowMailNotice(order: FilmOrderView, body: Record<string, unkn
 
   if (action === "resend-supplier-links") {
     recipients.splice(0, recipients.length, order.supplier_email?.trim() || "フィルムメーカー（設定待ち）");
-    subject = `【再送】発注書・納期/出荷報告ページ ${number} ${product}`;
-    lines = locale === "ko"
-      ? [
+    if (locale === "ko") {
+      subject = `【재전송】발주서·납기/출하/납품 보고 페이지 ${number} ${product}`;
+      lines = [
         "이전에 발주드린 건의 링크를 재전송합니다. 새로운 발주가 아닙니다.",
         "",
         `발주번호：${number}`,
         `품목：${product}`,
         "",
         "재전송 링크는 실제 발송 시 최신 토큰으로 갱신됩니다.",
-      ]
-      : [
+      ];
+    } else {
+      subject = `【再送】発注書・納期/出荷報告ページ ${number} ${product}`;
+      lines = [
         "初回送信済み発注のリンクを再送いたします。新しい発注ではありません。",
         "",
         `発注番号：${number}`,
@@ -579,6 +581,7 @@ function buildWorkflowMailNotice(order: FilmOrderView, body: Record<string, unkn
         "",
         "再送リンクは実送信時に最新トークンへ更新されます。",
       ];
+    }
   } else if (action === "send-po") {
     recipients.splice(0, recipients.length, order.supplier_email?.trim() || "フィルムメーカー（設定待ち）", seven);
     subject = `【フィルム発注のご依頼】${number} ${product}`;

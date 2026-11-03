@@ -192,6 +192,7 @@ import {
   type FilmOrderEventRecord,
   type FilmOrderStatus,
   type FilmOrderView,
+  type ShipToDestinationEntry,
 } from "./film-order-shared";
 
 export type FilmOrderAction =
@@ -218,6 +219,7 @@ export type FilmOrderAction =
   | "request-ship-to-registration"
   | "register-ship-to"
   | "confirm-ship-to"
+  | "remove-ship-to-destination"
   | "save-production-plan"
   | "confirm-production-plan"
   | "request-production-plan"
@@ -388,6 +390,29 @@ const BASE_SCHEMA = `
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_film_order_events_order ON film_order_events(order_id);
+  CREATE TABLE IF NOT EXISTS film_order_ship_to_destinations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES film_orders(id) ON DELETE CASCADE,
+    destination_id BIGINT,
+    position INTEGER NOT NULL DEFAULT 0,
+    label TEXT NOT NULL DEFAULT '',
+    company_name TEXT NOT NULL DEFAULT '',
+    department TEXT NOT NULL DEFAULT '',
+    contact_name TEXT NOT NULL DEFAULT '',
+    postal_code TEXT NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
+    building TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    registered_at TEXT NOT NULL,
+    registered_by TEXT NOT NULL DEFAULT '',
+    confirmed_at TEXT,
+    confirmed_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_film_order_ship_to_destinations_order
+    ON film_order_ship_to_destinations(order_id, position, id);
 `;
 
 const POSTGRES_SCHEMA = BASE_SCHEMA.replaceAll(
@@ -815,7 +840,7 @@ export interface UploadFileMetadata {
   userAgent?: string | null;
 }
 
-const FILM_SCHEMA_VERSION = "2026-10-27-delivery-documents-1";
+const FILM_SCHEMA_VERSION = "2026-11-03-ship-to-multi-1";
 
 async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
@@ -1095,6 +1120,23 @@ async function getDatabase(): Promise<SqlClient> {
         END
     `);
     await migrateLegacyProofTokens(db);
+    // 複数納品先テーブル導入前の旧 scalar カラムを 1 件目（代表納品先）として引き継ぐ。
+    await db.exec(`
+      INSERT INTO film_order_ship_to_destinations (
+        order_id, destination_id, position, label, company_name, department, contact_name,
+        postal_code, address, building, phone, email, note,
+        registered_at, registered_by, confirmed_at, confirmed_by, created_at
+      )
+      SELECT
+        f.id, f.ship_to_destination_id, 0, f.ship_to_label, f.ship_to_company_name,
+        f.ship_to_department, f.ship_to_contact_name, f.ship_to_postal_code, f.ship_to_address,
+        f.ship_to_building, f.ship_to_phone, f.ship_to_email, f.ship_to_note,
+        COALESCE(f.ship_to_registered_at, f.created_at), f.ship_to_registered_by,
+        f.ship_to_confirmed_at, f.ship_to_confirmed_by, COALESCE(f.ship_to_registered_at, f.created_at)
+      FROM film_orders f
+      WHERE f.ship_to_company_name != ''
+        AND NOT EXISTS (SELECT 1 FROM film_order_ship_to_destinations d WHERE d.order_id = f.id)
+    `);
     await db.run(`
       INSERT INTO film_order_schema_migrations (slot,version,updated_at) VALUES (?,?,?)
       ON CONFLICT(slot) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at
@@ -1216,6 +1258,7 @@ function mapOrder(row: FilmOrderRow): FilmOrder {
   const shipTo: ShipToTracking = {
     status: (row.ship_to_status || "not_provided") as ShipToStatus,
     destinationId: row.ship_to_destination_id == null ? null : Number(row.ship_to_destination_id),
+    destinations: [],
     label: row.ship_to_label,
     companyName: row.ship_to_company_name,
     department: row.ship_to_department,
@@ -1362,7 +1405,126 @@ export async function getFilmOrder(id: number): Promise<FilmOrderView | null> {
     "SELECT * FROM film_order_events WHERE order_id = ? ORDER BY created_at, id",
     [id],
   );
-  return { ...mapOrder(row), files, events };
+  const shipToDestinations = await listFilmOrderShipToDestinations(db, id);
+  const order = mapOrder(row);
+  return { ...order, files, events, shipTo: { ...order.shipTo, destinations: shipToDestinations } };
+}
+
+interface ShipToDestinationDbRow {
+  id: number;
+  order_id: number;
+  destination_id: number | null;
+  position: number;
+  label: string;
+  company_name: string;
+  department: string;
+  contact_name: string;
+  postal_code: string;
+  address: string;
+  building: string;
+  phone: string;
+  email: string;
+  note: string;
+  registered_at: string;
+  registered_by: string;
+  confirmed_at: string | null;
+  confirmed_by: string;
+}
+
+async function listFilmOrderShipToDestinations(db: SqlClient, orderId: number): Promise<ShipToDestinationEntry[]> {
+  const rows = await db.all<ShipToDestinationDbRow>(`
+    SELECT * FROM film_order_ship_to_destinations WHERE order_id = ? ORDER BY position, id
+  `, [orderId]);
+  return rows.map((row) => ({
+    id: Number(row.id),
+    destinationId: row.destination_id == null ? null : Number(row.destination_id),
+    position: Number(row.position),
+    label: row.label,
+    companyName: row.company_name,
+    department: row.department,
+    contactName: row.contact_name,
+    postalCode: row.postal_code,
+    address: row.address,
+    building: row.building,
+    phone: row.phone,
+    email: row.email,
+    note: row.note,
+    registeredAt: row.registered_at,
+    registeredBy: row.registered_by,
+    confirmedAt: row.confirmed_at,
+    confirmedBy: row.confirmed_by,
+  }));
+}
+
+const FILM_ORDER_SHIP_TO_MAX_DESTINATIONS = 10;
+
+interface ShipToEntryParams {
+  destinationId?: unknown;
+  shipToLabel?: unknown;
+  shipToCompanyName?: unknown;
+  shipToDepartment?: unknown;
+  shipToContactName?: unknown;
+  shipToPostalCode?: unknown;
+  shipToAddress?: unknown;
+  shipToBuilding?: unknown;
+  shipToPhone?: unknown;
+  shipToEmail?: unknown;
+  shipToNote?: unknown;
+  saveShipToMaster?: unknown;
+}
+
+/**
+ * register-ship-to の納品先入力を正規化する。
+ * - destinations 配列（複数対応・新UI）
+ * - 旧フラットパラメータ（destinationId / shipTo* 1件分・顧客外部リンクや既存クライアント互換）
+ */
+function shipToEntryParamsOf(params: ShipToEntryParams & { destinations?: unknown }): ShipToEntryParams[] {
+  if (Array.isArray(params.destinations)) {
+    return params.destinations
+      .filter((item): item is ShipToEntryParams => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+      .slice(0, FILM_ORDER_SHIP_TO_MAX_DESTINATIONS);
+  }
+  const hasFlatEntry = params.destinationId != null
+    || params.shipToCompanyName != null
+    || params.shipToAddress != null;
+  return hasFlatEntry ? [{ ...params }] : [];
+}
+
+function shipToRegisteredEventDetail(destinations: Array<Pick<CustomerDeliveryDestination, "companyName" | "postalCode" | "address">>): string {
+  const summary = destinations
+    .map((destination, index) => `${index + 1}) ${destination.companyName} / ${destination.postalCode} ${destination.address}`)
+    .join(" ");
+  return destinations.length === 1
+    ? `納品先登録: ${summary}`
+    : `納品先登録（${destinations.length}件）: ${summary}`;
+}
+
+async function syncPrimaryShipToColumns(
+  db: SqlClient,
+  orderId: number,
+  customerCode: string,
+  primary: Pick<
+    CustomerDeliveryDestination,
+    "id" | "label" | "companyName" | "department" | "contactName" | "postalCode" | "address" | "building" | "phone" | "email" | "note"
+  >,
+  registeredAt: string,
+  registeredBy: string,
+  updatedAt: string,
+  updatedBy: string,
+): Promise<void> {
+  await db.run(`
+    UPDATE film_orders SET
+      customer_code=?, ship_to_destination_id=?, ship_to_status='registered', ship_to_label=?,
+      ship_to_company_name=?, ship_to_department=?, ship_to_contact_name=?, ship_to_postal_code=?,
+      ship_to_address=?, ship_to_building=?, ship_to_phone=?, ship_to_email=?, ship_to_note=?,
+      ship_to_registered_at=?, ship_to_registered_by=?, ship_to_saved_to_master=TRUE,
+      ship_to_confirmed_at=NULL, ship_to_confirmed_by='', updated_at=?, updated_by_email=?
+    WHERE id=?
+  `, [
+    customerCode, primary.id, primary.label, primary.companyName, primary.department,
+    primary.contactName, primary.postalCode, primary.address, primary.building,
+    primary.phone, primary.email, primary.note, registeredAt, registeredBy, updatedAt, updatedBy, orderId,
+  ]);
 }
 
 function mailBodyBase(order: FilmOrder): string {
@@ -2830,6 +2992,8 @@ export async function runFilmOrderAction(
     approverName?: unknown;
     evidence?: unknown;
     destinationId?: unknown;
+    destinations?: unknown;
+    destinationRowId?: unknown;
     shipToLabel?: unknown;
     shipToCompanyName?: unknown;
     shipToDepartment?: unknown;
@@ -2907,56 +3071,135 @@ export async function runFilmOrderAction(
     if (!customerCode) throw new Error("customer_code_required");
 
     const ownerDomain = order.buyer_domain.includes("727") ? "seven" : "kanei";
-    const destinationId = Number(params.destinationId);
-    let destination = null as null | Awaited<ReturnType<typeof getDeliveryDestination>>;
-    if (Number.isInteger(destinationId) && destinationId > 0) {
-      destination = await getDeliveryDestination(ownerDomain, customerCode, destinationId);
-      if (!destination) throw new Error("delivery_destination_not_found");
-      destination = await markDeliveryDestinationUsed(ownerDomain, customerCode, destinationId) ?? destination;
-    } else {
-      const input = validateDeliveryDestinationInput({
-        label: params.shipToLabel,
-        companyName: params.shipToCompanyName,
-        department: params.shipToDepartment,
-        contactName: params.shipToContactName,
-        postalCode: params.shipToPostalCode,
-        address: params.shipToAddress,
-        building: params.shipToBuilding,
-        phone: params.shipToPhone,
-        email: params.shipToEmail,
-        note: params.shipToNote,
-        isDefault: params.saveShipToMaster === true,
-      });
-      if (!input) throw new Error("invalid_ship_to");
-      destination = await upsertDeliveryDestination(ownerDomain, customerCode, input);
+    const requestedEntries = shipToEntryParamsOf(params);
+    if (!requestedEntries.length || requestedEntries.length > FILM_ORDER_SHIP_TO_MAX_DESTINATIONS) {
+      throw new Error("invalid_ship_to");
+    }
+    const resolvedDestinations: CustomerDeliveryDestination[] = [];
+    for (const entry of requestedEntries) {
+      const destinationId = Number(entry.destinationId);
+      if (Number.isInteger(destinationId) && destinationId > 0) {
+        let destination = await getDeliveryDestination(ownerDomain, customerCode, destinationId);
+        if (!destination) throw new Error("delivery_destination_not_found");
+        destination = await markDeliveryDestinationUsed(ownerDomain, customerCode, destinationId) ?? destination;
+        resolvedDestinations.push(destination);
+      } else {
+        const input = validateDeliveryDestinationInput({
+          label: entry.shipToLabel,
+          companyName: entry.shipToCompanyName,
+          department: entry.shipToDepartment,
+          contactName: entry.shipToContactName,
+          postalCode: entry.shipToPostalCode,
+          address: entry.shipToAddress,
+          building: entry.shipToBuilding,
+          phone: entry.shipToPhone,
+          email: entry.shipToEmail,
+          note: entry.shipToNote,
+          isDefault: entry.saveShipToMaster === true,
+        });
+        if (!input) throw new Error("invalid_ship_to");
+        resolvedDestinations.push(await upsertDeliveryDestination(ownerDomain, customerCode, input));
+      }
     }
 
-    await db.run(`
-      UPDATE film_orders SET
-        customer_code=?, ship_to_destination_id=?, ship_to_status='registered', ship_to_label=?,
-        ship_to_company_name=?, ship_to_department=?, ship_to_contact_name=?, ship_to_postal_code=?,
-        ship_to_address=?, ship_to_building=?, ship_to_phone=?, ship_to_email=?, ship_to_note=?,
-        ship_to_registered_at=?, ship_to_registered_by=?, ship_to_saved_to_master=TRUE,
-        ship_to_confirmed_at=NULL, ship_to_confirmed_by='', updated_at=?, updated_by_email=?
-      WHERE id=?
-    `, [
-      customerCode, destination.id, destination.label, destination.companyName, destination.department,
-      destination.contactName, destination.postalCode, destination.address, destination.building,
-      destination.phone, destination.email, destination.note, now, actorEmail, now, actorEmail, id,
-    ]);
-    await addEvent(db, id, "ship_to", `納品先登録: ${destination.companyName} / ${destination.postalCode} ${destination.address}`, actorEmail);
+    // 複数納品先は登録し直すたびに未確定行を差し替える。1件目を代表納品先として旧 scalar カラムへ同期する。
+    await db.run("DELETE FROM film_order_ship_to_destinations WHERE order_id = ?", [id]);
+    for (const [index, destination] of resolvedDestinations.entries()) {
+      await db.run(`
+        INSERT INTO film_order_ship_to_destinations (
+          order_id, destination_id, position, label, company_name, department, contact_name,
+          postal_code, address, building, phone, email, note, registered_at, registered_by, created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `, [
+        id, destination.id, index, destination.label, destination.companyName, destination.department,
+        destination.contactName, destination.postalCode, destination.address, destination.building,
+        destination.phone, destination.email, destination.note, now, actorEmail, now,
+      ]);
+    }
+    await syncPrimaryShipToColumns(db, id, customerCode, resolvedDestinations[0], now, actorEmail, now, actorEmail);
+    await addEvent(db, id, "ship_to", shipToRegisteredEventDetail(resolvedDestinations), actorEmail);
   } else if (action === "confirm-ship-to") {
-    if (!order.shipTo.companyName || !order.shipTo.address || !order.shipTo.phone) {
+    const destinationRows = await listFilmOrderShipToDestinations(db, id);
+    const hasLegacyShipTo = Boolean(order.shipTo.companyName || order.shipTo.address || order.shipTo.phone);
+    if (!destinationRows.length && !hasLegacyShipTo) {
       throw new Error("ship_to_not_registered");
     }
     if (order.shipTo.status === "confirmed") throw new Error("invalid_status_transition");
+    await db.run(
+      "UPDATE film_order_ship_to_destinations SET confirmed_at = ?, confirmed_by = ? WHERE order_id = ?",
+      [now, actorEmail, id],
+    );
     await db.run(`
       UPDATE film_orders SET
         ship_to_status='confirmed', ship_to_confirmed_at=?, ship_to_confirmed_by=?,
         updated_at=?, updated_by_email=?
       WHERE id=?
     `, [now, actorEmail, now, actorEmail, id]);
-    await addEvent(db, id, "ship_to", "納品先確認", actorEmail);
+    await addEvent(
+      db,
+      id,
+      "ship_to",
+      destinationRows.length > 1 ? `納品先確認（${destinationRows.length}件）` : "納品先確認",
+      actorEmail,
+    );
+  } else if (action === "remove-ship-to-destination") {
+    if (order.shipTo.status === "confirmed") throw new Error("invalid_status_transition");
+    const rowId = Number(params.destinationRowId);
+    if (!Number.isInteger(rowId) || rowId <= 0) throw new Error("invalid_ship_to");
+    const existing = await db.get<{ id: number }>(
+      "SELECT id FROM film_order_ship_to_destinations WHERE id = ? AND order_id = ?",
+      [rowId, id],
+    );
+    if (!existing) throw new Error("ship_to_destination_not_found");
+    await db.run("DELETE FROM film_order_ship_to_destinations WHERE id = ?", [rowId]);
+    const remaining = await listFilmOrderShipToDestinations(db, id);
+    let customerCode = order.customer_code;
+    if (!customerCode) {
+      const { getQuotation } = await import("./quotation-store");
+      const quotation = await getQuotation(order.quotation_id);
+      customerCode = typeof quotation?.payload.customerCode === "string"
+        ? quotation.payload.customerCode.trim()
+        : "";
+    }
+    if (remaining.length) {
+      for (const [index, destination] of remaining.entries()) {
+        await db.run("UPDATE film_order_ship_to_destinations SET position = ? WHERE id = ?", [index, destination.id]);
+      }
+      const primary = remaining[0];
+      await syncPrimaryShipToColumns(
+        db,
+        id,
+        customerCode,
+        {
+          id: primary.destinationId ?? primary.id,
+          label: primary.label,
+          companyName: primary.companyName,
+          department: primary.department,
+          contactName: primary.contactName,
+          postalCode: primary.postalCode,
+          address: primary.address,
+          building: primary.building,
+          phone: primary.phone,
+          email: primary.email,
+          note: primary.note,
+        },
+        primary.registeredAt,
+        primary.registeredBy || actorEmail,
+        now,
+        actorEmail,
+      );
+    } else {
+      await db.run(`
+        UPDATE film_orders SET
+          ship_to_destination_id=NULL, ship_to_status='not_provided', ship_to_label='',
+          ship_to_company_name='', ship_to_department='', ship_to_contact_name='', ship_to_postal_code='',
+          ship_to_address='', ship_to_building='', ship_to_phone='', ship_to_email='', ship_to_note='',
+          ship_to_registered_at=NULL, ship_to_registered_by='', ship_to_saved_to_master=FALSE,
+          ship_to_confirmed_at=NULL, ship_to_confirmed_by='', updated_at=?, updated_by_email=?
+        WHERE id=?
+      `, [now, actorEmail, id]);
+    }
+    await addEvent(db, id, "ship_to", `納品先削除（残${remaining.length}件）`, actorEmail);
   } else if (action === "save-production-plan" || action === "confirm-production-plan") {
     const startDate = /^\d{4}-\d{2}-\d{2}$/u.test(String(params.productionPlanStartDate)) ? String(params.productionPlanStartDate) : "";
     const endDate = /^\d{4}-\d{2}-\d{2}$/u.test(String(params.productionPlanEndDate)) ? String(params.productionPlanEndDate) : "";
@@ -3004,7 +3247,7 @@ export async function runFilmOrderAction(
     const purchaseOrderUrl = `${origin}/film-orders/purchase-order/${encodeURIComponent(purchaseOrderToken.token)}`;
     const locale = supplierLocale(refreshed);
     const subject = locale === "ko"
-      ? `【再送】発注リンク・納期/出荷報告ページ ${refreshed.order_number} ${refreshed.product_name || ""}`.trim()
+      ? `【재전송】발주서·납기/출하/납품 보고 페이지 ${refreshed.order_number} ${refreshed.product_name || ""}`.trim()
       : `【再送】発注書・納期/出荷報告ページ ${refreshed.order_number} ${refreshed.product_name || ""}`.trim();
     const text = locale === "ko"
       ? [
@@ -3037,7 +3280,9 @@ export async function runFilmOrderAction(
       text,
       audience: "supplier",
       configuredRecipientKey: "supplierByLocale",
-      templateKey: "film_supplier_links_resend",
+      // K/digital 기본 한국 메이커에게는 DB 일본어 override가 적용되지 않도록 직접 본문을 사용한다.
+      // Y(국내 일본어) 공급사만 공통 일본어 템플릿을 사용한다.
+      templateKey: locale === "ja" ? "film_supplier_links_resend" : undefined,
       templateVars: {
         orderNumber: refreshed.order_number,
         productName: refreshed.product_name || "",
@@ -3590,6 +3835,18 @@ export interface CustomerShipToRequestView {
   expiresAt: string;
   status: "not_provided" | "registered" | "confirmed";
   currentDestination: CustomerShipToFormValues | null;
+  /** この注文に登録済みの納品先一覧（複数対応）。 */
+  registeredDestinations: Array<{
+    id: number;
+    label: string;
+    companyName: string;
+    department: string;
+    contactName: string;
+    postalCode: string;
+    address: string;
+    building: string;
+    phone: string;
+  }>;
   defaultDestination: CustomerShipToFormValues | null;
   destinations: CustomerShipToDestinationOption[];
 }
@@ -3681,6 +3938,17 @@ export async function getFilmOrderForShipToRequest(
     requestedAt: order.shipTo.requestedAt,
     expiresAt: resolved.token.expires_at,
     status: order.shipTo.status,
+    registeredDestinations: order.shipTo.destinations.map((destination) => ({
+      id: destination.id,
+      label: destination.label,
+      companyName: destination.companyName,
+      department: destination.department,
+      contactName: destination.contactName,
+      postalCode: destination.postalCode,
+      address: destination.address,
+      building: destination.building,
+      phone: destination.phone,
+    })),
     currentDestination: order.shipTo.companyName || order.shipTo.address
       ? {
         label: order.shipTo.label,
@@ -3762,17 +4030,16 @@ export async function registerShipToFromCustomerToken(params: {
   destination = await markDeliveryDestinationUsed(ownerDomain, customerCode, destination.id) ?? destination;
   const now = new Date().toISOString();
   const registeredBy = `customer:${resolved.token.audience_email || "external"}`;
+  const existingRows = await listFilmOrderShipToDestinations(db, order.id);
   await db.run(`
-    UPDATE film_orders SET
-      customer_code=?, ship_to_destination_id=?, ship_to_status='registered', ship_to_label=?,
-      ship_to_company_name=?, ship_to_department=?, ship_to_contact_name=?, ship_to_postal_code=?,
-      ship_to_address=?, ship_to_building=?, ship_to_phone=?, ship_to_email=?, ship_to_note=?,
-      ship_to_registered_at=?, ship_to_registered_by=?, ship_to_saved_to_master=TRUE,
-      ship_to_confirmed_at=NULL, ship_to_confirmed_by='', updated_at=?, updated_by_email=?
-    WHERE id=?
+    INSERT INTO film_order_ship_to_destinations (
+      order_id, destination_id, position, label, company_name, department, contact_name,
+      postal_code, address, building, phone, email, note, registered_at, registered_by, created_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `, [
-    customerCode,
+    order.id,
     destination.id,
+    existingRows.length,
     destination.label,
     destination.companyName,
     destination.department,
@@ -3786,9 +4053,16 @@ export async function registerShipToFromCustomerToken(params: {
     now,
     registeredBy,
     now,
-    registeredBy,
-    order.id,
   ]);
+  if (!existingRows.length) {
+    // 最初の登録のみ代表納品先（旧 scalar カラム）を更新する。2件目以降は追加分として保持する。
+    await syncPrimaryShipToColumns(db, order.id, customerCode, destination, now, registeredBy, now, registeredBy);
+  } else {
+    await db.run(
+      "UPDATE film_orders SET customer_code = ?, ship_to_status = 'registered', ship_to_confirmed_at = NULL, ship_to_confirmed_by = '', updated_at = ?, updated_by_email = ? WHERE id = ?",
+      [customerCode, now, registeredBy, order.id],
+    );
+  }
   await markExternalTokenUse(db, resolved.token, params.request);
   await addEvent(
     db,
