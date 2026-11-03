@@ -3038,6 +3038,12 @@ export async function runFilmOrderAction(
       audience: "supplier",
       configuredRecipientKey: "supplierByLocale",
       templateKey: "film_supplier_links_resend",
+      templateVars: {
+        orderNumber: refreshed.order_number,
+        productName: refreshed.product_name || "",
+        purchaseOrderUrl,
+        etaUrl,
+      },
     })];
     await logMailEvents(db, id, mails, "報告リンク再送信", actorEmail);
     const result = await getFilmOrder(id);

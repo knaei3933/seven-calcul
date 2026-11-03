@@ -463,6 +463,138 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
   );
 }
 
+type PendingWorkflowRun = {
+  body: Record<string, unknown>;
+  okMessage: string;
+};
+
+type WorkflowMailNotice = {
+  recipients: string[];
+  subject: string;
+  body: string;
+};
+
+const MAIL_WORKFLOW_ACTIONS = new Set([
+  "register-receiving",
+  "send-proof-notice",
+  "request-customer-design-upload",
+  "request-customer-design-correction",
+  "send-customer-proof-review",
+  "record-customer-proof-approval",
+  "request-re-proof",
+  "approve",
+  "send-po",
+  "resend-supplier-links",
+  "request-production-plan",
+  "confirm-film-receipt",
+]);
+
+function workflowRecipients(order: FilmOrderView): string[] {
+  const supplier = order.supplier_email?.trim() || "フィルムメーカー（設定待ち）";
+  const payload = (order as unknown as { payload?: { customerEmail?: unknown } }).payload;
+  const customerEmail = typeof payload?.customerEmail === "string" ? payload.customerEmail.trim() : "";
+  const customer = customerEmail || "顧客メール（未設定）";
+  const seven = order.seven_contact_email?.trim() || "Seven Chemical（未設定）";
+  const kanei = order.created_by_email?.trim() || "Kanei Trade（未設定）";
+  return [supplier, customer, seven, kanei];
+}
+
+function buildWorkflowMailNotice(order: FilmOrderView, body: Record<string, unknown>): WorkflowMailNotice {
+  const action = String(body.action ?? "");
+  const locale = supplierLocaleFor(order);
+  const product = order.product_name || "-";
+  const recipients = workflowRecipients(order);
+  const number = order.order_number;
+  const supplier = order.supplier_email?.trim() || "フィルムメーカー（設定待ち）";
+  const customer = workflowRecipients(order)[1];
+  const seven = order.seven_contact_email?.trim() || "Seven Chemical（未設定）";
+  const kanei = order.created_by_email?.trim() || "Kanei Trade（未設定）";
+  const buyerSeven = buyerDomainOf(order.created_by_email) === "seven";
+  let subject = `${number} ${product}`;
+  let lines: string[] = [];
+
+  if (action === "resend-supplier-links") {
+    recipients.splice(0, recipients.length, order.supplier_email?.trim() || "フィルムメーカー（設定待ち）");
+    subject = `【再送】発注書・納期/出荷報告ページ ${number} ${product}`;
+    lines = locale === "ko"
+      ? [
+        "이전에 발주드린 건의 링크를 재전송합니다. 새로운 발주가 아닙니다.",
+        "",
+        `발주번호：${number}`,
+        `품목：${product}`,
+        "",
+        "재전송 링크는 실제 발송 시 최신 토큰으로 갱신됩니다.",
+      ]
+      : [
+        "初回送信済み発注のリンクを再送いたします。新しい発注ではありません。",
+        "",
+        `発注番号：${number}`,
+        `品名：${product}`,
+        "",
+        "再送リンクは実送信時に最新トークンへ更新されます。",
+      ];
+  } else if (action === "send-po") {
+    recipients.splice(0, recipients.length, order.supplier_email?.trim() || "フィルムメーカー（設定待ち）", seven);
+    subject = `【フィルム発注のご依頼】${number} ${product}`;
+    lines = [
+      "フィルム製作のご依頼です。発注内容と追加指示をご確認ください。",
+      "受領後、納期見込み専用フォームへの登録をお願いいたします。",
+    ];
+  } else if (action === "request-production-plan") {
+    recipients.splice(0, recipients.length, seven);
+    subject = `【充填生産予定ご確認のお願い】${number} ${product}`;
+    lines = [
+      "フィルム入荷予定と充填生産予定（開始日・終了日）の共有をお願いいたします。",
+      `フィルム入荷予定：${order.eta_date || "未登録"}`,
+    ];
+  } else if (action === "request-customer-design-upload") {
+    recipients.splice(0, recipients.length, customer);
+    subject = `【デザイン原稿ご入稿のお願い】${number} ${product}`;
+    lines = ["パウチ仕様・充填量とデザイン原稿のアップロード方法をご案内します。"];
+  } else if (action === "request-customer-design-correction") {
+    recipients.splice(0, recipients.length, customer);
+    subject = `【デザイン原稿修正のお願い】${number} ${product}`;
+    lines = [`修正内容：${typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : "-"}`];
+  } else if (action === "send-customer-proof-review") {
+    recipients.splice(0, recipients.length, customer);
+    subject = `【校正ご確認のお願い】${number} ${product}`;
+    lines = ["校正データの内容・サイズ・表記をご確認のうえ、承認または修正判断をお願いいたします。"];
+  } else if (action === "record-customer-proof-approval") {
+    const buyerSeven = buyerDomainOf(order.created_by_email) === "seven";
+    recipients.splice(0, recipients.length, buyerSeven ? seven : kanei);
+    subject = `【最終承認待ち】${number} ${product}`;
+    lines = [
+      "金井貿易の校正承認が記録されました。Buyer最終承認のご確認をお願いいたします。",
+      `承認者：${typeof body.approverName === "string" ? body.approverName : "-"}`,
+    ];
+  } else if (action === "request-re-proof") {
+    recipients.splice(0, recipients.length, supplier, kanei);
+    subject = `【再校正のお願い】${number} ${product}`;
+    lines = [`修正内容：${typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : "-"}`];
+  } else if (action === "approve") {
+    recipients.splice(0, recipients.length, supplier, buyerSeven ? seven : kanei);
+    subject = `【校正承認・最終受注確定】${number} ${product}`;
+    lines = ["校正データが最終承認されました。承認データを基準に製作を進行してください。"];
+  } else if (action === "register-receiving") {
+    recipients.splice(0, recipients.length, kanei, order.supplier_email?.trim() ? supplier : "フィルムメーカー（未設定）");
+    subject = `【入稿データ登録】${number} ${product}`;
+    lines = [
+      `入稿AI：${typeof body.aiFileName === "string" ? body.aiFileName : "-"}`,
+      `確認用PDF：${typeof body.pdfFileName === "string" && body.pdfFileName ? body.pdfFileName : "なし"}`,
+    ];
+  } else if (action === "send-proof-notice") {
+    recipients.splice(0, recipients.length, order.supplier_email?.trim() || "フィルムメーカー（設定待ち）");
+    subject = `【校正データ返却のお願い】${number} ${product}`;
+    lines = ["校正データの作成・返却方法をご案内します。"];
+  } else if (action === "confirm-film-receipt") {
+    recipients.splice(0, recipients.length, supplier, "design@package-lab.com");
+    subject = `【フィルム受領確認完了】${number} ${product}`;
+    lines = ["フィルムの受領を確認しました。以後のパウチ製造を進行します。"];
+  }
+
+  return { recipients: [...new Set(recipients)], subject, body: lines.join("\n") };
+}
+
 function OrderCard({
   order,
   expanded,
@@ -489,6 +621,7 @@ function OrderCard({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [mails, setMails] = useState<MailResult[]>([]);
+  const [pendingRun, setPendingRun] = useState<PendingWorkflowRun | null>(null);
   const [operationTab, setOperationTab] = useState<"ship" | "sample" | "design" | "review" | "history">(() => {
     if (order.status === "ordered" && !customerDesignReadyOf(order) && canOperate(buyerCompanyOf(order), isSeven, isKanei)) return "design";
     if (order.status === "final_approved" && order.shipTo.status !== "confirmed") return "ship";
@@ -501,7 +634,7 @@ function OrderCard({
     : operationTab;
   const statusBadgeClass = order.status === "final_approved" ? "final" : order.status === "re_proof_requested" ? "warn" : "";
 
-  const run = async (body: Record<string, unknown>, okMessage: string) => {
+  const runDirect = async (body: Record<string, unknown>, okMessage: string) => {
     if (busy) return;
     setBusy(true);
     setMessage("");
@@ -546,7 +679,17 @@ function OrderCard({
     }
   };
 
+  const run = async (body: Record<string, unknown>, okMessage: string) => {
+    if (busy) return;
+    if (MAIL_WORKFLOW_ACTIONS.has(String(body.action ?? ""))) {
+      setPendingRun({ body, okMessage });
+      return;
+    }
+    await runDirect(body, okMessage);
+  };
+
   return (
+    <>
     <article className={`film-order-card ${expanded ? "expanded" : ""}`} data-print-target={expanded ? "true" : undefined}>
       <div className="film-order-summary" onClick={onToggle} role="button" tabIndex={0}
         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onToggle(); } }}
@@ -718,6 +861,34 @@ function OrderCard({
         </div>
       ) : null}
     </article>
+    {pendingRun ? (() => {
+      const notice = buildWorkflowMailNotice(order, pendingRun.body);
+      return (
+        <div className="workflow-mail-confirm-layer" role="dialog" aria-modal="true" aria-label="연락처/내용 확인">
+          <article className="workflow-mail-confirm-panel">
+            <header>
+              <span>MAIL PREVIEW</span>
+              <h4>{next.label}</h4>
+            </header>
+            <div className="workflow-mail-confirm-body">
+              <p><strong>受信対象：</strong>{notice.recipients.join("、")}</p>
+              <p><strong>件名：</strong>{notice.subject}</p>
+              <pre>{notice.body}</pre>
+              <p className="help">実際のリンクは送信時に最新トークンへ更新されます。</p>
+            </div>
+            <footer>
+              <button className="button secondary" type="button" disabled={busy} onClick={() => setPendingRun(null)}>キャンセル</button>
+              <button className="button" type="button" disabled={busy} onClick={() => {
+                const selected = pendingRun;
+                setPendingRun(null);
+                void runDirect(selected.body, selected.okMessage);
+              }}>送信する</button>
+            </footer>
+          </article>
+        </div>
+      );
+    })() : null}
+    </>
   );
 }
 
