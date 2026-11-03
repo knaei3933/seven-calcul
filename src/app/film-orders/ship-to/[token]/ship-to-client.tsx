@@ -244,8 +244,9 @@ export default function ShipToRequestClient({ token }: { token: string }) {
                 <label>備考<textarea value={values.note} rows={2} onChange={(event) => setValues((old) => ({ ...old, note: event.target.value }))} /></label>
                 <label className="inline-check">
                   <input type="checkbox" checked={saveAsDefault} onChange={(event) => setSaveAsDefault(event.target.checked)} />
-                  この納品先を既定に設定
+                  この納品先を住所録の既定に設定
                 </label>
+                <p className="help">チェックすると、次回以降の納品先候補でこの住所が最初に表示されます。</p>
               </div>
             ) : null}
 
