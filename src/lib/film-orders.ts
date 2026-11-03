@@ -3143,7 +3143,7 @@ export async function runFilmOrderAction(
     }
     if (!customerCode) throw new Error("customer_code_required");
 
-    const ownerDomain = order.buyer_domain.includes("727") ? "seven" : "kanei";
+    const ownerCandidates = shipToCustomerOwnerCandidatesOf(order);
     const requestedEntries = shipToEntryParamsOf(params);
     if (!requestedEntries.length || requestedEntries.length > FILM_ORDER_SHIP_TO_MAX_DESTINATIONS) {
       throw new Error("invalid_ship_to");
@@ -3158,10 +3158,19 @@ export async function runFilmOrderAction(
       }
       const destinationId = Number(entry.destinationId);
       if (Number.isInteger(destinationId) && destinationId > 0) {
-        let destination = await getDeliveryDestination(ownerDomain, customerCode, destinationId);
-        if (!destination) throw new Error("delivery_destination_not_found");
-        destination = await markDeliveryDestinationUsed(ownerDomain, customerCode, destinationId) ?? destination;
-        resolvedDestinations.push(resolvedShipToDestinationOf(destination));
+        let matched: CustomerDeliveryDestination | null = null;
+        let matchedOwner: "seven" | "kanei" = ownerCandidates[0];
+        for (const candidateOwner of ownerCandidates) {
+          const found = await getDeliveryDestination(candidateOwner, customerCode, destinationId);
+          if (found) {
+            matched = found;
+            matchedOwner = candidateOwner;
+            break;
+          }
+        }
+        if (!matched) throw new Error("delivery_destination_not_found");
+        matched = await markDeliveryDestinationUsed(matchedOwner, customerCode, destinationId) ?? matched;
+        resolvedDestinations.push(resolvedShipToDestinationOf(matched));
       } else {
         const input = validateDeliveryDestinationInput({
           label: entry.shipToLabel,
@@ -3177,7 +3186,8 @@ export async function runFilmOrderAction(
           isDefault: entry.saveShipToMaster === true,
         });
         if (!input) throw new Error("invalid_ship_to");
-        resolvedDestinations.push(resolvedShipToDestinationOf(await upsertDeliveryDestination(ownerDomain, customerCode, input)));
+        const addressBookOwner = await shipToAddressBookOwnerOf(order, customerCode);
+        resolvedDestinations.push(resolvedShipToDestinationOf(await upsertDeliveryDestination(addressBookOwner, customerCode, input)));
       }
     }
 
@@ -3979,9 +3989,26 @@ function customerShipToFormValuesOfDestination(destination: CustomerDeliveryDest
   };
 }
 
+/** 納品先の顧客マスタ解決順。K-コードなどは buyer と異なるオーナーで管理されているため両ドメインを試す。 */
+export function shipToCustomerOwnerCandidatesOf(order: Pick<FilmOrder, "buyer_domain">): Array<"seven" | "kanei"> {
+  const primary: "seven" | "kanei" = order.buyer_domain.includes("727") ? "seven" : "kanei";
+  return primary === "seven" ? ["seven", "kanei"] : ["kanei", "seven"];
+}
+
 async function customerShipToMasterOf(order: FilmOrder, customerCode: string): Promise<CustomerMaster | null> {
-  const ownerDomain: "seven" | "kanei" = order.buyer_domain.includes("727") ? "seven" : "kanei";
-  return getCustomer(ownerDomain, customerCode);
+  for (const ownerDomain of shipToCustomerOwnerCandidatesOf(order)) {
+    const master = await getCustomer(ownerDomain, customerCode);
+    if (master) return master;
+  }
+  return null;
+}
+
+/** 住所録の保存先オーナー。顧客マスタが存在するドメイン（なければ buyer 側）を返す。 */
+async function shipToAddressBookOwnerOf(order: FilmOrder, customerCode: string): Promise<"seven" | "kanei"> {
+  for (const ownerDomain of shipToCustomerOwnerCandidatesOf(order)) {
+    if (await getCustomer(ownerDomain, customerCode)) return ownerDomain;
+  }
+  return shipToCustomerOwnerCandidatesOf(order)[0];
 }
 
 /** 管理画面用: 顧客基本情報（初回登録時の住所）を納品先候補として返す。 */
@@ -4005,10 +4032,15 @@ export async function getFilmOrderForShipToRequest(
   if (!order) throw new Error("film_order_not_found");
   const customerCode = await shipToCustomerCodeOf(order);
   if (!customerCode) throw new Error("customer_code_required");
-  const ownerDomain: "seven" | "kanei" = order.buyer_domain.includes("727") ? "seven" : "kanei";
   const [master, destinations] = await Promise.all([
     customerShipToMasterOf(order, customerCode),
-    listDeliveryDestinations(ownerDomain, customerCode),
+    (async () => {
+      // 顧客マスタのオーナードメインに関係なく住所録候補を返す（K-コードは金井所有のケースがある）。
+      const lists = await Promise.all(
+        shipToCustomerOwnerCandidatesOf(order).map((ownerDomain) => listDeliveryDestinations(ownerDomain, customerCode)),
+      );
+      return lists.flat();
+    })(),
   ]);
   const defaultDestination = master
     ? {
@@ -4106,12 +4138,20 @@ export async function registerShipToFromCustomerToken(params: {
   if (order.shipTo.status === "confirmed") throw new Error("ship_to_already_confirmed");
   const customerCode = await shipToCustomerCodeOf(order);
   if (!customerCode) throw new Error("customer_code_required");
-  const ownerDomain: "seven" | "kanei" = order.buyer_domain.includes("727") ? "seven" : "kanei";
+  const ownerCandidates = shipToCustomerOwnerCandidatesOf(order);
 
   const destinationId = Number(params.destinationId);
   let destination: CustomerDeliveryDestination;
+  let destinationOwner: "seven" | "kanei" = ownerCandidates[0];
   if (Number.isInteger(destinationId) && destinationId > 0) {
-    const selected = await getDeliveryDestination(ownerDomain, customerCode, destinationId);
+    let selected: CustomerDeliveryDestination | null = null;
+    for (const candidateOwner of ownerCandidates) {
+      selected = await getDeliveryDestination(candidateOwner, customerCode, destinationId);
+      if (selected) {
+        destinationOwner = candidateOwner;
+        break;
+      }
+    }
     if (!selected) throw new Error("delivery_destination_not_found");
     destination = selected;
   } else {
@@ -4120,9 +4160,11 @@ export async function registerShipToFromCustomerToken(params: {
       isDefault: params.saveAsDefault === true,
     });
     if (!input) throw new Error("invalid_ship_to");
-    destination = await upsertDeliveryDestination(ownerDomain, customerCode, input);
+    const addressBookOwner = await shipToAddressBookOwnerOf(order, customerCode);
+    destination = await upsertDeliveryDestination(addressBookOwner, customerCode, input);
+    destinationOwner = addressBookOwner;
   }
-  destination = await markDeliveryDestinationUsed(ownerDomain, customerCode, destination.id) ?? destination;
+  destination = await markDeliveryDestinationUsed(destinationOwner, customerCode, destination.id) ?? destination;
   const now = new Date().toISOString();
   const registeredBy = `customer:${resolved.token.audience_email || "external"}`;
   const existingRows = await listFilmOrderShipToDestinations(db, order.id);

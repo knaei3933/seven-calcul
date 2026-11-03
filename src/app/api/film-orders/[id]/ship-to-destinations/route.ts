@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
 import { canViewFilmOrders, canViewFilmOrderRow } from "@/lib/film-order-access";
 import { listDeliveryDestinations } from "@/lib/customer-store";
-import { getFilmOrder, getFilmOrderCustomerBasicShipToDestination } from "@/lib/film-orders";
+import {
+  getFilmOrder,
+  getFilmOrderCustomerBasicShipToDestination,
+  shipToCustomerOwnerCandidatesOf,
+} from "@/lib/film-orders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,9 +32,14 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
     if (!order.customer_code) {
       return NextResponse.json({ destinations: [], basicDestination: null });
     }
-    const ownerDomain = order.buyer_domain.includes("727") ? "seven" : "kanei";
     const [destinations, basicDestination] = await Promise.all([
-      listDeliveryDestinations(ownerDomain, order.customer_code),
+      (async () => {
+        // K-コードなど buyer と異なるオーナーの顧客も両ドメインから収集する。
+        const lists = await Promise.all(
+          shipToCustomerOwnerCandidatesOf(order).map((ownerDomain) => listDeliveryDestinations(ownerDomain, order.customer_code)),
+        );
+        return lists.flat();
+      })(),
       getFilmOrderCustomerBasicShipToDestination(order.id),
     ]);
     return NextResponse.json({ destinations, basicDestination });

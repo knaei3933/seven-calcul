@@ -744,6 +744,37 @@ beforeAll(async () => {
     expect(registered.order.shipTo.phone).toBe("078-000-0000");
   });
 
+  it("resolves customer basic address owned by kanei for a seven-buyer order", async () => {
+    await saveCustomer("kanei", {
+      customerCode: "K-TEST-KANEI-001",
+      customerName: "金井所有テスト株式会社",
+      customerPostalCode: "194-0037",
+      customerAddress: "東京都町田市テスト2-6-19",
+      customerContact: "吉田",
+      customerTelephone: "070-0000-0279",
+      customerEmail: "k-test@example.test",
+    });
+    await saveQuotation({
+      ...input,
+      quotationNumber: "S7-FILM-SHIP-BASIC-KANEI-001",
+      status: "approved",
+      payload: { customerCode: "K-TEST-KANEI-001", customerEmail: "k-test@example.test", purchaseOrder },
+    }, 1, "admin");
+    await syncFilmOrdersFromQuotations("seven@727.co.jp");
+    const orders = await listFilmOrders("seven@727.co.jp");
+    const orderId = orders.find((item) => item.quotation_number === "S7-FILM-SHIP-BASIC-KANEI-001")!.id;
+
+    const registered = await runFilmOrderAction(orderId, "register-ship-to", {
+      destinations: [{ customerBasic: true }],
+    }, "seven@727.co.jp");
+    expect(registered.order.shipTo.status).toBe("registered");
+    expect(registered.order.shipTo.companyName).toBe("金井所有テスト株式会社");
+    expect(registered.order.shipTo.postalCode).toBe("194-0037");
+    expect(registered.order.shipTo.address).toBe("東京都町田市テスト2-6-19");
+    expect(registered.order.shipTo.phone).toBe("070-0000-0279");
+    expect(registered.order.shipTo.destinations[0]?.destinationId).toBeNull();
+  });
+
   it("builds human-readable file names containing the order number", () => {
     const order = { product_name: "あかちゃんバーム 50ml", order_number: "F-202610-001" };
     expect(buildFilmOrderFileName(order, "receiving", 1)).toMatch(/^あかちゃんバーム_50ml_F-202610-001_入稿_\d{8}$/u);
