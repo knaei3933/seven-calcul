@@ -23,15 +23,15 @@ test("verifies every mail template default, edit, save, and persistence", async 
       name: new RegExp(escapeRegExp(template.title)),
     });
     await button.click();
+    const editor = page.locator(`#mail-template-${template.key}`);
 
-    await expect(page.getByTestId("default-subject")).toHaveValue(defaults!.subject);
-    await expect(page.getByTestId("default-body")).toHaveValue(defaults!.body);
+    await expect(editor.getByTestId("default-subject")).toHaveValue(defaults!.subject);
+    await expect(editor.getByTestId("default-body")).toHaveValue(defaults!.body);
 
-    await page.getByRole("button", { name: "基本本文を読み込む" }).click();
     const subjectMarker = `UI_ALL_SUBJECT_${template.key.toUpperCase()}`;
     const bodyMarker = `UI_ALL_BODY_${template.key.toUpperCase()}`;
-    await page.getByTestId("override-subject").fill(`${defaults!.subject} [${subjectMarker}]`);
-    await page.getByTestId("override-body").fill(`${defaults!.body}\n${bodyMarker}`);
+    await editor.getByTestId("override-subject").fill(`${defaults!.subject} [${subjectMarker}]`);
+    await editor.getByTestId("override-body").fill(`${defaults!.body}\n${bodyMarker}`);
 
   }
 
@@ -44,10 +44,11 @@ test("verifies every mail template default, edit, save, and persistence", async 
       name: new RegExp(escapeRegExp(template.title)),
     });
     await button.click();
+    const editor = page.locator(`#mail-template-${template.key}`);
     const subjectMarker = `UI_ALL_SUBJECT_${template.key.toUpperCase()}`;
     const bodyMarker = `UI_ALL_BODY_${template.key.toUpperCase()}`;
-    await expect(page.getByTestId("override-subject")).toHaveValue(new RegExp(escapeRegExp(subjectMarker)));
-    await expect(page.getByTestId("override-body")).toHaveValue(new RegExp(escapeRegExp(bodyMarker)));
+    await expect(editor.getByTestId("override-subject")).toHaveValue(new RegExp(escapeRegExp(subjectMarker)));
+    await expect(editor.getByTestId("override-body")).toHaveValue(new RegExp(escapeRegExp(bodyMarker)));
     await button.click();
   }
 });

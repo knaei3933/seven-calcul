@@ -92,6 +92,10 @@ function requiredText(value: unknown, label: string, maxLength: number): string 
   return normalized;
 }
 
+function booleanParam(db: SqlClient, value: boolean): number | boolean {
+  return db.dialect === "postgres" ? value : value ? 1 : 0;
+}
+
 function optionalText(value: unknown, label: string, maxLength: number): string {
   const normalized = typeof value === "string" ? value.trim() : "";
   if (normalized.length > maxLength) throw new Error(`invalid_film_maker_${label}`);
@@ -164,7 +168,7 @@ export async function createFilmMaker(input: FilmMakerInput, actorEmail: string)
       valid.language,
       valid.printMethod,
       valid.procurementRoute,
-      valid.isActive ? 1 : 0,
+      booleanParam(db, valid.isActive),
       valid.note,
       now,
       now,
@@ -202,7 +206,7 @@ export async function updateFilmMaker(
       valid.language,
       valid.printMethod,
       valid.procurementRoute,
-      valid.isActive ? 1 : 0,
+      booleanParam(db, valid.isActive),
       valid.note,
       now,
       actorEmail,
@@ -219,7 +223,7 @@ export async function updateFilmMaker(
 export async function deactivateFilmMaker(id: number, actorEmail: string): Promise<FilmMakerRecord | null> {
   const db = await getDatabaseForFilmMakerStore();
   const result = await db.run(
-    "UPDATE film_makers SET is_active=0, updated_at=?, updated_by_email=? WHERE id=?",
+    "UPDATE film_makers SET is_active=FALSE, updated_at=?, updated_by_email=? WHERE id=?",
     [new Date().toISOString(), actorEmail, id],
   );
   return result.changes ? await getFilmMaker(id, db) : null;
@@ -243,7 +247,7 @@ export async function listFilmMakers(includeInactive = true): Promise<FilmMakerR
   const rows = await db.all<FilmMakerRow>(
     includeInactive
       ? "SELECT * FROM film_makers ORDER BY company_name, maker_code"
-      : "SELECT * FROM film_makers WHERE is_active=1 ORDER BY company_name, maker_code",
+      : "SELECT * FROM film_makers WHERE is_active=TRUE ORDER BY company_name, maker_code",
   );
   return rows.map(mapFilmMaker);
 }
@@ -258,7 +262,7 @@ export async function listActiveFilmMakerSelections(
   if (normalizedPrintMethod !== "gravure" && normalizedPrintMethod !== "digital") throw new Error("invalid_film_maker_print_method");
   const db = await getDatabaseForFilmMakerStore();
   const rows = await db.all<FilmMakerRow>(
-    "SELECT * FROM film_makers WHERE procurement_route=? AND print_method=? AND is_active=1 ORDER BY company_name, maker_code",
+    "SELECT * FROM film_makers WHERE procurement_route=? AND print_method=? AND is_active=TRUE ORDER BY company_name, maker_code",
     [normalizedRoute, normalizedPrintMethod],
   );
   return rows.map((row) => ({
