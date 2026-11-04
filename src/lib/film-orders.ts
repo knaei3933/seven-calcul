@@ -1266,7 +1266,7 @@ export interface UploadFileMetadata {
   userAgent?: string | null;
 }
 
-const FILM_SCHEMA_VERSION = "2026-11-04-g011-mail-boundary-1";
+const FILM_SCHEMA_VERSION = "2026-11-04-digital-route-default-1";
 
 async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
@@ -1284,6 +1284,13 @@ async function getDatabase(): Promise<SqlClient> {
     );
     // マーカーがある環境では、コールドスタート毎のDDL検査を省略する。
     if (marker?.version === FILM_SCHEMA_VERSION) {
+      // デジタル案件は従来 purchaseOrder の route が空だったため、韓国調达ルートへ正規化する。
+      await db.exec(`
+        UPDATE film_orders
+        SET procurement_route = 'K'
+        WHERE procurement_route = ''
+          AND printing_method = 'digital'
+      `);
       // 現行商流では Seven Chemical が buyer。旧データが kanei/空でも毎回正規化する。
       await db.exec(`
         UPDATE film_orders
@@ -1573,6 +1580,13 @@ async function getDatabase(): Promise<SqlClient> {
     }
     await migrateLegacyProofTokens(db);
     await migrateLegacyEtaTokens(db);
+    // レガシー digital 発注は procurementRoute 未設定のまま保存されていたため K へ正規化する。
+    await db.exec(`
+      UPDATE film_orders
+      SET procurement_route = 'K'
+      WHERE procurement_route = ''
+        AND printing_method = 'digital'
+    `);
     // Legacy reconciliation is a suggestion-only data migration. It runs before the schema
     // marker advances so a failed classification/backfill cannot mark the migration complete.
     const { reconcileLegacySuppliers } = await import("./film-maker-reconciliation");
@@ -1868,7 +1882,7 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
       quotation.productName,
       quotation.customerName,
       snapshot?.printingMethod ?? "",
-      snapshot?.procurementRoute ?? "",
+      snapshot?.procurementRoute ?? (snapshot?.printingMethod === "digital" ? "K" : ""),
       snapshot?.filmComposition ?? "",
       snapshot?.orderLengthM ?? "",
       String(snapshot?.webWidthsMm?.[0] ?? snapshot?.webWidthMm ?? ""),

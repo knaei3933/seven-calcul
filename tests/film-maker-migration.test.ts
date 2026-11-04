@@ -8,7 +8,7 @@ process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
 process.env.POUCH_CUSTOMER_DB = join(databaseDirectory, "customers.db");
 process.env.MAIL_DRY_RUN = "true";
 const LEGACY_SCHEMA_VERSION = "2026-11-04-film-order-cancel-scoping-2";
-const NEW_SCHEMA_VERSION = "2026-11-04-g011-mail-boundary-1";
+const NEW_SCHEMA_VERSION = "2026-11-04-digital-route-default-1";
 
 // Pre-G002 SQLite database: current ship-to schema, no film-maker columns/table/FK.
 const { getSqlClient } = await import("@/lib/db");
@@ -105,7 +105,9 @@ await db.exec(`
     (1, 'F-202611-INTERNAL', 'Internal pouch', 'Customer B', 'gravure', 'K',
      'Package Lab', 'design@package-lab.com', '{}', '2026-11-03T00:00:01.000Z', '2026-11-03T00:00:01.000Z'),
     (1, 'F-202611-AMBIGUOUS', 'Ambiguous pouch', 'Customer C', 'unknown', '',
-     '', '', '{}', '2026-11-03T00:00:02.000Z', '2026-11-03T00:00:02.000Z');
+     '', '', '{}', '2026-11-03T00:00:02.000Z', '2026-11-03T00:00:02.000Z'),
+    (2, 'F-202611-DIGITAL', 'Digital pouch', 'Customer D', 'digital', '',
+     '', '', '{}', '2026-11-03T00:00:03.000Z', '2026-11-03T00:00:03.000Z');
   INSERT INTO film_order_external_tokens (
     film_order_id,purpose,token_hash,audience_email,expires_at,revoked_at,
     created_by_email,created_at,updated_at
@@ -205,13 +207,15 @@ describe("incremental SQLite film-maker migration", () => {
     ))!.legacy_supplier_match_json).makerId).toBe(1);
     const orders = await db.all<{
       id: number;
+      printing_method: string;
+      procurement_route: string;
       supplier_name: string;
       supplier_email: string;
       film_maker_id: number | null;
       supplier_resolution: string;
       legacy_supplier_match_json: string | null;
-    }>("SELECT id,supplier_name,supplier_email,film_maker_id,supplier_resolution,legacy_supplier_match_json FROM film_orders ORDER BY id");
-    expect(orders).toHaveLength(3);
+    }>("SELECT id,printing_method,procurement_route,supplier_name,supplier_email,film_maker_id,supplier_resolution,legacy_supplier_match_json FROM film_orders ORDER BY id");
+    expect(orders).toHaveLength(4);
     expect(orders[0]).toMatchObject({
       supplier_name: "Exact External Maker",
       supplier_email: "  Exact@Example.test ",
@@ -234,6 +238,12 @@ describe("incremental SQLite film-maker migration", () => {
       supplier_resolution: "legacy_unresolved",
       legacy_supplier_match_json: null,
     });
+    expect(orders[3]).toMatchObject({
+      printing_method: "digital",
+      procurement_route: "K",
+      supplier_resolution: "legacy_unresolved",
+      legacy_supplier_match_json: null,
+    });
 
     const beforeMarker = await db.get<{ updated_at: string }>(
       "SELECT updated_at FROM film_order_schema_migrations WHERE slot='film_orders'",
@@ -244,7 +254,7 @@ describe("incremental SQLite film-maker migration", () => {
       "SELECT updated_at FROM film_order_schema_migrations WHERE slot='film_orders'",
     );
     const afterRows = await db.all<typeof orders[number]>(
-      "SELECT id,supplier_name,supplier_email,film_maker_id,supplier_resolution,legacy_supplier_match_json FROM film_orders ORDER BY id",
+      "SELECT id,printing_method,procurement_route,supplier_name,supplier_email,film_maker_id,supplier_resolution,legacy_supplier_match_json FROM film_orders ORDER BY id",
     );
     expect(afterMarker?.updated_at).toBe(beforeMarker?.updated_at);
     expect(JSON.stringify(afterRows)).toBe(beforeRows);
@@ -257,7 +267,7 @@ describe("incremental SQLite film-maker migration", () => {
     const eventsAfter = await db.get<{ count: number }>("SELECT COUNT(*) AS count FROM film_order_events");
     expect(eventsAfter?.count).toBe(eventsBefore?.count);
     const rollbackOrder = await db.get<typeof orders[number]>(
-      "SELECT id,supplier_name,supplier_email,film_maker_id,supplier_resolution,legacy_supplier_match_json FROM film_orders WHERE id=1",
+      "SELECT id,printing_method,procurement_route,supplier_name,supplier_email,film_maker_id,supplier_resolution,legacy_supplier_match_json FROM film_orders WHERE id=1",
     );
     expect(rollbackOrder).toEqual(orders[0]);
   });
@@ -289,7 +299,7 @@ describe("incremental SQLite film-maker migration", () => {
     process.env.POUCH_CUSTOMER_DB = join(databaseDirectory, "customers.db");
     const original = await getSqlClient("quotations");
     const rows = await original.all<{ id: number }>("SELECT id FROM film_orders ORDER BY id");
-    expect(rows.map((row) => row.id)).toEqual([1, 2, 3]);
+    expect(rows.map((row) => row.id)).toEqual([1, 2, 3, 4]);
   });
 
   it("reports historical order migration compatibility", async () => {
@@ -300,7 +310,7 @@ describe("incremental SQLite film-maker migration", () => {
       film_maker_id: number | null;
       supplier_resolution: string;
     }>("SELECT id,supplier_name,supplier_email,film_maker_id,supplier_resolution FROM film_orders ORDER BY id");
-    expect(orders).toHaveLength(3);
+    expect(orders).toHaveLength(4);
     expect(orders[0]).toMatchObject({
       supplier_name: "Exact External Maker",
       supplier_email: "  Exact@Example.test ",

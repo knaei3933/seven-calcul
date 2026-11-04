@@ -224,7 +224,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     const marker = await db.get<{ version: string }>(
       "SELECT version FROM film_order_schema_migrations WHERE slot='film_orders'",
     );
-    expect(marker?.version).toBe("2026-11-04-g011-mail-boundary-1");
+    expect(marker?.version).toBe("2026-11-04-digital-route-default-1");
     const quotation = await db.get<{ id: number }>("SELECT id FROM quotations WHERE quotation_number='S7-PG-INTEGRITY-001'");
     await db.exec(`
       INSERT INTO film_orders (
@@ -335,7 +335,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     const marker = await db.get<{ version: string }>(
       "SELECT version FROM film_order_schema_migrations WHERE slot='film_orders'",
     );
-    expect(marker?.version).toBe("2026-11-04-g011-mail-boundary-1");
+    expect(marker?.version).toBe("2026-11-04-digital-route-default-1");
     const columns = await db.all<{ column_name: string }>(`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema=current_schema() AND table_name='film_orders'
@@ -663,7 +663,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     const marker = await db.get<{ version: string }>(
       "SELECT version FROM film_order_schema_migrations WHERE slot='film_orders'",
     );
-    expect(marker?.version).toBe("2026-11-04-g011-mail-boundary-1");
+    expect(marker?.version).toBe("2026-11-04-digital-route-default-1");
     const { persistFilmOrderMailEnvelopes, listFilmOrderMailOutboxForKanei, listFilmOrderMailOutboxForAudience } =
       await import("@/lib/film-order-mail-outbox");
     const persisted = await persistFilmOrderMailEnvelopes(envelopes("supplier_purchase_order"), {

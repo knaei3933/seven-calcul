@@ -258,8 +258,10 @@ export async function listActiveFilmMakerSelections(
 ): Promise<FilmMakerSelection[]> {
   const normalizedRoute = String(procurementRoute).toUpperCase();
   const normalizedPrintMethod = String(printMethod).toLowerCase();
-  if (normalizedRoute !== "K" && normalizedRoute !== "Y") throw new Error("invalid_film_maker_procurement_route");
-  if (normalizedPrintMethod !== "gravure" && normalizedPrintMethod !== "digital") throw new Error("invalid_film_maker_print_method");
+  // 未解決レガシー案件では load 失敗ではなく「候補なし」を返す。
+  if ((normalizedRoute !== "K" && normalizedRoute !== "Y") || (normalizedPrintMethod !== "gravure" && normalizedPrintMethod !== "digital")) {
+    return [];
+  }
   const db = await getDatabaseForFilmMakerStore();
   const rows = await db.all<FilmMakerRow>(
     "SELECT * FROM film_makers WHERE procurement_route=? AND print_method=? AND is_active=TRUE ORDER BY company_name, maker_code",
