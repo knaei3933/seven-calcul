@@ -9,6 +9,37 @@ import { resolveFilmOrderExternalOrigin } from "@/lib/film-order-origin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const FILM_ORDER_ORIGIN_REQUIRED_ACTIONS = new Set([
+  "register-receiving",
+  "send-proof-notice",
+  "rotate-supplier-proof-token",
+  "register-proof",
+  "send-customer-proof-review",
+  "record-customer-proof-approval",
+  "approve",
+  "request-re-proof",
+  "send-po",
+  "resend-supplier-links",
+  "resend-receiving-notice",
+  "request-production-plan",
+  "request-ship-to-registration",
+  "ship-to-registered",
+  "request-customer-design-upload",
+  "request-customer-design-correction",
+  "customer-design-received",
+  "production-plan-request",
+  "update-eta",
+  "report-shipment",
+  "report-delivery",
+  "confirm-film-receipt",
+  "customer-proof-decision",
+  "preview-supplier-po",
+]);
+
+function originRequiresDeploymentAllowlist(action: string): boolean {
+  return FILM_ORDER_ORIGIN_REQUIRED_ACTIONS.has(action);
+}
+
 type Context = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, context: Context): Promise<NextResponse> {
@@ -79,6 +110,7 @@ function statusForError(message: string): number {
     || message === "film_maker_print_method_mismatch"
     || message === "film_maker_language_mismatch"
     || message === "legacy_exempt_reason_required"
+    || message === "film_order_external_origin_not_allowed"
     || message === "sample_bulk_quantity_mismatch"
   ) return 400;
   return 500;
@@ -104,11 +136,17 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     if (!canPerformFilmOrderAction(action, user.email, order.buyer_domain)) {
       return NextResponse.json({ error: "film_order_action_forbidden" }, { status: 403 });
     }
-    let origin = new URL(request.url).origin;
-    const forwardedHost = request.headers.get("x-forwarded-host");
-    const forwardedProto = request.headers.get("x-forwarded-proto");
-    if (forwardedHost) origin = `${forwardedProto ?? "https"}://${forwardedHost}`;
-    origin = resolveFilmOrderExternalOrigin(body.origin ?? origin);
+    const originRequiresAllowlist = originRequiresDeploymentAllowlist(action);
+    let origin = "";
+    if (originRequiresAllowlist) {
+      origin = new URL(request.url).origin;
+      const forwardedHost = request.headers.get("x-forwarded-host");
+      const forwardedProto = request.headers.get("x-forwarded-proto");
+      if (forwardedHost) origin = `${forwardedProto ?? "https"}://${forwardedHost}`;
+      origin = resolveFilmOrderExternalOrigin(body.origin ?? origin);
+    } else if (typeof body.origin === "string") {
+      origin = body.origin.trim();
+    }
     const result = await runFilmOrderAction(
       orderId,
       action,

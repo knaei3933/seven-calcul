@@ -25,6 +25,7 @@ import {
 import { isInternalLegacySupplier } from "./film-maker-reconciliation";
 import type { FilmOrderMailConfirmResult, FilmOrderMailPreview } from "./film-order-mail-lifecycle";
 import { resolveFilmOrderExternalOrigin } from "./film-order-origin";
+import { isFilmOrderLifecycleWorkflowAction } from "./film-order-lifecycle-actions";
 import { recoverStaleFilmOrderMailSendingAttempts } from "./film-order-mail-outbox";
 import {
   assertFilmOrderActionGuard,
@@ -3049,7 +3050,11 @@ export async function runFilmOrderAction(
 ): Promise<{ order: FilmOrderView; mails?: MailSendResult[]; preview?: SupplierOrderMailPreview | FilmOrderMailPreview; lifecycle?: FilmOrderMailConfirmResult }> {
   const db = await getDatabase();
   const now = new Date().toISOString();
-  const origin = resolveFilmOrderExternalOrigin(params.origin);
+  // 納品先登録など外部リンクを生成しない操作では、実行時ホストが deployment allowlist と一致しなくても失敗させてはいけない。
+  const originRequiresAllowlist = isFilmOrderLifecycleWorkflowAction(action) || action === "preview-supplier-po";
+  const origin = originRequiresAllowlist
+    ? resolveFilmOrderExternalOrigin(params.origin)
+    : typeof params.origin === "string" ? params.origin.trim() : "";
   const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [id]);
   if (!row) throw new Error("film_order_not_found");
   const order = mapOrder(row);

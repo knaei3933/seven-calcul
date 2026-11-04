@@ -18,6 +18,7 @@ const { GET: mailOutboxRoute } = await import("@/app/api/film-orders/[id]/mail-o
 const { POST: login } = await import("@/app/api/auth/login/route");
 const { createUser } = await import("@/lib/auth-store");
 const { saveQuotation } = await import("@/lib/quotation-store");
+const { saveCustomer } = await import("@/lib/customer-store");
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
@@ -64,7 +65,7 @@ const input: QuotationRecordInput = {
   notes: "",
   calculationVersion: "film-order-api-test",
   resultHash: "",
-  payload: { customerEmail: "api-customer@example.test", purchaseOrder: { printingMethod: "digital", orderLengthM: "1700", webWidthMm: 556 } },
+  payload: { customerCode: "K-9001", customerEmail: "api-customer@example.test", purchaseOrder: { printingMethod: "digital", orderLengthM: "1700", webWidthMm: 556 } },
 };
 
 describe("film order API permissions and workflow", () => {
@@ -80,6 +81,16 @@ describe("film order API permissions and workflow", () => {
     sevenToken = await loginToken("seven@727.co.jp", "seven-api-password");
     kaneiToken = await loginToken("kanei@kanei-trade.co.jp", "kanei-api-password");
     outsiderToken = await loginToken("outsider@example.com", "outsider-password");
+    await saveCustomer("seven", {
+      customerCode: "K-9001",
+      customerName: "API Ship To KK",
+      customerPostalCode: "100-0001",
+      customerAddress: "東京都千代田区",
+      customerContact: "API担当",
+      customerTelephone: "03-0000-0000",
+      customerFax: "",
+      customerEmail: "ship-to@example.test",
+    });
     const record = await saveQuotation(input, adminId, "admin");
     orderId = record.id;
   });
@@ -117,6 +128,7 @@ describe("film order API permissions and workflow", () => {
       }, sevenToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
+    if (marked.status !== 200) console.log("MARKED ERROR", await marked.clone().text());
     expect(marked.status).toBe(200);
     expect(await marked.json()).toMatchObject({ order: { status: "ordered" } });
   });
@@ -304,6 +316,31 @@ describe("film order API permissions and workflow", () => {
     );
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({ error: "drive_not_configured" });
+  });
+
+  it("registers ship-to without requiring an external-link origin", async () => {
+    const response = await actionRoute(
+      request(`http://localhost/api/film-orders/${orderId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "register-ship-to",
+          destinations: [{
+            shipToLabel: "本社",
+            shipToCompanyName: "API権限検証株式会社",
+            shipToContactName: "API担当",
+            shipToPostalCode: "100-0001",
+            shipToAddress: "東京都千代田区",
+            shipToPhone: "03-0000-0000",
+          }],
+        }),
+      }, sevenToken),
+      { params: Promise.resolve({ id: String(orderId) }) } as never,
+    );
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { order?: { shipTo?: { status?: string; destinations?: unknown[] } } };
+    expect(payload.order?.shipTo?.status).toBe("registered");
+    expect(payload.order?.shipTo?.destinations).toHaveLength(1);
   });
 
   it("maps domain errors to status codes", async () => {
