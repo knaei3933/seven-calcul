@@ -78,6 +78,8 @@ interface MailPreviewUi {
   dispatchGroupId: string;
   event?: string;
   envelopes: MailPreviewEnvelopeUi[];
+  plannedAudiences?: Array<MailPreviewEnvelopeUi["audience"]>;
+  hiddenAudienceCount?: number;
   stagedTokens: Array<{ linkKey: string; url: string; expiresAt: string }>;
   stagedTokenHashes?: readonly string[];
   warnings?: string[];
@@ -940,6 +942,22 @@ function OrderCard({
         : okMessage);
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : "failed";
+      if (rawMessage.startsWith("invalid_film_order_mail:")) {
+        setMessage("失敗しました（メール設定または宛先データに不備があります。送信者・宛先・リンク設定を確認してください。）");
+        return;
+      }
+      if (rawMessage === "smtp_sender_address_missing") {
+        setMessage("失敗しました（SMTP送信者メールアドレスが未設定です。MAIL_FROM または SMTP_USER を確認してください。）");
+        return;
+      }
+      if (rawMessage === "smtp_credentials_missing") {
+        setMessage("失敗しました（SMTP認証情報が未設定です。）");
+        return;
+      }
+      if (rawMessage === "film_order_mail_preview_stale") {
+        setMessage("失敗しました（最新内容と一致しないため、新しいプレビューを作成してください。）");
+        return;
+      }
       const humanMessages: Record<string, string> = {
         invalid_ai_file: "AIファイルが必要です。.ai ファイルを選択してください。",
         invalid_pdf_file: "PDFファイル名が不正です。.pdf ファイルを選択するか、PDFチェックを外してください。",
@@ -986,6 +1004,19 @@ function OrderCard({
       });
       const payload = await response.json() as { preview?: MailPreviewUi; error?: string };
       if (!response.ok || !payload.preview) throw new Error(String(payload.error ?? "preview_failed"));
+      const planned = payload.preview.plannedAudiences as string[] | undefined;
+      const visible = payload.preview.envelopes.length;
+      if (Array.isArray(planned) && planned.length > visible) {
+        setPendingRun({
+          body,
+          okMessage,
+          preview: {
+            ...payload.preview,
+            hiddenAudienceCount: planned.length - visible,
+          },
+        });
+        return;
+      }
       setPendingRun({ body, okMessage, preview: payload.preview });
     } catch (error) {
       const raw = error instanceof Error ? error.message : "preview_failed";
@@ -1420,6 +1451,11 @@ function MailPreviewDialog({
         </header>
         <div className="workflow-mail-confirm-body" data-testid="workflow-mail-preview">
           <p><strong>送信グループ：</strong><code>{preview.dispatchGroupId}</code></p>
+          {preview.hiddenAudienceCount ? (
+            <p className="help" role="note">
+              権限のため非表示の宛先が {preview.hiddenAudienceCount} 件あります。確定時には許可された全宛先に送信します。
+            </p>
+          ) : null}
           {preview.envelopes.map((envelope, index) => (
             <section
               key={envelope.contentHash + String(index)}

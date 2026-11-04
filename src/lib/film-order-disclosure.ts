@@ -164,6 +164,7 @@ export function serializeFilmOrderActionForActor(
       dispatchGroupId: raw.dispatchGroupId,
       event: raw.event,
       envelopes,
+      plannedAudiences: raw.envelopes.map((envelope) => envelope.audience),
       stagedTokenHashes: raw.stagedTokenHashes,
       warnings: raw.warnings ?? [],
     };
