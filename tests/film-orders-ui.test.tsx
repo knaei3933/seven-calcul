@@ -215,7 +215,7 @@ describe("film orders Seven-buyer UI", () => {
     expect(JSON.parse(String(ownDataPosts.at(-1)?.[1]?.body)).action)
       .toBe("set-customer-design-not-required");
     expect(JSON.parse(String(ownDataPosts.at(-1)?.[1]?.body)).reason)
-      .toBe("カネイ側の自社製作データで進行");
+      .toBe("金井貿易側の自社製作データで進行");
   });
 
   it("supports registering multiple delivery destinations", async () => {
@@ -595,7 +595,7 @@ describe("G007 role-aware workflow UI", () => {
 
     const panel = await screen.findByTestId("workflow-action-panel-1001");
     expect(panel).toHaveTextContent("セブン化学");
-    expect(panel).toHaveTextContent("カネイ側");
+    expect(panel).toHaveTextContent("金井貿易側");
     expect(screen.queryByTestId("film-maker-selection")).not.toBeInTheDocument();
     expect(screen.queryByText("メーカー")).not.toBeInTheDocument();
     expect(screen.getByTestId("workflow-stage-1001")).toHaveTextContent("最終承認処理中");

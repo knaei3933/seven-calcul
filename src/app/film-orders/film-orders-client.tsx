@@ -146,7 +146,7 @@ type WorkflowRole = "seven" | "kanei" | "customer" | "buyer" | "mixed" | "suppli
 
 const actorLabelOf = (role: WorkflowRole): string => {
   if (role === "seven") return "セブン化学";
-  if (role === "kanei" || role === "buyer") return "カネイ側";
+  if (role === "kanei" || role === "buyer") return "金井貿易側";
   if (role === "customer") return "得意先";
   if (role === "supplier") return "フィルムメーカー";
   return "関係者";
@@ -161,9 +161,9 @@ function WorkflowRoleBadge({
 }) {
   const labels: Record<WorkflowRole, string> = {
     seven: "セブン化学",
-    kanei: "カネイ側",
+    kanei: "金井貿易側",
     customer: "得意先",
-    buyer: "カネイ側",
+    buyer: "金井貿易側",
     mixed: "関連各社",
     supplier: "フィルムメーカー",
   };
@@ -211,7 +211,7 @@ function buyerCompanyOf(order: Pick<FilmOrderView, "buyer_domain" | "created_by_
 }
 
 function companyLabel(company: FilmOrderCompany): string {
-  return company === "seven" ? "セブン化学" : "カネイ側";
+  return company === "seven" ? "セブン化学" : "金井貿易側";
 }
 
 function customerDesignReadyOf(order: Pick<FilmOrderView, "customerDesign">): boolean {
@@ -244,7 +244,7 @@ function latestProofPairOf(order: Pick<FilmOrderView, "files">) {
 }
 
 function workflowOwnerLabelOf(order: Pick<FilmOrderView, "buyer_domain" | "created_by_email">): string {
-  return buyerCompanyOf(order) === "seven" ? "セブン化学" : "カネイ側";
+  return buyerCompanyOf(order) === "seven" ? "セブン化学" : "金井貿易側";
 }
 
 function supplierLabelOf(order: Pick<FilmOrderView, "supplier_name" | "supplier_email">): string {
@@ -362,7 +362,7 @@ function actionLabelOf(action: FilmWorkflowAction): string {
     "rotate-supplier-proof-token": "校正リンクを再発行",
     "register-proof": "校正データを登録",
     "send-customer-proof-review": "得意先校正確認を送る",
-    "record-customer-proof-approval": "カネイ側校正承認を記録",
+    "record-customer-proof-approval": "金井貿易側校正承認を記録",
     approve: "最終承認する",
     "request-re-proof": "再校正を依頼",
     "send-po": "発注メールを送る",
@@ -413,13 +413,13 @@ function statusHintOf(order: FilmOrderView): string {
     case "proof_registered":
       return supplierApprovalReadyOf(order)
         ? `${owner}が校正を最終承認、または再校正を依頼します。`
-        : "カネイ側の校正承認を待っています。承認後にBuyer最終承認ができます。";
+        : "金井貿易側の校正承認を待っています。承認後にBuyer最終承認ができます。";
     case "re_proof_requested":
       return "デザイン側の再校正データアップロードを待っています。専用URLからの返却は自動反映されます。";
     case "final_approved":
-      if (!order.po_sent_at) return "カネイ側が発注書・報告リンクをフィルムメーカーへ送信します。";
+      if (!order.po_sent_at) return "金井貿易側が発注書・報告リンクをフィルムメーカーへ送信します。";
       if (!order.eta_date) return `${supplierLabelOf(order)}の納期見込み入力を待っています。`;
-      if (order.shipTo.status !== "confirmed") return "納品先の確認が必要です。セブン化学／カネイ側が確認できます。";
+      if (order.shipTo.status !== "confirmed") return "納品先の確認が必要です。セブン化学／金井貿易側が確認できます。";
       if (!order.delivery.shippedOn) return `${supplierLabelOf(order)}の出荷報告を待っています。`;
       if (!order.delivery.deliveredOn) return `${supplierLabelOf(order)}の納品報告を待っています。`;
       if (!order.delivery.receivedAt) return "セブン化学のフィルム受領確認を待っています。";
@@ -469,8 +469,8 @@ export function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: bo
     case "proof_registered":
       if (!supplierApprovalReadyOf(order)) {
         return isKanei
-          ? { kind: "form", label: "カネイ側の校正承認", form: "seller-approval" }
-          : { kind: "none", label: "カネイ側の校正承認待ち" };
+          ? { kind: "form", label: "金井貿易側の校正承認", form: "seller-approval" }
+          : { kind: "none", label: "金井貿易側の校正承認待ち" };
       }
       return buyerCanOperate
         ? { kind: "run", label: "校正を承認する", body: { action: "approve" }, ok: "校正を承認しました。" }
@@ -478,7 +478,7 @@ export function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: bo
     case "re_proof_requested":
       return { kind: "none", label: "デザイン再校正データのアップロード待ち" };
     case "final_approved":
-      if (!order.po_sent_at) return { kind: "none", label: "カネイ側の発注書・報告リンク送信待ち" };
+      if (!order.po_sent_at) return { kind: "none", label: "金井貿易側の発注書・報告リンク送信待ち" };
       if (!order.eta_date) return { kind: "none", label: `${supplierLabelOf(order)}の納期見込み入力待ち` };
       if (order.shipTo.status === "registered") {
         return buyerCanOperate
@@ -648,7 +648,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
         </div>
         <div className="film-orders-toolbar">
           <span className={`film-orders-role ${isSeven ? "seven" : "kanei"}`}>
-            {isSeven ? "セブン化学" : "カネイ側"}
+            {isSeven ? "セブン化学" : "金井貿易側"}
           </span>
           <span className="film-orders-myturn" role="status" aria-live="polite">
             あなたの操作待ち <strong>{myTurnCount}</strong> 件
@@ -663,7 +663,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
         </div>
       </header>
       <p className="film-orders-lead">
-        得意先はパウチ充填製造をセブン化学へ発注し、セブン化学がフィルムをカネイ側へ発注します。成約見積から自動作成された発注を、ステップに沿って管理します。
+        得意先はパウチ充填製造をセブン化学へ発注し、セブン化学がフィルムを金井貿易側へ発注します。成約見積から自動作成された発注を、ステップに沿って管理します。
       </p>
 
       <div className="workflow-role-legend" aria-label="担当会社ごとの色と注力ポイント">
@@ -673,7 +673,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
         </div>
         <div className="workflow-role-legend-item role-kanei">
           <WorkflowRoleBadge role="kanei" />
-          <p>校正データ登録・カネイ側承認・フィルムメーカー発注・納期</p>
+          <p>校正データ登録・金井貿易側承認・フィルムメーカー発注・納期</p>
         </div>
         <div className="workflow-role-legend-item role-customer">
           <WorkflowRoleBadge role="customer" />
@@ -688,11 +688,11 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
       </div>
 
       <details className="film-order-guide">
-        <summary>{isSeven ? "セブン化学担当者の流れ" : "カネイ側担当者の流れ"}</summary>
+        <summary>{isSeven ? "セブン化学担当者の流れ" : "金井貿易側担当者の流れ"}</summary>
         {isSeven ? (
           <ol>
             <li>見積履歴で見積を「成約」にすると、ここに発注が自動作成されます。</li>
-            <li>発注内容を確認し、発注書をメールでカネイ側へ送付したら「発注書送信済みにする」を押します。</li>
+            <li>発注内容を確認し、発注書をメールで金井貿易側へ送付したら「発注書送信済みにする」を押します。</li>
             <li>フィルム製作用データを「入稿データを登録」します（AI必須・PDF任意。design@ へ自動連絡）。</li>
             <li>校正データが登録されたら「校正を承認」または「再校正を依頼」します。</li>
           </ol>
@@ -792,7 +792,7 @@ function audienceLabelOf(audience: MailPreviewEnvelopeUi["audience"]): string {
   const labels = {
     maker: "フィルムメーカー",
     seven: "セブン化学",
-    kanei: "カネイ側",
+    kanei: "金井貿易側",
     customer: "得意先",
   } as const;
   return labels[audience];
@@ -954,8 +954,8 @@ function OrderCard({
         invalid_production_plan_range: "生産予定の終了日は開始日以降にしてください。",
         sample_bulk_quantity_required: "サンプル量は0より大きい数値で入力してください。",
         customer_proof_pdf_required: "得意先確認用の校正PDFが必要です。",
-        supplier_approval_required: "先にカネイ側の校正承認を記録してください。",
-        customer_proof_release_required: "得意先／カネイ側の校正リリース確認が必要です。",
+        supplier_approval_required: "先に金井貿易側の校正承認を記録してください。",
+        customer_proof_release_required: "得意先／金井貿易側の校正リリース確認が必要です。",
         customer_email_required: "得意先メールアドレスが未登録のため依頼メールを送信できません。",
         upload_guide_acknowledgement_required: "データ入稿ガイド3冊の確認チェックが必要です。",
         customer_proof_evidence_required: "承認者と証拠・経緯を入力してください。",
@@ -1496,7 +1496,7 @@ function MailOutboxPanel({
         <button className="button secondary small" type="button" disabled={busy} onClick={() => void onReload()}>更新</button>
       </div>
       <p className="help" data-testid="mail-disclosure-note">
-        {isKanei ? "カネイ側は正規宛先・CC・本文・型付きリンク・添付対象・完全な試行履歴を参照できます。" : "セブン化学には自社宛通知の安全な状態と試行結果のみ表示します。"}
+        {isKanei ? "金井貿易側は正規宛先・CC・本文・型付きリンク・添付対象・完全な試行履歴を参照できます。" : "セブン化学には自社宛通知の安全な状態と試行結果のみ表示します。"}
       </p>
       {error ? <p className="form-error" role="alert">通知履歴を読み込めませんでした。</p> : null}
       {loaded && !error && envelopes.length === 0 ? <p>まだ通知履歴はありません。</p> : null}
@@ -1546,7 +1546,7 @@ function MailOutboxPanel({
         ))}
       </ul>
       {!isKanei && Array.from(retryGroups.entries()).some(([, group]) => group.canRetry) ? (
-        <p className="help">失敗・不明・再送が必要な場合はカネイ側が永続化された送信を再試行します。</p>
+        <p className="help">失敗・不明・再送が必要な場合は金井貿易側が永続化された送信を再試行します。</p>
       ) : null}
     </section>
   );
@@ -1646,7 +1646,7 @@ function NextStepPanel({
       {order.status === "ordered" && isDataModeChoice ? (
         <div className="workflow-mode-note" role="note">
           <strong>入稿方式を選択してください</strong>
-          <span>得意先原稿を受領するか、カネイ側が保有する自社製作データで進めるかを選べます。選択後に製作データを入稿できます。</span>
+          <span>得意先原稿を受領するか、金井貿易側が保有する自社製作データで進めるかを選べます。選択後に製作データを入稿できます。</span>
         </div>
       ) : null}
       {next.kind === "none" && nextRole === "supplier" ? (
@@ -1678,7 +1678,7 @@ function NextStepPanel({
         <div className="next-step-wait">
           <p>{next.label}</p>
           <button className="button small" type="button" disabled title="担当部署のみ操作できます">
-            {filmOrderStepRole(order, order.status) === "seven" ? "入稿・承認操作（セブン化学）" : "校正データ操作（カネイ側）"}
+            {filmOrderStepRole(order, order.status) === "seven" ? "入稿・承認操作（セブン化学）" : "校正データ操作（金井貿易側）"}
           </button>
         </div>
       ) : null}
@@ -1706,7 +1706,7 @@ function NextStepPanel({
           </div>
           <div className="workflow-choice">
             <strong>自社データで進める</strong>
-            <p>カネイ側がすでに製作データを持っている場合に選択します。</p>
+            <p>金井貿易側がすでに製作データを持っている場合に選択します。</p>
             <CustomerDesignNotRequiredForm
               busy={busy}
               selfService
@@ -1743,7 +1743,7 @@ function NextStepPanel({
             </details>
           ) : null}
           <details className="film-order-additional">
-            <summary>カネイ側が手動登録する（フォールバック）</summary>
+            <summary>金井貿易側が手動登録する（フォールバック）</summary>
             <ProofRegistrationForm
               title={order.status === "re_proof_requested" ? "再校正データ登録" : "校正データ登録"}
               autofocus={focused === "proof"}
@@ -1796,7 +1796,7 @@ function NextStepPanel({
 
           <div className="approval-flow-status" role="status">
             <span className={order.customerProof.supplierApprovalStatus === "approved" ? "approved" : "pending"}>
-              ① カネイ側校正承認: {order.customerProof.supplierApprovalStatus === "approved"
+              ① 金井貿易側校正承認: {order.customerProof.supplierApprovalStatus === "approved"
                 ? `済み（${order.customerProof.supplierApprovalBy || "-"}）`
                 : "待ち"}
             </span>
@@ -1809,12 +1809,12 @@ function NextStepPanel({
 
           {next.kind === "form" && next.form === "seller-approval" && isKanei ? (
             <div>
-              <p className="next-step-note">고객レビュー·오프라인 확인 결과를 포함해 カネイ側 책임자 승인을 먼저 기록합니다.</p>
+              <p className="next-step-note">고객レビュー·오프라인 확인 결과를 포함해 金井貿易側 책임자 승인을 먼저 기록합니다.</p>
               <CustomerProofOfflineForm
                 busy={busy}
                 onSubmit={(approverName, evidence, reason) => void onRun(
                   { action: "record-customer-proof-approval", approverName, evidence, offlineReason: reason },
-                  "カネイ側校正承認を記録しました。",
+                  "金井貿易側校正承認を記録しました。",
                 )}
               />
             </div>
@@ -1826,7 +1826,7 @@ function NextStepPanel({
             </button>
           ) : null}
           {sellerApprovalReady && !canOperate(buyerCompanyOf(order), isSeven, isKanei) ? (
-            <p className="next-step-note">カネイ側承認済み。Buyer最終承認を待っています。</p>
+            <p className="next-step-note">金井貿易側承認済み。Buyer最終承認を待っています。</p>
           ) : null}
 
           <ReProofForm
@@ -1838,7 +1838,7 @@ function NextStepPanel({
       ) : null}
       {order.status === "final_approved" ? (
         <div className="film-order-inline-actions">
-          <p className="film-order-final">最終承認済み（カネイ側の最終受注処理が確定）。{order.po_sent_at ? "発注書は送信済みです。" : "発注書をフィルムメーカーへ送信してください。"}</p>
+          <p className="film-order-final">最終承認済み（金井貿易側の最終受注処理が確定）。{order.po_sent_at ? "発注書は送信済みです。" : "発注書をフィルムメーカーへ送信してください。"}</p>
           <ProductionPlanPanel
             key={`${order.id}-${order.productionPlan.updatedAt ?? ""}-${order.productionPlan.status}`}
             order={order}
@@ -1963,13 +1963,13 @@ function FilmMakerSelectionPanel({
       ) : (
         <p className="workflow-mode-note" role="note">
           <strong>未解決フィルムメーカーの対応</strong>
-          <span>下記から条件一致する有効なフィルムメーカーを選択してください。連絡先はカネイ側管理画面でのみ登録でき、ここでは表示・列挙されません。</span>
+          <span>下記から条件一致する有効なフィルムメーカーを選択してください。連絡先は金井貿易側管理画面でのみ登録でき、ここでは表示・列挙されません。</span>
         </p>
       )}
       {loading ? <p role="status">有効な候補を読み込み中...</p> : null}
       {loadError ? <p className="form-error" role="alert">選択候補を読み込めませんでした。</p> : null}
       {!loading && !loadError && selections.length === 0 ? (
-        <p className="form-error" role="note">この条件に一致する有効なフィルムメーカーはありません。カネイ側管理者に登録を依頼してください。</p>
+        <p className="form-error" role="note">この条件に一致する有効なフィルムメーカーはありません。金井貿易側管理者に登録を依頼してください。</p>
       ) : null}
       <label>
         有効なフィルムメーカー候補
@@ -2167,7 +2167,7 @@ function ProductionPlanPanel({
           {plan.updatedAt ? <div><dt>更新</dt><dd>{plan.updatedBy} / {new Date(plan.updatedAt).toLocaleString("ja-JP")}</dd></div> : null}
         </dl>
         <p className="help">
-          この項目は任意です。未入力でもフィルム発注ワークフローは止まりません。セブン化学が登録するとカネイ側にも共有され、必要な場合はカネイ側から確認依頼を送れます。
+          この項目は任意です。未入力でもフィルム発注ワークフローは止まりません。セブン化学が登録すると金井貿易側にも共有され、必要な場合は金井貿易側から確認依頼を送れます。
         </p>
         {isSeven ? (
           <div className="film-order-form">
@@ -2393,7 +2393,7 @@ function ShipToPanel({
     <section className={`film-order-section role-buyer ${buyerRoleOf(order) === "seven" ? "on-seven" : "on-kanei"}`} aria-label="納品先管理" data-testid="ship-to-panel">
       <div className="film-order-section-head">
         <h3>納品先管理</h3>
-        <WorkflowRoleBadge role="mixed" label="セブン化学／カネイ側" />
+        <WorkflowRoleBadge role="mixed" label="セブン化学／金井貿易側" />
       </div>
       <div className="film-order-columns">
         <dl>
@@ -2711,7 +2711,7 @@ function CustomerDesignNotRequiredForm({
   onSubmit: (reason: string) => void;
 }) {
   const [reason, setReason] = useState("");
-  const SELF_SERVICE_DEFAULT_REASON = "カネイ側の自社製作データで進行";
+  const SELF_SERVICE_DEFAULT_REASON = "金井貿易側の自社製作データで進行";
   const form = (
     <form
       className={`film-order-form ${immediate ? "" : "compact"}`}
@@ -2772,7 +2772,7 @@ function CustomerProofPanel({
           <div><dt>依頼日時</dt><dd>{review.requestedAt ? new Date(review.requestedAt).toLocaleString("ja-JP") : "-"}</dd></div>
           <div><dt>得意先承認日時</dt><dd>{review.approvedAt ? new Date(review.approvedAt).toLocaleString("ja-JP") : "-"}</dd></div>
           <div>
-            <dt>① カネイ側承認</dt>
+            <dt>① 金井貿易側承認</dt>
             <dd data-testid="supplier-approval-status">
               {review.supplierApprovalStatus === "approved"
                 ? `${new Date(review.supplierApprovalAt ?? "").toLocaleString("ja-JP")} / ${review.supplierApprovalBy || "-"}`
@@ -2809,10 +2809,10 @@ function CustomerProofPanel({
             </button>
           ) : null}
           {review.status === "approved" && review.supplierApprovalStatus !== "approved"
-            ? <p className="film-order-final">得意先承認済み。次にカネイ側校正承認を記録してください。</p>
+            ? <p className="film-order-final">得意先承認済み。次に金井貿易側校正承認を記録してください。</p>
             : null}
           {review.supplierApprovalStatus === "approved" && review.buyerApprovalStatus !== "approved"
-            ? <p className="film-order-final">カネイ側承認済み。{companyLabel(buyerCompanyOf(order))}の最終承認に進めます。</p>
+            ? <p className="film-order-final">金井貿易側承認済み。{companyLabel(buyerCompanyOf(order))}の最終承認に進めます。</p>
             : null}
           {order.status === "proof_registered" && ["pending","requested","correction_requested"].includes(review.status) ? (
             <p className="film-order-final">得意先承認前に最終承認はできません。</p>
@@ -2904,7 +2904,7 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
             </table>
           </div>
         ) : null}
-        <p className="film-order-sheet-note">発注書はセブン化学からカネイ側へメールで送付してください。送信後に「発注書送信済みにする」でステータスを進めます。</p>
+        <p className="film-order-sheet-note">発注書はセブン化学から金井貿易側へメールで送付してください。送信後に「発注書送信済みにする」でステータスを進めます。</p>
       </div>
     </section>
   );

@@ -43,7 +43,7 @@ describe("film order action mapping", () => {
 
     const kanei = order("kanei-trade.co.jp");
     expect(nextActionOf(kanei, false, true).kind).toBe("run");
-    expect(nextActionOf(kanei, true, false)).toMatchObject({ kind: "none", label: "カネイ側の発注書送信待ち" });
+    expect(nextActionOf(kanei, true, false)).toMatchObject({ kind: "none", label: "金井貿易側の発注書送信待ち" });
   });
 
   it("maps proof approval to the buyer, not always Seven", () => {
@@ -53,7 +53,7 @@ describe("film order action mapping", () => {
     expect(nextActionOf(seven, true, false)).toMatchObject({ kind: "run", body: { action: "approve" } });
     expect(nextActionOf(seven, false, true)).toMatchObject({ kind: "none", label: "セブン化学の承認待ち" });
     expect(nextActionOf(kanei, false, true)).toMatchObject({ kind: "run", body: { action: "approve" } });
-    expect(nextActionOf(kanei, true, false)).toMatchObject({ kind: "none", label: "カネイ側の承認待ち" });
+    expect(nextActionOf(kanei, true, false)).toMatchObject({ kind: "none", label: "金井貿易側の承認待ち" });
   });
 
   it("requires Kanei seller approval before buyer final approval", () => {
@@ -69,7 +69,7 @@ describe("film order action mapping", () => {
 
     expect(nextActionOf(pendingSeller, true, false)).toMatchObject({
       kind: "none",
-      label: "カネイ側の校正承認待ち",
+      label: "金井貿易側の校正承認待ち",
     });
     expect(nextActionOf(pendingSeller, false, true)).toMatchObject({
       kind: "form",

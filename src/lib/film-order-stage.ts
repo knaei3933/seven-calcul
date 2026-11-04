@@ -76,7 +76,7 @@ export const filmOrderGuardReasonLabels: Record<FilmOrderGuardReasonCode, string
   customer_proof_pdf_required: "得意先確認用の校正PDFが必要です。",
   invalid_status_transition: "現在の状態では実行できません。",
   customer_proof_release_required: "得意先校正承認が必要です。",
-  supplier_approval_required: "カネイ側の校正承認が必要です。",
+  supplier_approval_required: "金井貿易側の校正承認が必要です。",
   buyer_approval_required: "バイヤーの最終承認が必要です。",
   ship_to_confirmation_required: "納品先の確定が必要です。",
   invalid_eta_transition: "フィルムメーカー発注後に納期見込みを登録できます。",
