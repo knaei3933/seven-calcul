@@ -35,7 +35,7 @@ import {
   type FilmWorkflowAction,
 } from "./film-order-stage";
 import { sendMail } from "./mailer";
-import { getStrictMailSettings, interpolateMailTemplate, parseStrictMailSettings, resolveMailTemplate, type MailSettings } from "./mail-settings";
+import { effectiveSmtpSenderAddress, getStrictMailSettings, interpolateMailTemplate, parseStrictMailSettings, resolveMailTemplate, type MailSettings } from "./mail-settings";
 import type { SqlClient } from "./db";
 import type { FilmOrderFileRecord } from "./film-order-shared";
 import type { FilmOrderLifecycleWorkflowAction } from "./film-order-lifecycle-actions";
@@ -345,17 +345,25 @@ async function lifecycleMailSettingsOf(tx: SqlClient): Promise<MailSettings> {
       "SELECT name FROM sqlite_master WHERE type='table' AND name='mail_settings'",
     ));
   if (!present) {
-    return defaultMailSettings();
+    const settings = defaultMailSettings();
+    settings.sender.email = effectiveSmtpSenderAddress(settings, process.env);
+    return settings;
   }
   row = await tx.get<{ settings_json: string }>("SELECT settings_json FROM mail_settings WHERE id=1");
-  if (!row) return defaultMailSettings();
+  if (!row) {
+    const settings = defaultMailSettings();
+    settings.sender.email = effectiveSmtpSenderAddress(settings, process.env);
+    return settings;
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(row.settings_json);
   } catch {
     throw new Error("film_order_mail_settings_corrupted");
   }
-  return parseStrictMailSettings(parsed);
+  const settings = parseStrictMailSettings(parsed);
+  settings.sender.email = effectiveSmtpSenderAddress(settings, process.env);
+  return settings;
 }
 
 function strictMakerSnapshot(row: RawOrder): {
