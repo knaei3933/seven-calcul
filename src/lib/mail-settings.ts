@@ -123,6 +123,19 @@ export class MailSettingsCorruptionError extends Error {
   }
 }
 
+export function effectiveSmtpSenderAddress(
+  settings: Pick<MailSettings, "sender">,
+  environment: unknown = process.env,
+): string {
+  const env = (typeof environment === "object" && environment ? environment : {}) as Record<"MAIL_FROM" | "SMTP_USER", string | undefined>;
+  const candidates = [
+    settings.sender.email,
+    env.MAIL_FROM,
+    env.SMTP_USER,
+  ].map((value) => typeof value === "string" ? value.trim() : "");
+  return candidates.find((value) => EMAIL_PATTERN.test(value)) ?? "";
+}
+
 export function parseStrictMailSettings(parsed: unknown): MailSettings {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new MailSettingsCorruptionError();
   const source = parsed as Record<string, unknown>;
