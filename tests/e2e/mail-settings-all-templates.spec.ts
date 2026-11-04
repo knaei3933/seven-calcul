@@ -10,6 +10,7 @@ function escapeRegExp(value: string): string {
 
 test("verifies every mail template default, edit, save, and persistence", async ({ page }) => {
   test.setTimeout(180_000);
+  const runId = Date.now();
   await page.goto("/settings/mail");
   await expect(page.getByRole("heading", { name: "メール送信設定" })).toBeVisible();
 
@@ -28,8 +29,8 @@ test("verifies every mail template default, edit, save, and persistence", async 
     await expect(editor.getByTestId("default-subject")).toHaveValue(defaults!.subject);
     await expect(editor.getByTestId("default-body")).toHaveValue(defaults!.body);
 
-    const subjectMarker = `UI_ALL_SUBJECT_${template.key.toUpperCase()}`;
-    const bodyMarker = `UI_ALL_BODY_${template.key.toUpperCase()}`;
+    const subjectMarker = `UI_ALL_SUBJECT_${template.key.toUpperCase()}_${runId}`;
+    const bodyMarker = `UI_ALL_BODY_${template.key.toUpperCase()}_${runId}`;
     await editor.getByTestId("override-subject").fill(`${defaults!.subject} [${subjectMarker}]`);
     await editor.getByTestId("override-body").fill(`${defaults!.body}\n${bodyMarker}`);
 
@@ -45,8 +46,8 @@ test("verifies every mail template default, edit, save, and persistence", async 
     });
     await button.click();
     const editor = page.locator(`#mail-template-${template.key}`);
-    const subjectMarker = `UI_ALL_SUBJECT_${template.key.toUpperCase()}`;
-    const bodyMarker = `UI_ALL_BODY_${template.key.toUpperCase()}`;
+    const subjectMarker = `UI_ALL_SUBJECT_${template.key.toUpperCase()}_${runId}`;
+    const bodyMarker = `UI_ALL_BODY_${template.key.toUpperCase()}_${runId}`;
     await expect(editor.getByTestId("override-subject")).toHaveValue(new RegExp(escapeRegExp(subjectMarker)));
     await expect(editor.getByTestId("override-body")).toHaveValue(new RegExp(escapeRegExp(bodyMarker)));
     await button.click();
