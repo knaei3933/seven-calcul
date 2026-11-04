@@ -185,7 +185,7 @@ describe("film order API permissions and workflow", () => {
       }, sevenToken), { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
     expect(designResponse.status).toBe(403);
-    const previewResponse = await actionRoute(
+    const forbiddenPreview = await actionRoute(
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -193,22 +193,8 @@ describe("film order API permissions and workflow", () => {
       }, sevenToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
-    expect(previewResponse.status).toBe(200);
-    const humanPreview = await previewResponse.json() as {
-      order: { customerDesign: { status: string }; updated_at: string };
-      order_supplier_email?: unknown;
-      supplier_email?: unknown;
-      preview?: unknown;
-      mails?: unknown[];
-    };
-    expect(humanPreview.order.customerDesign.status).toBe("not_required");
-    expect(humanPreview.order_supplier_email).toBeUndefined();
-    expect(humanPreview.supplier_email).toBeUndefined();
-    expect(humanPreview.preview).toMatchObject({
-      envelopes: [{ audience: "seven", links: expect.any(Array) }],
-      stagedTokenHashes: expect.any(Array),
-    });
-    expect(humanPreview.mails).toBeUndefined();
+    expect(forbiddenPreview.status).toBe(403);
+    expect(await forbiddenPreview.json()).toMatchObject({ error: "film_order_action_forbidden" });
 
     const kaneiReceiving = await actionRoute(
       request(`http://localhost/api/film-orders/${orderId}`, {

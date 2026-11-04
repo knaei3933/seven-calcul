@@ -279,11 +279,19 @@ function assertLifecycleGuard(
   if ((STAGE_GUARD_ACTIONS as readonly string[]).includes(action)) {
     assertFilmOrderActionGuard(guard, action as FilmWorkflowAction, actorRole);
   }
-  assertCustomLifecycleGuard(guard, action);
+  assertCustomLifecycleGuard(guard, action, actorRole);
 }
 
-function assertCustomLifecycleGuard(guard: FilmOrderGuardInput, action: FilmOrderLifecycleWorkflowAction): void {
+function assertCustomLifecycleGuard(
+  guard: FilmOrderGuardInput,
+  action: FilmOrderLifecycleWorkflowAction,
+  actorRole: FilmOrderActorRole,
+): void {
   const fail = (code: string): void => { throw new Error(code); };
+  if (
+    ["request-customer-design-upload","request-customer-design-correction"].includes(action)
+    && actorRole !== "kanei"
+  ) fail("film_order_actor_role_forbidden");
   if (action === "request-ship-to-registration" && (guard.status === "pending" || guard.shipToStatus === "confirmed")) fail("invalid_status_transition");
   if (action === "ship-to-registered" && !["not_provided", "registered"].includes(guard.shipToStatus ?? "")) fail("invalid_status_transition");
   if (action === "request-customer-design-upload" && !["pending", "ordered"].includes(guard.status ?? "") && !(guard.customerDesignStatus === "received")) fail("invalid_status_transition");

@@ -191,7 +191,7 @@ describe("film orders Seven-buyer UI", () => {
     vi.unstubAllGlobals();
   });
 
-  it("exposes the data-source choice and switches to own-data intake", async () => {
+  it("limits customer design request to Kanei and lets Seven use own data", async () => {
     const user = userEvent.setup();
     render(<FilmOrdersClient userEmail="buyer@727.co.jp" />);
 
@@ -199,7 +199,7 @@ describe("film orders Seven-buyer UI", () => {
     await user.click(screen.getByText("F-202610-001"));
 
     expect(await screen.findByTestId("customer-design-panel")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "得意先にアップロード依頼" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "得意先にアップロード依頼" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("設定メモ")).not.toBeRequired();
     await user.click(screen.getByRole("button", { name: "自社データで進める" }));
 

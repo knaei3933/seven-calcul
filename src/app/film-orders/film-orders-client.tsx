@@ -1734,15 +1734,28 @@ function NextStepPanel({
         />
       ) : null}
       {next.kind === "form" && next.form === "design-mode" ? (
-        <div className="workflow-choice-grid">
-          <div className="workflow-choice">
-            <strong>得意先デザインを受領</strong>
-            <p>得意先・外部デザイナーにアップロードを依頼し、確定後に入稿します。</p>
-            <CustomerDesignRequestForm busy={busy} onSubmit={(note) => void onRun({ action: "request-customer-design-upload", note }, "得意先デザイン依頼を送信しました。")} />
+        isKanei ? (
+          <div className="workflow-choice-grid">
+            <div className="workflow-choice">
+              <strong>得意先デザインを受領</strong>
+              <p>得意先・外部デザイナーにアップロードを依頼し、確定後に入稿します。</p>
+              <CustomerDesignRequestForm busy={busy} onSubmit={(note) => void onRun({ action: "request-customer-design-upload", note }, "得意先デザイン依頼を送信しました。")} />
+            </div>
+            <div className="workflow-choice">
+              <strong>自社データで進める</strong>
+              <p>金井貿易側がすでに製作データを持っている場合に選択します。</p>
+              <CustomerDesignNotRequiredForm
+                busy={busy}
+                selfService
+                immediate
+                onSubmit={(reason) => void onRun({ action: "set-customer-design-not-required", reason }, "自社データワークフローに設定しました。")}
+              />
+            </div>
           </div>
+        ) : (
           <div className="workflow-choice">
             <strong>自社データで進める</strong>
-            <p>金井貿易側がすでに製作データを持っている場合に選択します。</p>
+            <p>セブン化学が得意先と直接調整した製作データを登録します。得意先への依頼メールは金井貿易側操作です。</p>
             <CustomerDesignNotRequiredForm
               busy={busy}
               selfService
@@ -1750,7 +1763,7 @@ function NextStepPanel({
               onSubmit={(reason) => void onRun({ action: "set-customer-design-not-required", reason }, "自社データワークフローに設定しました。")}
             />
           </div>
-        </div>
+        )
       ) : null}
       {proofRegistrationOpen ? (
         <div className="film-order-inline-actions">
@@ -2698,13 +2711,13 @@ function CustomerDesignPanel({
               {files.map((file) => <li key={file.id}>v{file.version} / {file.file_name}</li>)}
             </ul>
           ) : <p>まだアップロードはありません。</p>}
-          {canOperate(buyerCompanyOf(order), isSeven, isKanei) && design.status === "received" ? (
+          {isKanei && design.status === "received" ? (
             <>
               <button className="button" type="button" disabled={busy} onClick={() => void onRun({ action: "confirm-customer-design" }, "得意先デザインを確定しました。")}>確定する</button>
               <CustomerDesignCorrectionForm busy={busy} onSubmit={({ internalReason, customerMessage }) => void onRun({ action: "request-customer-design-correction", reason: internalReason, customerMessage }, "得意先修正依頼を送信しました。")} />
             </>
           ) : null}
-          {canOperate(buyerCompanyOf(order), isSeven, isKanei) && ["requested","received","correction_requested"].includes(design.status) ? (
+          {isKanei && ["requested","received","correction_requested"].includes(design.status) ? (
             <CustomerDesignNotRequiredForm busy={busy} onSubmit={(reason) => void onRun({ action: "set-customer-design-not-required", reason }, "得意先デザインを不要に設定しました。")} />
           ) : null}
         </div>
