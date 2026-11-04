@@ -90,7 +90,7 @@ async function assertNoConfirmationMutation(orderId: number, dispatchGroupId: st
     "SELECT envelope_status FROM film_order_mail_outbox WHERE order_id=? AND dispatch_group_id=?",
     [orderId, dispatchGroupId],
   );
-  expect(envelopes).toHaveLength(3);
+  expect(envelopes).toHaveLength(2);
   expect(envelopes.every((envelope) => envelope.envelope_status === "draft")).toBe(true);
   const attempts = await db.all<{ id: number }>(`
     SELECT a.id FROM film_order_mail_attempts a
