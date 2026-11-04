@@ -45,7 +45,8 @@ const { upsertFilmPrice } = await import("@/lib/film-price-store");
 
 const token = process.env.PORTAL_SERVICE_TOKEN;
 const authorization = { authorization: `Bearer ${token}` };
-let currentTime = new Date("2026-10-23T01:23:45.000Z");
+const controlledClockStart = new Date();
+let currentTime = new Date(controlledClockStart);
 const users: Array<{ id: number; email: string; customerCode: string; token: string }> = [];
 let userSequence = 0;
 
@@ -55,6 +56,14 @@ function now(): Date {
 
 function nextTime(seconds = 1): void {
   currentTime = new Date(currentTime.getTime() + seconds * 1000);
+}
+
+function issueDateOf(date: Date = controlledClockStart): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(days: number, date: Date = controlledClockStart): string {
+  return issueDateOf(new Date(date.getTime() + days * 24 * 60 * 60 * 1000));
 }
 
 function requestBody(overrides: Record<string, unknown> = {}, remove: string[] = []): Record<string, unknown> {
@@ -137,9 +146,9 @@ function assertCustomerSafe(body: Record<string, unknown>): void {
   const allowed = contract.customerSafeQuoteProjection.allowlist as readonly string[];
   expect(Object.keys(body).every((key) => allowed.includes(key))).toBe(true);
   expect(body.publicId).toMatch(/^[0-9a-f-]{36}$/);
-  expect(body.quotationNumber).toMatch(/^KT-202610-\d{3}$/);
-  expect(body.issueDate).toBe("2026-10-23");
-  expect(body.validUntil).toBe("2026-11-22");
+  expect(body.quotationNumber).toMatch(/^KT-\d{6}-\d{3}$/);
+  expect(body.issueDate).toBe(issueDateOf());
+  expect(body.validUntil).toBe(addDays(30));
   expect(body.pdfAvailability).toBe("unavailable");
   expect(Number(body.displayedGrandTotal)).toBe(Number(body.displayedSubtotal) + Number(body.displayedTax));
   const forbiddenKeys = new Set(contract.forbiddenResponseFields);
@@ -296,7 +305,7 @@ describe("portal quote calculation G004", () => {
       { calculate, resolveFilmPrices, now },
     );
     expect(response.status).toBe(201);
-    expect(resolveFilmPrices).toHaveBeenCalledWith("2026-10-23", expect.any(Object));
+    expect(resolveFilmPrices).toHaveBeenCalledWith(issueDateOf(), expect.any(Object));
     const input = calculate.mock.calls[0]?.[0] as Record<string, any>;
     expect(input.parameters.filmUnitPrices).toEqual(overriddenPrices);
     expect(await counts().then((value) => value.quotations)).toBeGreaterThan(1);
@@ -305,12 +314,12 @@ describe("portal quote calculation G004", () => {
       band: "lte570",
       tier: "500",
       unitPriceYenPerM: "777",
-      effectiveFrom: "2026-10-01",
-      effectiveTo: "2026-10-31",
+      effectiveFrom: issueDateOf(),
+      effectiveTo: addDays(30),
       memo: "portal test",
     }, "test");
     const { resolveFilmUnitPrices } = await import("@/lib/film-price-store");
-    const resolved = await resolveFilmUnitPrices("2026-10-23", {
+    const resolved = await resolveFilmUnitPrices(issueDateOf(), {
       lte570: { "500": "1", "1000": "1", "1500": "1" },
       "571to740": { "500": "1", "1000": "1", "1500": "1" },
     });
@@ -422,8 +431,8 @@ describe("portal quote calculation G004", () => {
     const idempotencyKey = "unique-recovery-key";
     const quotation = {
       status: "draft" as const,
-      issueDate: "2026-10-23",
-      validUntil: "2026-11-06",
+      issueDate: issueDateOf(),
+      validUntil: addDays(14),
       customerName: "ユニークリカバリー株式会社",
       customerContact: "ポータル太郎",
       productName: "リカバリーテスト",

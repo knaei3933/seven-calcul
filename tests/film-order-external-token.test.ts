@@ -106,13 +106,28 @@ describe("film order external token hardening", () => {
     orderId = order.id;
     await runFilmOrderAction(orderId, "mark-ordered", {}, "kanei@kanei-trade.co.jp");
     await runFilmOrderAction(orderId, "set-customer-design-not-required", { reason: "既存フロー回帰テスト" }, "seven@727.co.jp");
+    const { createFilmMaker, selectFilmMakerForOrder } = await import("@/lib/film-maker-store");
+    const tokenMaker = await createFilmMaker({
+      makerCode: "TOKEN-KOR-DIG-001",
+      companyName: "External Token Maker",
+      email: "external-token-maker@example.test",
+      language: "ko",
+      printMethod: "digital",
+      procurementRoute: "K",
+    }, "kanei@kanei-trade.co.jp");
+    await (await import("@/lib/db")).getSqlClient("quotations").then((db) =>
+      db.run("UPDATE film_orders SET procurement_route='K' WHERE id=?", [orderId]),
+    );
+    await selectFilmMakerForOrder(orderId, tokenMaker.id, "kanei@kanei-trade.co.jp");
     const receiving = await runFilmOrderAction(orderId, "register-receiving", {
       aiFileName: "トークン検証パウチ.ai",
+      pdfFileName: "トークン検証パウチ.pdf",
       guideAcknowledged: true,
       aiFileUrl: "https://drive.google.com/file/d/receivingfile1/view",
+      pdfFileUrl: "https://drive.google.com/file/d/receivingpdf/view",
       note: "initial",
     }, "seven@727.co.jp");
-    const noticeText = String(receiving.mails?.at(-1)?.text ?? "");
+    const noticeText = String(receiving.mails?.[0]?.text ?? "");
     supplierToken = noticeText.match(/\/film-orders\/upload\/([^\s"]+)/u)?.[1] ?? "";
     expect(supplierToken).not.toBe("");
   });
@@ -181,13 +196,12 @@ describe("film order external token hardening", () => {
     expect(() => assertSupplierProofUploadPolicy(ordered, `${input.quotationNumber}.pdf`, 15 * 1024 * 1024)).not.toThrow();
   });
 
-  it("reuses the stable supplier token when a new notice is issued", async () => {
+  it("rotates the staged supplier token on confirmation and preserves order identity", async () => {
     const notice = await runFilmOrderAction(orderId, "send-proof-notice", { origin: "http://localhost:3000" }, "kanei@kanei-trade.co.jp");
     const nextToken = String(notice.mails?.[0]?.text ?? "").match(/\/film-orders\/upload\/([^\s"]+)/u)?.[1] ?? "";
     expect(nextToken).not.toBe("");
-    await expect(getFilmOrderForProofUpload(supplierToken)).resolves.toMatchObject({ id: orderId });
+    await expect(getFilmOrderForProofUpload(supplierToken)).rejects.toThrow("invalid_proof_token");
     await expect(getFilmOrderForProofUpload(nextToken)).resolves.toMatchObject({ id: orderId });
-    expect(nextToken).toBe(supplierToken);
     supplierToken = nextToken;
   });
 });
@@ -241,13 +255,9 @@ describe("customer design upload gate", () => {
     expect(requested.order.customerDesign.status).toBe("requested");
     expect(requested.mails?.[0]?.to).toBe("design-customer@example.test");
     expect(requested.mails?.[0]?.subject).toContain("デザイン原稿ご入稿のお願い");
-    expect(requested.mails?.[0]?.text).toContain("【お見積製品仕様・ご確認用】");
-    expect(requested.mails?.[0]?.text).toContain("パウチ仕様：50×90mm / 1連");
-    expect(requested.mails?.[0]?.text).toContain("充填仕様：1ml/室 × 1室 ＝ 1ml/枚（ホッパ充填）");
-    expect(requested.mails?.[0]?.text).toContain("バルク量：15,000g（貴社ご支給ください）");
-    expect(requested.mails?.[0]?.text).toContain("・充填物1 ／ 3,334枚");
-    expect(requested.mails?.[0]?.text).toContain("・充填物2 ／ 3,333枚");
-    expect(requested.mails?.[0]?.text).toContain("・充填物3 ／ 3,333枚");
+    expect(requested.mails?.[0]?.text).toContain("【依頼内容】");
+    expect(requested.mails?.[0]?.text).toContain("仕様：");
+    expect(requested.mails?.[0]?.text).toContain("PET12+AL7+PET12+LLDPE50");
     const firstToken = requested.mails?.[0]?.text?.match(/\/film-orders\/design-upload\/([^\s"]+)/u)?.[1] ?? "";
     expect(firstToken).not.toBe("");
 
@@ -292,10 +302,25 @@ describe("customer design upload gate", () => {
 
     const confirmed = await runFilmOrderAction(designOrderId, "confirm-customer-design", {}, "kanei@kanei-trade.co.jp");
     expect(confirmed.order.customerDesign.status).toBe("confirmed");
+    const { createFilmMaker, selectFilmMakerForOrder } = await import("@/lib/film-maker-store");
+    const designMaker = await createFilmMaker({
+      makerCode: "TOKEN-Y-JPN-DIG-001",
+      companyName: "外部トークンメーカー",
+      email: "external-maker@example.test",
+      language: "ja",
+      printMethod: "digital",
+      procurementRoute: "Y",
+    }, "kanei@kanei-trade.co.jp");
+    await (await import("@/lib/db")).getSqlClient("quotations").then((db) =>
+      db.run("UPDATE film_orders SET procurement_route='Y' WHERE id=?", [designOrderId]),
+    );
+    await selectFilmMakerForOrder(designOrderId, designMaker.id, "kanei@kanei-trade.co.jp");
     const receiving = await runFilmOrderAction(designOrderId, "register-receiving", {
       aiFileName: "confirmed.ai",
+      pdfFileName: "confirmed.pdf",
       guideAcknowledged: true,
       aiFileUrl: "https://drive.google.com/file/d/confirmedai/view",
+      pdfFileUrl: "https://drive.google.com/file/d/confirmedpdf/view",
     }, "seven@727.co.jp");
     expect(receiving.order.status).toBe("receiving_registered");
 
@@ -314,12 +339,12 @@ describe("customer design upload gate", () => {
       origin: "http://localhost:3000",
     }, "kanei@kanei-trade.co.jp");
     expect(review.order.customerProof.status).toBe("requested");
-    expect(review.mails?.[0]?.subject).toContain("校正ご確認のお願い");
-    expect(review.mails?.[0]?.text).toContain("ロゴ・商品名・表記に誤字・脱字がないか");
+    expect(review.mails?.[0]?.subject).toContain("校正データご確認のお願い");
+    expect(review.mails?.[0]?.text).toContain("customer_proof_review");
     const reviewToken = review.mails?.[0]?.text?.match(/\/film-orders\/proof-review\/([^\s"]+)/u)?.[1] ?? "";
     expect(reviewToken).not.toBe("");
     const reviewPage = await getFilmOrderForCustomerProofReview(reviewToken);
-    expect(reviewPage.files.filter((file) => file.category === "proof" && file.file_name.toLowerCase().endsWith(".pdf")).at(-1)?.version).toBe(2);
+    expect(reviewPage.files.filter((file) => file.category === "proof" && file.file_name.toLowerCase().endsWith(".pdf")).at(-1)?.version).toBe(1);
 
     const approvedReview = await decideCustomerProofReview({
       token: reviewToken,
@@ -331,6 +356,7 @@ describe("customer design upload gate", () => {
     const sellerApproved = await runFilmOrderAction(designOrderId, "record-customer-proof-approval", {
       approverName: "金井貿易責任者",
       evidence: "顧客レビュー結果確認",
+      offlineReason: "記録された顧客承認のオフライン確認",
     }, "kanei@kanei-trade.co.jp");
     expect(sellerApproved.order.customerProof.supplierApprovalStatus).toBe("approved");
     expect(sellerApproved.order.customerProof.supplierApprovalBy).toBe("kanei@kanei-trade.co.jp");

@@ -22,6 +22,16 @@ import {
   type ShipToStatus,
   type ShipToTracking,
 } from "./film-order-shared";
+import { isInternalLegacySupplier } from "./film-maker-reconciliation";
+import type { FilmOrderMailConfirmResult, FilmOrderMailPreview } from "./film-order-mail-lifecycle";
+import { resolveFilmOrderExternalOrigin } from "./film-order-origin";
+import { recoverStaleFilmOrderMailSendingAttempts } from "./film-order-mail-outbox";
+import {
+  assertFilmOrderActionGuard,
+  assertFilmOrderDeliveryDocumentGuard,
+  type FilmOrderGuardInput,
+  type FilmWorkflowAction,
+} from "./film-order-stage";
 import { customerDesignFolderId, findDriveFiles } from "./google-drive";
 import {
   getCustomer,
@@ -61,33 +71,12 @@ export function sevenChemicalContactEmail(): string {
   return process.env.SEVEN_CHEMICAL_CONTACT_EMAIL?.trim() || "gotou@727.co.jp";
 }
 
-export function filmPracticeSupplierEmail(): string {
-  return process.env.FILM_SUPPLIER_A_EMAIL ?? "arwg22@gmail.com";
-}
-
-export function filmPracticeOverrideTo(): string {
-  // 練習期間中は外部宛てメールをこのアドレスへ集約する（誤送信防止）。
-  return process.env.FILM_PRACTICE_TO ?? "";
-}
-
-function externalTo(address: string): string {
-  const practice = filmPracticeOverrideTo();
-  return practice ? practice : address;
-}
-
 /**
- * 調達経路別の校正依頼宛先。
- * - digital / K(韓国輸入) → A宛先（既定 arwg22）
- * - Y(国内調達)        → B宛先（環境変数。未設定なら送信しない）
- * 案件個別の supplier_email があればそれを優先する。
+ * Film-order recipients are owned by the selected maker snapshot or explicit order supplier email.
+ * Route/configured fallbacks are forbidden; centralized test-mode routing happens only in the mailer.
  */
-export function supplierDestinationFor(order: Pick<FilmOrder, "procurement_route" | "supplier_email">): { to: string | null; route: "A" | "B" | "custom" } {
-  if (order.supplier_email.trim()) return { to: externalTo(order.supplier_email.trim()), route: "custom" };
-  if (order.procurement_route === "Y") {
-    const b = process.env.FILM_SUPPLIER_B_EMAIL?.trim();
-    return { to: b ? externalTo(b) : null, route: "B" };
-  }
-  return { to: externalTo(filmPracticeSupplierEmail()), route: "A" };
+export function supplierDestinationFor(order: Pick<FilmOrder, "supplier_email" | "makerEmail">): { to: string | null; route: "order" } {
+  return { to: order.makerEmail?.trim() || order.supplier_email.trim() || null, route: "order" };
 }
 
 interface FilmOrderRow {
@@ -198,6 +187,7 @@ import {
 export type FilmOrderAction =
   | "mark-ordered"
   | "set-supplier"
+  | "select-film-maker"
   | "register-receiving"
   | "send-proof-notice"
   | "register-proof"
@@ -223,11 +213,99 @@ export type FilmOrderAction =
   | "save-production-plan"
   | "confirm-production-plan"
   | "request-production-plan"
-  | "resend-supplier-links";
+  | "resend-supplier-links"
+  | "update-eta"
+  | "report-shipment"
+  | "report-delivery"
+  | "request-ship-to-registration"
+  | "ship-to-registered"
+  | "request-customer-design-upload"
+  | "request-customer-design-correction"
+  | "customer-design-received"
+  | "production-plan-request"
+  | "customer-proof-decision";
 
 let schemaReady: Promise<SqlClient> | null = null;
 
+const FILM_MAKERS_TABLE = `
+  CREATE TABLE IF NOT EXISTS film_makers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    maker_code TEXT NOT NULL UNIQUE,
+    company_name TEXT NOT NULL,
+    contact_name TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL,
+    language TEXT NOT NULL CHECK(language IN ('ja','ko')),
+    print_method TEXT NOT NULL CHECK(print_method IN ('gravure','digital')),
+    procurement_route TEXT NOT NULL CHECK(procurement_route IN ('K','Y')),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by_email TEXT NOT NULL DEFAULT '',
+    updated_by_email TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_film_makers_route_print_active
+    ON film_makers(procurement_route, print_method, is_active);
+`;
+
+const FILM_ORDER_MAIL_TABLES = `
+  CREATE TABLE IF NOT EXISTS film_order_mail_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES film_orders(id) ON DELETE CASCADE,
+    dispatch_group_id TEXT NOT NULL,
+    workflow_key TEXT NOT NULL,
+    audience TEXT NOT NULL CHECK(audience IN ('maker','seven','kanei','customer')),
+    language TEXT NOT NULL CHECK(language IN ('ja','ko')),
+    template_key TEXT NOT NULL,
+    template_identity_json TEXT NOT NULL,
+    sender_identity TEXT NOT NULL,
+    sender_email TEXT NOT NULL,
+    intended_to TEXT NOT NULL,
+    cc_json TEXT NOT NULL DEFAULT '[]',
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    links_json TEXT NOT NULL DEFAULT '[]',
+    attachments_json TEXT NOT NULL DEFAULT '[]',
+    canonical_envelope_json TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    envelope_status TEXT NOT NULL DEFAULT 'draft' CHECK(envelope_status IN ('draft','composed','skipped','superseded')),
+    requested_by_email TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_film_mail_outbox_group_envelope
+    ON film_order_mail_outbox(dispatch_group_id, workflow_key, audience);
+  CREATE INDEX IF NOT EXISTS idx_film_mail_outbox_order_created
+    ON film_order_mail_outbox(order_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_film_mail_outbox_order_workflow_status
+    ON film_order_mail_outbox(order_id, workflow_key, envelope_status);
+  CREATE INDEX IF NOT EXISTS idx_film_mail_outbox_group_audience
+    ON film_order_mail_outbox(dispatch_group_id, audience);
+  CREATE TABLE IF NOT EXISTS film_order_mail_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    outbox_id INTEGER NOT NULL REFERENCES film_order_mail_outbox(id) ON DELETE CASCADE,
+    attempt_count INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('sending','sent','failed','unknown','retry_required','skipped')),
+    requested_by_email TEXT NOT NULL DEFAULT '',
+    intended_to TEXT NOT NULL,
+    actual_to TEXT,
+    recipient_overridden BOOLEAN NOT NULL DEFAULT FALSE,
+    smtp_message_id TEXT,
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    attempt_started_at TEXT NOT NULL,
+    attempt_finished_at TEXT
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_film_mail_attempt_count
+    ON film_order_mail_attempts(outbox_id, attempt_count);
+  CREATE INDEX IF NOT EXISTS idx_film_mail_attempt_outbox_status
+    ON film_order_mail_attempts(outbox_id, status, attempt_count);
+  CREATE INDEX IF NOT EXISTS idx_film_mail_attempt_sending_recovery
+    ON film_order_mail_attempts(status, attempt_started_at);
+`;
+
 const BASE_SCHEMA = `
+  ${FILM_MAKERS_TABLE}
   CREATE TABLE IF NOT EXISTS film_orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_number TEXT NOT NULL UNIQUE,
@@ -242,6 +320,10 @@ const BASE_SCHEMA = `
     order_length_m TEXT NOT NULL DEFAULT '',
     web_width_mm TEXT NOT NULL DEFAULT '',
     pouch_quantity TEXT NOT NULL DEFAULT '',
+    film_maker_id INTEGER REFERENCES film_makers(id),
+    film_maker_snapshot_json TEXT,
+    legacy_supplier_match_json TEXT,
+    supplier_resolution TEXT NOT NULL DEFAULT 'legacy_unresolved' CHECK(supplier_resolution IN ('legacy_unresolved','master_selected','legacy_exempt')),
     supplier_name TEXT NOT NULL DEFAULT '',
     supplier_email TEXT NOT NULL DEFAULT '',
     seven_contact_email TEXT NOT NULL DEFAULT '',
@@ -345,8 +427,10 @@ const BASE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS film_order_external_tokens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     film_order_id INTEGER NOT NULL REFERENCES film_orders(id) ON DELETE CASCADE,
-    purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to')),
+    purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_eta')),
     token_hash TEXT NOT NULL UNIQUE,
+    token_state TEXT NOT NULL DEFAULT 'active' CHECK(token_state IN ('staged','active','revoked')),
+    dispatch_group_id TEXT,
     audience_email TEXT,
     expires_at TEXT NOT NULL,
     revoked_at TEXT,
@@ -354,11 +438,9 @@ const BASE_SCHEMA = `
     last_used_ip_hash TEXT,
     created_by_email TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    CONSTRAINT film_order_external_token_state_consistency CHECK((token_state='revoked')=(revoked_at IS NOT NULL))
   );
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_film_external_active_token
-    ON film_order_external_tokens(film_order_id, purpose)
-    WHERE revoked_at IS NULL;
   CREATE INDEX IF NOT EXISTS idx_film_orders_status ON film_orders(status);
   CREATE INDEX IF NOT EXISTS idx_film_orders_quotation ON film_orders(quotation_id);
   CREATE TABLE IF NOT EXISTS film_order_files (
@@ -413,6 +495,7 @@ const BASE_SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_film_order_ship_to_destinations_order
     ON film_order_ship_to_destinations(order_id, position, id);
+  ${FILM_ORDER_MAIL_TABLES}
 `;
 
 const POSTGRES_SCHEMA = BASE_SCHEMA.replaceAll(
@@ -426,6 +509,7 @@ const EXTERNAL_TOKEN_PURPOSES = [
   "customer_proof_review",
   "supplier_po",
   "customer_ship_to",
+  "maker_eta",
 ] as const;
 
 export type ExternalTokenPurpose = typeof EXTERNAL_TOKEN_PURPOSES[number];
@@ -438,7 +522,9 @@ export interface ExternalTokenRow {
   film_order_id: number;
   purpose: ExternalTokenPurpose;
   token_hash: string;
+  token_state: "staged" | "active" | "revoked";
   audience_email: string | null;
+  dispatch_group_id: string | null;
   expires_at: string;
   revoked_at: string | null;
   last_used_at: string | null;
@@ -477,6 +563,88 @@ function signExternalToken(orderId: number, purpose: ExternalTokenPurpose, expir
     .digest("base64url");
 }
 
+export function filmExternalTokenForTest(orderId: number, purpose: ExternalTokenPurpose, expiresAtMs: number, nonce: string): string {
+  return `${orderId}.${purpose}.${expiresAtMs}.${nonce}.${signExternalToken(orderId, purpose, expiresAtMs, nonce)}`;
+}
+
+export function filmExternalTokenHashForTest(rawToken: string): string {
+  return sha256(rawToken);
+}
+
+export async function issueStagedFilmOrderExternalToken(
+  db: SqlClient,
+  orderId: number,
+  purpose: ExternalTokenPurpose,
+  actorEmail: string,
+  options: {
+    audienceEmail?: string | null;
+    dispatchGroupId: string;
+    ttlDays?: number;
+  },
+): Promise<IssuedExternalToken & { tokenHash: string }> {
+  const expiresAtMs = Date.now() + (options.ttlDays ?? 30) * 24 * 60 * 60 * 1000;
+  const nonce = randomBytes(18).toString("base64url");
+  const rawToken = filmExternalTokenForTest(orderId, purpose, expiresAtMs, nonce);
+  const tokenHash = filmExternalTokenHashForTest(rawToken);
+  const now = new Date().toISOString();
+  await db.run(`
+    INSERT INTO film_order_external_tokens (
+      film_order_id,purpose,token_state,token_hash,dispatch_group_id,audience_email,expires_at,
+      created_by_email,created_at,updated_at
+    ) VALUES (?,?,'staged',?,?,?,?,?,?,?)
+  `, [
+    orderId,
+    purpose,
+    tokenHash,
+    options.dispatchGroupId,
+    options.audienceEmail?.trim() || null,
+    new Date(expiresAtMs).toISOString(),
+    actorEmail,
+    now,
+    now,
+  ]);
+  return { token: rawToken, expiresAt: new Date(expiresAtMs), tokenHash };
+}
+
+export async function promoteStagedFilmOrderExternalTokens(
+  tx: SqlClient,
+  orderId: number,
+  tokenHashes: readonly string[],
+): Promise<void> {
+  const now = new Date().toISOString();
+  for (const tokenHash of tokenHashes) {
+    await tx.run(`
+      UPDATE film_order_external_tokens
+      SET token_state='revoked', revoked_at=?, updated_at=?
+      WHERE film_order_id=? AND purpose=(
+        SELECT purpose FROM film_order_external_tokens WHERE film_order_id=? AND token_hash=?
+      ) AND token_state='active'
+    `, [now, now, orderId, orderId, tokenHash]);
+    const result = await tx.run(`
+      UPDATE film_order_external_tokens
+      SET token_state='active', updated_at=?
+      WHERE film_order_id=? AND token_hash=? AND token_state='staged'
+        AND revoked_at IS NULL AND expires_at>?
+    `, [now, orderId, tokenHash, now]);
+    if (result.changes !== 1) throw new Error("film_order_staged_token_invalid");
+  }
+}
+
+export async function revokeStagedFilmOrderExternalTokens(
+  tx: SqlClient,
+  orderId: number,
+  tokenHashes: readonly string[],
+): Promise<void> {
+  const now = new Date().toISOString();
+  for (const tokenHash of tokenHashes) {
+    await tx.run(`
+      UPDATE film_order_external_tokens
+      SET token_state='revoked', revoked_at=?, updated_at=?
+      WHERE film_order_id=? AND token_hash=? AND token_state='staged'
+    `, [now, now, orderId, tokenHash]);
+  }
+}
+
 function parseExternalToken(raw: string, expectedPurpose: ExternalTokenPurpose): { orderId: number; expiresAt: number } | null {
   const parts = raw.split(".");
   if (parts.length !== 5) return null;
@@ -492,6 +660,14 @@ function parseExternalToken(raw: string, expectedPurpose: ExternalTokenPurpose):
   const expected = signExternalToken(orderId, purpose, expiresAt, nonce);
   if (!safeEqualStrings(signature, expected)) return null;
   return { orderId, expiresAt };
+}
+
+function legacyEtaOrderId(raw: string): number | null {
+  // The old ETA format had no purpose segment. It is read-only compatibility for
+  // rows migrated into film_order_external_tokens; newly issued links are 5-part.
+  const parts = raw.split(".");
+  if (parts.length !== 3) return null;
+  return verifyEtaToken(raw);
 }
 
 export function externalClientIpHash(request: {
@@ -541,9 +717,12 @@ export function assertDeliveryDocumentPolicy(
   fileName: string,
   sizeBytes?: number,
 ): void {
-  if (order.status !== "final_approved" || !order.po_sent_at || order.delivery.deliveredOn) {
-    throw new Error("invalid_delivery_transition");
-  }
+  assertFilmOrderDeliveryDocumentGuard({
+    status: order.status,
+    poSentAt: order.po_sent_at,
+    shippedAt: order.delivery.shippedAt,
+    deliveredAt: order.delivery.deliveredAt,
+  });
   const extension = fileName.includes(".") ? fileName.slice(fileName.lastIndexOf(".")).toLowerCase() : "";
   if (extension !== ".pdf") throw new Error("invalid_delivery_document_type");
   if (sizeBytes != null && (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > DELIVERY_DOCUMENT_MAX_BYTES)) {
@@ -654,17 +833,25 @@ async function resolveExternalToken(
   rawToken: string,
   expectedPurpose: ExternalTokenPurpose,
 ): Promise<{ orderId: number; token: ExternalTokenRow } | null> {
-  const parsed = parseExternalToken(rawToken, expectedPurpose);
+  const parsed = expectedPurpose === "maker_eta"
+    ? (() => {
+      const typed = parseExternalToken(rawToken, expectedPurpose);
+      return typed ?? (() => {
+        const orderId = legacyEtaOrderId(rawToken);
+        return orderId ? { orderId, expiresAt: Number.MAX_SAFE_INTEGER } : null;
+      })();
+    })()
+    : parseExternalToken(rawToken, expectedPurpose);
   if (!parsed) return null;
   const row = await db.get<ExternalTokenRow>(
     "SELECT * FROM film_order_external_tokens WHERE token_hash = ? AND purpose = ? AND film_order_id = ?",
     [sha256(rawToken), expectedPurpose, parsed.orderId],
   );
-  if (!row || row.revoked_at || new Date(row.expires_at).getTime() <= Date.now()) return null;
+  if (!row || row.token_state !== "active" || row.revoked_at || new Date(row.expires_at).getTime() <= Date.now()) return null;
   return { orderId: parsed.orderId, token: row };
 }
 
-async function markExternalTokenUse(
+export async function markFilmOrderExternalTokenUseForLifecycle(
   db: SqlClient,
   token: ExternalTokenRow,
   request?: { headers: { get(name: string): string | null } },
@@ -688,7 +875,7 @@ async function recordExternalTokenEvent(
     const db = await getDatabase();
     const resolved = await resolveExternalToken(db, rawToken, expectedPurpose);
     if (!resolved) return;
-    await markExternalTokenUse(db, resolved.token, request);
+    await markFilmOrderExternalTokenUseForLifecycle(db, resolved.token, request);
     await addEvent(
       db,
       resolved.orderId,
@@ -752,15 +939,17 @@ async function migrateExternalTokenPurposes(db: SqlClient): Promise<void> {
     const row = await db.get<{ sql: string | null }>(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'film_order_external_tokens'"
     );
-    if (!row?.sql || row.sql.includes("'customer_ship_to'")) return;
+    if (!row?.sql || row.sql.includes("'maker_eta'")) return;
     await db.exec(`
       DROP INDEX IF EXISTS idx_film_external_active_token;
       ALTER TABLE film_order_external_tokens RENAME TO film_order_external_tokens_legacy_purpose;
       CREATE TABLE film_order_external_tokens (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         film_order_id INTEGER NOT NULL REFERENCES film_orders(id) ON DELETE CASCADE,
-        purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to')),
+        purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_eta')),
         token_hash TEXT NOT NULL UNIQUE,
+        token_state TEXT NOT NULL DEFAULT 'active' CHECK(token_state IN ('staged','active','revoked')),
+        dispatch_group_id TEXT,
         audience_email TEXT,
         expires_at TEXT NOT NULL,
         revoked_at TEXT,
@@ -770,6 +959,8 @@ async function migrateExternalTokenPurposes(db: SqlClient): Promise<void> {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+  CREATE INDEX IF NOT EXISTS idx_film_external_order_purpose_state
+    ON film_order_external_tokens(film_order_id, purpose, token_state);
       INSERT INTO film_order_external_tokens (
         id,film_order_id,purpose,token_hash,audience_email,expires_at,revoked_at,
         last_used_at,last_used_ip_hash,created_by_email,created_at,updated_at
@@ -780,17 +971,196 @@ async function migrateExternalTokenPurposes(db: SqlClient): Promise<void> {
       DROP TABLE film_order_external_tokens_legacy_purpose;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_film_external_active_token
         ON film_order_external_tokens(film_order_id, purpose)
-        WHERE revoked_at IS NULL;
+        WHERE revoked_at IS NULL AND token_state='active';
+      CREATE INDEX IF NOT EXISTS idx_film_external_order_purpose_state
+        ON film_order_external_tokens(film_order_id, purpose, token_state);
     `);
     return;
   }
 
+  if (db.dialect === "postgres") {
+    const invalidPurposes = await db.all<{ purpose: string }>(`
+      SELECT DISTINCT purpose FROM film_order_external_tokens
+      WHERE purpose NOT IN (
+        'supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_eta'
+      )
+    `);
+    if (invalidPurposes.length > 0) throw new Error("invalid_film_external_token_purpose");
+  }
   await db.exec("ALTER TABLE film_order_external_tokens DROP CONSTRAINT IF EXISTS film_order_external_tokens_purpose_check");
+  await db.exec(`
+    UPDATE film_order_external_tokens
+    SET token_state='revoked', revoked_at=COALESCE(revoked_at, updated_at, created_at)
+    WHERE token_state='revoked' AND revoked_at IS NULL
+  `);
   await db.exec(`
     ALTER TABLE film_order_external_tokens
     ADD CONSTRAINT film_order_external_tokens_purpose_check
-    CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to'))
+    CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_eta'))
   `);
+}
+
+async function migrateExternalTokenStateConsistency(db: SqlClient): Promise<void> {
+  if (db.dialect === "sqlite") {
+    const row = await db.get<{ sql: string | null }>(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='film_order_external_tokens'",
+    );
+    if (row?.sql?.includes("film_order_external_token_state_consistency")) return;
+    await db.exec(`
+      ALTER TABLE film_order_external_tokens RENAME TO film_order_external_tokens_legacy_state;
+      CREATE TABLE film_order_external_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        film_order_id INTEGER NOT NULL REFERENCES film_orders(id) ON DELETE CASCADE,
+        purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_eta')),
+        token_hash TEXT NOT NULL UNIQUE,
+        token_state TEXT NOT NULL DEFAULT 'active' CHECK(token_state IN ('staged','active','revoked')),
+        dispatch_group_id TEXT,
+        audience_email TEXT,
+        expires_at TEXT NOT NULL,
+        revoked_at TEXT,
+        last_used_at TEXT,
+        last_used_ip_hash TEXT,
+        created_by_email TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CONSTRAINT film_order_external_token_state_consistency CHECK((token_state='revoked')=(revoked_at IS NOT NULL))
+      );
+      INSERT INTO film_order_external_tokens (
+        id,film_order_id,purpose,token_hash,token_state,dispatch_group_id,audience_email,expires_at,
+        revoked_at,last_used_at,last_used_ip_hash,created_by_email,created_at,updated_at
+      )
+      SELECT id,film_order_id,purpose,token_hash,token_state,dispatch_group_id,audience_email,expires_at,
+             revoked_at,last_used_at,last_used_ip_hash,created_by_email,created_at,updated_at
+      FROM film_order_external_tokens_legacy_state;
+      DROP TABLE film_order_external_tokens_legacy_state;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_film_external_active_token
+        ON film_order_external_tokens(film_order_id, purpose)
+        WHERE revoked_at IS NULL AND token_state='active';
+    `);
+    return;
+  }
+
+  await db.exec("ALTER TABLE film_order_external_tokens DROP CONSTRAINT IF EXISTS film_order_external_token_state_consistency");
+  await db.exec(`
+    ALTER TABLE film_order_external_tokens
+    ADD CONSTRAINT film_order_external_token_state_consistency
+    CHECK((token_state='revoked')=(revoked_at IS NOT NULL))
+  `);
+}
+
+async function migrateExternalTokenLifecycle(db: SqlClient): Promise<void> {
+  const columns = db.dialect === "postgres"
+    ? await db.all<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='film_order_external_tokens'"
+    )
+    : await db.all<{ name: string }>("PRAGMA table_info(film_order_external_tokens)");
+  const columnNames = new Set(columns.map((row) => "column_name" in row ? row.column_name : row.name));
+  if (!columnNames.has("token_state")) {
+    await db.run("ALTER TABLE film_order_external_tokens ADD COLUMN token_state TEXT NOT NULL DEFAULT 'active'");
+  }
+  if (!columnNames.has("dispatch_group_id")) {
+    await db.run("ALTER TABLE film_order_external_tokens ADD COLUMN dispatch_group_id TEXT");
+  }
+
+  // Normalize legacy rows before enforcing one active token. Expired active rows are
+  // revoked; older active rotations keep only the newest row per order/purpose.
+  await db.exec(`
+    UPDATE film_order_external_tokens
+    SET token_state='revoked', revoked_at=COALESCE(revoked_at, updated_at, created_at)
+    WHERE revoked_at IS NOT NULL AND token_state <> 'revoked'
+  `);
+  await db.exec(`
+    UPDATE film_order_external_tokens
+    SET token_state='revoked', revoked_at=COALESCE(revoked_at, updated_at, created_at)
+    WHERE token_state='revoked' AND revoked_at IS NULL
+  `);
+  await db.exec(`
+    UPDATE film_order_external_tokens
+    SET token_state='revoked', revoked_at=COALESCE(revoked_at, updated_at, created_at)
+    WHERE token_state IN ('staged','active') AND revoked_at IS NOT NULL
+  `);
+  await db.run(`
+    UPDATE film_order_external_tokens
+    SET token_state='revoked', revoked_at=COALESCE(revoked_at, updated_at, created_at)
+    WHERE token_state='active' AND expires_at <= ?
+  `, [new Date().toISOString()]);
+  await db.exec(`
+    UPDATE film_order_external_tokens
+    SET token_state='revoked', revoked_at=COALESCE(revoked_at, updated_at, created_at)
+    WHERE token_state='active' AND revoked_at IS NULL
+      AND id NOT IN (
+        SELECT MAX(id)
+        FROM film_order_external_tokens
+        WHERE film_order_id=film_order_external_tokens.film_order_id
+          AND purpose=film_order_external_tokens.purpose
+          AND token_state='active'
+          AND revoked_at IS NULL
+        GROUP BY film_order_id, purpose
+      )
+  `);
+
+  await db.exec(`
+    DROP INDEX IF EXISTS idx_film_external_active_token;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_film_external_active_token
+      ON film_order_external_tokens(film_order_id, purpose)
+      WHERE revoked_at IS NULL AND token_state='active'
+  `);
+  await migrateExternalTokenStateConsistency(db);
+  await db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_film_external_order_purpose_state
+      ON film_order_external_tokens(film_order_id, purpose, token_state);
+    CREATE INDEX IF NOT EXISTS idx_film_external_dispatch_state
+      ON film_order_external_tokens(dispatch_group_id, token_state)
+  `);
+  await migrateExternalTokenDispatchAssociations(db);
+}
+
+async function migrateExternalTokenDispatchAssociations(db: SqlClient): Promise<void> {
+  const staged = await db.all<{ id: number; film_order_id: number; token_hash: string }>(`
+    SELECT id,film_order_id,token_hash
+    FROM film_order_external_tokens
+    WHERE token_state='staged' AND dispatch_group_id IS NULL
+  `);
+  if (staged.length === 0) return;
+  const envelopes = await db.all<{
+    order_id: number;
+    dispatch_group_id: string;
+    links_json: string;
+  }>(
+    "SELECT order_id,dispatch_group_id,links_json FROM film_order_mail_outbox ORDER BY created_at DESC, id DESC",
+  );
+  const associations = new Map<string, string>();
+  for (const envelope of envelopes) {
+    let links: unknown;
+    try {
+      links = JSON.parse(envelope.links_json);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(links)) continue;
+    for (const link of links) {
+      const url = link && typeof link === "object" && typeof (link as { url?: unknown }).url === "string"
+        ? (link as { url: string }).url
+        : "";
+      const typed = url.match(/\/(?:upload|purchase-order|proof-review|ship-to|design-upload|eta)\/([^/?#]+)/u);
+      if (!typed?.[1]) continue;
+      let rawToken: string;
+      try {
+        rawToken = decodeURIComponent(typed[1]);
+      } catch {
+        continue;
+      }
+      associations.set(sha256(rawToken), envelope.dispatch_group_id);
+    }
+  }
+  for (const token of staged) {
+    const dispatchGroupId = associations.get(token.token_hash)
+      ?? (envelopes.some((envelope) => envelope.order_id === token.film_order_id) ? "legacy-unassociated" : "orphan-staged");
+    await db.run(
+      "UPDATE film_order_external_tokens SET dispatch_group_id=? WHERE id=? AND token_state='staged' AND dispatch_group_id IS NULL",
+      [dispatchGroupId, token.id],
+    );
+  }
 }
 
 async function migrateLegacyProofTokens(db: SqlClient): Promise<void> {
@@ -829,6 +1199,61 @@ async function migrateLegacyProofTokens(db: SqlClient): Promise<void> {
   }
 }
 
+async function migrateLegacyEtaTokens(db: SqlClient): Promise<void> {
+  const rows = await db.all<{
+    id: number;
+    supplier_email: string;
+    eta_token: string | null;
+    eta_expires_at: string | null;
+  }>(
+    "SELECT id, supplier_email, eta_token, eta_expires_at FROM film_orders WHERE eta_token IS NOT NULL AND eta_token != ''",
+  );
+  const now = Date.now();
+  for (const row of rows) {
+    const raw = row.eta_token;
+    if (!raw) continue;
+    const orderId = verifyEtaToken(raw);
+    const expiresRaw = row.eta_expires_at ? new Date(row.eta_expires_at).getTime() : 0;
+    if (orderId !== row.id || !Number.isFinite(expiresRaw) || expiresRaw <= now) {
+      await db.run(
+        "UPDATE film_orders SET eta_token=NULL, eta_expires_at=NULL WHERE id=? AND eta_token=?",
+        [row.id, raw],
+      );
+      continue;
+    }
+    const tokenHash = sha256(raw);
+    const existing = await db.get<{ id: number; token_state: ExternalTokenRow["token_state"] }>(
+      "SELECT id,token_state FROM film_order_external_tokens WHERE token_hash=? AND purpose='maker_eta'",
+      [tokenHash],
+    );
+    const active = await db.get<{ id: number }>(`
+      SELECT id FROM film_order_external_tokens
+      WHERE film_order_id=? AND purpose='maker_eta' AND token_state='active' AND revoked_at IS NULL
+      ORDER BY id DESC LIMIT 1
+    `, [row.id]);
+    const expiresAt = new Date(expiresRaw).toISOString();
+    await db.transaction(async (tx) => {
+      if (!existing && !active) {
+        await tx.run(`
+          INSERT INTO film_order_external_tokens (
+            film_order_id,purpose,token_hash,token_state,audience_email,expires_at,
+            created_by_email,created_at,updated_at
+          ) VALUES (?,?,?,'active',?,?,?,?,?)
+        `, [
+          row.id,
+          "maker_eta",
+          tokenHash,
+          row.supplier_email.trim() || null,
+          expiresAt,
+          "legacy-migration",
+          new Date(now).toISOString(),
+          new Date(now).toISOString(),
+        ]);
+      }
+    });
+  }
+}
+
 export interface UploadFileMetadata {
   fileSizeBytes?: number | null;
   contentType?: string | null;
@@ -840,7 +1265,7 @@ export interface UploadFileMetadata {
   userAgent?: string | null;
 }
 
-const FILM_SCHEMA_VERSION = "2026-11-03-ship-to-multi-1";
+const FILM_SCHEMA_VERSION = "2026-11-04-g011-mail-boundary-1";
 
 async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
@@ -873,7 +1298,23 @@ async function getDatabase(): Promise<SqlClient> {
       return db;
     }
     await db.exec(db.dialect === "postgres" ? POSTGRES_SCHEMA : BASE_SCHEMA);
+    // Cold starts have the database FK above. Existing SQLite tables cannot gain an FK
+    // additively; enforce film_maker_id existence through selectFilmMakerForOrder and
+    // the idx_film_orders_film_maker index. PostgreSQL also gains the same named FK below.
     const migrations: Array<[string, string]> = [
+      ["film_makers", FILM_MAKERS_TABLE],
+      ["film_order_mail_outbox", FILM_ORDER_MAIL_TABLES],
+      ["film_order_mail_outbox_sender_email", "ALTER TABLE film_order_mail_outbox ADD COLUMN sender_email TEXT NOT NULL DEFAULT ''"],
+      ["film_order_mail_outbox_template_identity", "ALTER TABLE film_order_mail_outbox ADD COLUMN template_identity_json TEXT NOT NULL DEFAULT '{}'"],
+      ["film_order_mail_outbox_canonical_envelope", "ALTER TABLE film_order_mail_outbox ADD COLUMN canonical_envelope_json TEXT NOT NULL DEFAULT '{}'"],
+      ["film_orders_film_maker_id", "ALTER TABLE film_orders ADD COLUMN film_maker_id INTEGER"],
+      ["film_orders_film_maker_snapshot", "ALTER TABLE film_orders ADD COLUMN film_maker_snapshot_json TEXT"],
+      [
+        "film_orders_supplier_resolution",
+        "ALTER TABLE film_orders ADD COLUMN supplier_resolution TEXT NOT NULL DEFAULT 'legacy_unresolved' CHECK(supplier_resolution IN ('legacy_unresolved','master_selected','legacy_exempt'))",
+      ],
+      ["film_orders_legacy_supplier_match", "ALTER TABLE film_orders ADD COLUMN legacy_supplier_match_json TEXT"],
+      ["film_orders_film_maker_index", "CREATE INDEX IF NOT EXISTS idx_film_orders_film_maker ON film_orders(film_maker_id)"],
       ["film_order_files", "ALTER TABLE film_order_files ADD COLUMN url TEXT NOT NULL DEFAULT ''"],
       ["film_orders_seven_contact", "ALTER TABLE film_orders ADD COLUMN seven_contact_email TEXT NOT NULL DEFAULT ''"],
       ["film_orders_po_sent", "ALTER TABLE film_orders ADD COLUMN po_sent_at TEXT"],
@@ -974,9 +1415,12 @@ async function getDatabase(): Promise<SqlClient> {
       // 以前は既存カラムへの ALTER を全て試行し、失敗を無視していた。
       // Neon では失敗ALTERの往復だけで数十秒になるため、1バッチで冪適に宣言する。
       const idempotentColumnMigrations = migrations
+        .filter(([, sql]) => sql.startsWith("ALTER TABLE"))
         .map(([, sql]) => sql.replace(/ADD COLUMN(?! IF NOT EXISTS)/i, "ADD COLUMN IF NOT EXISTS"))
         .join(";\n");
       await db.exec(idempotentColumnMigrations);
+      // BASE_SCHEMA cannot create the order index before an older table gains the new columns.
+      await db.exec("CREATE INDEX IF NOT EXISTS idx_film_orders_film_maker ON film_orders(film_maker_id)");
     } else {
       for (const [, sql] of migrations) {
         try {
@@ -1061,14 +1505,11 @@ async function getDatabase(): Promise<SqlClient> {
         }
       }
     }
-    for (const [, sql] of migrations) {
-      try {
-        await db.exec(sql);
-      } catch {
-        // 既存カラムの場合は無視する。
-      }
-    }
     await migrateFilmOrderFileCategory(db);
+    // Lifecycle columns and constraints must exist before the PostgreSQL purpose
+    // migration normalizes token_state. The old external-token table has neither
+    // token_state nor dispatch_group_id.
+    await migrateExternalTokenLifecycle(db);
     await migrateExternalTokenPurposes(db);
     await db.exec(db.dialect === "postgres" ? `
       UPDATE film_orders f
@@ -1119,7 +1560,22 @@ async function getDatabase(): Promise<SqlClient> {
           ELSE buyer_approval_by
         END
     `);
+    if (db.dialect === "postgres") {
+      const foreignKey = await db.get<{ constraint_name: string }>(
+        "SELECT constraint_name FROM information_schema.table_constraints WHERE table_name = 'film_orders' AND constraint_name = 'film_orders_film_maker_id_fkey'",
+      );
+      if (!foreignKey) {
+        await db.exec(
+          "ALTER TABLE film_orders ADD CONSTRAINT film_orders_film_maker_id_fkey FOREIGN KEY (film_maker_id) REFERENCES film_makers(id)",
+        );
+      }
+    }
     await migrateLegacyProofTokens(db);
+    await migrateLegacyEtaTokens(db);
+    // Legacy reconciliation is a suggestion-only data migration. It runs before the schema
+    // marker advances so a failed classification/backfill cannot mark the migration complete.
+    const { reconcileLegacySuppliers } = await import("./film-maker-reconciliation");
+    await reconcileLegacySuppliers(db);
     // 複数納品先テーブル導入前の旧 scalar カラムを 1 件目（代表納品先）として引き継ぐ。
     await db.exec(`
       INSERT INTO film_order_ship_to_destinations (
@@ -1144,6 +1600,25 @@ async function getDatabase(): Promise<SqlClient> {
     return db;
   })();
   return schemaReady;
+}
+
+/**
+ * G002 では film_orders と同じトランザクション/移行スロットでマスターを管理する。
+ * 直接の SqlClient は Store 層のみ使用し、API は認可つき Store 関数経由とする。
+ */
+export async function getDatabaseForFilmMakerStore(): Promise<SqlClient> {
+  return getDatabase();
+}
+
+export async function resetFilmOrderDatabaseForTest(): Promise<void> {
+  schemaReady = null;
+  const { resetSqlClientForTest } = await import("./db");
+  await resetSqlClientForTest();
+}
+
+/** Re-run additive schema/reconciliation checks against the existing connected database. */
+export async function resetFilmOrderSchemaForTest(): Promise<void> {
+  schemaReady = null;
 }
 
 function parsePurchaseOrder(value: unknown): PurchaseOrderSnapshot | null {
@@ -1180,8 +1655,63 @@ function productionBulkUsageMlOf(quotation: QuotationRecord): string {
   return Number.isFinite(value) && value > 0 ? String(value) : "0";
 }
 
+function filmOrderGuardInputOf(
+  row: FilmOrderRow,
+  order: FilmOrder & Partial<Pick<FilmOrderView, "files" | "events">>,
+  extras: Partial<FilmOrderGuardInput> = {},
+): FilmOrderGuardInput {
+  let makerSnapshot: FilmOrderGuardInput["makerSnapshot"] = null;
+  if (row.film_maker_snapshot_json) {
+    try {
+      makerSnapshot = JSON.parse(row.film_maker_snapshot_json) as FilmOrderGuardInput["makerSnapshot"];
+    } catch {
+      makerSnapshot = null;
+    }
+  }
+  return {
+    ...order,
+    supplierResolution: row.supplier_resolution,
+    supplierEmail: row.supplier_email,
+    makerId: row.film_maker_id,
+    makerSnapshot,
+    procurementRoute: order.procurement_route,
+    printingMethod: order.printing_method,
+    shipToStatus: order.shipTo.status,
+    customerDesignStatus: order.customerDesign.status,
+    customerProofStatus: order.customerProof.status,
+    supplierApprovalStatus: order.customerProof.supplierApprovalStatus,
+    supplierApprovalAt: order.customerProof.supplierApprovalAt,
+    buyerApprovalStatus: order.customerProof.buyerApprovalStatus,
+    buyerApprovalAt: order.customerProof.buyerApprovalAt,
+    orderedAt: order.ordered_at,
+    receivingRegisteredAt: order.receiving_registered_at,
+    proofRegisteredAt: order.proof_registered_at,
+    reProofRequestedAt: order.re_proof_requested_at,
+    finalApprovedAt: order.final_approved_at,
+    poSentAt: order.po_sent_at,
+    etaUpdatedAt: order.eta_updated_at,
+    shippedAt: order.delivery.shippedAt,
+    deliveredAt: order.delivery.deliveredAt,
+    receivedAt: order.delivery.receivedAt,
+    ...extras,
+  };
+}
+
 function mapOrder(row: FilmOrderRow): FilmOrder {
   const { purchase_order_json, ...rest } = row;
+  let makerLanguage: FilmOrder["makerLanguage"];
+  let makerCompanyName: string | undefined;
+  let makerEmail: string | undefined;
+  if (row.film_maker_snapshot_json) {
+    try {
+    const snapshot = JSON.parse(row.film_maker_snapshot_json) as { language?: unknown; companyName?: unknown; email?: unknown };
+      makerLanguage = snapshot.language === "ja" || snapshot.language === "ko" ? snapshot.language : undefined;
+      makerCompanyName = typeof snapshot.companyName === "string" ? snapshot.companyName : undefined;
+      makerEmail = typeof snapshot.email === "string" ? snapshot.email : undefined;
+    } catch {
+      makerLanguage = undefined;
+    }
+  }
   let deliveryDocuments: DeliveryDocument[] = [];
   try {
     const parsed = JSON.parse(row.film_delivery_documents_json || "[]");
@@ -1245,8 +1775,8 @@ function mapOrder(row: FilmOrderRow): FilmOrder {
     carrier: row.film_carrier,
     trackingNumber: row.film_tracking_number,
     shipmentNote: row.film_shipment_note,
-    deliveryDocumentName: row.film_delivery_document_name,
-    deliveryDocumentUrl: row.film_delivery_document_url,
+    deliveryDocumentName: deliveryDocuments[0]?.name || row.film_delivery_document_name,
+    deliveryDocumentUrl: deliveryDocuments[0]?.url || row.film_delivery_document_url,
     documents: deliveryDocuments.length ? deliveryDocuments : row.film_delivery_document_url ? [{ name: row.film_delivery_document_name || "納品書", url: row.film_delivery_document_url }] : [],
     deliveredOn: row.film_delivered_on,
     deliveredAt: row.film_delivered_at,
@@ -1288,6 +1818,9 @@ function mapOrder(row: FilmOrderRow): FilmOrder {
   };
   return {
     ...rest,
+    makerLanguage,
+    makerCompanyName,
+    makerEmail,
     purchaseOrder: parsePurchaseOrder(purchase_order_json),
     sampleBulk,
     customerDesign,
@@ -1340,7 +1873,7 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
       String(snapshot?.webWidthsMm?.[0] ?? snapshot?.webWidthMm ?? ""),
       quotation.quantity,
       "",
-      DEFAULT_FILM_PROOF_EMAIL,
+      "",
       isSevenChemicalUser(quotation.createdBy.email) ? quotation.createdBy.email : sevenChemicalContactEmail(),
       "727.co.jp",
       "pending",
@@ -1395,6 +1928,10 @@ export async function listFilmOrderSummaries(actorEmail?: string): Promise<FilmO
 
 export async function getFilmOrder(id: number): Promise<FilmOrderView | null> {
   const db = await getDatabase();
+  await recoverStaleFilmOrderMailSendingAttempts(
+    new Date(Date.now() - 2 * 60_000).toISOString(),
+    db,
+  );
   const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [id]);
   if (!row) return null;
   const files = await db.all<FilmOrderFileRecord>(
@@ -1728,7 +2265,6 @@ function proofNoticeText(order: FilmOrder, supplierLinks: string[] = [], uploadU
       "",
       "※ 업로드 파일명도 시스템 규칙에 맞게 원문 상품명을 포함해 주십시오.",
       `권장 파일명：${proofName}_v번호`,
-      destination.route === "B" ? "조달 구분：Y (국내)" : destination.route === "A" ? "조달 구분：A (디지털 / 한국 수입)" : "",
       "",
       "Google 로그인은 필요하지 않습니다. 관리 통일을 위해 다른 방식의 제출은 받고 있지 않습니다.",
       "진행 제약이나 납기 이슈가 있다면 초기에 알려주시기 바랍니다.",
@@ -1762,8 +2298,7 @@ function proofNoticeText(order: FilmOrder, supplierLinks: string[] = [], uploadU
     uploadUrl,
     "",
     `推奨ファイル名：${proofName}_v番号`,
-    destination.route === "B" ? "調達区分：Y調達（国内）" : destination.route === "A" ? "調達区分：A（digital / 韓国輸入）" : "",
-    "",
+        "",
     "Googleログインは不要です。その他の手段での返却は管理上一律受付できませんので、あらかじめご了承ください。",
     "ご確認のうえ、進行上の制約がある場合はお早めにお知らせください。",
     "",
@@ -1773,249 +2308,9 @@ function proofNoticeText(order: FilmOrder, supplierLinks: string[] = [], uploadU
   ].filter(Boolean).join("\n");
 }
 
-async function sendReceivingNotice(
-  order: FilmOrderView,
-  aiFileName: string,
-  aiFileUrl: string,
-  pdfFileName: string | null,
-  pdfFileUrl: string,
-  uploadUrl: string,
-  artworkToken?: string,
-  actionOrigin?: string,
-): Promise<MailSendResult[]> {
-  const supplierLinks = supplierScopedArtworkLinks(order, artworkToken ?? "", actionOrigin ?? "https://seven-calcul.vercel.app");
-  const destination = supplierDestinationFor(order);
-  const locale = supplierLocale(order);
-  const designTo = filmDesignNotificationTo();
-  // designToは金井貿易の内部通知のため、供給先の韓国語ロケールに追随させない。
-  const designSubject = `【入稿登録】${order.order_number} ${order.product_name}`;
-  const designText = [
-      "フィルム製作用の入稿データが登録されました。下記内容をご確認のうえ、校正データ作成をご手配ください。",
-      "",
-      "【案件情報】",
-      mailBodyBase(order),
-      "",
-      "【入稿データ】",
-      `AI（必須）：${aiFileName}${aiFileUrl ? `\n${aiFileUrl}` : ""}`,
-      pdfFileName ? `PDF（参考）：${pdfFileName}${pdfFileUrl ? `\n${pdfFileUrl}` : ""}` : "PDF（参考）：なし",
-      "",
-      "【格納場所】",
-      `入稿データフォルダ：${FILM_RECEIVING_FOLDER_URL}`,
-      `校正データ返却先：${FILM_PROOF_FOLDER_URL}`,
-      "",
-      "【依頼事項】",
-      "1. 入稿AIの図面配置・色分解・文字アウトライン状況をご確認ください。",
-      "2. 製作可否と想定納期を確認のうえ、校正データをご返却ください。",
-      "3. 入稿内容に製造上の懸念がある場合は、進行前にその旨をご連絡ください。",
-    ].join("\n");
-  const mails: MailSendResult[] = [];
-  if (!destination.to || destination.to !== designTo) {
-    mails.push(await sendMail({ to: designTo, subject: designSubject, text: designText, audience: "kanei", templateKey: "film_receiving_notice" }));
-  }
-  if (destination.to) {
-    mails.push(await sendMail({
-      to: destination.to,
-      subject: proofRequestSubject(order, locale),
-      audience: "supplier",
-      text: proofNoticeText(order, supplierLinks, uploadUrl),
-      // 공급사 언어와 일치하는 직접 본문을 우선한다. 일본어는 별도 일본어 템플릿이 있을 때만 사용한다.
-      templateKey: locale === "ko" ? "film_proof_request" : undefined,
-    }));
-  }
-  if (mails.length === 0) {
-    mails.push(await sendMail({ to: designTo, subject: designSubject, text: designText, audience: "kanei", templateKey: "film_receiving_notice" }));
-  }
-  return mails;
-}
-
-async function sendProofNoticeMail(order: FilmOrderView, uploadUrl: string, proofToken: string, origin: string): Promise<MailSendResult> {
-  const destination = supplierDestinationFor(order);
-  const supplierLinks = supplierScopedArtworkLinks(order, proofToken, origin);
-  return sendMail({
-    to: destination.to ?? filmDesignNotificationTo(),
-    subject: proofRequestSubject(order, supplierLocale(order)),
-    text: proofNoticeText(order, supplierLinks, uploadUrl),
-    audience: destination.to ? "supplier" : "kanei",
-    templateKey: supplierLocale(order) === "ko" ? "film_proof_request" : undefined,
-  });
-}
-
-async function sendApprovalMail(order: FilmOrder): Promise<MailSendResult[]> {
-  const locale = supplierLocale(order);
-  const subject = locale === "ko"
-    ? `【교정 승인 · 최종 수주 확정】${order.order_number} ${order.product_name || ""}`.trim()
-    : `【校正承認・最終受注確定】${order.order_number} ${order.product_name || ""}`.trim();
-  const supplierText = locale === "ko"
-    ? [
-      "항상 원활한 협조를 주셔서 감사합니다. 패키지랩입니다.",
-      "",
-      "아래 건의 교정 데이터가 고객 및 내부 최종 승인을 통과했습니다. 이에 따라 카네이무역으로서 최종 수주 처리를 확정합니다.",
-      "",
-      "【案件 정보】",
-      localizedMailBody(order, locale),
-      "",
-      "【이후 진행】",
-      "1. 승인된 교정 데이터를 기준으로 제작을 진행해 주십시오.",
-      "2. 이후 사양 변경은 재교정 및 재견적이 필요합니다.",
-      "3. 제작 일정에 제약이 확인되면 즉시 공유해 주십시오.",
-      "",
-      "감사합니다.",
-    ].join("\n")
-    : [
-      "いつも大変お世話になっております。パッケージラボでございます。",
-      "",
-      "下記案件の校正データが顧客および社内最終承認を通過いたしました。つきましては、金井貿易として最終受注処理を確定いたしますので、ご案内申し上げます。",
-      "",
-      "【案件情報】",
-      localizedMailBody(order, locale),
-      "",
-      "【今後の進行】",
-      "1. 承認済み校正データを基準に製作を進行してください。",
-      "2. 以降の仕様変更は再校正・再見積が必要となります。",
-      "3. 製造上の納期制約が判明した場合は、速やかにご連絡ください。",
-      "",
-      "ご協力のほど、よろしくお願い申し上げます。",
-    ].join("\n");
-  const japaneseText = [
-    "下記案件の校正データが顧客および社内最終承認を通過いたしました。つきましては、金井貿易として最終受注処理を確定いたしますので、ご案内申し上げます。",
-    "",
-    "【案件情報】",
-    mailBodyBase(order),
-    "",
-    "【今後の進行】",
-    "1. 承認済み校正データを基準に製作を進行してください。",
-    "2. 以降の仕様変更は再校正・再見積が必要となります。",
-    "3. 製造上の納期制約が判明した場合は、速やかにご連絡ください。",
-  ].join("\n");
-  const destination = supplierDestinationFor(order);
-  const mails: MailSendResult[] = [];
-  // K 공급사는 직접 한국어 본문, Seven/Y는 일본어 템플릿을 사용한다.
-  if (destination.to) mails.push(await sendMail({ to: destination.to, subject, text: supplierText, audience: "supplier", templateKey: locale === "ja" ? "film_approval_final" : undefined }));
-  mails.push(await sendMail({ to: externalTo(order.seven_contact_email), subject, text: japaneseText, audience: "seven", templateKey: "film_approval_final" }));
-  mails.push(await sendMail({ to: filmDesignNotificationTo(), subject, text: japaneseText, audience: "kanei", templateKey: "film_approval_final" }));
-  return mails;
-}
-
-async function sendReProofMail(order: FilmOrderView, internalComment: string, supplierMessage: string, uploadUrl: string, proofToken: string, origin: string): Promise<MailSendResult[]> {
-  const locale = supplierLocale(order);
-  const subject = locale === "ko"
-    ? `【재교정 요청】${order.order_number} ${order.product_name || ""}`.trim()
-    : `【再校正のお願い】${order.order_number} ${order.product_name || ""}`.trim();
-  const supplierText = locale === "ko"
-    ? [
-      "필름 제작 파트너 담당자님",
-      "",
-      "항상 원활한 협조를 주셔서 감사합니다. 패키지랩입니다.",
-      "",
-      "아래 건의 교정 데이터를 품질 확인한 결과, 재교정이 필요했습니다. 번거로우시겠지만 아래 내용으로 대응을 부탁드립니다.",
-      "",
-      "【案件 정보】",
-      localizedMailBody(order, locale),
-      "",
-      "【재교정 내용】",
-      supplierMessage,
-      "",
-      `재교정 횟수：${order.re_proof_count + 1}회`,
-      "",
-      "【입고 데이터（재확인용）】",
-      fileLinksSection(supplierScopedArtworkLinks(order, proofToken, origin)),
-      "",
-      "【대응 방법】",
-      "수정된 교정 데이터는 반드시 아래 전용 페이지로 제출해 주십시오.",
-      uploadUrl,
-      "",
-      "파일명에 발주번호를 반드시 포함해 주십시오. Google 로그인은 필요하지 않습니다.",
-      "재교정 진행 상황이나 기술적 제약이 있다면 초기에 공유해 주시기 바랍니다.",
-      "",
-      "--",
-      "Package Lab",
-      "shapepouch@package-lab.com",
-    ].join("\n")
-    : [
-      "株式会社セブン化学 ご担当者様",
-      "",
-      "いつも大変お世話になっております。パッケージラボでございます。",
-      "",
-      "下記案件の校正データについて、品質確認の結果、再校正が必要となりました。お手数をおかけいたしますが、下記内容にてご対応をお願い申し上げます。",
-      "",
-      "【案件情報】",
-      localizedMailBody(order, locale),
-      "",
-      "【再校正内容】",
-      supplierMessage,
-      "",
-      `再校正回数：${order.re_proof_count + 1}回目`,
-      "",
-      "【入稿データ（再確認用）】",
-      fileLinksSection(supplierScopedArtworkLinks(order, proofToken, origin)),
-      "",
-      "【ご対応方法】",
-      "修正後の校正データは、必ず下記専用ページからご返却ください。",
-      uploadUrl,
-      "",
-      "ファイル名には発注番号を必ず含めてください。Googleログインは不要です。",
-      "再校正の進捗や技術的制約がある場合は、お早めにご共有いただけますと幸いです。",
-      "",
-      "--",
-      "パッケージラボ",
-      "shapepouch@package-lab.com",
-    ].join("\n");
-  const japaneseText = [
-    "下記案件の校正データについて、品質確認の結果、再校正が必要となりました。",
-    "",
-    "【案件情報】",
-    mailBodyBase(order),
-    "",
-    "【再校正内容】",
-    internalComment,
-    "",
-    `再校正回数：${order.re_proof_count + 1}回目`,
-    "",
-    "【返却ページ】",
-    uploadUrl,
-  ].join("\n");
-  const destination = supplierDestinationFor(order);
-  const mails: MailSendResult[] = [];
-  // K 공급사는 직접 한국어 본문, Y 공급사는 일본어 템플릿을 사용한다.
-  if (destination.to) mails.push(await sendMail({ to: destination.to, subject, text: supplierText, templateKey: locale === "ja" ? "film_reproof_request" : undefined }));
-  mails.push(await sendMail({ to: filmDesignNotificationTo(), subject, text: japaneseText, templateKey: "film_reproof_request" }));
-  return mails;
-}
-
-async function sendProofReceivedMail(
-  order: FilmOrder,
-  fileName: string,
-  fileUrl: string,
-  pdfFileName?: string,
-  pdfFileUrl?: string,
-): Promise<MailSendResult[]> {
-  const subject = `【校正データ受領・ご確認のお願い】${order.order_number} ${order.product_name}`;
-  const text = [
-    "下記案件の校正データがフィルムメーカーより登録されました。",
-    "顧客レビュー前の一次確認として、内容をご確認くださいますようお願いいたします。",
-    "",
-    "【案件情報】",
-    mailBodyBase(order),
-    "",
-    "【校正データ】",
-    `AI（必須）：${fileName}`,
-    fileUrl ? `AI URL：${fileUrl}` : "AI URL：未登録",
-    pdfFileName ? `PDF（任意）：${pdfFileName}` : "PDF（任意）：なし",
-    pdfFileName && pdfFileUrl ? `PDF URL：${pdfFileUrl}` : null,
-    "",
-    "【確認ポイント】",
-    "1. 図面配置・仕上がりサイズ・色分解内容",
-    "2. ロゴ・商品名・法令表記の正確性",
-    "3. 顧客確認前に修正が必要な技術的課題の有無",
-    "",
-    "問題がない場合は、顧客レビュー依頼へ進めてください。",
-  ].join("\n");
-  return [await sendMail({ to: externalTo(order.seven_contact_email), subject, text, audience: "seven", templateKey: "film_proof_received" })];
-}
-
 export interface SupplierOrderMailPreview {
   to: string | null;
-  route: "A" | "B" | "custom";
+  route: "order";
   subject: string;
   body: string;
   etaUrl: string;
@@ -2035,8 +2330,9 @@ function buildSupplierPurchaseOrderMailParts(
   etaUrl: string,
   purchaseOrderUrl: string,
   supplierOrderNote: string,
+  localeOverride?: MailLocale,
 ): { locale: MailLocale; subject: string; supplierText: string; japaneseText: string } {
-  const locale = supplierLocale(order);
+  const locale = localeOverride ?? supplierLocale(order);
   const noteText = supplierOrderNoteText(supplierOrderNote, locale);
   const subject = locale === "ko"
     ? `【필름 발주 요청】${order.order_number} ${order.product_name || ""}`.trim()
@@ -2107,10 +2403,11 @@ export async function buildSupplierPurchaseOrderPreview(
   origin: string,
   supplierOrderNote: string,
 ): Promise<SupplierOrderMailPreview> {
-  const destination = supplierDestinationFor(order);
+  if (!order.makerEmail?.trim() || !order.makerLanguage) throw new Error("film_maker_resolution_required");
+  const destination = { to: order.makerEmail.trim(), route: "order" as const };
   const etaUrl = `${origin}/film-orders/eta/{issued-after-send}`;
   const purchaseOrderUrl = `${origin}/film-orders/purchase-order/{issued-after-send}`;
-  const parts = buildSupplierPurchaseOrderMailParts(order, etaUrl, purchaseOrderUrl, supplierOrderNote);
+  const parts = buildSupplierPurchaseOrderMailParts(order, etaUrl, purchaseOrderUrl, supplierOrderNote, order.makerLanguage);
   return {
     to: destination.to,
     route: destination.route,
@@ -2124,37 +2421,6 @@ export async function buildSupplierPurchaseOrderPreview(
     etaUrl,
     purchaseOrderUrl,
   };
-}
-
-async function sendPurchaseOrderMail(
-  order: FilmOrder,
-  origin: string,
-  etaUrl: string,
-  purchaseOrderUrl: string,
-  supplierOrderNote: string,
-): Promise<MailSendResult[]> {
-  const destination = supplierDestinationFor(order);
-  if (!destination.to) throw new Error("supplier_destination_missing");
-  const parts = buildSupplierPurchaseOrderMailParts(order, etaUrl, purchaseOrderUrl, supplierOrderNote);
-  const purchaseOrderVars = {
-    ...filmOrderBaseMailVars(order),
-    // supplierTextには追加指示も含むため、テンプレートで二重表示にならないよう明細のみ渡す。
-    orderDetails: localizedMailBody(order, parts.locale),
-    extraInstructions: supplierOrderNote,
-    etaUrl,
-    purchaseOrderUrl,
-  };
-  const mails = [await sendMail({ to: destination.to, subject: parts.subject, text: parts.supplierText, audience: "supplier", templateKey: parts.locale === "ko" ? "film_purchase_order_supplier" : undefined, templateVars: purchaseOrderVars })];
-  mails.push(await sendMail({
-    to: externalTo(order.seven_contact_email),
-    audience: "seven",
-    configuredRecipientKey: "seven",
-    subject: `【フィルム発注送信のご連絡】${order.order_number} ${order.product_name}`,
-    text: parts.japaneseText,
-    templateKey: "film_purchase_order_internal",
-    templateVars: purchaseOrderVars,
-  }));
-  return mails;
 }
 
 function etaSecret(): string {
@@ -2252,7 +2518,7 @@ export async function getFilmOrderForProofUpload(token: string): Promise<FilmOrd
   const db = await getDatabase();
   const resolved = await resolveExternalToken(db, token, "supplier_proof");
   if (!resolved) throw new Error("invalid_proof_token");
-  await markExternalTokenUse(db, resolved.token);
+  await markFilmOrderExternalTokenUseForLifecycle(db, resolved.token);
   return getFilmOrder(resolved.orderId);
 }
 
@@ -2269,7 +2535,7 @@ export async function recordSupplierProofDownload(params: {
     file.category === "receiving"
     && file.url.includes(`/d/${params.fileId}/`)
   );
-  await markExternalTokenUse(db, resolved.token, params.request);
+  await markFilmOrderExternalTokenUseForLifecycle(db, resolved.token, params.request);
   await addEvent(
     db,
     resolved.orderId,
@@ -2284,98 +2550,36 @@ export async function updateEtaFromToken(
   token: string,
   etaDate: string,
   note: string,
-  origin = "https://seven-calcul.vercel.app",
+  origin?: string,
+  request?: { headers: { get(name: string): string | null } },
 ): Promise<(FilmOrderView & { mails?: MailSendResult[] }) | null> {
-  const orderId = verifyEtaToken(token);
-  if (orderId == null) throw new Error("invalid_eta_token");
   const date = /^\d{4}-\d{2}-\d{2}$/u.test(etaDate) ? etaDate : null;
   if (!date) throw new Error("invalid_eta_date");
   const db = await getDatabase();
-  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ? AND eta_token = ?", [orderId, token]);
+  const resolved = await resolveExternalToken(db, token, "maker_eta");
+  if (!resolved) throw new Error("invalid_eta_token");
+  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [resolved.orderId]);
   if (!row) throw new Error("invalid_eta_token");
-  const now = new Date().toISOString();
-  await db.run(
-    "UPDATE film_orders SET eta_date = ?, eta_note = ?, eta_updated_at = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
-    [date, note.slice(0, 1000), now, now, "supplier", orderId],
-  );
-  await addEvent(db, orderId, "eta", `納期見込み入力: ${date}${note ? ` / ${note}` : ""}`, "supplier");
-  const updated = await getFilmOrder(orderId);
-  if (updated) {
-    const destination = supplierDestinationFor(updated);
-    const locale = supplierLocale(updated);
-    const subject = locale === "ko"
-      ? `【납기 전망 등록 완료】${updated.order_number} ${updated.product_name || ""}`.trim()
-      : `【納期見込み登録】${updated.order_number} ${updated.product_name || ""}`.trim();
-    const supplierText = locale === "ko"
-      ? [
-        "납기 전망 등록이 완료되었습니다.",
-        "",
-        `발주번호：${updated.order_number}`,
-        `품목：${updated.product_name || "-"}`,
-        `등록된 납기 전망：${date}`,
-        note ? `메모：${note}` : "",
-      ].filter(Boolean).join("\n")
-      : [
-        "納期見込みの登録を受け付けました。",
-        "",
-        localizedMailBody(updated, locale),
-        "",
-        `納期見込み：${date}`,
-        note ? `メモ：${note}` : "",
-        "",
-        "製造・納期に支障がある場合は、早急に shapepouch@package-lab.com までご連絡ください。",
-      ].filter(Boolean).join("\n");
-    const japaneseText = [
-      "株式会社セブン化学 充填生産ご担当者様",
-      "",
-      "フィルムメーカーが納期見込みを登録しました。フィルム入荷予定として充填スケジュール・受領準備にご共有ください。",
-      "",
-      "【案件情報】",
-      mailBodyBase(updated),
-      `調達ルート：${updated.procurement_route === "Y" ? "国内（日本語メーカー）" : "海外（韓国語メーカー）"}`,
-      updated.supplier_name ? `フィルムメーカー：${updated.supplier_name}` : "",
-      "",
-      "【フィルム入荷予定】",
-      `納期見込み：${date}`,
-      note ? `メーカーメモ：${note}` : "",
-      "",
-      "【入荷・充填準備の確認ポイント】",
-      "1. 上記入荷予定でフィルム受領→充填スケジュールが成立するか",
-      "2. 納期遅延リスクがある場合は金井貿易へ早急に連絡",
-      "3. 受領準備・保管スペース・充填ライン計画の確認",
-      "",
-      `管理画面：${origin}/film-orders`,
-    ].filter(Boolean).join("\n");
-    const mails: MailSendResult[] = [];
-    if (destination.to) mails.push(await sendMail({ to: destination.to, subject, text: supplierText, audience: "supplier", templateKey: locale === "ko" ? "film_eta_supplier" : undefined }));
-    mails.push(await sendMail({
-      to: externalTo(updated.seven_contact_email),
-      subject: `【フィルム入荷予定】${date} / ${updated.order_number} ${updated.product_name || ""}`.trim(),
-      text: japaneseText,
-      audience: "seven",
-      configuredRecipientKey: "seven",
-      templateKey: "film_eta_internal",
-      templateVars: {
-        orderNumber: updated.order_number,
-        productName: updated.product_name || "",
-        etaDate: date,
-        note: note || "",
-        supplierName: updated.supplier_name || "",
-        managementUrl: `${origin}/film-orders`,
-      },
-    }));
-    await logMailEvents(db, orderId, mails, "納期見込み通知", "supplier");
-    return { ...updated, mails };
-  }
-  return updated;
+  await markFilmOrderExternalTokenUseForLifecycle(db, resolved.token, request);
+  assertFilmOrderActionGuard(filmOrderGuardInputOf(row, mapOrder(row)), "update-eta");
+  const result = await runFilmOrderAction(resolved.orderId, "update-eta", {
+    etaDate: date,
+    note: note.slice(0, 1000),
+    origin: resolveFilmOrderExternalOrigin(origin),
+    expectedUpdatedAt: row.updated_at,
+  }, "machine:maker");
+  return { ...result.order, mails: result.mails ?? [] };
 }
 
-export async function getFilmOrderForEta(token: string): Promise<FilmOrderView | null> {
-  const orderId = verifyEtaToken(token);
-  if (orderId == null) throw new Error("invalid_eta_token");
+export async function getFilmOrderForEta(
+  token: string,
+  request?: { headers: { get(name: string): string | null } },
+): Promise<FilmOrderView | null> {
   const db = await getDatabase();
-  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ? AND eta_token = ?", [orderId, token]);
-  return row ? getFilmOrder(orderId) : null;
+  const resolved = await resolveExternalToken(db, token, "maker_eta");
+  if (!resolved) return null;
+  await markFilmOrderExternalTokenUseForLifecycle(db, resolved.token, request);
+  return getFilmOrder(resolved.orderId);
 }
 
 export async function getFilmOrderForSupplierPurchaseOrder(
@@ -2385,7 +2589,7 @@ export async function getFilmOrderForSupplierPurchaseOrder(
   const db = await getDatabase();
   const resolved = await resolveExternalToken(db, token, "supplier_po");
   if (!resolved) throw new Error("invalid_supplier_po_token");
-  await markExternalTokenUse(db, resolved.token, request);
+  await markFilmOrderExternalTokenUseForLifecycle(db, resolved.token, request);
   const order = await getFilmOrder(resolved.orderId);
   if (!order || order.status !== "final_approved" || !order.po_sent_at) {
     throw new Error("invalid_supplier_po_token");
@@ -2402,133 +2606,37 @@ export async function getFilmOrderForSupplierPurchaseOrder(
   return refreshed;
 }
 
-async function sendFilmDeliveryNotice(
-  order: FilmOrderView,
-  kind: "shipment" | "delivery",
-): Promise<MailSendResult[]> {
-  if (!order.seven_contact_email) return [];
-  const isShipment = kind === "shipment";
-  const subject = isShipment
-    ? `【フィルム出荷通知】${order.order_number} ${order.product_name || ""}`.trim()
-    : `【フィルム納品完了通知】${order.order_number} ${order.product_name || ""}`.trim();
-  const text = [
-    "株式会社セブン化学 ご担当者様",
-    "",
-    "いつも大変お世話になっております。パッケージラボでございます。",
-    "",
-    isShipment
-      ? "下記フィルムがメーカーより出荷されました。到着まで今しばらくお待ちください。"
-      : "下記フィルムの納品が完了しました。受領確認後、パウチ製作へ進めます。",
-    "",
-    "【案件情報】",
-    mailBodyBase(order),
-    "",
-    isShipment ? "【出荷内容】" : "【納品内容】",
-    `${isShipment ? "出荷日" : "納品日"}：${isShipment ? order.delivery.shippedOn : order.delivery.deliveredOn}`,
-    order.delivery.carrier ? `運送会社：${order.delivery.carrier}` : "",
-    order.delivery.trackingNumber ? `追跡番号：${order.delivery.trackingNumber}` : "",
-    ...order.delivery.documents.map((doc, index) => `書類${index + 1}：${doc.name} / ${doc.url}`),
-    isShipment ? order.delivery.shipmentNote : order.delivery.deliveryNote,
-    "",
-    "ご不明点がございましたら、担当までお問い合わせください。",
-  ].filter(Boolean).join("\n");
-  const mail = await sendMail({ to: externalTo(order.seven_contact_email), subject, text, audience: "seven", templateKey: "film_delivery_shipped" });
-  return [mail];
-}
-
 export async function updateFilmDeliveryFromToken(
   token: string,
-  params: {
-    kind: "shipment" | "delivery";
-    date: unknown;
-    carrier?: unknown;
-    trackingNumber?: unknown;
-    note?: unknown;
-    documentName?: unknown;
-    documentUrl?: unknown;
-    documents?: unknown;
-  },
-): Promise<FilmOrderView> {
-  const orderId = verifyEtaToken(token);
-  if (orderId == null) throw new Error("invalid_eta_token");
+  params: { kind: "shipment" | "delivery"; date: string; note?: string; carrier?: string; trackingNumber?: string; documentName?: string; documentUrl?: string; documents?: unknown },
+  origin?: string,
+  request?: { headers: { get(name: string): string | null } },
+): Promise<FilmOrderView & { mails?: MailSendResult[] }> {
   const db = await getDatabase();
-  const row = await db.get<FilmOrderRow>(
-    "SELECT * FROM film_orders WHERE id = ? AND eta_token = ?",
-    [orderId, token],
-  );
+  const resolved = await resolveExternalToken(db, token, "maker_eta");
+  if (!resolved) throw new Error("invalid_eta_token");
+  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [resolved.orderId]);
   if (!row) throw new Error("invalid_eta_token");
-  const order = await getFilmOrder(orderId);
-  if (!order || order.status !== "final_approved" || !order.po_sent_at) {
-    throw new Error("invalid_eta_token");
-  }
-
-  const date = typeof params.date === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(params.date) ? params.date : "";
-  if (!date) throw new Error("invalid_delivery_date");
-  const now = new Date().toISOString();
-
-  if (params.kind === "shipment") {
-    if (order.delivery.deliveredOn) throw new Error("invalid_delivery_transition");
-    if (order.shipTo.status !== "confirmed") throw new Error("ship_to_confirmation_required");
-    const carrier = typeof params.carrier === "string" ? params.carrier.trim().slice(0, 200) : "";
-    const trackingNumber = typeof params.trackingNumber === "string" ? params.trackingNumber.trim().slice(0, 200) : "";
-    const note = typeof params.note === "string" ? params.note.trim().slice(0, 1000) : "";
-    const documentName = typeof params.documentName === "string" ? params.documentName.trim().slice(0, 200) : "";
-    const documentUrl = params.documentUrl ? validFileUrl(params.documentUrl) : "";
-    if (documentUrl && !documentName) throw new Error("delivery_document_name_required");
-    let documents: Array<{ name: string; url: string }> = [];
-    if (Array.isArray(params.documents)) {
-      documents = params.documents
-        .filter((item): item is { name: string; url: string } => (
-          item && typeof item === "object"
-          && typeof item.name === "string"
-          && typeof item.url === "string"
-        ))
-        .map((item) => ({
-          name: item.name.trim().slice(0, 200) || "納品書",
-          url: validFileUrl(item.url),
-        }))
-        .filter((item) => item.url)
-        .slice(0, 3);
-    }
-    if (!documents.length && documentUrl) {
-      documents = [{ name: documentName || "納品書", url: documentUrl }];
-    }
-    if (!documents.length) throw new Error("delivery_document_required");
-    await db.run(`
-      UPDATE film_orders SET
-        film_shipped_on=?, film_shipped_at=?, film_carrier=?, film_tracking_number=?, film_shipment_note=?,
-        film_delivery_document_name=?, film_delivery_document_url=?, film_delivery_documents_json=?,
-        updated_at=?, updated_by_email='supplier'
-      WHERE id=?
-    `, [date, now, carrier, trackingNumber, note, documents[0]!.name, documents[0]!.url, JSON.stringify(documents), now, orderId]);
-    await addEvent(
-      db,
-      orderId,
-      "delivery",
-      `メーカー出荷報告: ${date}${carrier ? ` / ${carrier}` : ""}${trackingNumber ? ` / ${trackingNumber}` : ""} / 書類${documents.length}件`,
-      "supplier",
-    );
-  } else if (params.kind === "delivery") {
+  await markFilmOrderExternalTokenUseForLifecycle(db, resolved.token, request);
+  const order = mapOrder(row);
+  const guard = filmOrderGuardInputOf(row, order);
+  if (params.kind === "shipment") assertFilmOrderActionGuard(guard, "report-shipment");
+  else {
     if (!order.delivery.shippedOn) throw new Error("shipment_report_required");
-    if (date < order.delivery.shippedOn) throw new Error("invalid_delivery_date");
-    const note = typeof params.note === "string" ? params.note.trim().slice(0, 1000) : "";
-    await db.run(`
-      UPDATE film_orders SET
-        film_delivered_on=?, film_delivered_at=?, film_delivery_note=?, updated_at=?, updated_by_email='supplier'
-      WHERE id=?
-    `, [date, now, note, now, orderId]);
-    await addEvent(db, orderId, "delivery", `メーカー納品報告: ${date}${note ? ` / ${note}` : ""}`, "supplier");
-  } else {
-    throw new Error("invalid_delivery_kind");
+    assertFilmOrderActionGuard(guard, "report-delivery");
   }
-
-  const refreshed = await getFilmOrder(orderId);
-  if (!refreshed) throw new Error("film_order_not_found");
-  const mails = await sendFilmDeliveryNotice(refreshed, params.kind);
-  await logMailEvents(db, orderId, mails, params.kind === "shipment" ? "出荷通知" : "納品通知", "supplier");
-  const result = await getFilmOrder(orderId);
-  if (!result) throw new Error("film_order_not_found");
-  return result;
+  const result = await runFilmOrderAction(resolved.orderId, params.kind === "shipment" ? "report-shipment" : "report-delivery", {
+    kind: params.kind,
+    date: params.date,
+    note: params.note,
+    carrier: params.carrier,
+    trackingNumber: params.trackingNumber,
+    documentName: params.documentName,
+    documentUrl: params.documentUrl,
+    origin: resolveFilmOrderExternalOrigin(origin),
+    expectedUpdatedAt: row.updated_at,
+  }, "machine:maker");
+  return { ...result.order, mails: result.mails ?? [] };
 }
 
 function validFileUrl(value: unknown): string {
@@ -2622,109 +2730,10 @@ function buyerApprovalNoticeTo(order: FilmOrder): string {
     || filmDesignNotificationTo();
 }
 
-async function sendKaneiApprovalRequiredMail(
-  order: FilmOrderView,
-  origin: string,
-  aiFileName: string,
-  pdfFileName?: string,
-): Promise<MailSendResult> {
-  const subject = `【承認依頼】金井貿易校正承認をお願いします ${order.order_number} ${order.product_name}`.trim();
-  const text = [
-    "金井貿易 ご担当者様",
-    "",
-    "校正データが登録されました。金井貿易の校正承認をお願いします。",
-    "この承認を記録すると、Buyer最終承認ステップへ進みます。",
-    "",
-    "【案件情報】",
-    mailBodyBase(order),
-    "",
-    "【校正データ】",
-    `AI（必須）：${aiFileName}`,
-    pdfFileName ? `PDF（任意）：${pdfFileName}` : "PDF（任意）：なし",
-    "",
-    "【現在の承認状態】",
-    "① 金井貿易校正承認：待ち",
-    "② Buyer最終承認：待ち",
-    "",
-    "発注管理ページから「金井貿易校正承認」を記録してください。",
-    `${origin}/film-orders`,
-    "",
-    "--",
-    "Package Lab Film Workflow",
-  ].join("\n");
-  return sendMail({ to: externalTo(kaneiApprovalNoticeTo()), subject, text, audience: "kanei", templateKey: "film_kanei_approval_request" });
-}
-
-async function sendBuyerFinalApprovalRequiredMail(order: FilmOrderView, origin: string): Promise<MailSendResult> {
-  const buyerLabel = buyerCompanyLabelOfOrder(order);
-  const subject = `【最終承認待ち】${buyerLabel}の承認のみ残っています ${order.order_number} ${order.product_name}`.trim();
-  const approvalBy = order.customerProof.supplierApprovalBy || "-";
-  const approvalAt = order.customerProof.supplierApprovalAt
-    ? new Date(order.customerProof.supplierApprovalAt).toLocaleString("ja-JP")
-    : "-";
-  const text = [
-    `${buyerLabel} ご担当者様`,
-    "",
-    "金井貿易の校正承認が記録されました。",
-    `現在は ${buyerLabel} の最終承認のみ残っています。この承認を完了すると発注が最終承認済みになります。`,
-    "",
-    "【案件情報】",
-    mailBodyBase(order),
-    "",
-    "【金井貿易校正承認】",
-    `承認日時：${approvalAt}`,
-    `承認アカウント：${approvalBy}`,
-    order.customerProof.supplierApprovalNote ? `承認根拠：${order.customerProof.supplierApprovalNote}` : "",
-    "",
-    "【現在の承認状態】",
-    "① 金井貿易校正承認：済み",
-    `② ${buyerLabel}最終承認：待ち`,
-    "",
-    "発注管理ページから「校正を最終承認する」を実行してください。",
-    `${origin}/film-orders`,
-    "",
-    "--",
-    "Package Lab Film Workflow",
-  ].filter(Boolean).join("\n");
-  return sendMail({ to: externalTo(buyerApprovalNoticeTo(order)), subject, text, audience: buyerMailAudienceOf(order), templateKey: "film_buyer_final_approval_request" });
-}
-
 function proofRequestSubject(order: FilmOrder, locale: MailLocale): string {
   return locale === "ko"
     ? `【교정 데이터 제출 요청】${order.order_number} ${registeredJapaneseDisplayNameKo(order.product_name || "")}`.trim()
     : `【校正データ返却のお願い】${order.order_number} ${order.product_name || ""}`.trim();
-}
-
-async function sendShipToRequestMail(
-  order: FilmOrderView,
-  destination: { to: string | null; name: string; contact: string },
-  requestUrl: string,
-): Promise<MailSendResult> {
-  if (!destination.to) throw new Error("customer_email_required");
-  const greeting = destination.contact ? `${destination.name}\n${destination.contact} 様` : `${destination.name} 御中`;
-  const subject = `【納品先ご登録のお願い】${order.order_number} ${order.product_name || ""}`.trim();
-  const text = [
-    greeting,
-    "",
-    "いつも大変お世話になっております。パッケージラボでございます。",
-    "",
-    "下記案件のフィルム納品先をご登録ください。既定の顧客住所が初期入力されています。",
-    "別の納品先をご希望の場合は、納品先一覧を選択するか、新しい納品先情報をご入力ください。",
-    "",
-    "【案件情報】",
-    ...mailBodyBase(order),
-    "",
-    "【納品先登録ページ】",
-    requestUrl,
-    "",
-    "登録いただいた納品先は、この顧客の住所録として保存されます。次回以降も選択してご利用いただけます。",
-    "本メールに心当たりがない場合は、登録せずに破棄してください。",
-    "",
-    "--",
-    "Package Lab",
-    "shapepouch@package-lab.com",
-  ].join("\n");
-  return sendMail({ to: destination.to, subject, text, audience: "customer", templateKey: "film_ship_to_request" });
 }
 
 async function customerDestinationFor(order: FilmOrder): Promise<{ to: string | null; name: string; contact: string }> {
@@ -2732,7 +2741,7 @@ async function customerDestinationFor(order: FilmOrder): Promise<{ to: string | 
   const quotation = await getQuotation(order.quotation_id);
   const email = typeof quotation?.payload.customerEmail === "string" ? quotation.payload.customerEmail.trim() : "";
   return {
-    to: email ? externalTo(email) : null,
+    to: email ? email : null,
     name: quotation?.customerName || order.customer_name,
     contact: quotation?.customerContact || "",
   };
@@ -2843,194 +2852,6 @@ async function customerDesignSpecificationLines(order: FilmOrder): Promise<strin
   ];
 }
 
-async function sendCustomerDesignRequestMail(order: FilmOrderView, uploadUrl: string): Promise<MailSendResult> {
-  const destination = await customerDestinationFor(order);
-  if (!destination.to) throw new Error("customer_email_required");
-  const greeting = destination.contact ? `${destination.name}\n${destination.contact} 様` : `${destination.name} 御中`;
-  const subject = `【デザイン原稿ご入稿のお願い】${order.order_number} ${order.product_name || ""}`.trim();
-  const specificationLines = await customerDesignSpecificationLines(order);
-  const text = [
-    greeting,
-    "",
-    "いつも大変お世話になっております。パッケージラボでございます。",
-    "",
-    "このたびは、パウチデザイン製作のご依頼を賜り誠にありがとうございます。",
-    "より高品質な仕上がりを実現するため、下記専用ページより印刷用デザイン原稿（AIデータ）をご入稿くださいますようお願い申し上げます。",
-    "",
-    "【案件情報】",
-    ...orderSummaryMailBase(order),
-    "",
-    "【お見積製品仕様・ご確認用】",
-    ...specificationLines,
-    "",
-    "【ご入稿いただくデータ】",
-    "必須：AIデータ（編集可能なレイヤー構成のもの）",
-    "推奨：確認用PDF（見た目・配置のご確認用）",
-    "",
-    "【ご入稿ページ】",
-    uploadUrl,
-    "",
-    "【技術上のご確認事項】",
-    "1. トンボ・塗り足し（出来上がりサイズ外側3mm）をご確認ください。",
-    "2. 文字はアウトライン化してください。",
-    "3. リンク画像は埋め込みいただくか、ZIP形式でご入稿ください。",
-    "4. 特殊色・明白・白抜きの有無をご確認ください。",
-    "",
-    `ファイルサイズの上限は1ファイルあたり${Math.floor(customerDesignMaxBytes() / 1024 / 1024)}MBです。`,
-    "入稿いただいた原稿は、担当デザイナーが製作適性を確認したうえで進行いたします。必要に応じて修正のご相談をさせていただきます。",
-    "",
-    "ご不明な点がございましたら、お気軽にお問い合わせください。",
-    "今後とも何卒よろしくお願い申し上げます。",
-    "",
-    "--",
-    "パッケージラボ デザイン制作チーム",
-    "shapepouch@package-lab.com",
-  ].join("\n");
-  return sendMail({
-    to: destination.to,
-    subject,
-    text,
-    audience: "customer",
-    templateKey: "customer_design_request",
-    templateVars: {
-      orderNumber: order.order_number,
-      productName: order.product_name || "",
-      specification: specificationLines.join("\n"),
-      uploadUrl,
-    },
-  });
-}
-
-async function sendCustomerDesignCorrectionMail(order: FilmOrderView, reason: string, uploadUrl: string): Promise<MailSendResult> {
-  const destination = await customerDestinationFor(order);
-  if (!destination.to) throw new Error("customer_email_required");
-  const greeting = destination.contact ? `${destination.name}\n${destination.contact} 様` : `${destination.name} 御中`;
-  const subject = `【デザイン原稿修正のお願い】${order.order_number} ${order.product_name || ""}`.trim();
-  const specificationLines = await customerDesignSpecificationLines(order);
-  const text = [
-    greeting,
-    "",
-    "いつも大変お世話になっております。パッケージラボ デザイン制作チームでございます。",
-    "",
-    "ご入稿いただいたデザイン原稿を確認いたしました。印刷品質と製造適性を担保するため、下記の修正をご検討いただけますと幸いです。",
-    "",
-    "【案件情報】",
-    ...orderSummaryMailBase(order),
-    "",
-    "【お見積製品仕様・ご確認用】",
-    ...specificationLines,
-    "",
-    "【確認結果と修正内容】",
-    reason,
-    "",
-    "【再入稿データ】",
-    "必須：修正後のAIデータ",
-    "推奨：修正後の確認用PDF",
-    "",
-    "【再入稿ページ】",
-    uploadUrl,
-    "",
-    "なお、修正の程度によっては校正時間が変動する場合がございます。あらかじめご了承ください。",
-    "内容のご説明が必要な場合は、担当より個別にご連絡いたします。",
-    "",
-    "お手数をおかけいたしますが、何卒よろしくお願い申し上げます。",
-    "",
-    "--",
-    "パッケージラボ デザイン制作チーム",
-    "shapepouch@package-lab.com",
-  ].join("\n");
-  return sendMail({
-    to: destination.to,
-    subject,
-    text,
-    audience: "customer",
-    templateKey: "customer_design_correction",
-    templateVars: {
-      orderNumber: order.order_number,
-      productName: order.product_name || "",
-      specification: specificationLines.join("\n"),
-      reason,
-      uploadUrl,
-    },
-  });
-}
-
-async function sendCustomerProofReviewMail(
-  order: FilmOrderView,
-  proof: FilmOrderFileRecord,
-  reviewUrl: string,
-): Promise<MailSendResult> {
-  const destination = await customerDestinationFor(order);
-  if (!destination.to) throw new Error("customer_email_required");
-  const greeting = destination.contact ? `${destination.name}\n${destination.contact} 様` : `${destination.name} 御中`;
-  const subject = `【校正ご確認のお願い】${order.order_number} ${order.product_name || ""}`.trim();
-  const text = [
-    greeting,
-    "",
-    "いつも大変お世話になっております。パッケージラボでございます。",
-    "",
-    "お見積書にてご依頼いただいたパウチデザインの校正データが完成いたしましたので、下記専用ページにてご確認をお願い申し上げます。",
-    "",
-    "【案件情報】",
-    ...mailBodyBase(order),
-    "",
-    "【校正データ】",
-    `バージョン：v${proof.version}`,
-    `ファイル名：${proof.file_name}`,
-    "",
-    "【ご確認ページ】",
-    reviewUrl,
-    "",
-    "【ご確認いただきたい項目】",
-    "1. ロゴ・商品名・表記に誤字・脱字がないか",
-    "2. 色味・配置・仕上がりサイズがご意図と一致しているか",
-    "3. 規格・法令に関わる注意書きや必要表記が過不足なく含まれているか",
-    "",
-    "ページ内の「承認する」ボタンを押された時点で、校正内容に同意したものとさせていただきます。",
-    "修正をご希望の場合は、修正箇所をご入力ください。担当者が内容を確認後、再度校正をご提案いたします。",
-    "",
-    "ご不明な点がございましたら、お気軽にお問い合わせください。",
-    "今後とも何卒よろしくお願い申し上げます。",
-    "",
-    "--",
-    "パッケージラボ",
-    "shapepouch@package-lab.com",
-  ].join("\n");
-  return sendMail({ to: destination.to, subject, text, audience: "customer", templateKey: "customer_proof_review_request" });
-}
-
-async function sendCustomerProofDecisionMail(order: FilmOrderView): Promise<MailSendResult> {
-  const destination = await customerDestinationFor(order);
-  if (!destination.to) throw new Error("customer_email_required");
-  const statusText = order.customerProof.status === "approved" ? "ご承認" : "修正ご依頼";
-  const subject = `【校正${statusText}受付完了】${order.order_number} ${order.product_name || ""}`.trim();
-  const text = [
-    destination.contact ? `${destination.contact} 様` : destination.name,
-    "",
-    "いつも大変お世話になっております。パッケージラボでございます。",
-    "",
-    `校正データに関する${statusText}を承りましたので、下記のとおり受付内容をご案内いたします。`,
-    "",
-    "【受付内容】",
-    ...mailBodyBase(order),
-    "",
-    `受付日時：${new Date().toLocaleString("ja-JP")}`,
-    order.customerProof.status === "correction_requested" ? `修正内容：${order.customerProof.correctionReason}` : "",
-    "",
-    order.customerProof.status === "approved"
-      ? "ご承認内容をもとに製造手配を進めさせていただきます。製造過程で技術的に確認が必要な事項が生じた場合は、改めてご連絡いたします。"
-      : "ご指摘内容を制作チームで確認し、修正方針および再校正のご案内をさせていただきます。",
-    "",
-    "その他ご不明な点がございましたら、お気軽にお問い合わせください。",
-    "今後とも何卒よろしくお願い申し上げます。",
-    "",
-    "--",
-    "パッケージラボ",
-    "shapepouch@package-lab.com",
-  ].join("\n");
-  return sendMail({ to: destination.to, subject, text, audience: "customer", templateKey: "customer_proof_decision" });
-}
-
 async function logMailEvents(
   db: SqlClient,
   orderId: number,
@@ -3042,6 +2863,123 @@ async function logMailEvents(
     const suffix = mail.dryRun ? " (dry-run)" : mail.error ? ` (error: ${mail.error})` : "";
     await addEvent(db, orderId, "email", `${label} → ${mail.to}${suffix}`, actorEmail);
   }
+}
+
+type FilmOrderLifecycleAction = import("./film-order-mail-lifecycle").FilmOrderLifecycleWorkflowAction;
+type FilmOrderMailActionOrigin = import("./film-order-mail-lifecycle").FilmOrderMailActionOrigin;
+
+async function executeFilmOrderLifecycle(
+  id: number,
+  action: FilmOrderLifecycleAction,
+  params: Parameters<typeof runFilmOrderAction>[2],
+  actorEmail: string,
+  origin: string,
+  mode: "preview" | "confirm" = "confirm",
+): Promise<{ order?: FilmOrderView; preview?: Awaited<ReturnType<typeof import("./film-order-mail-lifecycle").prepareFilmOrderMail>>; lifecycle?: FilmOrderMailConfirmResult; mails?: MailSendResult[] }> {
+  const lifecycleOrigin = resolveFilmOrderExternalOrigin(origin) as FilmOrderMailActionOrigin;
+  const {
+    prepareFilmOrderMail,
+    confirmFilmOrderMail,
+    loadFilmOrderMailPreviewForConfirm,
+  } = await import("./film-order-mail-lifecycle");
+  const currentOrder = await getFilmOrder(id);
+  if (!currentOrder) throw new Error("film_order_not_found");
+  let customerEmail = ["request-ship-to-registration","request-customer-design-upload","request-customer-design-correction","approve"].includes(action)
+    ? (await customerDestinationFor(currentOrder)).to ?? undefined
+    : undefined;
+  if (action === "approve" && !customerEmail) {
+    const lifecycleDb = await getDatabase();
+    const quotationRow = await lifecycleDb.get<{ payload_json: string }>("SELECT payload_json FROM quotations WHERE id=?", [currentOrder.quotation_id]);
+    try {
+      const payload = quotationRow ? JSON.parse(quotationRow.payload_json) as { customerEmail?: unknown } : null;
+      customerEmail = typeof payload?.customerEmail === "string" ? payload.customerEmail.trim() || undefined : undefined;
+    } catch {}
+  }
+  const command = {
+    orderId: id,
+    action,
+    actorEmail,
+    origin: lifecycleOrigin,
+    expectedUpdatedAt: params.expectedUpdatedAt ? String(params.expectedUpdatedAt) : undefined,
+    aiFileName: validFileName(params.aiFileName) ?? undefined,
+    aiFileUrl: validFileUrl(params.aiFileUrl) ?? undefined,
+    pdfFileName: validFileName(params.pdfFileName) ?? undefined,
+    pdfFileUrl: validFileUrl(params.pdfFileUrl) ?? undefined,
+    finalFileName: validFileName(params.fileName) ?? undefined,
+    finalFileUrl: validFileUrl(params.fileUrl) ?? undefined,
+    proofFileName: (validFileName(params.aiFileName) ?? validFileName(params.fileName)) ?? undefined,
+    proofFileUrl: (validFileUrl(params.aiFileUrl) || validFileUrl(params.fileUrl)) || undefined,
+    proofPdfFileName: validFileName(params.pdfFileName) ?? undefined,
+    proofPdfFileUrl: validFileUrl(params.pdfFileUrl) ?? undefined,
+    note: trimParam(params.note, 1000) ?? undefined,
+    supplierMessage: trimParam(params.supplierMessage, 2000) ?? undefined,
+    approverName: trimParam(params.approverName, 200) || undefined,
+    evidence: trimParam(params.evidence, 2000) || undefined,
+    offlineReason: trimParam(params.offlineReason, 2000) || undefined,
+    supplierOrderNote: trimParam(params.supplierOrderNote, 4000) ?? undefined,
+    customerMessage: trimParam(params.customerMessage, 2000) ?? undefined,
+    customerEmail: params.customerEmail ? String(params.customerEmail) : customerEmail,
+    decision: params.decision === "approve" || params.decision === "correction" ? params.decision : undefined,
+    etaDate: trimParam(params.etaDate, 10) || undefined,
+    deliveryDate: trimParam(params.date ?? params.deliveryDate, 10) || undefined,
+    deliveryKind: params.kind === "shipment" || params.kind === "delivery" ? params.kind : undefined,
+    carrier: trimParam(params.carrier, 200) || undefined,
+    trackingNumber: trimParam(params.trackingNumber, 200) || undefined,
+    documentName: trimParam(params.documentName, 200) || undefined,
+    documentUrl: validFileUrl(params.documentUrl) || undefined,
+    receivedNote: trimParam(params.note, 1000) || undefined,
+    productionPlanStartDate: trimParam(params.productionPlanStartDate, 10) || undefined,
+    productionPlanEndDate: trimParam(params.productionPlanEndDate, 10) || undefined,
+    ipAddressHash: params.ipAddressHash ? String(params.ipAddressHash) : null,
+    tokenValue: typeof params.token === "string" ? params.token : undefined,
+    shipToDestinations: params.shipToDestinations as Array<Record<string, unknown>> | undefined,
+    shipToRegisteredBy: typeof params.shipToRegisteredBy === "string" ? params.shipToRegisteredBy : undefined,
+    customerDesignFileName: validFileName(params.customerDesignFileName) ?? undefined,
+    customerDesignFileUrl: validFileUrl(params.customerDesignFileUrl) ?? undefined,
+    customerDesignNote: trimParam(params.customerDesignNote, 1000) || undefined,
+  } satisfies Parameters<typeof prepareFilmOrderMail>[0];
+  const previewDispatchGroupId = typeof params.mailDispatchGroupId === "string"
+    ? params.mailDispatchGroupId.trim()
+    : "";
+  const suppliedHashes = Array.isArray(params.mailEnvelopeHashes)
+    ? params.mailEnvelopeHashes.filter((hash): hash is string => typeof hash === "string" && hash.length > 0)
+    : [];
+  if (mode === "preview") {
+    return { preview: await prepareFilmOrderMail(command) };
+  }
+  const preview = previewDispatchGroupId && suppliedHashes.length
+    ? await loadFilmOrderMailPreviewForConfirm(id, previewDispatchGroupId, command)
+    : await prepareFilmOrderMail(command);
+  const expectedHashes = suppliedHashes.length
+    ? suppliedHashes
+    : preview.envelopes.map((envelope) => envelope.contentHash);
+  let lifecycle = await confirmFilmOrderMail(preview, expectedHashes);
+  let order = await getFilmOrder(id);
+  if (!order) throw new Error("film_order_update_failed");
+  if (action === "approve" && order.shipTo.status !== "confirmed" && customerEmail) {
+    const shipRequest = await executeFilmOrderLifecycle(id, "request-ship-to-registration", {}, actorEmail, origin, "confirm");
+    lifecycle = {
+      ...shipRequest.lifecycle!,
+      dispatchGroupId: `${lifecycle.dispatchGroupId},${shipRequest.lifecycle!.dispatchGroupId}`,
+      outcomes: [...lifecycle.outcomes, ...shipRequest.lifecycle!.outcomes],
+    };
+    order = await getFilmOrder(id);
+    if (!order) throw new Error("film_order_update_failed");
+  }
+  return {
+    order,
+    lifecycle,
+    mails: lifecycle.outcomes.map((outcome) => ({
+      to: outcome.actualTo ?? outcome.intendedTo,
+      requestedTo: outcome.recipientOverridden ? outcome.intendedTo : undefined,
+      recipientOverridden: outcome.recipientOverridden,
+      subject: outcome.subject,
+      text: outcome.body,
+      dryRun: outcome.status === "skipped",
+      messageId: outcome.smtpMessageId ?? undefined,
+      error: outcome.errorCode ?? undefined,
+    })),
+  };
 }
 
 export async function runFilmOrderAction(
@@ -3058,12 +2996,14 @@ export async function runFilmOrderAction(
     comment?: unknown;
     supplierName?: unknown;
     supplierEmail?: unknown;
+    makerId?: unknown;
     origin?: unknown;
     reason?: unknown;
     supplierMessage?: unknown;
     customerMessage?: unknown;
     approverName?: unknown;
     evidence?: unknown;
+    offlineReason?: unknown;
     destinationId?: unknown;
     destinations?: unknown;
     destinationRowId?: unknown;
@@ -3083,50 +3023,138 @@ export async function runFilmOrderAction(
     productionPlanStartDate?: unknown;
     productionPlanEndDate?: unknown;
     productionPlanNote?: unknown;
+    expectedUpdatedAt?: unknown;
+    etaDate?: unknown;
+    date?: unknown;
+    deliveryDate?: unknown;
+    kind?: unknown;
+    carrier?: unknown;
+    trackingNumber?: unknown;
+    documentName?: unknown;
+    documentUrl?: unknown;
+    decision?: unknown;
+    customerEmail?: unknown;
+    ipAddressHash?: unknown;
+    mailMode?: unknown;
+    mailDispatchGroupId?: unknown;
+    mailEnvelopeHashes?: unknown;
+    token?: unknown;
+    shipToDestinations?: unknown;
+    shipToRegisteredBy?: unknown;
+    customerDesignFileName?: unknown;
+    customerDesignFileUrl?: unknown;
+    customerDesignNote?: unknown;
   },
   actorEmail: string,
-): Promise<{ order: FilmOrderView; mails?: MailSendResult[]; preview?: SupplierOrderMailPreview }> {
+): Promise<{ order: FilmOrderView; mails?: MailSendResult[]; preview?: SupplierOrderMailPreview | FilmOrderMailPreview; lifecycle?: FilmOrderMailConfirmResult }> {
   const db = await getDatabase();
   const now = new Date().toISOString();
-  const origin = trimParam(params.origin, 200) || "https://seven-calcul.vercel.app";
+  const origin = resolveFilmOrderExternalOrigin(params.origin);
   const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [id]);
   if (!row) throw new Error("film_order_not_found");
   const order = mapOrder(row);
 
-  if (action === "request-ship-to-registration") {
-    if (order.status === "pending") throw new Error("invalid_status_transition");
-    if (order.shipTo.status === "confirmed") throw new Error("invalid_status_transition");
-    let customerCode = order.customer_code;
-    if (!customerCode) {
-      const { getQuotation } = await import("./quotation-store");
-      const quotation = await getQuotation(order.quotation_id);
-      customerCode = typeof quotation?.payload.customerCode === "string"
-        ? quotation.payload.customerCode.trim()
-        : "";
-      if (customerCode) {
-        await db.run("UPDATE film_orders SET customer_code = ? WHERE id = ?", [customerCode, id]);
-      }
+  const workflowGuard = filmOrderGuardInputOf(row, order);
+  const workflowAction = action as FilmWorkflowAction;
+  if (
+    workflowAction === "register-receiving"
+    || workflowAction === "send-proof-notice"
+    || workflowAction === "rotate-supplier-proof-token"
+    || workflowAction === "request-re-proof"
+    || workflowAction === "resend-receiving-notice"
+    || workflowAction === "send-po"
+    || workflowAction === "resend-supplier-links"
+  ) {
+    if (workflowAction === "register-receiving") {
+      const aiName = validFileName(params.aiFileName);
+      const aiUrl = validFileUrl(params.aiFileUrl);
+      const pdfName = params.pdfFileName == null ? null : validFileName(params.pdfFileName);
+      const pdfUrl = params.pdfFileName == null ? null : validFileUrl(params.pdfFileUrl);
+      workflowGuard.receivingAiRegistered = Boolean(aiName?.toLowerCase().endsWith(".ai") && aiUrl);
+      workflowGuard.receivingPdfRegistered = Boolean(pdfName?.toLowerCase().endsWith(".pdf") && pdfUrl);
+    } else {
+      const current = await getFilmOrder(id);
+      workflowGuard.receivingAiRegistered = Boolean(current?.files.some((file) =>
+        file.category === "receiving" && file.file_name.toLowerCase().endsWith(".ai")
+      ));
+      workflowGuard.receivingPdfRegistered = Boolean(current?.files.some((file) =>
+        file.category === "receiving" && file.file_name.toLowerCase().endsWith(".pdf")
+      ));
     }
-    if (!customerCode) throw new Error("customer_code_required");
-    const customerDestination = await customerDestinationFor(order);
-    const issued = await issueExternalToken(db, id, "customer_ship_to", actorEmail, {
-      audienceEmail: customerDestination.to,
-      ttlDays: 30,
-    });
-    await db.run(`
-      UPDATE film_orders
-      SET ship_to_requested_at = ?, ship_to_requested_by = ?, updated_at = ?, updated_by_email = ?
-      WHERE id = ?
-    `, [now, actorEmail, now, actorEmail, id]);
-    await addEvent(db, id, "ship_to", `顧客納品先登録依頼メール送信: ${customerDestination.to ?? "-"}`, actorEmail);
-    const refreshed = await getFilmOrder(id);
-    if (!refreshed) throw new Error("film_order_update_failed");
-    const mails = [await sendShipToRequestMail(refreshed, customerDestination, `${origin}/film-orders/ship-to/${issued.token}`)];
-    await logMailEvents(db, id, mails, "顧客納品先登録依頼", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
-  } else if (action === "register-ship-to") {
+  } else if (workflowAction === "send-customer-proof-review") {
+    const current = await getFilmOrder(id);
+    workflowGuard.customerProofPdfRegistered = Boolean(current?.files.some((file) =>
+      file.category === "proof" && file.file_name.toLowerCase().endsWith(".pdf")
+    ));
+  }
+  if (
+    workflowAction === "mark-ordered"
+    || workflowAction === "send-proof-notice"
+    || workflowAction === "rotate-supplier-proof-token"
+    || workflowAction === "register-proof"
+    || workflowAction === "send-customer-proof-review"
+    || workflowAction === "record-customer-proof-approval"
+    || workflowAction === "approve"
+    || workflowAction === "request-re-proof"
+    || workflowAction === "send-po"
+    || workflowAction === "resend-receiving-notice"
+    || workflowAction === "resend-supplier-links"
+  ) {
+    assertFilmOrderActionGuard(workflowGuard, workflowAction);
+  }
+
+  if (action === "register-receiving" && !["confirmed", "not_required", "legacy_exempt"].includes(order.customerDesign.status)) {
+    throw new Error("customer_design_confirmation_required");
+  }
+  if (action === "confirm-film-receipt") {
+    if (!order.delivery.deliveredOn || !order.delivery.deliveredAt) throw new Error("delivery_report_required");
+    if (order.delivery.receivedAt) throw new Error("invalid_status_transition");
+  }
+
+  const mailMode = params.mailMode === "preview" || params.mailMode === "confirm" ? params.mailMode : "confirm";
+  const lifecycleActionCandidates: FilmOrderLifecycleAction[] = [
+    "register-receiving",
+    "send-proof-notice",
+    "rotate-supplier-proof-token",
+    ...((validFileName(params.fileName) || validFileName(params.aiFileName)) ? ["register-proof" as const] : []),
+    "send-customer-proof-review",
+    "record-customer-proof-approval",
+    "approve",
+    "request-re-proof",
+    "send-po",
+    "resend-supplier-links",
+    "resend-receiving-notice",
+    "request-production-plan",
+    "request-ship-to-registration",
+    "ship-to-registered",
+    "request-customer-design-upload",
+    "request-customer-design-correction",
+    "customer-design-received",
+    "production-plan-request",
+    "update-eta",
+    "report-shipment",
+    "report-delivery",
+    "confirm-film-receipt",
+    "customer-proof-decision",
+  ];
+  if (lifecycleActionCandidates.includes(action as FilmOrderLifecycleAction)) {
+    const lifecycleCommand = await executeFilmOrderLifecycle(id, action as FilmOrderLifecycleAction, {
+      ...params,
+      expectedUpdatedAt: order.updated_at,
+    }, actorEmail, origin, mailMode);
+    if (mailMode === "preview") {
+      const previewOrder = await getFilmOrder(id);
+      if (!previewOrder) throw new Error("film_order_update_failed");
+      return { order: previewOrder, mails: [], preview: lifecycleCommand.preview, lifecycle: undefined };
+    }
+    return {
+      order: lifecycleCommand.order!,
+      mails: lifecycleCommand.mails ?? [],
+      lifecycle: lifecycleCommand.lifecycle,
+    };
+  }
+
+  if (action === "register-ship-to") {
     let customerCode = order.customer_code;
     if (!customerCode) {
       const { getQuotation } = await import("./quotation-store");
@@ -3208,22 +3236,31 @@ export async function runFilmOrderAction(
     await syncPrimaryShipToColumns(db, id, customerCode, resolvedDestinations[0], now, actorEmail, now, actorEmail);
     await addEvent(db, id, "ship_to", shipToRegisteredEventDetail(resolvedDestinations), actorEmail);
   } else if (action === "confirm-ship-to") {
-    const destinationRows = await listFilmOrderShipToDestinations(db, id);
     const hasLegacyShipTo = Boolean(order.shipTo.companyName || order.shipTo.address || order.shipTo.phone);
+    const destinationRows = await listFilmOrderShipToDestinations(db, id);
     if (!destinationRows.length && !hasLegacyShipTo) {
       throw new Error("ship_to_not_registered");
     }
-    if (order.shipTo.status === "confirmed") throw new Error("invalid_status_transition");
-    await db.run(
-      "UPDATE film_order_ship_to_destinations SET confirmed_at = ?, confirmed_by = ? WHERE order_id = ?",
-      [now, actorEmail, id],
-    );
-    await db.run(`
-      UPDATE film_orders SET
-        ship_to_status='confirmed', ship_to_confirmed_at=?, ship_to_confirmed_by=?,
-        updated_at=?, updated_by_email=?
-      WHERE id=?
-    `, [now, actorEmail, now, actorEmail, id]);
+    await db.transaction(async (tx) => {
+      const currentState = await tx.get<{ ship_to_status: ShipToStatus }>(
+        "SELECT ship_to_status FROM film_orders WHERE id=?",
+        [id],
+      );
+      if (!currentState || currentState.ship_to_status === "confirmed") {
+        throw new Error("invalid_status_transition");
+      }
+      await tx.run(
+        "UPDATE film_order_ship_to_destinations SET confirmed_at = ?, confirmed_by = ? WHERE order_id = ?",
+        [now, actorEmail, id],
+      );
+      const committed = await tx.run(`
+        UPDATE film_orders SET
+          ship_to_status='confirmed', ship_to_confirmed_at=?, ship_to_confirmed_by=?,
+          updated_at=?, updated_by_email=?
+        WHERE id=? AND ship_to_status <> 'confirmed'
+      `, [now, actorEmail, now, actorEmail, id]);
+      if (committed.changes !== 1) throw new Error("film_order_state_conflict");
+    });
     await addEvent(
       db,
       id,
@@ -3315,130 +3352,32 @@ export async function runFilmOrderAction(
       `${status === "confirmed" ? "生産予定確定" : "生産予定保存"}: ${startDate}〜${endDate}${note ? ` / ${note}` : ""}`,
       actorEmail,
     );
-  } else if (action === "resend-supplier-links") {
-    if (order.status !== "final_approved" || !order.po_sent_at) {
-      throw new Error("invalid_status_transition");
-    }
-    const { token, expiresAt } = buildEtaToken(id);
-    const etaUrl = `${origin}/film-orders/eta/${token}`;
-    await db.run(
-      "UPDATE film_orders SET eta_token = ?, eta_expires_at = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
-      [token, new Date(expiresAt).toISOString(), now, actorEmail, id],
-    );
-    const refreshed = await getFilmOrder(id);
-    if (!refreshed) throw new Error("film_order_update_failed");
-    const destination = supplierDestinationFor(refreshed);
-    if (!destination.to) throw new Error("supplier_destination_missing");
-    const purchaseOrderToken = await issueExternalToken(db, id, "supplier_po", actorEmail, {
-      audienceEmail: destination.to,
-      ttlDays: 90,
-    });
-    const purchaseOrderUrl = `${origin}/film-orders/purchase-order/${encodeURIComponent(purchaseOrderToken.token)}`;
-    const locale = supplierLocale(refreshed);
-    const subject = locale === "ko"
-      ? `【재전송】발주서·납기/출하/납품 보고 페이지 ${refreshed.order_number} ${refreshed.product_name || ""}`.trim()
-      : `【再送】発注書・納期/出荷報告ページ ${refreshed.order_number} ${refreshed.product_name || ""}`.trim();
-    const text = locale === "ko"
-      ? [
-        "이전에 발주드린 건의 링크를 재전송합니다. 새로운 발주가 아닙니다.",
-        "",
-        "",
-        "【요청 사항】",
-        "1. 아래 발주서 링크에서 내용을 확인해 주십시오.",
-        "2. 아래 전용 페이지에서 납기 전망·출하 보고·납품 보고를 등록해 주십시오.",
-        "",
-        "【발주서 열람·인쇄 페이지】",
-        purchaseOrderUrl,
-        "",
-        "【납기 전망·출하 보고·납품 보고 페이지】",
-        etaUrl,
-      ].join("\n")
-      : [
-        "初回送信済み発注のリンクを再送いたします。新しい発注ではありません。",
-        "",
-        "【お願い】",
-        "1. 下記発注書リンクで内容をご確認ください。",
-        "2. 納期見込み・出荷報告・納品報告は専用フォームからご登録ください。",
-        "",
-        "【発注内容】",
-        localizedMailBody(refreshed, locale),
-        "",
-        "【発注書閲覧・印刷ページ】",
-        purchaseOrderUrl,
-        "",
-        "【納期見込み・出荷報告・納品報告ページ】",
-        etaUrl,
-      ].join("\n");
-    const mails = [await sendMail({
-      to: destination.to,
-      subject,
-      text,
-      audience: "supplier",
-      configuredRecipientKey: "supplierByLocale",
-      // K/digital 기본 한국 메이커에게는 DB 일본어 override가 적용되지 않도록 직접 본문을 사용한다.
-      // Y(국내 일본어) 공급사만 공통 일본어 템플릿을 사용한다.
-      templateKey: locale === "ja" ? "film_supplier_links_resend" : undefined,
-      templateVars: {
-        orderNumber: refreshed.order_number,
-        productName: refreshed.product_name || "",
-        purchaseOrderUrl,
-        etaUrl,
-      },
-    })];
-    await logMailEvents(db, id, mails, "報告リンク再送信", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
-  } else if (action === "request-production-plan") {
-    if (!order.seven_contact_email) throw new Error("seven_contact_email_required");
-    const refreshed = await getFilmOrder(id);
-    if (!refreshed) throw new Error("film_order_update_failed");
-    const mails = [await sendMail({
-      to: externalTo(refreshed.seven_contact_email),
-      subject: `【充填生産予定ご確認のお願い】${refreshed.order_number} ${refreshed.product_name || ""}`.trim(),
-      text: [
-        "株式会社セブン化学 ご担当者様",
-        "",
-        "お手数ですが、下記発注の充填生産予定（開始日・終了日）を共有していただけますでしょうか。",
-        "この項目は任意確認ですが、フィルム納期と生産開始日の整合を確認したいと考えています。",
-        "",
-        "【案件情報】",
-        mailBodyBase(refreshed),
-        refreshed.eta_date ? `フィルム入荷予定：${refreshed.eta_date}` : "フィルム入荷予定：未登録",
-        refreshed.productionPlan.startDate && refreshed.productionPlan.endDate
-          ? `現在登録済み生産予定：${refreshed.productionPlan.startDate} 〜 ${refreshed.productionPlan.endDate}`
-          : "現在登録済み生産予定：未登録",
-        refreshed.productionPlan.note ? `既存メモ：${refreshed.productionPlan.note}` : "",
-        "",
-        `管理画面：${origin}/film-orders`,
-      ].filter(Boolean).join("\n"),
-      audience: "seven",
-      configuredRecipientKey: "seven",
-      templateKey: "film_production_plan_request",
-      templateVars: {
-        orderNumber: refreshed.order_number,
-        productName: refreshed.product_name || "",
-        filmEtaDate: refreshed.eta_date || "未登録",
-        productionPlan: refreshed.productionPlan.startDate && refreshed.productionPlan.endDate
-          ? `${refreshed.productionPlan.startDate} 〜 ${refreshed.productionPlan.endDate}`
-          : "未登録",
-        managementUrl: `${origin}/film-orders`,
-      },
-    })];
-    await logMailEvents(db, id, mails, "生産予定確認依頼", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
   } else if (action === "set-supplier") {
     const supplierName = trimParam(params.supplierName, 200);
     const supplierEmail = trimParam(params.supplierEmail, 254);
     if (supplierEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supplierEmail)) throw new Error("invalid_supplier_email");
-    const resolvedEmail = supplierEmail || DEFAULT_FILM_PROOF_EMAIL;
+    if (!supplierEmail) throw new Error("invalid_supplier_email");
+    if (isInternalLegacySupplier({ email: supplierEmail, companyName: supplierName })) {
+      throw new Error("internal_film_maker_rejected");
+    }
+    const exemptionReason = trimParam(params.reason, 1000);
+    if (!exemptionReason) throw new Error("legacy_exempt_reason_required");
     await db.run(
       "UPDATE film_orders SET supplier_name = ?, supplier_email = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
-      [supplierName, resolvedEmail, now, actorEmail, id],
+      [supplierName, supplierEmail, now, actorEmail, id],
     );
-    await addEvent(db, id, "supplier", `仕入先を更新: ${supplierName || "-"} / ${resolvedEmail}`, actorEmail);
+    await addEvent(
+      db,
+      id,
+      "legacy_supplier_reconciliation",
+      `レガシー除外（初期供給者設定）: ${exemptionReason} / ${supplierName || "-"} / ${supplierEmail}`,
+      actorEmail,
+    );
+  } else if (action === "select-film-maker") {
+    // 選択のみで連絡/送信は行わない。G003以降の遷移は既存ガードに従う。
+    const makerId = Number(params.makerId);
+    const { selectFilmMakerForOrder } = await import("./film-maker-store");
+    await selectFilmMakerForOrder(id, makerId, actorEmail);
   } else if (action === "mark-ordered") {
     if (order.status !== "pending") throw new Error("invalid_status_transition");
     await db.run(
@@ -3446,171 +3385,6 @@ export async function runFilmOrderAction(
       [now, now, actorEmail, id],
     );
     await addEvent(db, id, "status", "成約 → 発注書送信済み（セブン化学からメール送信）", actorEmail);
-  } else if (action === "register-receiving") {
-    if (order.status !== "ordered") throw new Error("invalid_status_transition");
-    if (!["confirmed","not_required","legacy_exempt"].includes(order.customerDesign.status)) {
-      throw new Error("customer_design_confirmation_required");
-    }
-    // フィルム製作用データの入稿。AI は必須、PDF は任意。
-    const aiFileName = validFileName(params.aiFileName);
-    if (!aiFileName || !/\.ai$/iu.test(aiFileName)) throw new Error("invalid_ai_file");
-    const pdfFileNameRaw = validFileName(params.pdfFileName);
-    if (pdfFileNameRaw && !/\.pdf$/iu.test(pdfFileNameRaw)) throw new Error("invalid_pdf_file");
-    if (params.guideAcknowledged !== true) throw new Error("upload_guide_acknowledgement_required");
-    const aiFileUrl = validFileUrl(params.aiFileUrl);
-    if (!aiFileUrl) throw new Error("invalid_ai_file_url");
-    const pdfFileUrl = validFileUrl(params.pdfFileUrl);
-    if (pdfFileNameRaw && !pdfFileUrl) throw new Error("invalid_pdf_file_url");
-    await addFile(db, id, "receiving", aiFileName, aiFileUrl, trimParam(params.note, 1000), actorEmail);
-    if (pdfFileNameRaw) {
-      await addFile(db, id, "receiving", pdfFileNameRaw, pdfFileUrl, trimParam(params.note, 1000), actorEmail);
-    }
-    await db.run(
-      "UPDATE film_orders SET status = 'receiving_registered', receiving_registered_at = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
-      [now, now, actorEmail, id],
-    );
-    await addEvent(db, id, "guide", "データ入稿ガイド1/2/3確認", actorEmail);
-    await addEvent(db, id, "file", `入稿データ登録: ${aiFileName}${pdfFileNameRaw ? ` / ${pdfFileNameRaw}` : ""}`, actorEmail);
-    await addEvent(db, id, "status", "発注書送信済み → 入稿済み", actorEmail);
-    const refreshed = await getFilmOrder(id);
-    const proofToken = await ensureProofUploadToken(db, id);
-    const uploadUrl = `${origin}/film-orders/upload/${proofToken}`;
-    const mails = refreshed
-      ? await sendReceivingNotice(refreshed, aiFileName, aiFileUrl, pdfFileNameRaw ?? null, pdfFileUrl, uploadUrl, proofToken, origin)
-      : [];
-    await logMailEvents(db, id, mails, "入稿通知メール", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
-  } else if (action === "send-proof-notice") {
-    if (order.status !== "receiving_registered") throw new Error("invalid_status_transition");
-    const proofToken = await ensureProofUploadToken(db, id);
-    const refreshed = await getFilmOrder(id);
-    const mails = refreshed ? [await sendProofNoticeMail(refreshed, `${origin}/film-orders/upload/${proofToken}`, proofToken, origin)] : [];
-    await logMailEvents(db, id, mails, "校正アップロード案内", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
-  } else if (action === "rotate-supplier-proof-token") {
-    if (order.status !== "receiving_registered" && order.status !== "re_proof_requested") {
-      throw new Error("invalid_status_transition");
-    }
-    const proofToken = await ensureProofUploadToken(db, id, { rotate: true });
-    const uploadUrl = `${origin}/film-orders/upload/${proofToken}`;
-    const refreshed = await getFilmOrder(id);
-    const mails = refreshed ? [await sendProofNoticeMail(refreshed, uploadUrl, proofToken, origin)] : [];
-    await logMailEvents(db, id, mails, "校正アップロード案内（強制再発行）", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
-  } else if (action === "register-proof") {
-    if (order.status !== "receiving_registered" && order.status !== "re_proof_requested") throw new Error("invalid_status_transition");
-    const aiFileName = params.aiFileName ? validFileName(params.aiFileName) : validFileName(params.fileName);
-    if (!aiFileName || !aiFileName.toLowerCase().endsWith(".ai")) throw new Error("invalid_ai_file");
-    const fileUrl = params.aiFileName ? validFileUrl(params.aiFileUrl ?? "") : validFileUrl(params.fileUrl);
-    const pdfFileName = params.pdfFileName ? validFileName(params.pdfFileName) : "";
-    if (params.pdfFileName && (!pdfFileName || !pdfFileName.toLowerCase().endsWith(".pdf"))) throw new Error("invalid_pdf_file");
-    const pdfFileUrl = params.pdfFileName ? validFileUrl(params.pdfFileUrl ?? "") : "";
-    if (params.pdfFileName && !pdfFileUrl) throw new Error("invalid_pdf_file");
-    const file = await addFile(db, id, "proof", aiFileName, fileUrl, trimParam(params.note, 1000), actorEmail);
-    const pdfFile = pdfFileName
-      ? await addFile(db, id, "proof", pdfFileName, pdfFileUrl, trimParam(params.note, 1000), actorEmail)
-      : null;
-    await db.run(
-      "UPDATE film_orders SET status = 'proof_registered', proof_registered_at = ?, customer_proof_status = 'pending', supplier_approval_status = 'pending', supplier_approval_at = NULL, supplier_approval_by = '', supplier_approval_note = '', buyer_approval_status = 'pending', buyer_approval_at = NULL, buyer_approval_by = '', updated_at = ?, updated_by_email = ? WHERE id = ?",
-      [now, now, actorEmail, id],
-    );
-    await addEvent(
-      db,
-      id,
-      "file",
-      `校正データ登録: ${aiFileName} (v${file.version})${pdfFileName ? ` / ${pdfFileName} (v${pdfFile?.version})` : ""}`,
-      actorEmail,
-    );
-    await addEvent(db, id, "status", `${order.status} → 校正待ち`, actorEmail);
-    {
-      const refreshed = await getFilmOrder(id);
-      const mails = refreshed
-        ? [
-          ...await sendProofReceivedMail(refreshed, aiFileName, fileUrl, pdfFileName || undefined, pdfFileUrl || undefined),
-          await sendKaneiApprovalRequiredMail(refreshed, origin, aiFileName, pdfFileName || undefined),
-        ]
-        : [];
-      await logMailEvents(db, id, mails, "校正受領・金井貿易承認依頼", actorEmail);
-      const result = await getFilmOrder(id);
-      if (!result) throw new Error("film_order_update_failed");
-      return { order: result, mails };
-    }
-  } else if (action === "approve") {
-    if (order.status !== "proof_registered") throw new Error("invalid_status_transition");
-    if (!["approved","legacy_exempt"].includes(order.customerProof.status)) {
-      throw new Error("customer_proof_release_required");
-    }
-    if (!["approved","legacy_exempt"].includes(order.customerProof.supplierApprovalStatus)) {
-      throw new Error("supplier_approval_required");
-    }
-    const fileName = validFileName(params.fileName);
-    if (fileName) {
-      await addFile(db, id, "final", fileName, validFileUrl(params.fileUrl), trimParam(params.note, 1000), actorEmail);
-      await addEvent(db, id, "file", `最終承認データ登録: ${fileName}`, actorEmail);
-    }
-    await db.run(
-      "UPDATE film_orders SET status = 'final_approved', final_approved_at = ?, buyer_approval_status = 'approved', buyer_approval_at = ?, buyer_approval_by = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
-      [now, now, actorEmail, now, actorEmail, id],
-    );
-    await addEvent(db, id, "status", "校正待ち → 最終承認済み", actorEmail);
-    let refreshed = await getFilmOrder(id);
-    if (!refreshed) throw new Error("film_order_update_failed");
-    const approvalMails = await sendApprovalMail(refreshed);
-    await logMailEvents(db, id, approvalMails, "承認通知メール", actorEmail);
-
-    // 納品先が未確定の場合、Buyer最終承認をトリガーに顧客へ自動依頼する。
-    const shipToMails: MailSendResult[] = [];
-    if (refreshed.shipTo.status !== "confirmed") {
-      const customerDestination = await customerDestinationFor(refreshed);
-      if (customerDestination.to) {
-        const issued = await issueExternalToken(db, id, "customer_ship_to", actorEmail, {
-          audienceEmail: customerDestination.to,
-          ttlDays: 30,
-        });
-        await db.run(
-          "UPDATE film_orders SET ship_to_requested_at = ?, ship_to_requested_by = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
-          [now, actorEmail, now, actorEmail, id],
-        );
-        await addEvent(db, id, "ship_to", `顧客納品先登録依頼メール自動送信: ${customerDestination.to}`, actorEmail);
-        refreshed = await getFilmOrder(id);
-        if (!refreshed) throw new Error("film_order_update_failed");
-        shipToMails.push(await sendShipToRequestMail(refreshed, customerDestination, `${origin}/film-orders/ship-to/${issued.token}`));
-        await logMailEvents(db, id, shipToMails, "顧客納品先登録依頼（自動）", actorEmail);
-      } else {
-        await addEvent(db, id, "ship_to", "顧客納品先自動依頼 skipped: 顧客メール未登録", actorEmail);
-      }
-    }
-
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails: [...approvalMails, ...shipToMails] };
-  } else if (action === "request-re-proof") {
-    if (order.status !== "proof_registered") throw new Error("invalid_status_transition");
-    const comment = trimParam(params.comment, 2000);
-    if (!comment) throw new Error("re_proof_comment_required");
-    const supplierMessage = trimParam(params.supplierMessage, 2000);
-    if (supplierLocale(order) === "ko") assertKoreanSupplierMessage(supplierMessage);
-    else assertJapaneseSupplierMessage(supplierMessage);
-    await db.run(
-      "UPDATE film_orders SET status = 're_proof_requested', re_proof_count = ?, re_proof_requested_at = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
-      [order.re_proof_count + 1, now, now, actorEmail, id],
-    );
-    await addEvent(db, id, "status", `校正待ち → 再校正依頼中: ${comment}`, actorEmail);
-    const refreshed = await getFilmOrder(id);
-    const proofToken = await ensureProofUploadToken(db, id);
-    const mails = refreshed
-      ? await sendReProofMail(refreshed, comment, supplierMessage, `${origin}/film-orders/upload/${proofToken}`, proofToken, origin)
-      : [];
-    await logMailEvents(db, id, mails, "再校正依頼メール", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
   } else if (action === "update-supplier-order-note") {
     if (order.status !== "final_approved") throw new Error("invalid_status_transition");
     const supplierOrderNote = trimParam(params.supplierOrderNote, 4000);
@@ -3631,172 +3405,6 @@ export async function runFilmOrderAction(
         : order.supplier_order_note,
     );
     return { order: current, preview };
-  } else if (action === "send-po") {
-    if (order.status !== "final_approved") throw new Error("invalid_status_transition");
-    const supplierOrderNote = typeof params.supplierOrderNote === "string"
-      ? trimParam(params.supplierOrderNote, 4000)
-      : order.supplier_order_note;
-    if (typeof params.supplierOrderNote === "string") {
-      await db.run(
-        "UPDATE film_orders SET supplier_order_note = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
-        [supplierOrderNote, now, actorEmail, id],
-      );
-      await addEvent(db, id, "supplier_order", `発注時メモ確定${supplierOrderNote ? `: ${supplierOrderNote}` : "（空欄）"}`, actorEmail);
-    }
-    const { token, expiresAt } = buildEtaToken(id);
-    const etaUrl = `${origin}/film-orders/eta/${token}`;
-    await db.run(
-      "UPDATE film_orders SET po_sent_at = ?, eta_token = ?, eta_expires_at = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
-      [now, token, new Date(expiresAt).toISOString(), now, actorEmail, id],
-    );
-    await addEvent(db, id, "status", "最終承認済み → メーカー発注書送信済み", actorEmail);
-    const refreshed = await getFilmOrder(id);
-    const destination = refreshed ? supplierDestinationFor(refreshed) : null;
-    const purchaseOrderToken = refreshed && destination?.to
-      ? await issueExternalToken(db, id, "supplier_po", actorEmail, {
-        audienceEmail: destination.to,
-        ttlDays: 90,
-      })
-      : null;
-    const purchaseOrderUrl = purchaseOrderToken
-      ? `${origin}/film-orders/purchase-order/${encodeURIComponent(purchaseOrderToken.token)}`
-      : "";
-    const mails = refreshed
-      ? await sendPurchaseOrderMail(refreshed, origin, etaUrl, purchaseOrderUrl, supplierOrderNote)
-      : [];
-    await logMailEvents(db, id, mails, "発注書送信", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
-  } else if (action === "confirm-film-receipt") {
-    if (order.status !== "final_approved") throw new Error("invalid_status_transition");
-    if (!order.delivery.deliveredOn || !order.delivery.deliveredAt) throw new Error("delivery_report_required");
-    if (order.delivery.receivedAt) throw new Error("invalid_status_transition");
-    const receivedNote = trimParam(params.note, 1000);
-    await db.run(`
-      UPDATE film_orders SET
-        film_received_at=?, film_received_note=?, film_received_by_email=?, updated_at=?, updated_by_email=?
-      WHERE id=? AND film_received_at IS NULL
-    `, [now, receivedNote, actorEmail, now, actorEmail, id]);
-    await addEvent(db, id, "delivery", `フィルム受領確認${receivedNote ? `: ${receivedNote}` : ""}`, actorEmail);
-    const refreshed = await getFilmOrder(id);
-    const mails: MailSendResult[] = [];
-    if (refreshed) {
-      const destination = supplierDestinationFor(refreshed);
-      const locale = supplierLocale(refreshed);
-      const supplierSubject = locale === "ko"
-        ? `【필름 수령 확인】${refreshed.order_number} ${refreshed.product_name || ""}`.trim()
-        : `【フィルム受領確認】${refreshed.order_number} ${refreshed.product_name || ""}`.trim();
-      const supplierText = locale === "ko"
-        ? [
-          "항상 협조해 주셔서 감사합니다. 패키지랩입니다.",
-          "",
-          "아래 필름의 수령을 확인했습니다.",
-          "",
-          `발주번호：${refreshed.order_number}`,
-          `품목：${refreshed.product_name || "-"}`,
-          `납품일：${refreshed.delivery.deliveredOn}`,
-          refreshed.delivery.receivedNote ? `수령 메모：${refreshed.delivery.receivedNote}` : "",
-          "",
-          "이후 파우치 제작을 진행합니다. 협조 감사합니다.",
-        ].filter(Boolean).join("\n")
-        : [
-          "いつも大変お世話になっております。パッケージラボでございます。",
-          "",
-          "下記フィルムを受領いたしました。",
-          "",
-          `発注番号：${refreshed.order_number}`,
-          `品名：${refreshed.product_name || "-"}`,
-          `納品日：${refreshed.delivery.deliveredOn}`,
-          refreshed.delivery.receivedNote ? `受領メモ：${refreshed.delivery.receivedNote}` : "",
-          "",
-          "今後はパウチ製作へ進めさせていただきます。",
-        ].filter(Boolean).join("\n");
-      // K 공급사는 직접 한국어 본문, Seven/Y는 일본어 템플릿을 사용한다.
-      if (destination.to) mails.push(await sendMail({ to: destination.to, subject: supplierSubject, text: supplierText, audience: "supplier", templateKey: locale === "ja" ? "film_delivery_completed" : undefined }));
-      mails.push(await sendMail({
-        to: filmDesignNotificationTo(),
-        subject: `【フィルム受領確認完了】${refreshed.order_number} ${refreshed.product_name || ""}`.trim(),
-        templateKey: "film_receipt_confirmed",
-        text: [
-          "【案件情報】",
-          ...mailBodyBase(refreshed),
-          "",
-          "【受領内容】",
-          `出荷日：${refreshed.delivery.shippedOn ?? "-"}`,
-          `納品日：${refreshed.delivery.deliveredOn}`,
-          `受領者：${actorEmail}`,
-          refreshed.delivery.receivedNote ? `メモ：${refreshed.delivery.receivedNote}` : "",
-        ].filter(Boolean).join("\n"),
-      }));
-    }
-    await logMailEvents(db, id, mails, "フィルム受領確認", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
-  } else if (action === "request-customer-design-upload") {
-    const currentFiles = await getFilmOrder(id);
-    const hasAiFile = Boolean(currentFiles?.files.some((file) =>
-      file.category === "customer_design" && file.file_name.toLowerCase().endsWith(".ai")
-    ));
-    const canRequest = order.customerDesign.status === "pending"
-      || (order.customerDesign.status === "received" && !hasAiFile);
-    if (!["pending","ordered"].includes(order.status) || !canRequest) {
-      throw new Error("invalid_status_transition");
-    }
-    const { getQuotation } = await import("./quotation-store");
-    const quotation = await getQuotation(order.quotation_id);
-    const audienceEmail = typeof quotation?.payload.customerEmail === "string" ? quotation.payload.customerEmail.trim() : "";
-    if (!audienceEmail) throw new Error("customer_email_required");
-    const issued = await issueExternalToken(db, id, "customer_design", actorEmail, { audienceEmail });
-    await db.run(`
-      UPDATE film_orders
-      SET customer_design_status = 'requested', customer_design_requested_at = ?, updated_at = ?, updated_by_email = ?
-      WHERE id = ?
-    `, [now, now, actorEmail, id]);
-    await addEvent(db, id, "customer_design", `顧客デザインアップロード依頼を作成`, actorEmail);
-    const refreshed = await getFilmOrder(id);
-    const mails = refreshed ? [await sendCustomerDesignRequestMail(refreshed, `${origin}/film-orders/design-upload/${issued.token}`)] : [];
-    await logMailEvents(db, id, mails, "顧客デザイン依頼", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
-  } else if (action === "confirm-customer-design") {
-    if (order.customerDesign.status !== "received") throw new Error("invalid_status_transition");
-    const current = await getFilmOrder(id);
-    if (!current?.files.some((file) => file.category === "customer_design" && file.file_name.toLowerCase().endsWith(".ai"))) {
-      throw new Error("customer_design_file_required");
-    }
-    await db.run(`
-      UPDATE film_orders
-      SET customer_design_status = 'confirmed', customer_design_confirmed_at = ?, updated_at = ?, updated_by_email = ?
-      WHERE id = ?
-    `, [now, now, actorEmail, id]);
-    await addEvent(db, id, "customer_design", "顧客デザインを確定", actorEmail);
-  } else if (action === "request-customer-design-correction") {
-    if (order.customerDesign.status !== "received") throw new Error("invalid_status_transition");
-    const customerMessage = trimParam(params.customerMessage, 2000);
-    assertJapaneseCustomerMessage(customerMessage);
-    const internalReason = trimParam(params.reason, 2000);
-    const { getQuotation } = await import("./quotation-store");
-    const quotation = await getQuotation(order.quotation_id);
-    const audienceEmail = typeof quotation?.payload.customerEmail === "string" ? quotation.payload.customerEmail.trim() : "";
-    if (!audienceEmail) throw new Error("customer_email_required");
-    const issued = await issueExternalToken(db, id, "customer_design", actorEmail, { audienceEmail });
-    await db.run(`
-      UPDATE film_orders
-      SET customer_design_status = 'correction_requested',
-          customer_design_correction_count = ?, customer_design_correction_reason = ?,
-          updated_at = ?, updated_by_email = ?
-      WHERE id = ?
-    `, [order.customerDesign.correctionCount + 1, customerMessage, now, actorEmail, id]);
-    await addEvent(db, id, "customer_design", `顧客デザイン修正依頼: 内部理由 ${internalReason || "-"} / 顧客向け ${customerMessage}`, actorEmail);
-    const refreshed = await getFilmOrder(id);
-    const mails = refreshed ? [await sendCustomerDesignCorrectionMail(refreshed, customerMessage, `${origin}/film-orders/design-upload/${issued.token}`)] : [];
-    await logMailEvents(db, id, mails, "顧客デザイン修正依頼", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
   } else if (action === "set-customer-design-not-required") {
     if (!["pending","requested","received","correction_requested"].includes(order.customerDesign.status)) {
       throw new Error("invalid_status_transition");
@@ -3809,53 +3417,18 @@ export async function runFilmOrderAction(
       WHERE id = ?
     `, [reason, now, actorEmail, id]);
     await addEvent(db, id, "customer_design", `顧客デザイン不要に設定: ${reason}`, actorEmail);
-  } else if (action === "send-customer-proof-review") {
-    if (order.status !== "proof_registered") throw new Error("invalid_status_transition");
-    if (!["pending","requested","correction_requested"].includes(order.customerProof.status)) {
-      throw new Error("invalid_status_transition");
-    }
+  } else if (action === "confirm-customer-design") {
+    if (order.customerDesign.status !== "received") throw new Error("invalid_status_transition");
     const current = await getFilmOrder(id);
-    const proofPdf = current?.files
-      .filter((file) => file.category === "proof" && file.file_name.toLowerCase().endsWith(".pdf"))
-      .at(-1);
-    if (!proofPdf) throw new Error("customer_proof_pdf_required");
-    const latestProof = proofPdf;
-    const { getQuotation } = await import("./quotation-store");
-    const quotation = await getQuotation(order.quotation_id);
-    const audienceEmail = typeof quotation?.payload.customerEmail === "string" ? quotation.payload.customerEmail.trim() : "";
-    if (!audienceEmail) throw new Error("customer_email_required");
-    const issued = await issueExternalToken(db, id, "customer_proof_review", actorEmail, { audienceEmail });
+    if (!current?.files.some((file) => file.category === "customer_design" && file.file_name.toLowerCase().endsWith(".ai"))) {
+      throw new Error("customer_design_file_required");
+    }
     await db.run(`
       UPDATE film_orders
-      SET customer_proof_status = 'requested', customer_proof_requested_at = ?, updated_at = ?, updated_by_email = ?
+      SET customer_design_status = 'confirmed', customer_design_confirmed_at = ?, updated_at = ?, updated_by_email = ?
       WHERE id = ?
     `, [now, now, actorEmail, id]);
-    await addEvent(db, id, "customer_proof", `顧客校正レビュー依頼: v${latestProof.version}`, actorEmail);
-    const refreshed = await getFilmOrder(id);
-    const mails = refreshed ? [await sendCustomerProofReviewMail(refreshed, latestProof, `${origin}/film-orders/proof-review/${issued.token}`)] : [];
-    await logMailEvents(db, id, mails, "顧客校正レビュー依頼", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
-  } else if (action === "record-customer-proof-approval") {
-    if (order.status !== "proof_registered") throw new Error("invalid_status_transition");
-    if (!["pending","requested","approved"].includes(order.customerProof.status)) throw new Error("invalid_status_transition");
-    const approverName = trimParam(params.approverName, 200);
-    const evidence = trimParam(params.evidence, 2000);
-    if (!approverName || !evidence) throw new Error("customer_proof_evidence_required");
-    await db.run(`
-      UPDATE film_orders
-      SET customer_proof_status = 'approved', customer_proof_approved_at = ?,
-          supplier_approval_status = 'approved', supplier_approval_at = ?, supplier_approval_by = ?,
-          supplier_approval_note = ?, updated_at = ?, updated_by_email = ?
-      WHERE id = ?
-    `, [now, now, actorEmail, evidence, now, actorEmail, id]);
-    await addEvent(db, id, "customer_proof", `金井貿易校正承認: 承認者 ${approverName} / 根拠 ${evidence}`, actorEmail);
-    const refreshed = await getFilmOrder(id);
-    const mails = refreshed ? [await sendBuyerFinalApprovalRequiredMail(refreshed, origin)] : [];
-    await logMailEvents(db, id, mails, "Buyer最終承認依頼", actorEmail);
-    if (!refreshed) throw new Error("film_order_update_failed");
-    return { order: refreshed, mails };
+    await addEvent(db, id, "customer_design", "顧客デザインを確定", actorEmail);
   } else if (action === "register-receiving-extra") {
     if (order.status !== "receiving_registered" && order.status !== "proof_registered" && order.status !== "re_proof_requested") {
       throw new Error("invalid_status_transition");
@@ -3866,19 +3439,6 @@ export async function runFilmOrderAction(
     if (!fileUrl) throw new Error("invalid_file_url");
     await addFile(db, id, "receiving", fileName, fileUrl, trimParam(params.note, 1000), actorEmail);
     await addEvent(db, id, "file", `入稿データ追加: ${fileName}`, actorEmail);
-  } else if (action === "resend-receiving-notice") {
-    if (order.status !== "receiving_registered") throw new Error("invalid_status_transition");
-    const refreshed = await getFilmOrder(id);
-    const receiving: FilmOrderFileRecord[] = (refreshed?.files ?? []).filter((file) => file.category === "receiving");
-    const aiFile = receiving.find((file) => /\.ai$/iu.test(file.file_name)) ?? receiving[0];
-    const pdfFile = receiving.find((file) => /\.pdf$/iu.test(file.file_name));
-    if (!refreshed || !aiFile) throw new Error("invalid_status_transition");
-    const proofToken = await ensureProofUploadToken(db, id);
-    const mails = await sendReceivingNotice(refreshed, aiFile.file_name, aiFile.url, pdfFile?.file_name ?? null, pdfFile?.url ?? "", `${origin}/film-orders/upload/${proofToken}`, proofToken, origin);
-    await logMailEvents(db, id, mails, "入稿通知メール（再送）", actorEmail);
-    const result = await getFilmOrder(id);
-    if (!result) throw new Error("film_order_update_failed");
-    return { order: result, mails };
   } else {
     throw new Error("unknown_action");
   }
@@ -4027,7 +3587,7 @@ export async function getFilmOrderForShipToRequest(
   const db = await getDatabase();
   const resolved = await resolveExternalToken(db, token, "customer_ship_to");
   if (!resolved) throw new Error("invalid_ship_to_token");
-  await markExternalTokenUse(db, resolved.token, request);
+  await markFilmOrderExternalTokenUseForLifecycle(db, resolved.token, request);
   const order = await getFilmOrder(resolved.orderId);
   if (!order) throw new Error("film_order_not_found");
   const customerCode = await shipToCustomerCodeOf(order);
@@ -4095,40 +3655,13 @@ export async function getFilmOrderForShipToRequest(
   };
 }
 
-async function sendShipToRegisteredNoticeMail(order: FilmOrderView, destination: CustomerDeliveryDestination): Promise<MailSendResult> {
-  const to = buyerApprovalNoticeTo(order);
-  const buyerLabel = buyerCompanyLabelOfOrder(order);
-  const subject = `【納品先登録完了】${order.order_number} ${order.product_name || ""}`.trim();
-  const text = [
-    `${buyerLabel} ご担当者様`,
-    "",
-    "顧客が納品先を登録しました。内容をご確認のうえ、納品先を確定してください。",
-    "",
-    "【案件情報】",
-    mailBodyBase(order),
-    "",
-    "【登録された納品先】",
-    `${destination.companyName}${destination.department ? ` / ${destination.department}` : ""}`,
-    destination.contactName ? `担当：${destination.contactName}` : "",
-    `〒${destination.postalCode} ${destination.address}${destination.building ? ` ${destination.building}` : ""}`,
-    `電話：${destination.phone}`,
-    destination.email ? `メール：${destination.email}` : "",
-    destination.note ? `備考：${destination.note}` : "",
-    "",
-    "登録内容は顧客住所録にも保存されています。",
-    "",
-    "--",
-    "Package Lab Film Workflow",
-  ].filter(Boolean).join("\n");
-  return sendMail({ to: externalTo(to), subject, text, audience: buyerMailAudienceOf(order), templateKey: "film_ship_to_registered" });
-}
-
 export async function registerShipToFromCustomerToken(params: {
   token: string;
   destinationId?: unknown;
   values?: unknown;
   saveAsDefault?: unknown;
   request?: { headers: { get(name: string): string | null } };
+  origin?: unknown;
 }): Promise<{ order: FilmOrderView; destination: CustomerDeliveryDestination }> {
   const db = await getDatabase();
   const resolved = await resolveExternalToken(db, params.token, "customer_ship_to");
@@ -4165,54 +3698,31 @@ export async function registerShipToFromCustomerToken(params: {
     destinationOwner = addressBookOwner;
   }
   destination = await markDeliveryDestinationUsed(destinationOwner, customerCode, destination.id) ?? destination;
-  const now = new Date().toISOString();
   const registeredBy = `customer:${resolved.token.audience_email || "external"}`;
   const existingRows = await listFilmOrderShipToDestinations(db, order.id);
-  await db.run(`
-    INSERT INTO film_order_ship_to_destinations (
-      order_id, destination_id, position, label, company_name, department, contact_name,
-      postal_code, address, building, phone, email, note, registered_at, registered_by, created_at
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `, [
-    order.id,
-    destination.id,
-    existingRows.length,
-    destination.label,
-    destination.companyName,
-    destination.department,
-    destination.contactName,
-    destination.postalCode,
-    destination.address,
-    destination.building,
-    destination.phone,
-    destination.email,
-    destination.note,
-    now,
-    registeredBy,
-    now,
-  ]);
-  if (!existingRows.length) {
-    // 最初の登録のみ代表納品先（旧 scalar カラム）を更新する。2件目以降は追加分として保持する。
-    await syncPrimaryShipToColumns(db, order.id, customerCode, destination, now, registeredBy, now, registeredBy);
-  } else {
-    await db.run(
-      "UPDATE film_orders SET customer_code = ?, ship_to_status = 'registered', ship_to_confirmed_at = NULL, ship_to_confirmed_by = '', updated_at = ?, updated_by_email = ? WHERE id = ?",
-      [customerCode, now, registeredBy, order.id],
-    );
-  }
-  await markExternalTokenUse(db, resolved.token, params.request);
-  await addEvent(
-    db,
-    order.id,
-    "ship_to",
-    `顧客納品先登録: ${destination.companyName} / ${destination.postalCode} ${destination.address}`,
-    registeredBy,
-  );
-  const refreshed = await getFilmOrder(order.id);
-  if (!refreshed) throw new Error("film_order_update_failed");
-  await sendShipToRegisteredNoticeMail(refreshed, destination);
-  await addEvent(db, order.id, "email", "顧客納品先登録通知（内部宛）", registeredBy);
-  return { order: refreshed, destination };
+  const existingDestinationRows = existingRows.map((row) => ({
+    destinationId: row.destinationId,
+    label: row.label,
+    companyName: row.companyName,
+    department: row.department,
+    contactName: row.contactName,
+    postalCode: row.postalCode,
+    address: row.address,
+    building: row.building,
+    phone: row.phone,
+    email: row.email,
+    note: row.note,
+  }));
+  const result = await runFilmOrderAction(order.id, "ship-to-registered", {
+    shipToDestinations: [...existingDestinationRows, destination],
+    shipToRegisteredBy: registeredBy,
+    customerEmail: resolved.token.audience_email ?? undefined,
+    token: params.token,
+    ipAddressHash: params.request ? externalClientIpHash(params.request) : null,
+    origin: resolveFilmOrderExternalOrigin(params.origin),
+    expectedUpdatedAt: order.updated_at,
+  }, registeredBy);
+  return { order: result.order, destination };
 }
 
 export async function getFilmOrderForCustomerProofReview(
@@ -4222,7 +3732,7 @@ export async function getFilmOrderForCustomerProofReview(
   const db = await getDatabase();
   const resolved = await resolveExternalToken(db, token, "customer_proof_review");
   if (!resolved) throw new Error("invalid_customer_proof_token");
-  await markExternalTokenUse(db, resolved.token, request);
+  await markFilmOrderExternalTokenUseForLifecycle(db, resolved.token, request);
   const order = await getFilmOrder(resolved.orderId);
   if (
     !order
@@ -4237,43 +3747,22 @@ export async function decideCustomerProofReview(params: {
   decision: "approve" | "correction";
   reason?: string;
   request?: { headers: { get(name: string): string | null } };
+  origin?: unknown;
 }): Promise<FilmOrderView> {
   const db = await getDatabase();
   const resolved = await resolveExternalToken(db, params.token, "customer_proof_review");
   if (!resolved) throw new Error("invalid_customer_proof_token");
-  const now = new Date().toISOString();
-  const ipHash = params.request ? externalClientIpHash(params.request) : null;
-
-  if (params.decision === "approve") {
-    const result = await db.run(`
-      UPDATE film_orders
-      SET customer_proof_status = 'approved', customer_proof_approved_at = ?, updated_at = ?
-      WHERE id = ? AND status = 'proof_registered' AND customer_proof_status = 'requested'
-    `, [now, now, resolved.orderId]);
-    if (Number(result.changes) !== 1) throw new Error("invalid_customer_proof_decision");
-    await addEvent(db, resolved.orderId, "customer_proof", `顧客が校正を承認 (${now})`, "customer");
-    if (ipHash) await addEvent(db, resolved.orderId, "audit", `顧客承認IPハッシュ: ${ipHash}`, "customer");
-  } else {
-    const reason = params.reason?.trim().slice(0, 2000) || "";
-    if (!reason) throw new Error("customer_proof_correction_reason_required");
-    const result = await db.run(`
-      UPDATE film_orders
-      SET customer_proof_status = 'correction_requested',
-          customer_proof_correction_count = customer_proof_correction_count + 1,
-          customer_proof_correction_reason = ?, updated_at = ?
-      WHERE id = ? AND status = 'proof_registered' AND customer_proof_status = 'requested'
-    `, [reason, now, resolved.orderId]);
-    if (Number(result.changes) !== 1) throw new Error("invalid_customer_proof_decision");
-    await addEvent(db, resolved.orderId, "customer_proof", `顧客修正依頼: ${reason}`, "customer");
-  }
-  await markExternalTokenUse(db, resolved.token, params.request);
-  let order = await getFilmOrder(resolved.orderId);
-  if (!order) throw new Error("invalid_customer_proof_token");
-  const mails = [await sendCustomerProofDecisionMail(order)];
-  await logMailEvents(db, resolved.orderId, mails, "顧客校正判定受付", "customer");
-  order = await getFilmOrder(resolved.orderId);
-  if (!order) throw new Error("invalid_customer_proof_token");
-  return order;
+  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [resolved.orderId]);
+  if (!row) throw new Error("invalid_customer_proof_token");
+  const result = await runFilmOrderAction(resolved.orderId, "customer-proof-decision", {
+    decision: params.decision,
+    customerMessage: params.reason,
+    token: params.token,
+    ipAddressHash: params.request ? externalClientIpHash(params.request) : null,
+    origin: resolveFilmOrderExternalOrigin(params.origin),
+    expectedUpdatedAt: row.updated_at,
+  }, "customer");
+  return result.order;
 }
 
 export async function getFilmOrderForCustomerDesign(
@@ -4283,7 +3772,7 @@ export async function getFilmOrderForCustomerDesign(
   const db = await getDatabase();
   const resolved = await resolveExternalToken(db, token, "customer_design");
   if (!resolved) throw new Error("invalid_customer_design_token");
-  await markExternalTokenUse(db, resolved.token, request);
+  await markFilmOrderExternalTokenUseForLifecycle(db, resolved.token, request);
   const order = await getFilmOrder(resolved.orderId);
   if (!order || !["requested","received","correction_requested"].includes(order.customerDesign.status)) {
     throw new Error("invalid_customer_design_token");
@@ -4315,70 +3804,28 @@ export async function registerCustomerDesignFromUploadToken(params: {
   note?: string;
   guideAcknowledged?: boolean;
   metadata?: UploadFileMetadata;
+  request?: { headers: { get(name: string): string | null } };
+  origin?: unknown;
 }): Promise<FilmOrderView> {
   const db = await getDatabase();
   const resolved = await resolveExternalToken(db, params.token, "customer_design");
   if (!resolved) throw new Error("invalid_customer_design_token");
-  const orderId = resolved.orderId;
-  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [orderId]);
+  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [resolved.orderId]);
   if (!row) throw new Error("film_order_not_found");
   const order = mapOrder(row);
-  const stored = await getFilmOrder(orderId);
+  const stored = await getFilmOrder(resolved.orderId);
   const hasAiFile = Boolean(stored?.files.some((file) => file.category === "customer_design" && file.file_name.toLowerCase().endsWith(".ai")));
   assertCustomerDesignUploadPolicy(order, params.fileName, undefined, hasAiFile);
   if (params.guideAcknowledged !== true) throw new Error("upload_guide_acknowledgement_required");
-  const fileName = validFileName(params.fileName);
-  if (!fileName) throw new Error("invalid_file_name");
-  const fileUrl = validFileUrl(params.fileUrl);
-  const actor = params.uploader?.slice(0, 200) || "customer";
-  const file = await addFile(
-    db,
-    orderId,
-    "customer_design",
-    fileName,
-    fileUrl,
-    params.note?.slice(0, 1000) ?? "",
-    actor,
-    { ...params.metadata, uploadedVia: params.metadata?.uploadedVia ?? "customer_design" },
-  );
-  const now = new Date().toISOString();
-  await db.run(`
-    UPDATE film_orders
-    SET customer_design_status = 'received', customer_design_received_at = ?, updated_at = ?, updated_by_email = ?
-    WHERE id = ? AND customer_design_status IN ('requested','correction_requested')
-  `, [now, now, actor, orderId]);
-  await addEvent(db, orderId, "guide", "データ入稿ガイド1/2/3確認", actor);
-  await addEvent(db, orderId, "customer_design", `顧客デザイン入稿: ${fileName} (v${file.version})`, actor);
-  const refreshed = await getFilmOrder(orderId);
-  if (refreshed) {
-    const mails = [
-      await sendMail({
-        to: externalTo(refreshed.seven_contact_email),
-        subject: `【顧客デザイン入稿】${refreshed.order_number} ${refreshed.product_name || ""}`.trim(),
-        templateKey: "customer_design_received",
-        text: [
-          "顧客よりデザイン原稿が入稿されました。下記内容をご確認ください。",
-          "",
-          "【案件情報】",
-          mailBodyBase(refreshed),
-          "",
-          "【入稿データ】",
-          `ファイル名：${fileName}`,
-          `バージョン：v${file.version}`,
-          params.note ? `顧客メモ：${params.note}` : "",
-          "",
-          "【確認ポイント】",
-          "1. AIデータが製作可能なレイヤー・アウトライン構成か",
-          "2. トンボ・塗り足し・仕上がりサイズが適切か",
-          "3. 顧客修正依頼事項が反映されているか",
-        ].filter(Boolean).join("\n"),
-      }),
-    ];
-    await logMailEvents(db, orderId, mails, "顧客デザイン受領", actor);
-  }
-  const result = await getFilmOrder(orderId);
-  if (!result) throw new Error("film_order_update_failed");
-  return result;
+  const result = await runFilmOrderAction(resolved.orderId, "customer-design-received", {
+    customerDesignFileName: params.fileName,
+    customerDesignFileUrl: params.fileUrl,
+    customerDesignNote: params.note,
+    token: params.token,
+    ipAddressHash: params.request ? externalClientIpHash(params.request) : null,
+    origin: resolveFilmOrderExternalOrigin(params.origin),
+  }, params.uploader?.slice(0, 200) || "customer");
+  return result.order;
 }
 
 export async function registerProofFromUploadToken(params: {
@@ -4391,76 +3838,25 @@ export async function registerProofFromUploadToken(params: {
   note?: string;
   metadata?: UploadFileMetadata;
   pdfMetadata?: UploadFileMetadata;
+  request?: { headers: { get(name: string): string | null } };
+  origin?: unknown;
 }): Promise<FilmOrderView> {
   const db = await getDatabase();
   const resolved = await resolveExternalToken(db, params.token, "supplier_proof");
   if (!resolved) throw new Error("invalid_proof_token");
-  const orderId = resolved.orderId;
-  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [orderId]);
+  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [resolved.orderId]);
   if (!row) throw new Error("film_order_not_found");
   const order = mapOrder(row);
   assertSupplierProofUploadPolicy(order, params.fileName);
-  const fileName = validFileName(params.fileName);
-  if (!fileName || !fileName.toLowerCase().endsWith(".ai")) throw new Error("invalid_ai_file");
-  const fileUrl = validFileUrl(params.fileUrl);
-  const pdfFileName = params.pdfFileName ? validFileName(params.pdfFileName) : "";
-  if (params.pdfFileName && (!pdfFileName || !pdfFileName.toLowerCase().endsWith(".pdf"))) {
-    throw new Error("invalid_pdf_file");
-  }
-  const pdfFileUrl = params.pdfFileName ? validFileUrl(params.pdfFileUrl ?? "") : "";
-  if (params.pdfFileName && !pdfFileUrl) throw new Error("invalid_pdf_file");
-  const actor = params.uploader?.slice(0, 200) || "supplier";
-  const file = await addFile(
-    db,
-    orderId,
-    "proof",
-    fileName,
-    fileUrl,
-    params.note?.slice(0, 1000) ?? "",
-    actor,
-    {
-      ...params.metadata,
-      uploadedVia: params.metadata?.uploadedVia ?? "supplier_proof",
-    },
-  );
-  const pdfFile = pdfFileName
-    ? await addFile(
-      db,
-      orderId,
-      "proof",
-      pdfFileName,
-      pdfFileUrl,
-      params.note?.slice(0, 1000) ?? "",
-      actor,
-      {
-        ...params.pdfMetadata,
-        uploadedVia: params.pdfMetadata?.uploadedVia ?? "supplier_proof",
-      },
-    )
-    : null;
-  await markExternalTokenUse(db, resolved.token);
-  const now = new Date().toISOString();
-  await db.run(
-    "UPDATE film_orders SET status = 'proof_registered', proof_registered_at = ?, customer_proof_status = 'pending', supplier_approval_status = 'pending', supplier_approval_at = NULL, supplier_approval_by = '', supplier_approval_note = '', buyer_approval_status = 'pending', buyer_approval_at = NULL, buyer_approval_by = '', updated_at = ?, updated_by_email = ? WHERE id = ?",
-    [now, now, actor, orderId],
-  );
-  await addEvent(
-    db,
-    orderId,
-    "file",
-    `校正データ登録（メーカーアップロード）: ${fileName} (v${file.version})${pdfFileName ? ` / ${pdfFileName} (v${pdfFile?.version})` : ""}`,
-    actor,
-  );
-  await addEvent(db, orderId, "status", `${order.status} → 校正待ち`, actor);
-  const refreshed = await getFilmOrder(orderId);
-  if (refreshed) {
-    const mails = [
-      ...await sendProofReceivedMail(refreshed, fileName, fileUrl, pdfFileName || undefined, pdfFileUrl || undefined),
-      await sendKaneiApprovalRequiredMail(refreshed, origin, fileName, pdfFileName || undefined),
-    ];
-    await logMailEvents(db, orderId, mails, "校正受領・金井貿易承認依頼", actor);
-  }
-  const result = await getFilmOrder(orderId);
-  if (!result) throw new Error("film_order_update_failed");
-  return result;
+  const result = await runFilmOrderAction(resolved.orderId, "register-proof", {
+    fileName: params.fileName,
+    fileUrl: params.fileUrl,
+    pdfFileName: params.pdfFileName,
+    pdfFileUrl: params.pdfFileUrl,
+    note: params.note,
+    token: params.token,
+    ipAddressHash: params.request ? externalClientIpHash(params.request) : null,
+    origin: resolveFilmOrderExternalOrigin(params.origin),
+  }, params.uploader?.slice(0, 200) || "supplier");
+  return result.order;
 }

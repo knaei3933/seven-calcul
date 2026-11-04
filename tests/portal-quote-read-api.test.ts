@@ -41,7 +41,7 @@ const {
 
 const token = process.env.PORTAL_SERVICE_TOKEN;
 const authorization = { authorization: `Bearer ${token}` };
-let currentTime = new Date("2026-10-23T02:00:00.000Z");
+let currentTime = new Date();
 let userSequence = 0;
 
 interface TestUser {

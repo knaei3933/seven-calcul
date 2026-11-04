@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { getFilmOrderForSupplierPurchaseOrder } from "@/lib/film-orders";
-import { supplierLocaleFor } from "@/lib/film-order-access";
 import PurchaseOrderPrintButton from "./print-button";
 
 export const dynamic = "force-dynamic";
@@ -104,7 +103,8 @@ export default async function SupplierPurchaseOrderPage({ params }: PageProps) {
   }
   if (!order) notFound();
 
-  const locale = supplierLocaleFor(order);
+  const locale = order.makerLanguage;
+  if (!locale || !order.makerCompanyName || !order.makerEmail) notFound();
   const t = TEXT[locale];
   const purchaseOrder = order.purchaseOrder;
   const printing = order.printing_method === "gravure" ? t.gravure : order.printing_method === "digital" ? t.digital : "-";
@@ -152,8 +152,8 @@ export default async function SupplierPurchaseOrderPage({ params }: PageProps) {
           </div>
           <div>
             <h2>{t.supplier}</h2>
-            <p><strong>{order.supplier_name || "-"}</strong></p>
-            <p>{order.supplier_email || "-"}</p>
+            <p><strong>{order.makerCompanyName}</strong></p>
+            <p>{order.makerEmail}</p>
           </div>
         </section>
 

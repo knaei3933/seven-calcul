@@ -116,6 +116,77 @@ export async function getMailSettings(): Promise<MailSettings> {
   }
 }
 
+export class MailSettingsCorruptionError extends Error {
+  constructor() {
+    super("film_order_mail_settings_corrupted");
+    this.name = "MailSettingsCorruptionError";
+  }
+}
+
+export function parseStrictMailSettings(parsed: unknown): MailSettings {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new MailSettingsCorruptionError();
+  const source = parsed as Record<string, unknown>;
+  const testMode = source.testMode as Record<string, unknown> | null | undefined;
+  const sender = source.sender as Record<string, unknown> | null | undefined;
+  const recipients = source.recipients as Record<string, unknown> | null | undefined;
+  const templatesSource = source.templates as Record<string, unknown> | null | undefined;
+  if (
+    source.version !== 1
+    || !testMode || typeof testMode.enabled !== "boolean" || typeof testMode.recipient !== "string"
+    || !sender || typeof sender.name !== "string" || typeof sender.email !== "string"
+    || !assertStringArray(source.globalCc)
+    || !recipients || !["design","seven","kaneiApprovals","supplierKorean","supplierJapanese"].every((key) => typeof recipients[key] === "string")
+    || !templatesSource || typeof templatesSource !== "object" || Array.isArray(templatesSource)
+  ) throw new MailSettingsCorruptionError();
+  const templates: MailSettings["templates"] = {};
+  for (const [key, raw] of Object.entries(templatesSource)) {
+    if (raw == null) continue;
+    if (typeof raw !== "object" || Array.isArray(raw)) throw new MailSettingsCorruptionError();
+    const override = raw as Record<string, unknown>;
+    if (
+      (override.subject != null && typeof override.subject !== "string")
+      || (override.body != null && typeof override.body !== "string")
+      || (override.cc != null && !assertStringArray(override.cc))
+    ) throw new MailSettingsCorruptionError();
+    templates[key] = {
+      ...(override.subject != null ? { subject: override.subject as string } : {}),
+      ...(override.body != null ? { body: override.body as string } : {}),
+      ...(override.cc != null ? { cc: override.cc as string[] } : {}),
+    };
+  }
+  return {
+    version: 1,
+    testMode: { enabled: testMode.enabled, recipient: testMode.recipient },
+    sender: { name: sender.name, email: sender.email },
+    globalCc: source.globalCc as string[],
+    recipients: Object.fromEntries(["design","seven","kaneiApprovals","supplierKorean","supplierJapanese"].map((key) => [key, recipients[key] as string])) as MailSettings["recipients"],
+    templates,
+  };
+}
+
+function assertString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function assertStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(assertString);
+}
+
+/** Persisted film-workflow settings are read without compatibility substitution. */
+export async function getStrictMailSettings(): Promise<MailSettings> {
+  await ensureSchema();
+  const db = await getSqlClient("quotations");
+  const row = await db.get<{ settings_json: string }>("SELECT settings_json FROM mail_settings WHERE id = 1");
+  if (!row) return { ...DEFAULT_SETTINGS, templates: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.settings_json);
+  } catch {
+    throw new MailSettingsCorruptionError();
+  }
+  return parseStrictMailSettings(parsed);
+}
+
 export async function saveMailSettings(input: unknown, updatedBy: string): Promise<MailSettings> {
   const settings = normalizeSettings(input);
   if (settings.testMode.enabled) {

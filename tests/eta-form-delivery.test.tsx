@@ -12,6 +12,39 @@ afterEach(() => {
 });
 
 describe("eta form delivery report", () => {
+  it("blocks shipment reporting until ship-to is confirmed", async () => {
+    const user = userEvent.setup();
+    const postBodies: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/delivery-upload") && !init?.method) {
+        return Response.json({ driveConfigured: true, folderConfigured: true });
+      }
+      if (init?.method === "POST") postBodies.push(JSON.parse(String(init.body)));
+      return Response.json({});
+    }));
+
+    const delivery = {
+      shippedOn: null,
+      deliveredOn: null,
+      documents: [],
+    } as unknown as FilmDeliveryTracking;
+
+    render(
+      <EtaFormClient
+        token="token"
+        currentEtaDate=""
+        currentNote=""
+        delivery={delivery}
+        locale={"ko" as SupplierLocale}
+        shipToStatus="registered"
+      />,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("납품처가 아직 등록/확정되지 않았습니다");
+    await user.type(screen.getByLabelText("출하일(필수)"), "2026-10-28");
+    expect(screen.getByRole("button", { name: "보고 등록" })).toBeDisabled();
+    expect(postBodies).toEqual([]);
+  });
+
   it("sends kind=delivery when registering the delivered date", async () => {
     const user = userEvent.setup();
     let body: unknown;

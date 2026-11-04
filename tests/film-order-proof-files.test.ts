@@ -85,10 +85,24 @@ describe("film proof AI/PDF registration", () => {
     orderId = order.id;
     await runFilmOrderAction(orderId, "mark-ordered", {}, "seven@727.co.jp");
     await runFilmOrderAction(orderId, "set-customer-design-not-required", { reason: "AI+PDF regression" }, "seven@727.co.jp");
+    const { createFilmMaker, selectFilmMakerForOrder } = await import("@/lib/film-maker-store");
+    const maker = await createFilmMaker({
+      makerCode: "PROOF-KOR-001",
+      companyName: "Proof Files Maker",
+      email: "proof-files-maker@example.test",
+      language: "ko",
+      printMethod: "gravure",
+      procurementRoute: "K",
+    }, "kanei@kanei-trade.co.jp");
+    const db = await (await import("@/lib/db")).getSqlClient("quotations");
+    await db.run("UPDATE film_orders SET procurement_route='K', printing_method='gravure' WHERE id=?", [orderId]);
+    await selectFilmMakerForOrder(orderId, maker.id, "kanei@kanei-trade.co.jp");
     await runFilmOrderAction(orderId, "register-receiving", {
       aiFileName: "入稿.ai",
+      pdfFileName: "入稿.pdf",
       guideAcknowledged: true,
       aiFileUrl: "https://drive.google.com/file/d/receivingai/view",
+      pdfFileUrl: "https://drive.google.com/file/d/receivingpdf/view",
     }, "seven@727.co.jp");
   });
 
@@ -105,6 +119,7 @@ describe("film proof AI/PDF registration", () => {
       fileUrl: "https://drive.google.com/file/d/proofai/view",
       pdfFileName: `${orderNumber}_proof.pdf`,
       pdfFileUrl: "https://drive.google.com/file/d/proofpdf/view",
+      origin: "http://localhost:3000",
     });
     expect(uploaded.status).toBe("proof_registered");
     const proofs = uploaded.files.filter((file) => file.category === "proof");

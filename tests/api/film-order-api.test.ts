@@ -14,6 +14,7 @@ process.env.ADMIN_NAME = "Seven API";
 const { GET: listRoute } = await import("@/app/api/film-orders/route");
 const { POST: uploadSession } = await import("@/app/api/film-orders/[id]/upload-session/route");
 const { POST: actionRoute } = await import("@/app/api/film-orders/[id]/route");
+const { GET: mailOutboxRoute } = await import("@/app/api/film-orders/[id]/mail-outbox/route");
 const { POST: login } = await import("@/app/api/auth/login/route");
 const { createUser } = await import("@/lib/auth-store");
 const { saveQuotation } = await import("@/lib/quotation-store");
@@ -63,7 +64,7 @@ const input: QuotationRecordInput = {
   notes: "",
   calculationVersion: "film-order-api-test",
   resultHash: "",
-  payload: { purchaseOrder: { printingMethod: "digital", orderLengthM: "1700", webWidthMm: 556 } },
+  payload: { customerEmail: "api-customer@example.test", purchaseOrder: { printingMethod: "digital", orderLengthM: "1700", webWidthMm: 556 } },
 };
 
 describe("film order API permissions and workflow", () => {
@@ -130,11 +131,78 @@ describe("film order API permissions and workflow", () => {
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
 
+    const { createFilmMaker } = await import("@/lib/film-maker-store");
+    const apiMaker = await createFilmMaker({
+      makerCode: "API-KOR-001",
+      companyName: "API Maker",
+      email: "api-maker@example.test",
+      language: "ko",
+      printMethod: "digital",
+      procurementRoute: "K",
+    }, "kanei@kanei-trade.co.jp");
+    await (await import("@/lib/db")).getSqlClient("quotations").then(async (db) => {
+      await db.run("UPDATE film_orders SET procurement_route='K' WHERE id=?", [orderId]);
+    });
+    await actionRoute(
+      request(`http://localhost/api/film-orders/${orderId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "select-film-maker", makerId: apiMaker.id }),
+      }, kaneiToken),
+      { params: Promise.resolve({ id: String(orderId) }) } as never,
+    );
+
+    const silentExemption = await actionRoute(
+      request(`http://localhost/api/film-orders/${orderId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "set-supplier",
+          supplierName: "Another Maker",
+          supplierEmail: "another@example.test",
+        }),
+      }, kaneiToken),
+      { params: Promise.resolve({ id: String(orderId) }) } as never,
+    );
+    expect(silentExemption.status).toBe(400);
+    expect(await silentExemption.json()).toMatchObject({ error: "legacy_exempt_reason_required" });
+
+    const designResponse = await actionRoute(
+      request(`http://localhost/api/film-orders/${orderId}`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "get-design-status" })
+      }, sevenToken), { params: Promise.resolve({ id: String(orderId) }) } as never,
+    );
+    expect(designResponse.status).toBe(403);
+    const previewResponse = await actionRoute(
+      request(`http://localhost/api/film-orders/${orderId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "request-customer-design-upload" }),
+      }, sevenToken),
+      { params: Promise.resolve({ id: String(orderId) }) } as never,
+    );
+    expect(previewResponse.status).toBe(200);
+    const humanPreview = await previewResponse.json() as {
+      order: { customerDesign: { status: string }; updated_at: string };
+      order_supplier_email?: unknown;
+      supplier_email?: unknown;
+      preview?: unknown;
+      mails?: unknown[];
+    };
+    expect(humanPreview.order.customerDesign.status).toBe("not_required");
+    expect(humanPreview.order_supplier_email).toBeUndefined();
+    expect(humanPreview.supplier_email).toBeUndefined();
+    expect(humanPreview.preview).toMatchObject({
+      envelopes: [{ audience: "seven", links: expect.any(Array) }],
+      stagedTokenHashes: expect.any(Array),
+    });
+    expect(humanPreview.mails).toBeUndefined();
+
     const kaneiReceiving = await actionRoute(
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", aiFileUrl: "https://drive.google.com/file/d/api-ai/view", pdfFileName: "API検証パウチ.pdf", pdfFileUrl: "https://drive.google.com/file/d/api-pdf/view", guideAcknowledged: true }),
+        body: JSON.stringify({ action: "register-receiving", mailMode: "confirm", aiFileName: "API検証パウチ.ai", aiFileUrl: "https://drive.google.com/file/d/api-ai/view", pdfFileName: "API検証パウチ.pdf", pdfFileUrl: "https://drive.google.com/file/d/api-pdf/view", guideAcknowledged: true }),
       }, kaneiToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
@@ -144,20 +212,20 @@ describe("film order API permissions and workflow", () => {
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "register-receiving", aiFileName: "API検証パウチ.ai", aiFileUrl: "https://drive.google.com/file/d/api-ai/view", pdfFileName: "API検証パウチ.pdf", pdfFileUrl: "https://drive.google.com/file/d/api-pdf/view", guideAcknowledged: true }),
+        body: JSON.stringify({ action: "register-receiving", mailMode: "confirm", aiFileName: "API検証パウチ.ai", aiFileUrl: "https://drive.google.com/file/d/api-ai/view", pdfFileName: "API検証パウチ.pdf", pdfFileUrl: "https://drive.google.com/file/d/api-pdf/view", guideAcknowledged: true }),
       }, sevenToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
-    expect(sevenReceiving.status).toBe(200);
+        expect(sevenReceiving.status).toBe(200);
     const receivingPayload = await sevenReceiving.json() as { order: { status: string }; mails: Array<{ dryRun: boolean }> };
     expect(receivingPayload.order.status).toBe("receiving_registered");
-    expect(receivingPayload.mails.every((mail) => mail.dryRun)).toBe(true);
+    expect(receivingPayload.mails).toBeUndefined();
 
     const kaneiProof = await actionRoute(
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "register-proof", fileName: "校正_v1.ai" }),
+        body: JSON.stringify({ action: "register-proof", mailMode: "confirm", fileName: "校正_v1.ai", fileUrl: "https://example.test/proof.ai" }),
       }, kaneiToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
@@ -168,7 +236,7 @@ describe("film order API permissions and workflow", () => {
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "approve" }),
+        body: JSON.stringify({ action: "approve", mailMode: "confirm" }),
       }, kaneiToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
@@ -178,12 +246,48 @@ describe("film order API permissions and workflow", () => {
       request(`http://localhost/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "request-re-proof", comment: "色を調整", supplierMessage: "색상과 배치를 조정해서 다시 제출해 주십시오." }),
+        body: JSON.stringify({ action: "request-re-proof", mailMode: "confirm", comment: "色を調整", supplierMessage: "색상과 배치를 조정해서 다시 제출해 주십시오." }),
       }, sevenToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
     expect(sevenReProof.status).toBe(200);
     expect(await sevenReProof.json()).toMatchObject({ order: { status: "re_proof_requested" } });
+  });
+
+  it("scopes API order and outbox reads to the authorized audience", async () => {
+    const sevenOrder = await (await import("@/app/api/film-orders/[id]/route")).GET(
+      request(`http://localhost/api/film-orders/${orderId}`, {}, sevenToken),
+      { params: Promise.resolve({ id: String(orderId) }) } as never,
+    );
+    expect(sevenOrder.status).toBe(200);
+    const serializedSeven = JSON.stringify(await sevenOrder.json());
+    expect(serializedSeven).not.toContain("API Maker");
+    expect(serializedSeven).not.toContain("api-maker@example.test");
+    expect(serializedSeven).not.toContain("purchaseOrder");
+
+    const sevenOutbox = await mailOutboxRoute(
+      request(`http://localhost/api/film-orders/${orderId}/mail-outbox`, {}, sevenToken),
+      { params: Promise.resolve({ id: String(orderId) }) } as never,
+    );
+    expect(sevenOutbox.status).toBe(200);
+    const sevenOutboxPayload = await sevenOutbox.json() as { envelopes: Array<{ audience: string }> };
+    expect(sevenOutboxPayload.envelopes.every((envelope) => envelope.audience === "seven")).toBe(true);
+    expect(JSON.stringify(sevenOutboxPayload)).not.toContain('"body"');
+
+    const kaneiOutbox = await mailOutboxRoute(
+      request(`http://localhost/api/film-orders/${orderId}/mail-outbox`, {}, kaneiToken),
+      { params: Promise.resolve({ id: String(orderId) }) } as never,
+    );
+    expect(kaneiOutbox.status).toBe(200);
+    const kaneiOutboxPayload = await kaneiOutbox.json() as { envelopes: Array<{ audience: string; body?: string }> };
+    expect(kaneiOutboxPayload.envelopes.map((envelope) => envelope.audience)).toContain("maker");
+    expect(kaneiOutboxPayload.envelopes.every((envelope) => typeof envelope.body === "string")).toBe(true);
+
+    const outsiderOutbox = await mailOutboxRoute(
+      request(`http://localhost/api/film-orders/${orderId}/mail-outbox`, {}, outsiderToken),
+      { params: Promise.resolve({ id: String(orderId) }) } as never,
+    );
+    expect(outsiderOutbox.status).toBe(403);
   });
 
   it("reports direct upload as unavailable without service account credentials", async () => {

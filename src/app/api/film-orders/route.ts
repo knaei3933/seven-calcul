@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
 import { canViewFilmOrders } from "@/lib/film-order-access";
+import { serializeFilmOrderForActor } from "@/lib/film-order-disclosure";
 import { listFilmOrderSummaries, syncFilmOrdersFromQuotations } from "@/lib/film-orders";
 import { driveConfigured } from "@/lib/google-drive";
 
@@ -14,7 +15,11 @@ export async function GET(request: Request): Promise<NextResponse> {
   try {
     const created = await syncFilmOrdersFromQuotations(user.email);
     const orders = await listFilmOrderSummaries(user.email);
-    return NextResponse.json({ created, orders, driveConfigured: driveConfigured() });
+    return NextResponse.json({
+      created,
+      orders: orders.map((order) => serializeFilmOrderForActor(order, user.email)),
+      driveConfigured: driveConfigured(),
+    });
   } catch {
     return NextResponse.json({ error: "film_order_list_failed" }, { status: 500 });
   }

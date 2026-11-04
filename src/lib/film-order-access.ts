@@ -66,6 +66,7 @@ const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
   "send-proof-notice": "kanei",
   "rotate-supplier-proof-token": "kanei",
   "set-supplier": "kanei",
+  "select-film-maker": "kanei",
   "update-supplier-order-note": "kanei",
   "preview-supplier-po": "kanei",
   "send-po": "kanei",

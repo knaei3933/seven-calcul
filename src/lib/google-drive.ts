@@ -1,4 +1,5 @@
 import { createSign } from "node:crypto";
+import { resolveFilmOrderExternalOrigin } from "./film-order-origin";
 
 /**
  * Google Drive 直接アップロード（サービスアカウント）。
@@ -68,13 +69,12 @@ export function deliveryDocumentFolderId(): string {
 
 export function browserOriginOf(request: Request): string {
   const origin = request.headers.get("origin");
-  if (origin && /^https?:\/\//iu.test(origin)) return origin;
   const forwardedHost = request.headers.get("x-forwarded-host");
   if (forwardedHost) {
     const forwardedProto = request.headers.get("x-forwarded-proto") ?? "https";
-    return `${forwardedProto.split(",")[0]!.trim()}://${forwardedHost.split(",")[0]!.trim()}`;
+    return resolveFilmOrderExternalOrigin(`${forwardedProto.split(",")[0]!.trim()}://${forwardedHost.split(",")[0]!.trim()}`);
   }
-  return new URL(request.url).origin;
+  return resolveFilmOrderExternalOrigin(origin ?? new URL(request.url).origin);
 }
 
 let cachedToken: { token: string; expiresAt: number } | null = null;

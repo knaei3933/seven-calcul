@@ -43,7 +43,8 @@ const fontBytes = await readFile("src/fonts/NotoSansJP-Variable.ttf");
 
 const token = process.env.PORTAL_SERVICE_TOKEN;
 const serviceAuthorization = { authorization: `Bearer ${token}` };
-let currentTime = new Date("2026-10-23T02:00:00.000Z");
+const controlledClockStart = new Date();
+let currentTime = new Date(controlledClockStart);
 let userSequence = 0;
 
 interface TestUser {
@@ -529,8 +530,10 @@ describe("portal-owned canonical quotation PDF API", () => {
           projection: {
             publicId: input.publicId,
             quotationNumber: "Q",
-            issueDate: "2026-10-23",
-            validUntil: "2026-11-22",
+            issueDate: controlledClockStart.toISOString().slice(0, 10),
+            validUntil: new Date(controlledClockStart.getTime() + 30 * 24 * 60 * 60 * 1000)
+              .toISOString()
+              .slice(0, 10),
             customerName: " customer",
             customerContact: "contact",
             productName: "product",

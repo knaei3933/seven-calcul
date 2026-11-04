@@ -132,6 +132,9 @@ export interface FilmOrderRow {
   order_length_m: string;
   web_width_mm: string;
   pouch_quantity: string;
+  film_maker_id: number | null;
+  film_maker_snapshot_json: string | null;
+  supplier_resolution: "legacy_unresolved" | "master_selected" | "legacy_exempt";
   supplier_name: string;
   supplier_email: string;
   seven_contact_email: string;
@@ -338,6 +341,10 @@ export interface ShipToTracking {
 }
 
 export type FilmOrder = FilmOrderRow & {
+  /** Immutable selected-master language captured on the order snapshot. */
+  makerLanguage?: "ja" | "ko";
+  makerCompanyName?: string;
+  makerEmail?: string;
   purchaseOrder: PurchaseOrderSnapshot | null;
   sampleBulk: SampleBulkTracking;
   customerDesign: CustomerDesignTracking;

@@ -23,9 +23,11 @@ const TEXT = {
     deliveryDate: "납품일(필수)",
     carrier: "운송사",
     tracking: "운송장 번호",
-    document: "납품서·인보이스 PDF（최대 3개, 1개 필수）",
+    document: "납품서·인보이스 PDF（선택, 최대 3개）",
     report: "보고 등록",
     shipmentRequired: "납품 보고 전에 출하 보고를 등록해 주십시오.",
+    shipToRequired: "납품처가 아직 등록/확정되지 않았습니다. 등록 후 확정해 주십시오.",
+    registeredEta: "등록된 납기 전망",
   },
   ja: {
     date: "おおよその納期日（必須）",
@@ -45,9 +47,11 @@ const TEXT = {
     deliveryDate: "納品日（必須）",
     carrier: "運送会社",
     tracking: "追跡番号",
-    document: "納品書・インボイスPDF（最大3通、1通必須）",
+    document: "納品書・インボイスPDF（任意、最大3通）",
     report: "報告を登録",
     shipmentRequired: "納品報告の前に出荷報告を登録してください。",
+    shipToRequired: "納品先がまだ登録/確定されていません。登録・確定をお願いします。",
+    registeredEta: "登録済み納期見込み",
   },
 } as const;
 
@@ -57,12 +61,16 @@ export default function EtaFormClient({
   currentNote,
   delivery,
   locale,
+  shipToStatus,
+  shipToSummary,
 }: {
   token: string;
   currentEtaDate: string;
   currentNote: string;
   delivery: FilmDeliveryTracking;
   locale: SupplierLocale;
+  shipToStatus?: string;
+  shipToSummary?: string;
 }) {
   const t = TEXT[locale];
   const [etaDate, setEtaDate] = useState(currentEtaDate);
@@ -146,7 +154,7 @@ export default function EtaFormClient({
   };
 
   const uploadShipment = async () => {
-    if (!documentFiles.length || !shipmentDate || busy) return;
+    if (!shipmentDate || busy || shipToStatus !== "confirmed") return;
     if (documentFiles.length > 3) throw new Error("too_many_delivery_documents");
     const documents = [];
     for (const documentFile of documentFiles) {
@@ -234,6 +242,10 @@ export default function EtaFormClient({
       {error ? <p className="eta-error">{error}</p> : null}
 
       <div className="eta-delivery-state">
+        <strong>{t.registeredEta}</strong>
+        <span>{etaDate || "-"}</span>
+      </div>
+      <div className="eta-delivery-state">
         <strong>{t.deliveryState}</strong>
         <span>{delivery.deliveredOn ? t.delivered : delivery.shippedOn ? t.shipped : t.notShipped}</span>
       </div>
@@ -251,6 +263,10 @@ export default function EtaFormClient({
             <button className="button" type="submit" disabled={busy || !deliveredDate}>{busy ? t.submitting : t.report}</button>
           </form>
         ) : (
+          <>
+          {shipToStatus !== "confirmed" ? (
+            <p className="eta-error" role="alert">{t.shipToRequired}</p>
+          ) : null}
           <form className="eta-form eta-delivery-form" onSubmit={(event) => {
             event.preventDefault();
             setBusy(true); setError(""); setMessage("");
@@ -265,7 +281,12 @@ export default function EtaFormClient({
               <input type="date" value={shipmentDate} onChange={(event) => setShipmentDate(event.target.value)} required />
             </label>
             <label>{t.carrier}
-              <input value={carrier} onChange={(event) => setCarrier(event.target.value)} />
+              <input value={carrier} list="shipment-carrier-options" onChange={(event) => setCarrier(event.target.value)} />
+              <datalist id="shipment-carrier-options">
+                {["EMS", "배편 / 船便", "후쿠야마통운 / 福山通運", "사가와 / 佐川急便", "야마토 / ヤマト運輸"].map((option) => (
+                  <option key={option} value={option} />
+                ))}
+              </datalist>
             </label>
             <label>{t.tracking}
               <input value={trackingNumber} onChange={(event) => setTrackingNumber(event.target.value)} />
@@ -297,11 +318,16 @@ export default function EtaFormClient({
             <label>메모 / メモ
               <textarea value={shipmentNote} rows={2} onChange={(event) => setShipmentNote(event.target.value)} />
             </label>
-            <button className="button" type="submit" disabled={busy || !shipmentDate || !documentFiles.length || !driveReady}>
+            <button
+              className="button"
+              type="submit"
+              disabled={busy || !shipmentDate || shipToStatus !== "confirmed" || (documentFiles.length > 0 && !driveReady)}
+            >
               {busy ? t.submitting : t.report}
             </button>
             {!driveReady ? <p className="help">Drive upload is not configured.（Driveアップロード未設定）</p> : null}
           </form>
+          </>
         )
       ) : (
         <p className="help">{t.delivered}</p>

@@ -4170,3 +4170,56 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 3mm; }
   color: #92400e;
   font-size: 12px;
 }
+
+.film-order-stage-chip {
+  border: 1px solid #dbe3ee;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  background: #f8fafc;
+  white-space: nowrap;
+}
+.workflow-stage-track {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+}
+.workflow-stage-track span {
+  flex: 0 0 auto;
+  border: 1px solid #dbe3ee;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 10.5px;
+  color: #64748b;
+  background: white;
+  white-space: nowrap;
+}
+.workflow-stage-track span.active { border-color: #2563eb; color: #1d4ed8; background: #eff6ff; font-weight: 900; }
+.workflow-stage-track span.done { border-color: #bbf7d0; color: #15803d; background: #f0fdf4; }
+.workflow-action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.workflow-action-cell { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.workflow-action-reason { margin: 0; color: #64748b; font-size: 11.5px; overflow-wrap: anywhere; }
+.workflow-action-cell button:disabled { opacity: .62; cursor: not-allowed; }
+.film-maker-snapshot { display: grid; gap: 5px; margin: 8px 0; }
+.film-maker-snapshot div { display: grid; grid-template-columns: 92px 1fr; gap: 8px; }
+.film-maker-snapshot dt { color: #64748b; font-size: 11.5px; }
+.film-maker-snapshot dd { margin: 0; overflow-wrap: anywhere; }
+.mail-outbox-list { display: grid; gap: 10px; list-style: none; padding: 0; margin: 10px 0 0; }
+.mail-outbox-list li { display: grid; gap: 7px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; min-width: 0; }
+.mail-outbox-list li.failed { border-color: #fecaca; background: #fff1f2; }
+.mail-outbox-list li.unknown, .mail-outbox-list li.retry_required { border-color: #fde68a; background: #fffbeb; }
+.mail-outbox-list li.skipped { border-color: #e2e8f0; background: #f8fafc; }
+.mail-outbox-list p { margin: 0; overflow-wrap: anywhere; }
+.mail-attempt-list { display: grid; gap: 4px; }
+.mail-outcome-list { display: grid; gap: 8px; list-style: none; padding: 0; margin: 0; }
+.mail-outcome-list li { display: grid; gap: 3px; border-left: 4px solid #93c5fd; padding-left: 8px; }
+.mail-outcome-list li.sent { border-color: #22c55e; }
+.mail-outcome-list li.failed { border-color: #ef4444; }
+.mail-outcome-list li.unknown, .mail-outcome-list li.retry_required { border-color: #f59e0b; }
+@media (max-width: 720px) {
+  .workflow-action-grid { grid-template-columns: 1fr; }
+  .film-order-stage-chip { white-space: normal; }
+}

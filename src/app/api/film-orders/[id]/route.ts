@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/api-auth";
 import { canViewFilmOrders, canPerformFilmOrderAction, canViewFilmOrderRow } from "@/lib/film-order-access";
+import { serializeFilmOrderActionForActor, serializeFilmOrderForActor } from "@/lib/film-order-disclosure";
 import { getFilmOrder } from "@/lib/film-orders";
 import { runFilmOrderAction, type FilmOrderAction } from "@/lib/film-orders";
+import { resolveFilmOrderExternalOrigin } from "@/lib/film-order-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +25,7 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
     if (!order || !canViewFilmOrderRow(order.buyer_domain, user.email)) {
       return NextResponse.json({ error: "film_order_not_found" }, { status: 404 });
     }
-    return NextResponse.json({ order });
+    return NextResponse.json({ order: serializeFilmOrderForActor(order, user.email) });
   } catch {
     return NextResponse.json({ error: "film_order_get_failed" }, { status: 500 });
   }
@@ -34,6 +36,13 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
 function statusForError(message: string): number {
   if (message === "film_order_not_found") return 404;
   if (message === "invalid_status_transition") return 409;
+  if (message === "ship_to_confirmation_required") return 409;
+  if (
+    message === "film_order_state_conflict"
+    || message === "film_order_resend_conflict"
+    || message === "legacy_supplier_history_conflict"
+  ) return 409;
+  if (message === "maker_data_packet_required" || message === "supplier_destination_missing") return 400;
   if (
     message.startsWith("invalid_")
     || message === "re_proof_comment_required"
@@ -58,13 +67,18 @@ function statusForError(message: string): number {
     || message === "delivery_report_required"
     || message === "shipment_report_required"
     || message === "invalid_delivery_transition"
-    || message === "ship_to_confirmation_required"
     || message === "ship_to_not_registered"
     || message === "invalid_ship_to"
     || message === "invalid_production_plan_date"
     || message === "invalid_production_plan_range"
     || message === "delivery_destination_not_found"
     || message === "customer_code_required"
+    || message === "invalid_film_maker_id"
+    || message === "film_maker_not_found"
+    || message === "film_maker_route_mismatch"
+    || message === "film_maker_print_method_mismatch"
+    || message === "film_maker_language_mismatch"
+    || message === "legacy_exempt_reason_required"
     || message === "sample_bulk_quantity_mismatch"
   ) return 400;
   return 500;
@@ -80,7 +94,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     return NextResponse.json({ error: "invalid_film_order_id" }, { status: 400 });
   }
   try {
-    const body = await request.json() as { action?: unknown };
+    const body = await request.json() as { action?: unknown; mailMode?: unknown; origin?: unknown };
     const action = typeof body.action === "string" ? body.action as FilmOrderAction : null;
     if (!action) {
       return NextResponse.json({ error: "unknown_action" }, { status: 400 });
@@ -94,13 +108,14 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     const forwardedHost = request.headers.get("x-forwarded-host");
     const forwardedProto = request.headers.get("x-forwarded-proto");
     if (forwardedHost) origin = `${forwardedProto ?? "https"}://${forwardedHost}`;
+    origin = resolveFilmOrderExternalOrigin(body.origin ?? origin);
     const result = await runFilmOrderAction(
       orderId,
       action,
-      { ...(body as Parameters<typeof runFilmOrderAction>[2]), origin },
+      { ...(body as Parameters<typeof runFilmOrderAction>[2]), origin, mailMode: body.mailMode === "confirm" ? "confirm" : "preview" },
       user.email,
     );
-    return NextResponse.json(result);
+    return NextResponse.json(serializeFilmOrderActionForActor(result, user.email));
   } catch (error) {
     const message = error instanceof Error ? error.message : "film_order_action_failed";
     return NextResponse.json({ error: message }, { status: statusForError(message) });

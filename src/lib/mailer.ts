@@ -1,6 +1,6 @@
 import { resolveMailRoute } from "./mail-routing";
 import { withRecipientSubjectPrefix } from "./mail-subject";
-import { getMailSettings, resolveMailTemplate } from "./mail-settings";
+import { getMailSettings, getStrictMailSettings, resolveMailTemplate, type MailSettings } from "./mail-settings";
 
 export interface MailInput {
   to: string;
@@ -10,6 +10,10 @@ export interface MailInput {
   cc?: string[];
   templateKey?: string;
   templateVars?: Record<string, unknown>;
+  /** Internal outbox boundary: send persisted subject/body/cc exactly; centralized test-mode routing remains active. */
+  exactEnvelope?: boolean;
+  senderEmail?: string;
+  strictSettings?: MailSettings;
   configuredRecipientKey?: "design" | "seven" | "kaneiApprovals" | "supplierByLocale";
 }
 
@@ -65,23 +69,31 @@ function mailFromIdentity(input: {
  * MAIL_DRY_RUN=true の場合は実際に送信せず、結果オブジェクトだけ返す（テスト用）。
  */
 export async function sendMail(input: MailInput): Promise<MailSendResult> {
-  const settings = await getMailSettings();
+  const settings = input.exactEnvelope
+    ? (input.strictSettings ?? await getStrictMailSettings())
+    : await getMailSettings();
   let requested = input.to;
   const configured = input.configuredRecipientKey === "supplierByLocale"
     ? (/[가-힯]/u.test(input.text) ? settings.recipients.supplierKorean : settings.recipients.supplierJapanese)
     : input.configuredRecipientKey ? settings.recipients[input.configuredRecipientKey] : "";
   if (configured) requested = configured;
   const route = resolveMailRoute(requested, settings.testMode);
-  const resolved = input.templateKey
+  const resolved = input.exactEnvelope
+    ? { subject: input.subject, body: input.text, cc: [...new Set(input.cc ?? [])] }
+    : input.templateKey
     ? resolveMailTemplate(settings, input.templateKey, { subject: input.subject, body: input.text }, input.templateVars)
     : { subject: input.subject, body: input.text, cc: [] };
-  const cc = [...new Set([...settings.globalCc, ...input.cc ?? [], ...resolved.cc])];
-  const subject = withRecipientSubjectPrefix({
-    to: requested,
-    subject: resolved.subject,
-    body: resolved.body,
-    audience: input.audience,
-  });
+  const cc = input.exactEnvelope
+    ? [...new Set(input.cc ?? [])]
+    : [...new Set([...settings.globalCc, ...input.cc ?? [], ...resolved.cc])];
+  const subject = input.exactEnvelope
+    ? resolved.subject
+    : withRecipientSubjectPrefix({
+      to: requested,
+      subject: resolved.subject,
+      body: resolved.body,
+      audience: input.audience,
+    });
   const base = {
     to: route.to,
     requestedTo: route.overridden ? input.to : undefined,
@@ -100,12 +112,14 @@ export async function sendMail(input: MailInput): Promise<MailSendResult> {
   if (!user || !password) {
     return { ...base, dryRun: false, error: "smtp_credentials_missing" };
   }
-  const fromIdentity = mailFromIdentity({
+  const fromIdentity = input.exactEnvelope && input.senderEmail
+    ? { name: settings.sender.name || "Package Lab", address: input.senderEmail }
+    : mailFromIdentity({
     audience: input.audience,
     body: resolved.body,
     settingsSender: settings.sender,
     fallbackAddress: process.env.MAIL_FROM ?? user,
-  });
+    });
   try {
     const nodemailer = await import("nodemailer");
     const transporter = nodemailer.createTransport({

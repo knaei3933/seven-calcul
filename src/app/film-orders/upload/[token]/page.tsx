@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { getFilmOrderForProofUpload } from "@/lib/film-orders";
-import { supplierLocaleFor } from "@/lib/film-order-access";
 import ProofUploadClient from "./proof-upload-client";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +15,8 @@ export default async function FilmOrderProofUploadPage({ params }: PageProps) {
     order = null;
   }
   if (!order) notFound();
-  const locale = supplierLocaleFor(order);
+  const locale = order.makerLanguage;
+  if (!locale) notFound();
   const printing = order.printing_method === "gravure"
     ? (locale === "ko" ? "그라비아 인쇄" : "グラビア印刷")
     : order.printing_method === "digital"

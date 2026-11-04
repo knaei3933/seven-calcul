@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { getFilmOrderForEta } from "@/lib/film-orders";
-import { supplierLocaleFor } from "@/lib/film-order-access";
 import EtaFormClient from "./eta-form-client";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +30,8 @@ export default async function FilmOrderEtaPage({ params }: PageProps) {
     order = null;
   }
   if (!order) notFound();
-  const locale = supplierLocaleFor(order);
+  const locale = order.makerLanguage;
+  if (!locale) notFound();
   const t = TEXT[locale];
   const printing = order.printing_method === "gravure"
     ? t.gravure
@@ -55,6 +55,8 @@ export default async function FilmOrderEtaPage({ params }: PageProps) {
           currentNote={order.eta_note ?? ""}
           delivery={order.delivery}
           locale={locale}
+          shipToStatus={order.shipTo.status}
+          shipToSummary={[order.shipTo.companyName, order.shipTo.address].filter(Boolean).join(' / ')}
         />
       </section>
     </main>
