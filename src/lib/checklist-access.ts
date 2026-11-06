@@ -1,10 +1,18 @@
-/**
- * 社内QA（金井貿易）チェックリストの閲覧権限。
- * 金井貿易のメールアドレスを持つアカウントだけが社内QAタブを表示・更新できる。
- */
-export const KANEI_TRADE_EMAIL_DOMAIN = "@kanei-trade.co.jp";
+import { canActForQuoteOwner } from "./quotation-access";
+import { isKaneiTradeUser } from "./film-order-access";
+import type { QuotationOwnerDomain } from "./quotation-shared";
 
-export function canViewInternalChecklist(email: string | null | undefined): boolean {
+/**
+ * Legacy callers without a quote owner retain Kanei Trade QA behavior.
+ * Owner-aware checklist routes pass the durable quotation owner.
+ */
+export function canViewInternalChecklist(
+  email: string | null | undefined,
+  ownerDomain?: QuotationOwnerDomain,
+): boolean {
+  if (ownerDomain) return canActForQuoteOwner(email, ownerDomain);
   if (!email) return false;
-  return email.trim().toLowerCase().endsWith(KANEI_TRADE_EMAIL_DOMAIN);
+  return isKaneiTradeUser(email);
 }
+
+export const KANEI_TRADE_EMAIL_DOMAIN = "@kanei-trade.co.jp";

@@ -32,7 +32,7 @@ vi.mock("@/lib/google-drive", () => ({
   getConfirmedDriveUpload: driveMocks.getConfirmedUpload,
 }));
 
-const { saveQuotation } = await import("@/lib/quotation-store");
+const { getDatabaseForTest, saveQuotation } = await import("@/lib/quotation-store");
 const { saveCustomer, listDeliveryDestinations } = await import("@/lib/customer-store");
 const { canPerformFilmOrderAction } = await import("@/lib/film-order-access");
 const { createFilmMaker, deactivateFilmMaker, selectFilmMakerForOrder } = await import("@/lib/film-maker-store");
@@ -142,18 +142,20 @@ beforeAll(async () => {
     expect(orders[0]!.events.some((event) => event.type === "created")).toBe(true);
   });
 
-  it("creates a Seven-owned film order even for a Kanei sales-channel quotation", async () => {
+  it("derives a Kanei-origin film order buyer from the durable quotation owner", async () => {
     const kaneiUser = await createUser({
-      email: "sales-kanei-store@example.kanei-trade.co.jp",
+      email: "sales-kanei-store@kanei-trade.co.jp",
       name: "Kanei Sales Channel",
       password: "kanei-store-password",
       role: "user",
     });
-    await saveQuotation({
+    const quotation = await saveQuotation({
       ...input,
       quotationNumber: "KT-FILM-CHANNEL-001",
       status: "approved",
     }, kaneiUser.id, "user");
+    const db = await getDatabaseForTest();
+    await db.run("UPDATE quotations SET owner_domain='kanei', quotation_number='KT-FILM-CHANNEL-001' WHERE id=?", [quotation.id]);
     expect(await syncFilmOrdersFromQuotations("kanei@kanei-trade.co.jp")).toBe(1);
 
     const sevenView = await listFilmOrders("seven@727.co.jp");
@@ -161,9 +163,9 @@ beforeAll(async () => {
     const sevenSummaries = await listFilmOrderSummaries("gotou@727.co.jp");
     const kaneiSummaries = await listFilmOrderSummaries("kim@kanei-trade.co.jp");
     const order = sevenView.find((item) => item.quotation_number === "KT-FILM-CHANNEL-001")!;
-    expect(order.buyer_domain).toBe("727.co.jp");
-    expect(order.created_by_email).toBe("sales-kanei-store@example.kanei-trade.co.jp");
-    expect(order.seven_contact_email).toBe("gotou@727.co.jp");
+    expect(order.buyer_domain).toBe("kanei-trade.co.jp");
+    expect(order.created_by_email).toBe("sales-kanei-store@kanei-trade.co.jp");
+    expect(order.seven_contact_email).toBe("sales-kanei-store@kanei-trade.co.jp");
     expect(sevenView.some((item) => item.id === order.id)).toBe(true);
     expect(kaneiView.some((item) => item.id === order.id)).toBe(true);
     expect(sevenSummaries.some((item) => item.id === order.id)).toBe(true);
@@ -171,7 +173,7 @@ beforeAll(async () => {
   });
 
   it("walks the full workflow with mails recorded in dry-run mode", async () => {
-    const marked = await runFilmOrderAction(orderId, "mark-ordered", {}, "kanei@kanei-trade.co.jp");
+    const marked = await runFilmOrderAction(orderId, "mark-ordered", {}, "seven@727.co.jp");
     expect(marked.order.status).toBe("ordered");
     await runFilmOrderAction(orderId, "set-customer-design-not-required", { reason: "既存フロー回帰テスト" }, "seven@727.co.jp");
     await expect(runFilmOrderAction(orderId, "register-proof", { fileName: "x" }, "kanei@kanei-trade.co.jp"))
@@ -269,7 +271,7 @@ beforeAll(async () => {
     expect(proof2.order.files.filter((file) => file.category === "proof")).toHaveLength(5);
 
     const sellerApproved = await runFilmOrderAction(orderId, "record-customer-proof-approval", {
-      approverName: "顧客担当",
+      approverName: "金井貿易担当",
       evidence: "電話承認（回帰テスト）",
       offlineReason: "記録された顧客承認のオフライン確認",
     }, "kanei@kanei-trade.co.jp");
@@ -285,7 +287,7 @@ beforeAll(async () => {
     expect(approved.order.customerProof.supplierApprovalBy).toBe("kanei@kanei-trade.co.jp");
     expect(approved.order.customerProof.buyerApprovalStatus).toBe("approved");
     expect(approved.order.customerProof.buyerApprovalBy).toBe("seven@727.co.jp");
-    expect(approved.order.events.some((event) => event.detail.includes("金井貿易校正承認") && event.actor_email === "kanei@kanei-trade.co.jp")).toBe(true);
+    expect(approved.order.events.some((event) => event.detail.includes("セブン化学校正承認") && event.actor_email === "seven@727.co.jp")).toBe(true);
     expect(approved.order.files.find((file) => file.category === "final")).toBeDefined();
     expect(approved.mails?.every((mail) => mail.dryRun)).toBe(true);
 
@@ -306,7 +308,7 @@ beforeAll(async () => {
       shipToEmail: "warehouse@example.test",
       shipToNote: "大型車不可",
       saveShipToMaster: true,
-    }, "kanei@kanei-trade.co.jp");
+    }, "seven@727.co.jp");
     await runFilmOrderAction(orderId, "confirm-ship-to", {}, "seven@727.co.jp");
 
     const supplierNote = "用材：既指定のまま\n1ロール：500m × 3本\n発注長：SKU-1を優先";
@@ -613,7 +615,7 @@ beforeAll(async () => {
       aiFileUrl: "https://drive.google.com/file/d/k-po-proof/view",
     }, "kanei@kanei-trade.co.jp");
     await runFilmOrderAction(order.id, "record-customer-proof-approval", {
-      approverName: "K 발주 고객",
+      approverName: "金井貿易担当",
       evidence: "메일 승인 회신",
       offlineReason: "記録された顧客承認のオフライン確認",
     }, "kanei@kanei-trade.co.jp");
@@ -850,7 +852,7 @@ beforeAll(async () => {
     expect(successfulConfirmations).toHaveLength(1);
     expect(failedConfirmations).toHaveLength(1);
     expect((failedConfirmations[0] as PromiseRejectedResult).reason).toMatchObject({
-      message: expect.stringContaining("invalid_status_transition"),
+      message: expect.stringContaining("film_order_actor_forbidden"),
     });
     const confirmed = await getFilmOrder(orderId);
     if (!confirmed) throw new Error("film_order_update_failed");

@@ -144,10 +144,26 @@ export async function upsertFilmPrice(
     [input.effectiveFrom, now, updatedBy, input.band, input.tier, input.effectiveFrom, input.effectiveFrom],
   );
 
+  const insertColumns = `band, tier, unit_price_yen_per_m, effective_from, effective_to, memo, updated_by, updated_at, created_at`;
+  const insertValues = [
+    input.band, input.tier, input.unitPriceYenPerM, input.effectiveFrom, effectiveTo, input.memo, updatedBy, now, now,
+  ];
+
+  if (db.dialect === "postgres") {
+    const insertedRow = await db.get<FilmPriceDbRow>(
+      `INSERT INTO film_prices (${insertColumns})
+       VALUES (?,?,?,?,?,?,?,?,?)
+       RETURNING id, band, tier, unit_price_yen_per_m, effective_from, effective_to, memo, updated_by, updated_at`,
+      insertValues,
+    );
+    if (!insertedRow) throw new Error("film_price_insert_row_missing");
+    return mapRow(insertedRow);
+  }
+
   const result = await db.run(
-    `INSERT INTO film_prices (band, tier, unit_price_yen_per_m, effective_from, effective_to, memo, updated_by, updated_at, created_at)
+    `INSERT INTO film_prices (${insertColumns})
      VALUES (?,?,?,?,?,?,?,?,?)`,
-    [input.band, input.tier, input.unitPriceYenPerM, input.effectiveFrom, effectiveTo, input.memo, updatedBy, now, now],
+    insertValues,
   );
   const row = await db.get<FilmPriceDbRow>("SELECT * FROM film_prices WHERE id = ?", [result.lastInsertRowid]);
   return mapRow(row!);

@@ -2,13 +2,17 @@
 
 import { useMemo, useState } from "react";
 import type { ChecklistAudience, ChecklistItem, ChecklistRecord } from "@/lib/calculation-checklist";
+import type { QuotationOwnerDomain } from "@/lib/quotation-shared";
 
 type Props = {
   quotationId: number;
   quotationNumber: string;
   customerName: string;
+  ownerDomain: QuotationOwnerDomain;
   records: ChecklistRecord[];
   isLegacy?: boolean;
+  rebuildRequired?: boolean;
+  canRebuild?: boolean;
 };
 
 const audienceLabels: Record<ChecklistAudience, string> = {
@@ -20,16 +24,25 @@ export function CalculationChecklistClient({
   quotationId,
   quotationNumber,
   customerName,
+  ownerDomain,
   records: initialRecords,
   isLegacy = false,
+  rebuildRequired = false,
+  canRebuild = false,
 }: Props) {
   const [records, setRecords] = useState<ChecklistRecord[]>(initialRecords);
   const [activeAudience, setActiveAudience] = useState<ChecklistAudience>(initialRecords[0]?.audience ?? "CUSTOMER");
   const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
   const [checkedBy, setCheckedBy] = useState("");
   const [error, setError] = useState("");
 
   const activeRecord = records.find((record) => record.audience === activeAudience) ?? null;
+  const internalQaName = ownerDomain === "seven"
+    ? "株式会社セブン化学 社内QA"
+    : ownerDomain === "kanei"
+      ? "金井貿易株式会社 社内QA"
+      : "社内QA";
   const grouped = useMemo(() => {
     const groups = new Map<string, ChecklistItem[]>();
     for (const item of activeRecord?.items ?? []) {
@@ -52,7 +65,7 @@ export function CalculationChecklistClient({
           audience: activeAudience,
           itemId,
           accepted: nextAccepted,
-          checkedBy: checkedBy.trim() || (activeAudience === "CUSTOMER" ? customerName || "顧客" : "金井貿易株式会社 社内QA"),
+          checkedBy: checkedBy.trim() || (activeAudience === "CUSTOMER" ? customerName || "顧客" : internalQaName),
         }),
       });
       const payload = await response.json();
@@ -63,6 +76,24 @@ export function CalculationChecklistClient({
       setError("確認状態を保存できませんでした。");
     } finally {
       setUpdatingItemId(null);
+    }
+  }
+
+  async function rebuildChecklists() {
+    if (!canRebuild || rebuilding) return;
+    setRebuilding(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/quotations/${quotationId}/checklists`, { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok || !Array.isArray(payload.checklists)) throw new Error();
+      const rebuilt = payload.checklists as ChecklistRecord[];
+      setRecords(rebuilt);
+      setActiveAudience(rebuilt[0]?.audience ?? "CUSTOMER");
+    } catch {
+      setError("チェックリストを再生成できませんでした。");
+    } finally {
+      setRebuilding(false);
     }
   }
 
@@ -92,6 +123,16 @@ export function CalculationChecklistClient({
         </div>
 
         <div className="current-controls">
+          {rebuildRequired ? (
+            <button
+              type="button"
+              className="button"
+              onClick={rebuildChecklists}
+              disabled={rebuilding}
+            >
+              {rebuilding ? "再生成中..." : "チェックリストを再生成"}
+            </button>
+          ) : null}
           <div className="checklist-tabs" role="tablist">
             {records.map((record) => (
               <button
@@ -111,7 +152,7 @@ export function CalculationChecklistClient({
             <input
               value={checkedBy}
               onChange={(event) => setCheckedBy(event.target.value)}
-              placeholder={activeAudience === "CUSTOMER" ? customerName || "顧客" : "金井貿易株式会社 社内QA"}
+              placeholder={activeAudience === "CUSTOMER" ? customerName || "顧客" : internalQaName}
             />
           </label>
         </div>

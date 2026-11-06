@@ -188,6 +188,7 @@ export interface FilmOrderRow {
   proof_upload_expires_at: string | null;
   status: FilmOrderStatus;
   re_proof_count: number;
+  current_proof_round: number;
   ordered_at: string | null;
   receiving_registered_at: string | null;
   proof_registered_at: string | null;
@@ -231,6 +232,7 @@ export interface CustomerDesignTracking {
 
 export interface CustomerProofTracking {
   status: CustomerProofStatus;
+  currentRound: number;
   requestedAt: string | null;
   approvedAt: string | null;
   correctionCount: number;

@@ -14,6 +14,7 @@ import {
 
 const links: FilmOrderNotificationLink[] = [
   { key: "maker_receiving_packet", url: "https://example.test/packet/abc", label: "制作データ" },
+  { key: "maker_customer_design_file", url: "https://example.test/maker/design", label: "デザイン" },
   { key: "maker_proof_upload", url: "https://example.test/proof/token", label: "校正提出" },
   { key: "maker_purchase_order", url: "https://example.test/po/token", label: "発注" },
   { key: "maker_eta_report", url: "https://example.test/eta/token", label: "ETA" },
@@ -107,7 +108,7 @@ describe("film order notification projections", () => {
       ship_to_registered: ["customer", "seven", "kanei"],
       customer_design_upload: ["customer", "kanei"],
       customer_design_correction: ["customer", "kanei"],
-      customer_design_received: ["seven", "kanei"],
+      customer_design_received: ["maker", "seven", "kanei"],
       production_plan_request: ["seven"],
       link_resend: ["maker", "seven", "kanei"],
     };

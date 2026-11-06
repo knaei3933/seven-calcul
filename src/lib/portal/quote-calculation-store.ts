@@ -84,12 +84,33 @@ async function getDatabase(): Promise<SqlClient> {
     const { getDatabaseForTest } = await import("@/lib/quotation-store");
     const db = await getDatabaseForTest();
     await db.exec(db.dialect === "postgres" ? POSTGRES_SCHEMA : SQLITE_SCHEMA);
+    await backfillPortalQuotationOwners(db);
     return db;
   })().catch((error) => {
     schemaReady = null;
     throw error;
   });
   return schemaReady;
+}
+
+async function backfillPortalQuotationOwners(db: SqlClient): Promise<void> {
+  // `unresolved` is explicit quarantine; only rows predating the owner column are legacy.
+  await db.run(`
+    UPDATE quotations
+    SET owner_domain = portal_quote_mappings.owner_domain
+    FROM portal_quote_mappings
+    WHERE quotations.id = portal_quote_mappings.quotation_id
+      AND quotations.owner_domain IS NULL
+  `);
+  await db.run(`
+    UPDATE quotations
+    SET owner_domain = 'unresolved'
+    WHERE owner_domain IS NULL
+  `);
+}
+
+export async function backfillPortalQuotationOwnersForTest(db: SqlClient): Promise<void> {
+  return backfillPortalQuotationOwners(db);
 }
 
 export async function getPortalQuoteDatabaseForTest(): Promise<SqlClient> {
@@ -165,11 +186,12 @@ export async function findPortalQuoteMapping(input: {
 function insertPortalQuotationSql(): string {
   return `
     INSERT INTO quotations (
+      owner_domain,
       quotation_number,status,issue_date,valid_until,customer_name,customer_contact,product_name,size_summary,
       quantity,filling_cost_per_piece,film_cost_per_piece,film_meter_price,film_order_length_m,target_margin,
       tax_rate_percent,price_per_piece,subtotal,tax,grand_total,delivery_date,payment_terms,notes,
       calculation_version,result_hash,payload_json,created_at,updated_at,created_by,updated_by
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `;
 }
 
@@ -230,6 +252,7 @@ export async function createPortalQuoteWithMapping(input: {
         const now = new Date().toISOString();
         const payloadJson = JSON.stringify(input.quotation.payload);
         const values = [
+          input.ownerDomain,
           quotationNumber,
           input.quotation.status,
           input.quotation.issueDate,

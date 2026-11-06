@@ -397,8 +397,8 @@ async function completeChain(route: "K" | "Y") {
   });
   expect(proof.status).toBe("proof_registered");
 
-  const review = await actorAction(kanei, orderId, "send-customer-proof-review", { origin: "http://localhost:3000" });
-  const reviewToken = tokenFromMail(review, "proof-review");
+  const review = await actorAction(seven, orderId, "send-customer-proof-review", { origin: "http://localhost:3000" });
+  const reviewToken = await latestAudienceToken(orderId, "proof-review");
   const reviewEnvelopes = await outboxGroup(
     orderId,
     String((review.lifecycle as Record<string, unknown>).dispatchGroupId).split(",")[0],
@@ -446,7 +446,7 @@ async function completeChain(route: "K" | "Y") {
     uploader: "maker",
     origin: "http://localhost:3000",
   });
-  await actorAction(kanei, orderId, "send-customer-proof-review", { origin: "http://localhost:3000" });
+  await actorAction(seven, orderId, "send-customer-proof-review", { origin: "http://localhost:3000" });
   const finalReviewToken = await latestAudienceToken(orderId, "proof-review");
   const approved = await expectRoute(await proofReviewPostRoute(
     request(`http://localhost/api/film-orders/proof-review/${finalReviewToken}`, {
@@ -575,7 +575,7 @@ async function completeChain(route: "K" | "Y") {
   expect(finalOrder?.shipTo.status).toBe("confirmed");
   expect(finalOrder?.delivery).toMatchObject({ shippedOn: today(9), deliveredOn: today(11) });
   expect(finalOrder?.events.some((event) => event.type === "mail_audit" || event.type === "email")).toBe(true);
-  expect(finalOrder?.events.some((event) => event.detail.includes("金井貿易校正承認"))).toBe(true);
+  expect(finalOrder?.events.some((event) => event.detail.includes("セブン化学校正承認"))).toBe(true);
   expect(finalOrder?.events.some((event) => event.detail.includes("顧客が校正を承認"))).toBe(true);
   expect(finalOrder?.events.some((event) => event.type === "token_access")).toBe(true);
 

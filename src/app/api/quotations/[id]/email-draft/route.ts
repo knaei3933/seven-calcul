@@ -5,6 +5,7 @@ import { buildCustomerQuotationEmail } from "@/lib/quotation-email";
 import { buildQuotationPdfFileName } from "@/lib/film-quotation";
 import { findCustomerDesignAttachments } from "@/lib/customer-design-data";
 import { getSessionUser } from "@/lib/api-auth";
+import { canManageQuotationCustomerRequest } from "@/lib/quotation-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,12 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
     }
     const record = await getQuotation(quotationId);
     if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
+    if (record.ownerDomain === "unresolved") {
+      return NextResponse.json({ error: "unresolved_quote_owner" }, { status: 409 });
+    }
+    if (!canManageQuotationCustomerRequest(user.email, record.ownerDomain)) {
+      return NextResponse.json({ error: "customer_request_forbidden" }, { status: 403 });
+    }
     const fileName = buildQuotationPdfFileName({
       issueDate: record.issueDate,
       productName: record.productName,
@@ -60,7 +67,11 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
         contentType: file.contentType,
       })),
     });
-  } catch {
-    return NextResponse.json({ error: "email_draft_failed" }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error && error.message === "unresolved_quote_owner"
+      ? "unresolved_quote_owner"
+      : "email_draft_failed";
+    const status = message === "unresolved_quote_owner" ? 409 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

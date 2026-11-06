@@ -194,7 +194,7 @@ test.beforeAll(async ({}, testInfo) => {
     storageState: join(tmpdir(), "pouch-playwright-kanai-state.json"),
   });
 
-  const sevenEmail = `seven-e2e-${testInfo.workerIndex}-${Date.now()}@7chemical.co.jp`;
+  const sevenEmail = `seven-e2e-${testInfo.workerIndex}-${Date.now()}@727.co.jp`;
   const created = await postJson(kanai, "/api/users", {
     email: sevenEmail,
     name: "Seven Chemical E2E",
@@ -349,7 +349,7 @@ test("ordinary redacted issuance succeeds and master changes do not invalidate t
 
   const response = await seven.post("/api/quotations", {
     multipart: {
-      payload: JSON.stringify(quoteBody(baseline, `G-E2E-OLD-${Date.now()}`)),
+      payload: JSON.stringify(quoteBody(baseline, `S7-E2E-OLD-${Date.now()}`)),
       pdf: {
         name: "quotation.pdf",
         mimeType: "application/pdf",
@@ -374,7 +374,7 @@ test("tampered snapshot id, hash, or merged projection fails issuance", async ({
     ["merge", (body: ReturnType<typeof quoteBody>) => { body.payload.pricingSnapshot.publicProjection.candidates[0].filmTotalYen = "1"; }],
   ] as const;
   for (const [name, mutate] of cases) {
-    const body = quoteBody(baseline, `G-E2E-BAD-${name}-${suffix}`);
+    const body = quoteBody(baseline, `S7-E2E-BAD-${name}-${suffix}`);
     mutate(body);
     const response = await seven.post("/api/quotations", {
       multipart: {

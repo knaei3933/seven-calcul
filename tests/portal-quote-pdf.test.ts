@@ -498,6 +498,61 @@ describe("portal-owned canonical quotation PDF API", () => {
     expect(text).not.toContain("内定");
   });
 
+  it("brands generation from the durable quotation owner even when the caller is a Kanei portal user", async () => {
+    const quote = await createQuote(owner, "pdf-durable-owner");
+    const publicId = String(quote.publicId);
+    const mapping = await mappingFor(publicId);
+    await getPortalQuoteDatabaseForTest().then((db) => db.run(
+      "UPDATE quotations SET owner_domain = 'seven' WHERE id = ?",
+      [Number(mapping.quotation_id)],
+    ));
+    let resolvedOwner: unknown;
+    const response = await generatePortalQuotePdfApi(generateRequest(owner, publicId), publicId, {
+      now,
+      fontBytes,
+      incrementRateLimit: async () => ({
+        count: 1,
+        windowStartedAt: now().toISOString(),
+        expiresAt: now().toISOString(),
+      }),
+      generatePdf: async (_projection, _fontBytes, ownerProfile) => {
+        resolvedOwner = ownerProfile;
+        return Buffer.from("%PDF-durable-owner");
+      },
+    });
+    expect(response.status).toBe(201);
+    expect(resolvedOwner).toMatchObject({
+      ownerDomain: "seven",
+      legalName: "株式会社セブン化学",
+    });
+  });
+
+  it("rejects unresolved durable owners with an explicit error before PDF output", async () => {
+    const quote = await createQuote(owner, "pdf-unresolved-owner");
+    const publicId = String(quote.publicId);
+    const mapping = await mappingFor(publicId);
+    await getPortalQuoteDatabaseForTest().then((db) => db.run(
+      "UPDATE quotations SET owner_domain = 'unresolved' WHERE id = ?",
+      [Number(mapping.quotation_id)],
+    ));
+    const response = await generatePortalQuotePdfApi(generateRequest(owner, publicId), publicId, {
+      now,
+      fontBytes,
+      incrementRateLimit: async () => ({
+        count: 1,
+        windowStartedAt: now().toISOString(),
+        expiresAt: now().toISOString(),
+      }),
+    });
+    expect(response.status).toBe(409);
+    expect(await responseBody(response)).toMatchObject({ error: "unresolved_quote_owner" });
+    const stored = await getPortalQuoteDatabaseForTest().then((db) => db.get<{ pdf_data: Uint8Array | null }>(
+      "SELECT pdf_data FROM quotations WHERE id = ?",
+      [Number(mapping.quotation_id)],
+    ));
+    expect(stored?.pdf_data).toBeNull();
+  });
+
   it("has no customer-facing portal PDF upload route", async () => {
     const files = await portalRouteFiles();
     expect(files).toContain(join("src/app/api/portal/v1/quotes/[publicId]/pdf/route.ts"));

@@ -369,6 +369,41 @@ export async function filmOrderMakerResolution(orderId: number): Promise<FilmOrd
   };
 }
 
+export type FilmMakerAutoSelectionResult = {
+  status: "selected" | "already_selected" | "no_candidate" | "ambiguous";
+  makerId?: number;
+};
+
+/**
+ * A contract's procurement route and printing method are fixed before approval.
+ * When the authoritative master has exactly one matching active maker, assign it
+ * without another user choice. Ambiguous masters remain explicitly unresolved.
+ */
+export async function autoSelectFilmMakerForOrder(
+  orderId: number,
+  actorEmail: string,
+): Promise<FilmMakerAutoSelectionResult> {
+  const db = await getDatabaseForFilmMakerStore();
+  const order = await db.get<{
+    procurement_route: string;
+    printing_method: string;
+    supplier_resolution: FilmMakerSupplierResolution;
+  }>(
+    "SELECT procurement_route,printing_method,supplier_resolution FROM film_orders WHERE id=?",
+    [orderId],
+  );
+  if (!order) throw new Error("film_order_not_found");
+  if (order.supplier_resolution !== "legacy_unresolved") {
+    return { status: "already_selected" };
+  }
+  const selections = await listActiveFilmMakerSelections(order.procurement_route, order.printing_method);
+  if (selections.length === 0) return { status: "no_candidate" };
+  if (selections.length > 1) return { status: "ambiguous" };
+  const maker = selections[0]!;
+  await selectFilmMakerForOrder(orderId, maker.id, actorEmail);
+  return { status: "selected", makerId: maker.id };
+}
+
 export async function listLegacyReconciliations(): Promise<LegacyOrderReconciliation[]> {
   const db = await getDatabaseForFilmMakerStore();
   return listLegacyOrderReconciliations(db);

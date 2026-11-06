@@ -26,7 +26,6 @@ import {
   type FilmWorkflowAction,
 } from "@/lib/film-order-stage";
 import {
-  buyerDomainOf,
   isKaneiTradeUser,
   isSevenChemicalUser,
   supplierLocaleFor,
@@ -177,8 +176,18 @@ function WorkflowRoleBadge({
   );
 }
 
+function buyerCompanyOrNull(order: Pick<FilmOrderView, "buyer_domain" | "created_by_email">): FilmOrderCompany | null {
+  const projectedOwner = (order as FilmOrderView & { ownerCompany?: FilmOrderCompany | "unresolved" }).ownerCompany;
+  if (projectedOwner === "seven" || projectedOwner === "kanei") return projectedOwner;
+  if (projectedOwner === "unresolved") return null;
+  const normalized = String(order.buyer_domain ?? "").trim().toLowerCase();
+  if (normalized === "727.co.jp") return "seven";
+  if (normalized === "kanei-trade.co.jp") return "kanei";
+  return null;
+}
+
 function buyerRoleOf(order: Pick<FilmOrderView, "buyer_domain" | "created_by_email">): "seven" | "kanei" {
-  return buyerCompanyOf(order) === "seven" ? "seven" : "kanei";
+  return buyerCompanyOrNull(order) ?? "kanei";
 }
 
 function primaryWorkflowRoleOf(order: Pick<FilmOrderView, "buyer_domain" | "created_by_email" | "customerProof" | "status">): "seven" | "kanei" {
@@ -198,18 +207,18 @@ function workflowActionRoleOf(
   if (next.kind === "run" && next.body.action === "approve") return buyerRoleOf(order);
   if (order.status === "final_approved") {
     if (!order.po_sent_at || !order.eta_date) return "kanei";
-    if (order.shipTo.status !== "confirmed") return "seven";
+    if (order.shipTo.status !== "confirmed") return buyerRoleOf(order);
     if (!order.delivery.shippedOn || !order.delivery.deliveredOn) return "supplier";
-    if (!order.delivery.receivedAt) return "seven";
+    if (!order.delivery.receivedAt) return buyerRoleOf(order);
     return "supplier";
   }
   return primaryWorkflowRoleOf(order);
 }
 
 function buyerCompanyOf(order: Pick<FilmOrderView, "buyer_domain" | "created_by_email">): FilmOrderCompany {
-  if (order.buyer_domain === "727.co.jp") return "seven";
-  if (order.buyer_domain === "kanei-trade.co.jp") return "kanei";
-  return buyerDomainOf(order.created_by_email);
+  const company = buyerCompanyOrNull(order);
+  if (!company) throw new Error("film_order_buyer_domain_missing");
+  return company;
 }
 
 function companyLabel(company: FilmOrderCompany): string {
@@ -246,7 +255,7 @@ function latestProofPairOf(order: Pick<FilmOrderView, "files">) {
 }
 
 function workflowOwnerLabelOf(order: Pick<FilmOrderView, "buyer_domain" | "created_by_email">): string {
-  return buyerCompanyOf(order) === "seven" ? "セブン化学" : "金井貿易側";
+  return buyerCompanyOrNull(order) === "seven" ? "セブン化学" : "金井貿易側";
 }
 
 function supplierLabelOf(order: Pick<FilmOrderView, "supplier_name" | "supplier_email">): string {
@@ -347,12 +356,18 @@ function workflowActionDecisionOf(
   const decision = filmOrderActionAvailability(guard, action, actorRoleOf(order, owner));
   const authorized = owner === "seven" ? isSeven : owner === "kanei" ? isKanei : true;
   const reasonCode = authorized ? decision.reasons[0] : "actor_role_forbidden";
+  const ownerLabel = owner === "seven" ? "セブン化学" : owner === "kanei" ? "金井貿易側" : "担当会社";
+  const ownerReason = reasonCode === "actor_role_forbidden"
+    ? `${ownerLabel}のみ実行できます。`
+    : reasonCode === "buyer_approval_required"
+      ? `${ownerLabel}の最終承認が必要です。`
+      : null;
   return {
     action,
     label: actionLabelOf(action),
     owner,
     enabled: authorized && decision.available,
-    reason: reasonCode ? filmOrderGuardReasonLabels[reasonCode] : "実行できます。",
+    reason: reasonCode ? (ownerReason ?? filmOrderGuardReasonLabels[reasonCode]) : "実行できます。",
   };
 }
 
@@ -421,10 +436,10 @@ function statusHintOf(order: FilmOrderView): string {
     case "final_approved":
       if (!order.po_sent_at) return "金井貿易側が発注書・報告リンクをフィルムメーカーへ送信します。";
       if (!order.eta_date) return `${supplierLabelOf(order)}の納期見込み入力を待っています。`;
-      if (order.shipTo.status !== "confirmed") return "納品先の確認が必要です。セブン化学／金井貿易側が確認できます。";
+      if (order.shipTo.status !== "confirmed") return `納品先の確認が必要です。${workflowOwnerLabelOf(order)}が確認できます。`;
       if (!order.delivery.shippedOn) return `${supplierLabelOf(order)}の出荷報告を待っています。`;
       if (!order.delivery.deliveredOn) return `${supplierLabelOf(order)}の納品報告を待っています。`;
-      if (!order.delivery.receivedAt) return "セブン化学のフィルム受領確認を待っています。";
+      if (!order.delivery.receivedAt) return `${workflowOwnerLabelOf(order)}のフィルム受領確認を待っています。`;
       return "フィルム受領済み。パウチ製作へ進行します。";
   }
 }
@@ -450,7 +465,8 @@ type NextAction =
   | { kind: "none"; label: string };
 
 export function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: boolean): NextAction {
-  const buyer = buyerCompanyOf(order);
+  const buyer = buyerCompanyOrNull(order);
+  if (!buyer) return { kind: "none", label: "所有会社が未解決のため隔離中" };
   const buyerCanOperate = canOperate(buyer, isSeven, isKanei);
   switch (order.status) {
     case "pending":
@@ -493,7 +509,7 @@ export function nextActionOf(order: FilmOrderView, isSeven: boolean, isKanei: bo
       if (!order.delivery.receivedAt) {
         return buyerCanOperate
           ? { kind: "run", label: "フィルムを受領確認", body: { action: "confirm-film-receipt" }, ok: "フィルムの受領を確認しました。" }
-          : { kind: "none", label: "セブン化学のフィルム受領確認待ち" };
+          : { kind: "none", label: `${companyLabel(buyer)}のフィルム受領確認待ち` };
       }
       return { kind: "none", label: "完了" };
   }
@@ -507,7 +523,8 @@ function orderTotalText(order: FilmOrderView): string {
   return `￥${Number(total.toFixed(0)).toLocaleString("ja-JP")}`;
 }
 
-export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
+export default function FilmOrdersClient({ userEmail, userRole }: { userEmail: string; userRole?: string | null }) {
+  void userRole;
   const [orders, setOrders] = useState<FilmOrderView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -520,6 +537,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
   const [driveReady, setDriveReady] = useState(false);
   const isSeven = isSevenChemicalUser(userEmail);
   const isKanei = isKaneiTradeUser(userEmail);
+  const adminViewOnly = !isSeven && !isKanei;
   const [mailRouting, setMailRouting] = useState<{ enabled: boolean; recipient: string }>({
     enabled: false,
     recipient: "",
@@ -649,8 +667,8 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
           <h1>フィルム発注管理</h1>
         </div>
         <div className="film-orders-toolbar">
-          <span className={`film-orders-role ${isSeven ? "seven" : "kanei"}`}>
-            {isSeven ? "セブン化学" : "金井貿易側"}
+          <span className={`film-orders-role ${isSeven ? "seven" : isKanei ? "kanei" : "unknown"}`}>
+            {isSeven ? "セブン化学" : isKanei ? "金井貿易側" : "管理者（閲覧のみ）"}
           </span>
           <span className="film-orders-myturn" role="status" aria-live="polite">
             あなたの操作待ち <strong>{myTurnCount}</strong> 件
@@ -665,7 +683,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
         </div>
       </header>
       <p className="film-orders-lead">
-        得意先はパウチ充填製造をセブン化学へ発注し、セブン化学がフィルムを金井貿易側へ発注します。成約見積から自動作成された発注を、ステップに沿って管理します。
+        成約見積の所有会社がフィルム発注の buyer になります。Seven-origin（S7）はセブン化学、Kanei-origin（KT）は金井貿易側が発注側操作を担い、金井貿易側がフィルム発注・supplier approval を行います。
       </p>
 
       <div className="workflow-role-legend" aria-label="担当会社ごとの色と注力ポイント">
@@ -702,7 +720,7 @@ export default function FilmOrdersClient({ userEmail }: { userEmail: string }) {
           <ol>
             <li>成約後の発注は自動的にここに表示されます（発注番号 F-…）。</li>
             <li>仕入先・校正データ送付先を設定します。</li>
-            <li>フィルムメーカーから校正データが返却されたら「校正データを登録」します（セブン化学へ自動連絡）。</li>
+            <li>フィルムメーカーから校正データが返却されたら「校正データを登録」します（buyer 会社へ自動連絡）。</li>
             <li>再校正依頼が来たら再校正データを登録します。</li>
           </ol>
         )}
@@ -790,10 +808,13 @@ function isMailWorkflowAction(action: unknown): boolean {
   return typeof action === "string" && MAIL_WORKFLOW_ACTIONS.has(action);
 }
 
-function audienceLabelOf(audience: MailPreviewEnvelopeUi["audience"]): string {
+function audienceLabelOf(
+  audience: MailPreviewEnvelopeUi["audience"],
+  buyer: FilmOrderCompany = "seven",
+): string {
   const labels = {
     maker: "フィルムメーカー",
-    seven: "セブン化学",
+    seven: buyer === "seven" ? "セブン化学" : "金井貿易側",
     kanei: "金井貿易側",
     customer: "得意先",
   } as const;
@@ -868,19 +889,20 @@ function OrderCard({
   const [outboxLoaded, setOutboxLoaded] = useState(false);
   const [pendingRun, setPendingRun] = useState<PendingWorkflowRun | null>(null);
   const [operationTab, setOperationTab] = useState<"ship" | "sample" | "design" | "review" | "history" | "notifications">(() => {
-    if (order.status === "ordered" && !customerDesignReadyOf(order) && canOperate(buyerCompanyOf(order), isSeven, isKanei)) return "design";
+    if (order.status === "ordered" && !customerDesignReadyOf(order) && canOperate(buyerCompanyOrNull(order) ?? "kanei", isSeven, isKanei)) return "design";
     if (order.status === "final_approved" && order.shipTo.status !== "confirmed") return "ship";
     if (["proof_registered", "re_proof_requested"].includes(order.status)) return "review";
     return "sample";
   });
-  const next = nextActionOf(order, isSeven, isKanei);
+  const ownershipBlocked = buyerCompanyOrNull(order) === null;
+  const next = ownershipBlocked ? { kind: "none", label: "所有会社未解決" } as const : nextActionOf(order, isSeven, isKanei);
   const stage = workflowStageOf(order);
   const activeSupportTab = next.kind === "form" && next.form === "design-mode"
     ? "design" as const
     : operationTab;
   const statusBadgeClass = order.status === "final_approved" ? "final" : order.status === "re_proof_requested" ? "warn" : "";
-  const buyerOwner = buyerRoleOf(order);
-  const actionItems = [
+  const buyerOwner = buyerCompanyOrNull(order) ?? "kanei";
+  const actionItems = ownershipBlocked ? [] : [
     workflowActionDecisionOf(order, "mark-ordered", buyerOwner, isSeven, isKanei),
     workflowActionDecisionOf(order, "register-receiving", buyerOwner, isSeven, isKanei),
     workflowActionDecisionOf(order, "approve", buyerOwner, isSeven, isKanei),
@@ -937,9 +959,7 @@ function OrderCard({
       applyPayload(payload);
       const outcomes = ((payload.lifecycle as { outcomes?: MailLifecycleOutcomeUi[] } | undefined)?.outcomes ?? []);
       const overridden = outcomes.some((outcome) => outcome.recipientOverridden);
-      setMessage(overridden
-        ? `${okMessage}（テストモードのため実際送信先は設定済みテスト宛先です。）`
-        : okMessage);
+      setMessage(okMessage);
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : "failed";
       if (rawMessage.startsWith("invalid_film_order_mail:")) {
@@ -1087,15 +1107,12 @@ function OrderCard({
     }
   };
 
-  const testModeNote = mailRouting.enabled ? (
-    <p className="workflow-mail-routing-note" role="note" data-testid="workflow-mail-test-routing">
-      <strong>テストモード ON：</strong>
-      実際の送信先は <span>{mailRouting.recipient}</span> に変更されます。宛先欄は正規宛先を表示します。
-    </p>
-  ) : null;
+  // Mail routing is intentionally silent here. The persisted test recipient is an
+  // operational SMTP control, not part of the production-like workflow UI.
+  const testModeNote = null;
   const persistedMailWarnings = (
     <div className="mail-routing-warning" data-testid="mail-preview-warnings">
-      {(pendingRun?.preview.warnings ?? []).map((warning) => (
+      {(pendingRun?.preview.warnings ?? []).filter((warning) => warning !== "mail_test_mode_enabled").map((warning) => (
         <p key={warning} role="alert">
           {warning === "mail_test_mode_enabled"
             ? "保存済みメール設定のテストモードが有効です。"
@@ -1106,6 +1123,24 @@ function OrderCard({
       ))}
     </div>
   );
+
+  if (ownershipBlocked) {
+    return (
+      <article className="film-order-card" data-testid={`film-order-card-${order.id}`}>
+        <div className="film-order-summary">
+          <div className="film-order-summary-main">
+            <div className="film-order-titleline">
+              <span className="film-order-number">{order.order_number}</span>
+              <span className="film-order-product">{order.product_name || "-"}</span>
+            </div>
+            <p className="film-order-warning" role="alert">
+              所有会社が未解決のため、この発注は隔離中です。金井貿易側管理者が明示的に修復するまで操作できません。
+            </p>
+          </div>
+        </div>
+      </article>
+    );
+  }
 
   return (
     <>
@@ -1181,7 +1216,7 @@ function OrderCard({
               <ul className="mail-outcome-list" data-testid={`mail-outcomes-${order.id}`}>
                 {lifecycleOutcomes.map((outcome, index) => (
                   <li key={`${outcome.audience}-${index}`} className={outcome.status}>
-                    <strong>{audienceLabelOf(outcome.audience)}</strong>
+                    <strong>{audienceLabelOf(outcome.audience, buyerRoleOf(order))}</strong>
                     <span data-testid="mail-attempt-status">{mailStatusTextOf(outcome.status)}</span>
                     <small>宛先 {outcome.intendedTo} / 試行 {outcome.attemptCount}</small>
                     {outcome.errorCode ? <small>エラー: {outcome.errorCode}</small> : null}
@@ -1318,6 +1353,7 @@ function OrderCard({
     {pendingRun ? (
       <MailPreviewDialog
         action={String(pendingRun.body.action)}
+        buyer={buyerRoleOf(order)}
         preview={pendingRun.preview}
         testModeNote={testModeNote}
         persistedWarnings={persistedMailWarnings}
@@ -1390,6 +1426,7 @@ function WorkflowActionPanel({
 
 function MailPreviewDialog({
   action,
+  buyer,
   preview,
   testModeNote,
   persistedWarnings,
@@ -1399,6 +1436,7 @@ function MailPreviewDialog({
   onDismiss,
 }: {
   action: string;
+  buyer: FilmOrderCompany;
   preview: MailPreviewUi;
   testModeNote: React.ReactNode;
   persistedWarnings: React.ReactNode;
@@ -1463,7 +1501,7 @@ function MailPreviewDialog({
               data-testid="workflow-mail-envelope"
               data-language={envelope.language}
             >
-              <h5>{audienceLabelOf(envelope.audience)} / {envelope.language === "ko" ? "한국語" : "日本語"}</h5>
+              <h5>{audienceLabelOf(envelope.audience, buyer)} / {envelope.language === "ko" ? "한국語" : "日本語"}</h5>
               <p><strong>To：</strong><span>{envelope.intendedTo}</span></p>
               {envelope.cc.length > 0 ? <p><strong>CC：</strong><span>{envelope.cc.join("、")}</span></p> : null}
               <p><strong>件名：</strong><span>{envelope.subject}</span></p>
@@ -1532,7 +1570,7 @@ function MailOutboxPanel({
         <button className="button secondary small" type="button" disabled={busy} onClick={() => void onReload()}>更新</button>
       </div>
       <p className="help" data-testid="mail-disclosure-note">
-        {isKanei ? "金井貿易側は正規宛先・CC・本文・型付きリンク・添付対象・完全な試行履歴を参照できます。" : "セブン化学には自社宛通知の安全な状態と試行結果のみ表示します。"}
+        {isKanei ? "金井貿易側は正規宛先・CC・本文・型付きリンク・添付対象・完全な試行履歴を参照できます。" : "buyer 会社には自社宛通知の安全な状態と試行結果のみ表示します。"}
       </p>
       {error ? <p className="form-error" role="alert">通知履歴を読み込めませんでした。</p> : null}
       {loaded && !error && envelopes.length === 0 ? <p>まだ通知履歴はありません。</p> : null}
@@ -1540,7 +1578,7 @@ function MailOutboxPanel({
         {envelopes.map((envelope) => (
           <li key={envelope.id} data-testid={`mail-outbox-envelope-${envelope.id}`} className={envelope.envelopeStatus}>
             <div>
-              <strong>{audienceLabelOf(envelope.audience)}</strong>
+              <strong>{audienceLabelOf(envelope.audience, buyerRoleOf(order))}</strong>
               <span>{mailStatusLabelOf(envelope.envelopeStatus)}</span>
               <small>{envelope.workflowKey} / {envelope.language === "ko" ? "한국어" : "日本語"}</small>
             </div>
@@ -1672,11 +1710,11 @@ function NextStepPanel({
       <h3>{statusHintOf(order)}</h3>
       {order.eta_date ? (
         <div className="production-schedule-note" role="note">
-          <strong>フィルム入荷予定（セブン化学工場到着見込み）</strong>
+          <strong>フィルム入荷予定（{workflowOwnerLabelOf(order)}工場到着見込み）</strong>
           <span>納期見込み: {order.eta_date}</span>
           {order.eta_note ? <span>フィルムメーカーメモ: {order.eta_note}</span> : null}
           {order.eta_updated_at ? <small>更新: {new Date(order.eta_updated_at).toLocaleString("ja-JP")}</small> : null}
-          <small>セブン化学の充填スケジュール・受領準備にそのまま共有してください。</small>
+          <small>{workflowOwnerLabelOf(order)}の充填スケジュール・受領準備にそのまま共有してください。</small>
         </div>
       ) : null}
       {order.status === "ordered" && isDataModeChoice ? (
@@ -1881,6 +1919,7 @@ function NextStepPanel({
           <ReProofForm
             order={order}
             busy={busy}
+            readOnly={!canOperate(buyerCompanyOf(order), isSeven, isKanei)}
             onSubmit={({ internalComment, supplierMessage }) => void onRun({ action: "request-re-proof", comment: internalComment, supplierMessage }, "再校正を依頼しました。")}
           />
         </div>
@@ -2018,7 +2057,11 @@ function FilmMakerSelectionPanel({
       {loading ? <p role="status">有効な候補を読み込み中...</p> : null}
       {loadError ? <p className="form-error" role="alert">選択候補を読み込めませんでした。</p> : null}
       {!loading && !loadError && selections.length === 0 ? (
-        <p className="form-error" role="note">この条件に一致する有効なフィルムメーカーはありません。金井貿易側管理者に登録を依頼してください。</p>
+        <div className="form-error" role="note" data-testid="film-maker-empty">
+          <strong>実フィルムメーカーが未登録です。</strong>
+          <span>テストデータは無効化済みのため、候補は表示されません。金井貿易側管理者が実メーカーを登録すると選択できます。</span>
+          <Link href="/film-makers" className="button secondary small">フィルムメーカー管理へ</Link>
+        </div>
       ) : null}
       <label>
         有効なフィルムメーカー候補
@@ -2032,7 +2075,7 @@ function FilmMakerSelectionPanel({
             if (makerId > 0) void onRun({ action: "select-film-maker", makerId }, "フィルムメーカーを選択しました。");
           }}
         >
-          <option value="">選択してください</option>
+          <option value="">{selections.length === 0 ? "実フィルムメーカー未登録" : "選択してください"}</option>
           {snapshot?.companyName ? <option value="selected">{snapshot.companyName}（選択済み）</option> : null}
           {selections.map((maker) => (
             <option key={maker.id} value={maker.id} disabled={Boolean(snapshot?.companyName)}>
@@ -2218,7 +2261,7 @@ function ProductionPlanPanel({
         <p className="help">
           この項目は任意です。未入力でもフィルム発注ワークフローは止まりません。セブン化学が登録すると金井貿易側にも共有され、必要な場合は金井貿易側から確認依頼を送れます。
         </p>
-        {isSeven ? (
+        {canOperate(buyerRoleOf(order), isSeven, isKanei) ? (
           <div className="film-order-form">
             <label>生産可能 開始日
               <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required />
@@ -2368,7 +2411,7 @@ function ShipToPanel({
     void load();
   }, [load]);
 
-  const canOperateShipTo = isSeven || isKanei;
+  const canOperateShipTo = canOperate(buyerRoleOf(order), isSeven, isKanei);
   const canEdit = canOperateShipTo && order.shipTo.status !== "confirmed";
   const draftEntries = entries ?? [];
   const allEntriesComplete = draftEntries.length > 0 && draftEntries.every(shipToEntryCompleteOf);
@@ -2953,7 +2996,7 @@ function OrderSheet({ order }: { order: FilmOrderView }) {
             </table>
           </div>
         ) : null}
-        <p className="film-order-sheet-note">発注書はセブン化学から金井貿易側へメールで送付してください。送信後に「発注書送信済みにする」でステータスを進めます。</p>
+        <p className="film-order-sheet-note">発注書は{workflowOwnerLabelOf(order)}からフィルムメーカーへ送付してください。送信後に「発注書送信済みにする」でステータスを進めます。</p>
       </div>
     </section>
   );
@@ -3571,10 +3614,12 @@ function DriveFileField({
 function ReProofForm({
   order,
   busy,
+  readOnly = false,
   onSubmit,
 }: {
   order: FilmOrderView;
   busy: boolean;
+  readOnly?: boolean;
   onSubmit: (values: { internalComment: string; supplierMessage: string }) => void;
 }) {
   const locale = order.makerLanguage ?? supplierLocaleFor(order);
@@ -3583,7 +3628,9 @@ function ReProofForm({
   const [supplierMessage, setSupplierMessage] = useState("");
   const [open, setOpen] = useState(false);
   if (!open) {
-    return (
+    return readOnly ? (
+      <p className="next-step-note">管理者は閲覧のみ可能です。再校正依頼はBuyer会社から実行してください。</p>
+    ) : (
       <button className="button danger" type="button" onClick={() => setOpen(true)}>再校正を依頼</button>
     );
   }

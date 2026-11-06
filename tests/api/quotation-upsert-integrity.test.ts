@@ -14,7 +14,7 @@ const { createUser } = await import("@/lib/auth-store");
 const {
   getDatabaseForTest,
   getQuotation,
-  QuotationOwnershipConflictError,
+  QuotationActionForbiddenError,
   saveQuotation,
 } = await import("@/lib/quotation-store");
 
@@ -68,7 +68,7 @@ describe("quotation upsert ownership and referential integrity", () => {
       tax: "99",
       grandTotal: "1098",
       payload: { revision: 999 },
-    }, attacker.id, "user")).rejects.toBeInstanceOf(QuotationOwnershipConflictError);
+    }, attacker.id, "user")).rejects.toBeInstanceOf(QuotationActionForbiddenError);
 
     const unchanged = await getQuotation(original.id);
     expect(unchanged?.status).toBe("draft");
@@ -77,15 +77,19 @@ describe("quotation upsert ownership and referential integrity", () => {
     expect(unchanged?.createdBy.id).toBe(owner.id);
     expect(unchanged?.updatedBy?.id).toBe(owner.id);
 
-    const adminUpdated = await saveQuotation({
+    await expect(saveQuotation({
       ...baseInput,
       status: "sent",
       quantity: "20000",
       payload: { revision: 2 },
-    }, attacker.id, "admin");
-    expect(adminUpdated.status).toBe("sent");
-    expect(adminUpdated.createdBy.id).toBe(owner.id);
-    expect(adminUpdated.updatedBy?.id).toBe(attacker.id);
+    }, attacker.id, "admin")).rejects.toBeInstanceOf(QuotationActionForbiddenError);
+    const unchangedAfterAdminAttempt = await getQuotation(original.id);
+    expect(unchangedAfterAdminAttempt).toMatchObject({
+      status: "draft",
+      quantity: "10000",
+      createdBy: { id: owner.id },
+      updatedBy: { id: owner.id },
+    });
   });
 
   it("enforces users relationships with foreign keys on the quotation connection", async () => {

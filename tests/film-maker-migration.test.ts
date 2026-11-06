@@ -8,7 +8,7 @@ process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
 process.env.POUCH_CUSTOMER_DB = join(databaseDirectory, "customers.db");
 process.env.MAIL_DRY_RUN = "true";
 const LEGACY_SCHEMA_VERSION = "2026-11-04-film-order-cancel-scoping-2";
-const NEW_SCHEMA_VERSION = "2026-11-04-digital-route-default-1";
+const NEW_SCHEMA_VERSION = "2026-11-06-extensible-proof-rounds-1";
 
 // Pre-G002 SQLite database: current ship-to schema, no film-maker columns/table/FK.
 const { getSqlClient } = await import("@/lib/db");

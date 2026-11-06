@@ -119,6 +119,11 @@ export function buildQuotationDraft(
     calculationRequest?: CalculationInput;
     originalQuantity?: string;
     selectedCandidateShortage?: boolean;
+    pricingSnapshot?: {
+      id: string;
+      sha256: string;
+      publicProjection: import("./gravure-price-store").ReturnedPublicProjection;
+    };
   },
 ): QuotationDraft {
   // 見積単価の基準は「1連相当の加工原価×連結加算率」。バルクは別ラインで計上する。
@@ -200,6 +205,7 @@ export function buildQuotationDraft(
     customerEmail: context.customerEmail,
     originalQuantity: context.originalQuantity,
     selectedCandidateShortage: context.selectedCandidateShortage,
+    ...(context.pricingSnapshot ? { pricingSnapshot: context.pricingSnapshot } : {}),
     ...(context.printingMethod === "gravure" ? {
       copperPlateCostPerPiece: result.copperPlateCostPerPiece,
       copperPlateCostYen: result.copperPlateCost,

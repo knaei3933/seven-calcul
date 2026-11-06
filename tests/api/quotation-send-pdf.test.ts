@@ -82,7 +82,7 @@ beforeAll(async () => {
   await writeFile(join(designDirectory, "RDA5090_1_7_C.ai"), "%AI-canonical-design");
   await writeFile(join(designDirectory, "RDA5090_1_7_C.pdf"), "%PDF-canonical-design");
   owner = await createUser({
-    email: "owner@send-pdf.test",
+    email: "gotou@727.co.jp",
     name: "PDF Mail Owner",
     password: "owner-send-pdf-password",
     role: "user",
@@ -159,7 +159,9 @@ describe("quotation send API with canonical PDF attachment", () => {
     const mail = sendMailMock.mock.calls[0][0];
     expect(mail.to).toBe("customer@example.test");
     expect(mail.subject).toContain(record.quotationNumber);
-    expect(mail.body).toContain("いつも大変お世話になっております。パッケージラボでございます。");
+    expect(mail.body).toContain("いつも大変お世話になっております。株式会社セブン化学でございます。");
+    expect(mail.body).toContain("gotou@727.co.jp");
+    expect(mail.fromName).toBe("株式会社セブン化学");
     expect(mail.body).toContain("【お見積り概要】");
     expect(mail.body).toContain("【ご承認のお願い】");
     expect(mail.body).toContain(payload.approvalUrl);
@@ -208,7 +210,7 @@ describe("quotation send API with canonical PDF attachment", () => {
 
   it("does not send before Kim's internal approval", async () => {
     const owner = await createUser({
-      email: "no-pdf@send-pdf.test",
+    email: "no-pdf-owner@727.co.jp",
       name: "No PDF Owner",
       password: "no-pdf-send-password",
       role: "user",
@@ -233,7 +235,7 @@ describe("quotation send API with canonical PDF attachment", () => {
 
   it("opens a pending-internal-approval mail draft without generating an approval URL", async () => {
     const owner = await createUser({
-      email: "pending-draft@send-pdf.test",
+    email: "pending-draft-owner@727.co.jp",
       name: "Pending Draft Owner",
       password: "pending-draft-password",
       role: "user",
@@ -258,7 +260,7 @@ describe("quotation send API with canonical PDF attachment", () => {
 
   it("keeps the draft status when SMTP dispatch fails", async () => {
     const owner = await createUser({
-      email: "smtp-failure@send-pdf.test",
+    email: "smtp-failure-owner@727.co.jp",
       name: "SMTP Failure Owner",
       password: "smtp-failure-send-password",
       role: "user",
@@ -290,7 +292,7 @@ describe("quotation send API with canonical PDF attachment", () => {
 
   it("does not send when stored PDF integrity verification fails", async () => {
     const owner = await createUser({
-      email: "integrity@send-pdf.test",
+    email: "integrity-owner@727.co.jp",
       name: "Integrity Owner",
       password: "integrity-send-password",
       role: "user",

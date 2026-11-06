@@ -15,6 +15,8 @@ import {
   PortalQuotePdfGenerationError,
 } from "@/lib/portal/quote-pdf-generator";
 import { PortalServiceAuthenticationError, requirePortalServiceToken } from "@/lib/portal/service-auth";
+import { quotationOwnerProfile, type QuoteOwnerProfile } from "@/lib/quote-owner-profiles";
+import { quotationOwnerDomainFromStorage } from "@/lib/quotation-shared";
 import {
   getQuotationPdf,
   QuotationPdfIntegrityError,
@@ -47,6 +49,13 @@ class PortalPdfConflictError extends Error {
   }
 }
 
+export class UnresolvedPortalQuoteOwnerError extends Error {
+  constructor() {
+    super("unresolved_quote_owner");
+    this.name = "UnresolvedPortalQuoteOwnerError";
+  }
+}
+
 interface PortalPdfSourceRow {
   public_id: string;
   quotation_id: number;
@@ -65,6 +74,7 @@ interface PortalPdfSourceRow {
   delivery_date: string;
   payment_terms: string;
   notes: string;
+  owner_domain: string;
   created_at: string;
   pdf_available: number | boolean;
 }
@@ -89,6 +99,7 @@ interface AuthenticatedCaller {
 interface ResolvedPortalQuote {
   internalQuotationId: number;
   projection: PortalQuoteProjection;
+  ownerProfile?: QuoteOwnerProfile;
 }
 
 async function resolveOwnPortalQuoteForPdf(input: {
@@ -122,6 +133,7 @@ async function resolveOwnPortalQuoteForPdf(input: {
            quotations.delivery_date,
            quotations.payment_terms,
            quotations.notes,
+           quotations.owner_domain,
            portal_quote_mappings.created_at,
            (quotations.pdf_data IS NOT NULL) AS pdf_available
     FROM portal_quote_mappings
@@ -138,8 +150,13 @@ async function resolveOwnPortalQuoteForPdf(input: {
     || !Number.isInteger(row.quotation_id)
     || Number(row.quotation_id) <= 0
   ) throw new Error("portal_quote_mapping_invalid");
+  const ownerProfile = quotationOwnerProfile(
+    quotationOwnerDomainFromStorage(row.owner_domain),
+  );
+  if (!ownerProfile) throw new UnresolvedPortalQuoteOwnerError();
   return {
     internalQuotationId: Number(row.quotation_id),
+    ownerProfile,
     projection: projectPortalQuote({
       publicId: row.public_id,
       quotationNumber: row.quotation_number,
@@ -257,6 +274,12 @@ function unauthorizedResponse(): NextResponse {
 }
 
 function pdfErrorResponse(error: unknown): NextResponse {
+  if (error instanceof UnresolvedPortalQuoteOwnerError) {
+    return NextResponse.json({
+      error: "unresolved_quote_owner",
+      message: "この見積書の所有会社を解決できないため、PDFを処理できません。",
+    }, { status: 409 });
+  }
   if (error instanceof PortalServiceAuthenticationError || error instanceof PortalPdfSessionError) {
     return unauthorizedResponse();
   }
@@ -304,7 +327,7 @@ export async function generatePortalQuotePdfApi(
     }
     const generatePdf = dependencies.generatePdf ?? generatePortalQuotePdf;
     const fontBytes = dependencies.fontBytes ?? await readBrandFont();
-    const generated = await generatePdf(quote.projection, fontBytes);
+    const generated = await generatePdf(quote.projection, fontBytes, quote.ownerProfile);
     const savePdf = dependencies.savePdf ?? saveQuotationPdf;
     const saved = await savePdf(quote.internalQuotationId, generated, buildQuotationPdfFileName({
       issueDate: quote.projection.issueDate,

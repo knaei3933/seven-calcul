@@ -1,9 +1,9 @@
 /**
  * フィルム発注ワークフローの権限。
- * 商流は「顧客 → セブン化学（パウチ充填製造） → 金井貿易（フィルム調達） → フィルムメーカー」。
- * 見積の営業チャネル所有者が誰であっても、フィルム発注主は Seven Chemical (@727.co.jp)。
- * - セブン化学: Buyer操作（発注書送信・入稿・Buyer最終承認・受領）
- * - 金井貿易: フィルム調達・校正データ登録・金井貿易承認・メーカー発注
+ * フィルム発注の buyer は成約見積の durable owner から決定する。
+ * - Seven-origin quote: Seven Chemical が Buyer操作、Kanei Trade がフィルム調達・ supplier approval。
+ * - Kanei-origin quote: Kanei Trade が Buyer操作と supplier approval の両方を担う。
+ * - maker/customer/token paths remain isolated from internal buyer ownership.
  */
 export const SEVEN_CHEMICAL_EMAIL_DOMAIN = "@727.co.jp";
 export const KANEI_TRADE_EMAIL_DOMAIN = "@kanei-trade.co.jp";
@@ -38,29 +38,47 @@ export function supplierLocaleFor(order: { procurement_route: string | null | un
   return order.procurement_route === "Y" ? "ja" : "ko";
 }
 
-export function canViewFilmOrders(email: string | null | undefined): boolean {
+export function canViewFilmOrders(
+  email: string | null | undefined,
+  role?: string | null,
+): boolean {
+  if (role === "admin") return true;
   return isSevenChemicalUser(email) || isKaneiTradeUser(email);
 }
 
-/** 発注側ドメイン（見積作成者の会社）を返す。 */
-export function buyerDomainOf(createdByEmail: string | null | undefined): "seven" | "kanei" {
-  return isSevenChemicalUser(createdByEmail) ? "seven" : "kanei";
+export function filmOrderBuyerDomainOf(order: {
+  buyer_domain: string | null | undefined;
+}): "seven" | "kanei" {
+  const normalized = String(order.buyer_domain ?? "").trim().toLowerCase();
+  if (normalized === "727.co.jp") return "seven";
+  if (normalized === "kanei-trade.co.jp") return "kanei";
+  throw new Error("film_order_buyer_domain_missing");
 }
 
-export type FilmOrderActionSide = "buyer" | "kanei" | "buyer_and_kanei";
+export type FilmOrderActionSide = "buyer" | "kanei" | "seven" | "other_company";
+export type FilmOrderViewerRole = "admin" | "user";
+
+export type FilmOrderExecutionActorRole =
+  | "kanei"
+  | "seven"
+  | "maker"
+  | "customer"
+  | "system";
 
 const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
   "mark-ordered": "buyer",
   "register-receiving": "buyer",
   "register-receiving-extra": "buyer",
   "resend-receiving-notice": "buyer",
-  approve: "buyer",
+  approve: "seven",
   "request-re-proof": "buyer",
-  "request-customer-design-upload": "kanei",
-  "confirm-customer-design": "kanei",
-  "request-customer-design-correction": "kanei",
+  // Customer/filling responsibility follows the durable buyer. Kanei remains the
+  // buyer for Kanei-origin work; Seven owns these actions for Seven-origin work.
+  "request-customer-design-upload": "buyer",
+  "confirm-customer-design": "buyer",
+  "request-customer-design-correction": "buyer",
   "set-customer-design-not-required": "buyer",
-  "send-customer-proof-review": "kanei",
+  "send-customer-proof-review": "buyer",
   "record-customer-proof-approval": "kanei",
   "register-proof": "kanei",
   "send-proof-notice": "kanei",
@@ -70,10 +88,10 @@ const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
   "update-supplier-order-note": "kanei",
   "preview-supplier-po": "kanei",
   "send-po": "kanei",
-  "request-ship-to-registration": "buyer_and_kanei",
-  "register-ship-to": "buyer_and_kanei",
-  "confirm-ship-to": "buyer_and_kanei",
-  "remove-ship-to-destination": "buyer_and_kanei",
+  "request-ship-to-registration": "buyer",
+  "register-ship-to": "buyer",
+  "confirm-ship-to": "buyer",
+  "remove-ship-to-destination": "buyer",
   "save-production-plan": "buyer",
   "confirm-production-plan": "buyer",
   "request-production-plan": "kanei",
@@ -82,32 +100,92 @@ const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
 };
 
 /**
- * セブン化学が buyer 操作を、金井貿易が seller 側操作を行う。
- * buyer_domain が旧データで空/金井の場合も、現行商流では互換目的に限定する。
+ * buyer_domain は見積 owner から永続化済み。buyer actions are restricted to that
+ * company; film supplier/order approval remains Kanei for both origins.
  */
 export function canPerformFilmOrderAction(
   action: string,
   actorEmail: string | null | undefined,
   buyerDomain: string,
 ): boolean {
+
   const side = ACTION_SIDE[action];
   if (!side) return false;
-  const buyer = buyerDomain.includes("727") ? "seven" : "kanei";
+  let buyer: "seven" | "kanei";
+  try {
+    buyer = filmOrderBuyerDomainOf({ buyer_domain: buyerDomain });
+  } catch {
+    return false;
+  }
   if (side === "buyer") {
     return buyer === "seven" ? isSevenChemicalUser(actorEmail) : isKaneiTradeUser(actorEmail);
   }
-  if (side === "buyer_and_kanei") {
-    return isSevenChemicalUser(actorEmail) || isKaneiTradeUser(actorEmail);
+  if (side === "other_company") {
+    const ownerActor = buyer === "seven" ? isSevenChemicalUser(actorEmail) : isKaneiTradeUser(actorEmail);
+    return (isSevenChemicalUser(actorEmail) || isKaneiTradeUser(actorEmail)) && !ownerActor;
   }
+  if (side === "seven") return isSevenChemicalUser(actorEmail);
   return isKaneiTradeUser(actorEmail);
+}
+
+const TOKEN_ACTION_ROLES: Record<string, readonly FilmOrderExecutionActorRole[]> = {
+  "update-eta": ["maker"],
+  "report-shipment": ["maker"],
+  "report-delivery": ["maker"],
+  "ship-to-registered": ["customer", "system"],
+  "customer-design-received": ["customer"],
+  "production-plan-request": ["kanei"],
+  "customer-proof-decision": ["customer"],
+};
+
+export function filmOrderExecutionActorRoleOf(
+  actorEmail: string | null | undefined,
+): FilmOrderExecutionActorRole {
+  const actor = String(actorEmail ?? "").trim().toLowerCase();
+  if (actor === "machine:maker" || actor.startsWith("machine:maker:")) return "maker";
+  if (actor === "supplier" || actor.startsWith("supplier:")) return "maker";
+  if (actor === "customer" || actor.startsWith("customer:")) return "customer";
+  if (actor === "system" || actor.startsWith("machine:system:")) return "system";
+  if (isSevenChemicalUser(actor)) return "seven";
+  if (isKaneiTradeUser(actor)) return "kanei";
+  // Token entry points validate purpose before invoking these fixed mutations; a
+  // non-internal uploader is therefore the customer/maker side and never buyer/Kanei.
+  return "customer";
+}
+
+export function canPerformFilmOrderActorAction(
+  action: string,
+  actorEmail: string | null | undefined,
+  buyerDomain: string,
+): boolean {
+
+  const buyer = filmOrderBuyerDomainOf({ buyer_domain: buyerDomain });
+  const actor = filmOrderExecutionActorRoleOf(actorEmail);
+  const tokenRoles = TOKEN_ACTION_ROLES[action];
+  if (tokenRoles) return tokenRoles.includes(actor);
+  const side = ACTION_SIDE[action];
+  if (!side) return false;
+  const roles: readonly FilmOrderExecutionActorRole[] = side === "buyer"
+    ? [buyer]
+    : side === "kanei"
+      ? ["kanei"]
+      : side === "other_company"
+        ? buyer === "seven" ? ["kanei"] : ["seven"]
+        : side === "seven"
+          ? ["seven"]
+        : ["seven", "kanei"];
+  return roles.includes(actor) || (action === "register-proof" && actor === "maker");
 }
 
 /** 発注ワークフロー一覧は Seven/Kanei が共有する。処理権限は buyer/seller role で分離する。 */
 export function canViewFilmOrderRow(
   orderBuyerDomain: string,
   actorEmail: string | null | undefined,
+  actorRole?: FilmOrderViewerRole,
 ): boolean {
-  // orderBuyerDomain は処理区分のためだけに使用し、閲覧は両社共有とする。
+  // Role-admin may supervise neutral/system-account reads; company authority remains
+  // buyer-domain based for every mutation.
+  if (actorRole === "admin") return true;
   void orderBuyerDomain;
   return isSevenChemicalUser(actorEmail) || isKaneiTradeUser(actorEmail);
 }
@@ -115,9 +193,9 @@ export function canViewFilmOrderRow(
 // ---- 後方互換用（ページ表示など） ----
 export function canRegisterFilmOrderReceiving(
   email: string | null | undefined,
-  buyerDomain: string = "seven",
+  buyerDomain: string,
 ): boolean {
-  return buyerDomain === "seven" ? isSevenChemicalUser(email) : isKaneiTradeUser(email);
+  return canPerformFilmOrderAction("register-receiving", email, buyerDomain);
 }
 
 export function canManageFilmOrderProof(email: string | null | undefined): boolean {
@@ -126,14 +204,14 @@ export function canManageFilmOrderProof(email: string | null | undefined): boole
 
 export function canApproveFilmOrderProof(
   email: string | null | undefined,
-  buyerDomain: string = "seven",
+  buyerDomain: string,
 ): boolean {
-  return buyerDomain === "seven" ? isSevenChemicalUser(email) : isKaneiTradeUser(email);
+  return canPerformFilmOrderAction("approve", email, buyerDomain);
 }
 
 export function canMarkFilmOrderOrdered(
   email: string | null | undefined,
-  buyerDomain: string = "seven",
+  buyerDomain: string,
 ): boolean {
   return canPerformFilmOrderAction("mark-ordered", email, buyerDomain);
 }

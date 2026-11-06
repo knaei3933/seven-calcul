@@ -20,6 +20,7 @@ function summary(order: Awaited<ReturnType<typeof getFilmOrderForCustomerProofRe
       productName: order.product_name,
       status: order.status,
       proofStatus: order.customerProof.status,
+      proofRound: order.customerProof.currentRound,
       requestedAt: order.customerProof.requestedAt,
       approvedAt: order.customerProof.approvedAt,
       correctionReason: order.customerProof.correctionReason || null,

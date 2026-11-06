@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CalculationInput, CostResult } from "@/lib/calculation";
-import { CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForSpec, machineChargeBasis, sizeMaster } from "@/lib/constants";
+import { CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForSpec, machineChargeBasis, sizeMaster, standardSizeMasterForSpec } from "@/lib/constants";
 import { displayAmount } from "@/lib/calculation";
 import { D, Decimal, sum } from "@/lib/decimal";
 import { CURRENT_CHECKLIST_SNAPSHOT_KEY, buildCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
@@ -52,9 +52,16 @@ type CalculationPayload = {
   result?: unknown;
   originalResult?: unknown;
   candidates?: unknown;
+  pricingSnapshot?: unknown;
   projection?: unknown;
   returnedProjection?: unknown;
   error?: string;
+};
+
+type QuoteIssuancePricingSnapshot = {
+  id: string;
+  sha256: string;
+  publicProjection: ReturnedPublicProjection;
 };
 
 type ServerCalculation = {
@@ -73,6 +80,7 @@ type ServerCalculation = {
   originalTargetMarginMode?: TargetMarginMode;
   calculationRequest?: CalculationInput;
   originalCalculationRequest?: CalculationInput;
+  pricingSnapshot?: QuoteIssuancePricingSnapshot;
 };
 
 type RedactedCalculation = {
@@ -118,6 +126,22 @@ async function postCalculationWithTimeout(request: CalculationInput): Promise<{
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
+}
+
+function issuancePricingSnapshotFromPayload(payload: CalculationPayload): QuoteIssuancePricingSnapshot | null {
+  const projection = returnedProjectionFrom(payload);
+  if (!projection) return null;
+  const metadata = payload.pricingSnapshot;
+  if (
+    !metadata || typeof metadata !== "object"
+    || typeof (metadata as { id?: unknown }).id !== "string"
+    || typeof (metadata as { sha256?: unknown }).sha256 !== "string"
+  ) return null;
+  return {
+    id: projection.pricingSnapshot.id,
+    sha256: projection.pricingSnapshot.sha256,
+    publicProjection: projection,
+  };
 }
 
 function calculationErrorFor(error: unknown, fallbackCode: string): { code: string; message: string } {
@@ -454,6 +478,16 @@ function withMarginForPrintingMethod<T extends { printingMethod: PrintingMethod;
   return form.targetMargin === "custom" || options.includes(form.targetMargin)
     ? form
     : { ...form, targetMargin: MARGIN_OPTIONS[form.printingMethod][0] };
+}
+
+function normalizeLegacySizeSelection<T extends { sizeKey?: SizeKey; connected?: "1" | "2" | "3" | "4" }>(form: T): T {
+  if (form.sizeKey === "round-60x80-2") {
+    return { ...form, sizeKey: "round-60x80", connected: form.connected ?? "2" };
+  }
+  if (form.sizeKey === "round-70x120-3") {
+    return { ...form, sizeKey: "round-70x120", connected: form.connected ?? "3" };
+  }
+  return form;
 }
 
 function targetMarginModeFor(targetMargin: string): TargetMarginMode {
@@ -1029,6 +1063,7 @@ export default function QuotationPage({
     ],
   });
   const [parameters, setParameters] = useState<CostParameters>(defaultParameters);
+  const [filmUnitPricesTouched, setFilmUnitPricesTouched] = useState(false);
   const [gravureParameters, setGravureParameters] = useState<GravureRollParameters>(() => normalizeGravureParameters(defaultGravureRollParameters()));
   const [machineBreakdown, setMachineBreakdown] = useState<Record<MachineBreakdownKey, string>>(() => ({ ...MACHINE_BREAKDOWN_DEFAULTS }));
   const [serverResult, setServerResult] = useState<ServerCalculation | null>(null);
@@ -1061,20 +1096,22 @@ export default function QuotationPage({
             gravureParameters?: Partial<GravureRollParameters>;
             machineBreakdown?: Partial<Record<MachineBreakdownKey, string>>;
             productionSpeedManual?: boolean;
+            filmUnitPricesTouched?: boolean;
             serverResult?: ServerCalculation;
             calculatedAt?: string | null;
           };
-          if (saved.form) setForm((old) => withMarginForPrintingMethod({
+          const savedForm = saved.form;
+          if (savedForm) setForm((old) => withMarginForPrintingMethod({
             ...old,
-            ...saved.form,
+            ...normalizeLegacySizeSelection(savedForm),
             // Candidate display state must never overwrite the customer's
             // input basis. The simulator intentionally starts as digital and
             // exposes gravure only through recommendation candidates.
             printingMethod: INPUT_PRINTING_METHOD,
           }));
           if (saved.parameters) setParameters((old) => ({ ...old, ...saved.parameters }));
-          if (saved.parameters?.customPouchCharge === "400000") {
-            setParameters((old) => ({ ...old, customPouchCharge: "220000" }));
+          if (saved.parameters?.customPouchCharge === "400000" || saved.parameters?.customPouchCharge === "220000") {
+            setParameters((old) => ({ ...old, customPouchCharge: "270000" }));
           }
           if (saved.gravureParameters) setGravureParameters(normalizeGravureParameters(saved.gravureParameters));
           if (saved.machineBreakdown) setMachineBreakdown((old) => ({ ...old, ...saved.machineBreakdown }));
@@ -1082,6 +1119,9 @@ export default function QuotationPage({
             setProductionSpeedManual(saved.productionSpeedManual);
           } else if (saved.parameters?.productionSpeedPerMinute) {
             setProductionSpeedManual(true);
+          }
+          if (typeof saved.filmUnitPricesTouched === "boolean") {
+            setFilmUnitPricesTouched(saved.filmUnitPricesTouched);
           }
           const savedServerResult = saved.serverResult?.result && typeof saved.serverResult.inputJson === "string"
             ? saved.serverResult
@@ -1194,7 +1234,10 @@ export default function QuotationPage({
     if (sizeKey === "round-70x120-3") return "3";
     return "1";
   };
-  const standardSize = sizeMaster[form.sizeKey];
+  const standardSize = standardSizeMasterForSpec({
+    sizeKey: form.sizeKey,
+    connectedChambers: Number(form.connected) as 1 | 2 | 3 | 4,
+  });
   const dimensionMismatch = !form.custom && (form.widthMm !== standardSize.widthMm || form.lengthMm !== standardSize.lengthMm);
   const customDimensionsValid = isPositiveDecimalInput(form.widthMm) && isPositiveDecimalInput(form.lengthMm);
   const effectiveSize = form.custom && customDimensionsValid
@@ -1302,7 +1345,10 @@ export default function QuotationPage({
     setParameters((old) => ({ ...old, [key]: mode === "percent" ? formatNumber(Number(rawValue) / 100, 6) : rawValue }));
   };
 
-  const setFilmUnitPrice = (band: "lte570" | "571to740", lengthBand: "500" | "1000" | "1500", rawValue: string) => setParameters((old) => ({ ...old, filmUnitPrices: { ...old.filmUnitPrices, [band]: { ...old.filmUnitPrices[band], [lengthBand]: rawValue } } }));
+  const setFilmUnitPrice = (band: "lte570" | "571to740", lengthBand: "500" | "1000" | "1500", rawValue: string) => {
+    setFilmUnitPricesTouched(true);
+    setParameters((old) => ({ ...old, filmUnitPrices: { ...old.filmUnitPrices, [band]: { ...old.filmUnitPrices[band], [lengthBand]: rawValue } } }));
+  };
 
   const setMachineBreakdownField = (key: MachineBreakdownKey, rawValue: string) => {
     setMachineBreakdown((old) => {
@@ -1321,14 +1367,20 @@ export default function QuotationPage({
   const depreciationPerHour = machineBreakdownValid ? D(machineBreakdown.acquisitionCostYen).div(machineBreakdown.usefulLifeYears).div(machineBreakdown.annualOperatingHours) : null;
   const electricityPerHour = machineBreakdownValid ? D(machineBreakdown.annualElectricityKwh).times(machineBreakdown.electricityUnitPriceYen).div(machineBreakdown.annualOperatingHours) : null;
 
+  const requestParameters = useMemo(() => {
+    if (filmUnitPricesTouched) return effectiveParameters;
+    const { filmUnitPrices: _adminMasterPrices, ...parametersWithoutFilmPrices } = effectiveParameters;
+    return parametersWithoutFilmPrices;
+  }, [effectiveParameters, filmUnitPricesTouched]);
+
   const calculationInput = useMemo(() => ({
     spec: spec(),
     quantity: form.quantity,
     printingMethod: activePrintingMethod,
     targetMargins: targetMarginList,
-    parameters: effectiveParameters,
+    parameters: requestParameters,
     gravureParameters: normalizedGravureParameters,
-  }), [spec, form.quantity, activePrintingMethod, targetMarginList, effectiveParameters, normalizedGravureParameters]);
+  }), [spec, form.quantity, activePrintingMethod, targetMarginList, requestParameters, normalizedGravureParameters]);
 
   const calculationInputJson = useMemo(() => JSON.stringify(calculationInput), [calculationInput]);
   const selectedRecommendationForStale = serverResult?.selectedCandidateId
@@ -1496,6 +1548,7 @@ export default function QuotationPage({
         throw new Error("candidate_response_invalid");
       }
       const candidates: PrintCandidate[] = payload.candidates;
+      const pricingSnapshot = issuancePricingSnapshotFromPayload(payload);
       const expectedAdjustedQuantity = sum(candidate.adjustedSkuQuantities.map((quantity) => D(quantity)));
       const returnedSelectedCandidate = candidates.find((returnedCandidate) => returnedCandidate.id === candidate.id) ?? null;
       const returnedSelectedSkuQuantitiesMatch = Boolean(returnedSelectedCandidate
@@ -1549,6 +1602,7 @@ export default function QuotationPage({
         originalTargetMarginMode,
         calculationRequest,
         originalCalculationRequest: serverResult.originalCalculationRequest ?? serverResult.calculationRequest,
+        pricingSnapshot: pricingSnapshot ?? serverResult.pricingSnapshot,
       });
       setForm((old) => ({
         ...old,
@@ -1783,6 +1837,7 @@ export default function QuotationPage({
       // replace the customer's digital input basis with an active candidate.
       const selectedResult: CostResult = originalResult;
       const candidates: PrintCandidate[] = payload.candidates;
+      const pricingSnapshot = issuancePricingSnapshotFromPayload(payload);
       setCalculationError(null);
       setRecommendationModalOpen(candidates.length > 0);
       setServerResult({
@@ -1801,6 +1856,7 @@ export default function QuotationPage({
         originalTargetMarginMode: requestedTargetMarginMode,
         calculationRequest,
         originalCalculationRequest: calculationRequest,
+        pricingSnapshot: pricingSnapshot ?? undefined,
       });
       setForm((old) => ({
         ...old,
@@ -1838,8 +1894,8 @@ export default function QuotationPage({
   const hasCurrentRecommendationCandidates = !staleResult && (serverResult?.candidates.length ?? 0) > 0;
   const showPrintingMethodSelector = !hasCurrentRecommendationCandidates;
   const quotationPreview = useMemo(
-    () => resultShown ? calculateAutomaticQuotation(resultShown, effectiveMargin) : null,
-    [effectiveMargin, resultShown],
+    () => resultShown && marginValid ? calculateAutomaticQuotation(resultShown, effectiveMargin) : null,
+    [effectiveMargin, marginValid, resultShown],
   );
   // 選択したD/K/Y候補をそのまま見積ドラフトへ引き継ぐ。未選択時は入力値基準。
   const quotationDraftResult = resultShown;
@@ -1944,6 +2000,9 @@ export default function QuotationPage({
           calculationRequest: serverResult.calculationRequest,
           originalQuantity: serverResult.originalResult.quantity,
           selectedCandidateShortage: selectedShortageReference,
+          pricingSnapshot: selectedRecommendation?.printingMethod === "gravure"
+            ? serverResult.pricingSnapshot
+            : undefined,
         })),
       );
       sessionStorage.removeItem(SIMULATOR_STALE_STATUS_KEY);
@@ -2194,7 +2253,7 @@ export default function QuotationPage({
         <form onSubmit={submit} className="layout" noValidate data-testid="quotation-form" data-state={staleResult ? "stale" : "current"}>
           <section className="panel" aria-labelledby="input-title">
             <h2 id="input-title">製品情報</h2>
-            <Field label="サイズ" htmlFor="size"><select id="size" value={form.sizeKey} onChange={(e) => { const key = e.target.value as SizeKey; const s = sizeMaster[key]; set("sizeKey", key); patchForm({ widthMm: s.widthMm, lengthMm: s.lengthMm, connected: connectedChambersForSizeKey(key) }); }}>{Object.values(sizeMaster).map((size) => <option key={size.key} value={size.key}>{size.label}</option>)}</select></Field>
+            <Field label="サイズ" htmlFor="size"><select id="size" value={form.sizeKey} onChange={(e) => { const key = e.target.value as SizeKey; const s = sizeMaster[key]; set("sizeKey", key); patchForm({ widthMm: s.widthMm, lengthMm: s.lengthMm, connected: connectedChambersForSizeKey(key) }); }}>{Object.values(sizeMaster).filter((size) => size.key !== "round-60x80-2" && size.key !== "round-70x120-3").map((size) => <option key={size.key} value={size.key}>{size.label}</option>)}</select></Field>
             <div className="field"><label htmlFor="custom"><input id="custom" type="checkbox" checked={form.custom} onChange={(e) => { const checked = e.target.checked; if (checked) patchForm({ custom: true }); else patchForm({ custom: false, widthMm: standardSize.widthMm, lengthMm: standardSize.lengthMm }); }} /> カスタム区分</label><p className="help">チェックすると左右幅・長さを自由入力できます。列数は選択サイズを引き継ぎ、原反幅・価格帯・配送単位は幅から自動判定します（参考計算）。</p></div>
             <div className="field-row">
               <Field label="左右幅 (mm)" htmlFor="width"><input id="width" inputMode="decimal" readOnly={!form.custom} aria-readonly={!form.custom} aria-describedby={dimensionMismatch ? "dimension-error" : undefined} value={form.widthMm} onChange={(e) => set("widthMm", e.target.value)} /></Field>
@@ -2534,8 +2593,8 @@ export default function QuotationPage({
               <>
                 <p className="total-label">
                   {serverResult?.selectedCandidateId
-                    ? <>元入力 {formatNumber(serverResult.originalResult.quantity)} 枚 ／ 選択後発注 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>
-                    : <>発注数量 {formatNumber(resultShown.quantity)} 枚 原価 {formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</>}
+                    ? <>元入力 {formatNumber(serverResult.originalResult.quantity)} 枚 ／ 選択後発注 {formatNumber(resultShown.quantity)} 枚</>
+                    : <>発注数量 {formatNumber(resultShown.quantity)} 枚</>}
                 </p>
                 {selectedShortageReference ? (
                   <p className="quote-gate" role="alert" data-testid="shortage-candidate-warning">
@@ -2551,7 +2610,6 @@ export default function QuotationPage({
 	                  </HoverInfo>
 	                ) : null}
 	                <p className="total">
-	                  {formatCurrency(displayAmount(resultShown.totalCostPerPiece))}<span className="help"> / 枚</span>
 	                  <span className="total-sub">
 	                    総原価 <strong>{formatCurrency(displayAmount(resultShown.costTotal))}</strong> ／ フィルム発注 {formatNumber(resultShown.film.orderLengthM)}m ／ 製造計画 {formatNumber(resultShown.quantity)} 枚
                     {resultPrintingMethod === "gravure" && resultShown.recommendedQuantity
@@ -2559,6 +2617,32 @@ export default function QuotationPage({
                       : `（製造可能 ${formatNumber(resultShown.film.actualQuantity)} 枚・余剰 ≈ ${formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）`}
 	                  </span>
 	                </p>
+		                <div className="result-metric-grid" data-testid="price-profit-summary">
+		                  <div className="result-metric-card">
+		                    <span>発注数量</span>
+		                    <strong>{formatNumber(resultShown.quantity, 0)} 枚</strong>
+		                  </div>
+		                  <div className="result-metric-card">
+		                    <span>総原価単価</span>
+		                    <strong>{formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</strong>
+		                  </div>
+		                  <div className="result-metric-card">
+		                    <span>パウチ販売単価（金型・銅版除く）</span>
+		                    <strong>{quotationPreview ? formatCurrency(quotationPreview.display.pouchPricePerPiece, 2) : "-"} /枚</strong>
+		                  </div>
+		                  <div className="result-metric-card metric-accent">
+		                    <span>総費用込販売単価</span>
+		                    <strong>{quotationPreview ? formatCurrency(quotationPreview.display.pricePerPiece, 2) : "-"} /枚</strong>
+		                  </div>
+		                  <div className="result-metric-card">
+		                    <span>1枚あたり利益（税抜）</span>
+		                    <strong>{quotationPreview ? formatCurrency(quotationPreview.pricePerPiece.minus(resultShown.totalCostPerPiece).toString(), 2) : "-"} /枚</strong>
+		                  </div>
+		                  <div className="result-metric-card">
+		                    <span>総利益（税抜）</span>
+		                    <strong>{quotationPreview ? formatCurrency(quotationPreview.pricePerPiece.minus(resultShown.totalCostPerPiece).times(resultShown.quantity).toString(), 0) : "-"}</strong>
+		                  </div>
+		                </div>
 	                <div className="unit-cost-grid" data-testid="unit-cost-summary">
 	                  <div>
 	                    <span>総単価（初期費用込）</span>
@@ -2912,8 +2996,11 @@ export default function QuotationPage({
                   <dd>
                     {quotationPreview ? (
                       <>
-                        {formatCurrency(quotationPreview.display.pricePerPiece, 2)}
-                        <span className="help">（原価 {formatCurrency(quotationPreview.totalCostPerPiece.toString(), 2)} /枚）</span>
+                        <div>
+                          <div>パウチ単価（金型・銅版除く）：{formatCurrency(quotationPreview.display.pouchPricePerPiece, 2)}</div>
+                          <div>総費用込単価：{formatCurrency(quotationPreview.display.pricePerPiece, 2)}</div>
+                          <span className="help">（総原価 {formatCurrency(quotationPreview.totalCostPerPiece.toString(), 2)} /枚）</span>
+                        </div>
                       </>
                     ) : "-"}
                   </dd>
@@ -2921,7 +3008,7 @@ export default function QuotationPage({
               </dl>
               {quotationPreview && resultShown ? (
                 <p className="help" data-testid="connected-filling-surcharge">
-                  充填・加工単価（バルク除く）：1連基準加工原価 {formatCurrency(resultShown.singleConnectedProcessingCostPerPiece, 2)} /枚 × {form.connected}連（室数）＝基本額 {formatCurrency(D(resultShown.singleConnectedProcessingCostPerPiece).times(D(form.connected)).toString(), 2)} /枚、さらに連結加算 {formatNumber(Number(resultShown.connectedFillingSurchargeRate) * 100, 0)}% を乗じて ÷ (1−利益率) ＝ 見積基準 {formatCurrency(D(resultShown.singleConnectedProcessingCostPerPiece).times(D(form.connected)).times(D(1).plus(D(resultShown.connectedFillingSurchargeRate))).div(D(1).minus(effectiveMargin)).toString(), 2)} /枚。{D(resultShown.costPerPieceComponents.bulk).gt(0) ? `バルクは別ライン：使用量 ${formatNumber(quotationPreview.bulkUsage.toString())}g × 原価 ＝ ${formatCurrency(resultShown.bulkCost)}円、これに1.4を乗じて表示単価 ${formatCurrency(quotationPreview.display.bulkUnit, 1)}円/g` : "バルク単価が0円（貴社支給）のためバルクラインは表示しません"}。{resultPrintingMethod === "digital" ? "デジタルはフィルムm単価（380〜480円/mの帯）を先に確定し、バルクを除く目標合計からの残額を充填・加工へ配分します" : "グラビアはフィルムm単価を90〜220円/mの帯に制限し、バルクを除く帯による差額を充填・加工へ配分します"}。適用単価 {formatCurrency(quotationPreview.display.fillingUnit, 1)} /枚（小数第1位へ切り上げ）
+                  充填・加工単価（バルク除く）：1連基準加工原価 {formatCurrency(resultShown.singleConnectedProcessingCostPerPiece, 2)} /枚 × {form.connected}連（室数）＝基本額 {formatCurrency(D(resultShown.singleConnectedProcessingCostPerPiece).times(D(form.connected)).toString(), 2)} /枚、さらに連結加算 {formatNumber(Number(resultShown.connectedFillingSurchargeRate) * 100, 0)}% を乗じて ÷ (1−利益率) ＝ 見積基準 {formatCurrency(D(resultShown.singleConnectedProcessingCostPerPiece).times(D(form.connected)).times(D(1).plus(D(resultShown.connectedFillingSurchargeRate))).div(D(1).minus(effectiveMargin)).toString(), 2)} /枚。{D(resultShown.costPerPieceComponents.bulk).gt(0) ? `バルクは別ライン：使用量 ${formatNumber(quotationPreview.bulkUsage.toString())}g × 原価 ＝ ${formatCurrency(resultShown.bulkCost)}円、これに1.4を乗じて表示単価 ${formatCurrency(quotationPreview.display.bulkUnit, 1)}円/g` : "バルク単価が0円（貴社支給）のためバルクラインは表示しません"}。{resultPrintingMethod === "digital" ? "デジタルはフィルムm単価（380〜480円/mの帯）を先に確定し、バルクを除く目標合計からの残額を充填・加工へ配分します" : "グラビアはフィルムm単価を100〜170円/mの帯に制限し、バルクを除く帯による差額を充填・加工へ配分します"}。適用単価 {formatCurrency(quotationPreview.display.fillingUnit, 1)} /枚（小数第1位へ切り上げ）
                 </p>
               ) : null}
               <div className="quote-total"><span>参考税抜金額</span><span data-testid="customer-total">{quotationPreview ? formatCurrency(quotationPreview.subtotal.toString(), 0) : "-"}</span></div>

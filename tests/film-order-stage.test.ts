@@ -162,10 +162,6 @@ describe("film-order action guards", () => {
       status: "proof_registered",
       customerProofStatus: "pending",
     }), "approve")).toThrow("customer_proof_release_required");
-    expect(() => assertFilmOrderActionGuard(order({
-      status: "proof_registered",
-      customerProofStatus: "approved",
-    }), "approve")).toThrow("supplier_approval_required");
   });
 
   it("gates supplier PO on both approvals and confirmed ship-to", () => {

@@ -1,5 +1,6 @@
 import { formatCurrency, formatNumber } from "./serialization";
 import type { QuotationRecord } from "./quotation-shared";
+import { quotationOwnerProfile, type QuoteOwnerProfile } from "./quote-owner-profiles";
 
 export interface QuotationEmailDocument {
   subject: string;
@@ -21,11 +22,13 @@ export function buildCustomerQuotationEmail(
   attachmentName: string,
   designAttachmentNames: string[] = [],
 ): QuotationEmailDocument {
+  const owner = quotationOwnerProfile(record.ownerDomain);
+  if (!owner) throw new Error("unresolved_quote_owner");
   const subject = `お見積書 ${record.quotationNumber}（${record.productName || "お見積り"}）のご送付とご承認のお願い`;
   const body = [
     recipientGreeting(record),
     "",
-    "いつも大変お世話になっております。パッケージラボでございます。",
+    `いつも大変お世話になっております。${owner.portalBrandName}でございます。`,
     "",
     "このたびはお見積りのご依頼を賜り、誠にありがとうございます。",
     "下記の通りお見積書を作成いたしましたので、添付ファイルにてご送付申し上げます。",
@@ -57,12 +60,19 @@ export function buildCustomerQuotationEmail(
     "※有効期限経過後、またはお見積内容変更後は承認できない場合がございます。",
     "※本メールに心当たりがない場合は、お手数ですが本メールを削除し、下記連絡先までご一報ください。",
     "",
-    "ご不明な点がございましたら、お気軽にお問い合わせください。",
+    `ご不明な点がございましたら、${owner.defaultContactEmail}${owner.defaultContactTelephone ? ` / ${owner.defaultContactTelephone}` : ""} までお気軽にお問い合わせください。`,
     "今後とも何卒よろしくお願い申し上げます。",
     "",
     "--",
-    "パッケージラボ",
-    "shapepouch@package-lab.com",
+    owner.legalName,
+    owner.portalBrandName,
+    owner.defaultContactEmail,
   ].join("\n");
   return { subject, body };
+}
+
+export function customerQuotationSenderName(record: QuotationRecord): string {
+  const owner: QuoteOwnerProfile | null = quotationOwnerProfile(record.ownerDomain);
+  if (!owner) throw new Error("unresolved_quote_owner");
+  return owner.portalBrandName;
 }

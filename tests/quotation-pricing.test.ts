@@ -7,10 +7,10 @@ import { D, Decimal } from "@/lib/decimal";
 import type { PouchSpec } from "@/lib/types";
 
 describe("automatic quotation pricing", () => {
-  it("clamps gravure film meter unit into the 90-220 yen band", () => {
-    expect(clampGravureFilmMeterUnit(D("50")).toString()).toBe("90");
+  it("clamps gravure film meter unit into the 100-170 yen band", () => {
+    expect(clampGravureFilmMeterUnit(D("50")).toString()).toBe("100");
     expect(clampGravureFilmMeterUnit(D("150")).toString()).toBe("150");
-    expect(clampGravureFilmMeterUnit(D("300")).toString()).toBe("220");
+    expect(clampGravureFilmMeterUnit(D("300")).toString()).toBe("170");
   });
 
   it("carries a selected gravure candidate's film basis into quotation lines", () => {
@@ -40,9 +40,9 @@ describe("automatic quotation pricing", () => {
     expect(quote).not.toBeNull();
     expect(quote!.filmCostPerPiece.eq(D(selected.costPerPieceComponents.film))).toBe(true);
     expect(quote!.filmOrderLength.eq(D(candidate!.orderLengthM))).toBe(true);
-    expect(quote!.display.filmUnit).toBe("220");
-    expect(quote!.display.filmAmount).toBe("374000");
-    expect(quote!.display.filmPouchUnit).toBe("7.48");
+    expect(quote!.display.filmUnit).toBe("170");
+    expect(quote!.display.filmAmount).toBe("289000");
+    expect(quote!.display.filmPouchUnit).toBe("5.78");
     expect(quote!.copperCostPerPiece.eq(D(selected.copperPlateCostPerPiece))).toBe(true);
     expect(quote!.copperAmount.eq(D(selected.copperPlateCost).times(COPPER_SELLING_MARKUP))).toBe(true);
   });
@@ -178,5 +178,36 @@ describe("automatic quotation pricing", () => {
     expect(sold.display.fillingUnit).toBe(supplied.display.fillingUnit);
     expect(sold.display.filmUnit).toBe(supplied.display.filmUnit);
     expect(sold.display.filmAmount).toBe(supplied.display.filmAmount);
+  });
+
+  it("outputs custom charges as a fixed quotation total independent of target margin", () => {
+    const result = calculatePouchCost({
+      spec: {
+        sizeKey: "round-50x60" as const,
+        customWidthMm: "50",
+        customLengthMm: "60",
+        fillMlPerChamber: "3",
+        connectedChambers: 1 as const,
+        fillingMethod: "hopper" as const,
+        fillingLanes: 4,
+        isCustom: true,
+        colorCount: 2,
+        bulkUnitPrice: "0",
+        skuCount: 1,
+      },
+      quantity: "10000",
+      printingMethod: "gravure",
+    });
+    expect(result.customCharge).toBe("270000");
+
+    const quote = calculateAutomaticQuotation(result, "0.3")!;
+    expect(quote.customLotCost.toString()).toBe("270000");
+    expect(quote.customSaleTotal.toString()).toBe("300000");
+    expect(quote.display.customUnit).toBe("300000");
+    expect(quote.display.customAmount).toBe("300000");
+    const copperPerPiece = quote.copperAmount.div(result.quantity);
+    const customPerPiece = D(quote.display.customAmount).div(result.quantity);
+    expect(Number(quote.display.pricePerPiece) - Number(quote.display.pouchPricePerPiece))
+      .toBeCloseTo(Number(copperPerPiece.plus(customPerPiece)), 8);
   });
 });

@@ -14,8 +14,8 @@ vi.mock("next/navigation", () => ({
 
 const currentUser: AuthenticatedUser = {
   id: 2,
-  email: "editor@history.test",
-  name: "Editor",
+  email: "gotou@727.co.jp",
+  name: "Gotou",
   role: "user",
   isActive: true,
   createdAt: "2026-09-20T00:00:00.000Z",
@@ -27,6 +27,9 @@ function record(id: number, number: string, creator: { id: number; email: string
   return {
     id,
     quotationNumber: number,
+    ownerDomain: creator.email.endsWith("@kanei-trade.co.jp")
+      ? "kanei"
+      : creator.email.endsWith("@727.co.jp") ? "seven" : "unresolved",
     status: "draft",
     issueDate: "2026-09-20",
     validUntil: "2026-10-20",
@@ -94,7 +97,7 @@ describe("quotation history ownership UI", () => {
 
     await user.selectOptions(screen.getByTestId("history-creator"), "1");
     await waitFor(() => expect(screen.queryByText("S7-HISTORY-OWNER")).not.toBeInTheDocument());
-    expect(screen.getByRole("option", { name: "Editor（editor@history.test）" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Gotou（gotou@727.co.jp）" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("creatorId=1"), { cache: "no-store" });
     vi.unstubAllGlobals();
   });
@@ -274,10 +277,15 @@ describe("quotation history ownership UI", () => {
   it("shows why internal approval is unavailable for another Kanei user", async () => {
     const kaneiUser: AuthenticatedUser = {
       ...currentUser,
+      id: 99,
       email: "other@kanei-trade.co.jp",
       name: "Other Kanei",
     };
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ records: [ownerRecord] }, { status: 200 })));
+    const approvalRecord = {
+      ...ownerRecord,
+      payload: { customerEmail: "approval@example.test" },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ records: [approvalRecord] }, { status: 200 })));
     render(<HistoryClient currentUser={kaneiUser} />);
 
     await screen.findByText("S7-HISTORY-OWNER");
@@ -285,19 +293,61 @@ describe("quotation history ownership UI", () => {
     const button = await screen.findByTestId("history-internal-approve");
     expect(button).toBeDisabled();
     expect(screen.getByTestId("history-internal-approval-blocked-reason")).toHaveTextContent(
-      "内部承認はKimのみ実行できます。",
+      "この見積書はセブン化学（S7）の担当者のみ操作できます。",
     );
   });
 
-  it("shows why internal approval is blocked while sample bulk is unconfirmed for Kim", async () => {
-    const kimUser: AuthenticatedUser = {
+  it("shows owner badges and owner-specific disabled reasons", async () => {
+    const kaneiRecord: QuotationRecord = {
+      ...ownerRecord,
+      id: 3,
+      quotationNumber: "KT-HISTORY-OWNER",
+      ownerDomain: "kanei",
+      createdBy: { id: 4, email: "creator@kanei-trade.co.jp", name: "Kanei Creator" },
+      status: "sent",
+      internalApproval: { approvedAt: "2026-09-21T00:00:00.000Z", approvedBy: null },
+      payload: { customerEmail: "kanei-customer@example.test" },
+    };
+    const unresolvedRecord: QuotationRecord = {
+      ...ownerRecord,
+      id: 5,
+      quotationNumber: "UN-HISTORY-OWNER",
+      ownerDomain: "unresolved",
+      createdBy: { id: 6, email: "legacy@old.test", name: "Legacy Creator" },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      records: [kaneiRecord, ownerRecord, unresolvedRecord],
+    }, { status: 200 })));
+    render(<HistoryClient currentUser={currentUser} />);
+
+    const badges = await screen.findAllByTestId("history-quote-owner-badge");
+    expect(badges.map((badge) => badge.textContent)).toEqual(["KT", "S7", "未解決"]);
+    const kaneiRow = badges[0]!.closest("tr")!;
+    const unresolvedRow = badges[2]!.closest("tr")!;
+    const kaneiReason = "この見積書は金井貿易（KT）の担当者のみ操作できます。";
+    const unresolvedReason = "所有会社が未解決のため、この操作は実行できません。";
+    expect(screen.getByLabelText("KT-HISTORY-OWNER の状態")).toBeDisabled();
+    expect(screen.getByLabelText("KT-HISTORY-OWNER の状態")).toHaveAttribute("title", kaneiReason);
+    expect(kaneiRow.querySelector('[data-testid="history-restore"]')).toHaveAttribute("title", kaneiReason);
+    expect(unresolvedRow.querySelector('[aria-label="UN-HISTORY-OWNER の状態"]')).toBeDisabled();
+    expect(unresolvedRow.querySelector('[aria-label="UN-HISTORY-OWNER の状態"]')).toHaveAttribute("title", unresolvedReason);
+
+    await userEvent.setup().click(kaneiRow.querySelector<HTMLButtonElement>('button:first-child')!);
+    const customerButton = await screen.findByTestId("history-customer-approval-record");
+    expect(customerButton).toBeDisabled();
+    expect(screen.getByTestId("history-customer-approval-blocked-reason")).toHaveTextContent(kaneiReason);
+  });
+
+  it("allows internal approval for a matching Seven responsible user", async () => {
+    const sevenUser: AuthenticatedUser = {
       ...currentUser,
-      email: "kim@kanei-trade.co.jp",
-      name: "Kim",
+      email: "other@727.co.jp",
+      name: "Other Seven",
     };
     const pendingSampleRecord = {
       ...ownerRecord,
       payload: {
+        customerEmail: "approval@example.test",
         sampleBulkConfirmation: {
           required: true,
           status: "pending" as const,
@@ -310,7 +360,7 @@ describe("quotation history ownership UI", () => {
       },
     };
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ records: [pendingSampleRecord] }, { status: 200 })));
-    render(<HistoryClient currentUser={kimUser} />);
+    render(<HistoryClient currentUser={sevenUser} />);
 
     await screen.findByText("S7-HISTORY-OWNER");
     await userEvent.setup().click(screen.getAllByRole("button", { name: "詳細" })[0]);

@@ -1,14 +1,9 @@
 import { notFound } from "next/navigation";
-import {
-  createChecklistsForQuotation,
-  createLegacyChecklistsForQuotation,
-  getChecklistsForQuotation,
-  getQuotation,
-} from "@/lib/quotation-store";
+import { getChecklistsForQuotation, getQuotation } from "@/lib/quotation-store";
 import { CHECKLIST_VERSION, readCalculationChecklistSnapshot } from "@/lib/calculation-checklist";
-import { printingMethodOf } from "@/lib/quotation-history";
 import { requirePageUser } from "@/lib/page-auth";
 import { canViewInternalChecklist } from "@/lib/checklist-access";
+import { canPerformOwnerWorkflowAction, canReadQuotation } from "@/lib/quotation-access";
 import { CalculationChecklistClient } from "./checklist-client";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +20,7 @@ export default async function ChecklistPage({ params }: PageProps) {
 
   const quotation = await getQuotation(id);
   if (!quotation) notFound();
+  if (!canReadQuotation(user, quotation)) notFound();
 
   const savedChecklists = await getChecklistsForQuotation(id);
   const payloadSnapshot = readCalculationChecklistSnapshot(quotation.payload.calculationChecklistSnapshot);
@@ -39,19 +35,18 @@ export default async function ChecklistPage({ params }: PageProps) {
   const shouldRebuild = savedChecklists.length === 0
     || hasLegacyChecklists
     || (!!payloadSnapshot && (hasOutdatedChecklists || hasStaleResultHash));
-  const checklists = shouldRebuild
-    ? payloadSnapshot
-      ? await createChecklistsForQuotation(quotation, payloadSnapshot)
-      : await createLegacyChecklistsForQuotation(quotation, printingMethodOf(quotation))
-    : savedChecklists;
+  const checklists = savedChecklists;
   // 社内QA（金井貿易）チェックリストは金井貿易アカウントにのみ表示する。
-  const visibleChecklists = canViewInternalChecklist(user.email)
+  const visibleChecklists = canViewInternalChecklist(user.email, quotation.ownerDomain)
     ? checklists
     : checklists.filter((record) => record.audience !== "INTERNAL_QA");
 
+  const canRebuild = canPerformOwnerWorkflowAction(user, quotation);
+  const requiresExplicitRebuild = shouldRebuild && canRebuild;
+
   return (
     <main className="checklist-page current-checklist">
-      {checklists.length === 0 ? (
+      {checklists.length === 0 && !requiresExplicitRebuild ? (
         <section className="panel">
           <p className="empty">この見積りはチェックリスト機能導入前に保存されています。新しい見積りを保存すると自動生成されます。</p>
         </section>
@@ -60,6 +55,9 @@ export default async function ChecklistPage({ params }: PageProps) {
           quotationId={id}
           quotationNumber={quotation.quotationNumber}
           customerName={quotation.customerName}
+          ownerDomain={quotation.ownerDomain}
+          rebuildRequired={requiresExplicitRebuild}
+          canRebuild={canRebuild}
           records={visibleChecklists}
           isLegacy={checklists[0]?.checklistVersion.startsWith("legacy-")}
         />

@@ -15,7 +15,7 @@ process.env.FILM_EXTERNAL_TOKEN_SECRET = "film-external-token-test-secret-32-byt
 process.env.MAIL_DRY_RUN = "true";
 
 const { saveQuotation } = await import("@/lib/quotation-store");
-const { ensureAdministratorSeed } = await import("@/lib/auth-store");
+const { createUser } = await import("@/lib/auth-store");
 const {
   assertSupplierProofUploadPolicy,
   getFilmOrder,
@@ -99,12 +99,12 @@ describe("film order external token hardening", () => {
   let supplierToken = "";
 
   beforeAll(async () => {
-    const adminId = await ensureAdministratorSeed();
-    await saveQuotation(input, adminId, "admin");
+    const adminId = (await createUser({ email: "seven-owner@727.co.jp", name: "Seven Owner", password: "external-token-seven-password", role: "user" })).id;
+    await saveQuotation(input, adminId, "user");
     await syncFilmOrdersFromQuotations("seven@727.co.jp");
     const order = (await listFilmOrders("kanei@kanei-trade.co.jp")).find((item) => item.quotation_number === input.quotationNumber)!;
     orderId = order.id;
-    await runFilmOrderAction(orderId, "mark-ordered", {}, "kanei@kanei-trade.co.jp");
+    await runFilmOrderAction(orderId, "mark-ordered", {}, "seven@727.co.jp");
     await runFilmOrderAction(orderId, "set-customer-design-not-required", { reason: "既存フロー回帰テスト" }, "seven@727.co.jp");
     const { createFilmMaker, selectFilmMakerForOrder } = await import("@/lib/film-maker-store");
     const tokenMaker = await createFilmMaker({
@@ -215,10 +215,11 @@ describe("customer design upload gate", () => {
       approveQuotationGate,
     } = await import("@/lib/quotation-store");
     const { registerCustomerDesignFromUploadToken } = await import("@/lib/film-orders");
-    const adminId = await ensureAdministratorSeed();
+    const adminId = (await createUser({ email: "kanei-owner@kanei-trade.co.jp", name: "Kanei Owner", password: "external-token-kanei-password", role: "user" })).id;
+    const db = await getDatabaseForTest();
     const quotation = await saveQuotation({
       ...input,
-      quotationNumber: "S7-EXTERNAL-TOKEN-002",
+      quotationNumber: "KT-EXTERNAL-TOKEN-002",
       payload: {
         ...input.payload,
         customerEmail: "design-customer@example.test",
@@ -238,15 +239,20 @@ describe("customer design upload gate", () => {
           ],
         },
       },
-    }, adminId, "admin");
-    void quotation;
+    }, adminId, "user");
+    // Persist a legacy Kanei-owned quote fixture. New saves are always Seven-owned.
+    await db.run(
+      "UPDATE quotations SET owner_domain='kanei', quotation_number='KT-EXTERNAL-TOKEN-002' WHERE id=?",
+      [quotation.id],
+    );
     await syncFilmOrdersFromQuotations("kanei@kanei-trade.co.jp");
     const orders = await listFilmOrders("kanei@kanei-trade.co.jp");
-    const order = orders.find((item) => item.quotation_number === "S7-EXTERNAL-TOKEN-002")!;
+    const order = orders.find((item) => item.quotation_number === "KT-EXTERNAL-TOKEN-002")!;
     designOrderId = order.id;
-    await runFilmOrderAction(designOrderId, "mark-ordered", {}, "kanei@kanei-trade.co.jp");
+    expect(order.buyer_domain).toBe("kanei-trade.co.jp");
+    await runFilmOrderAction(designOrderId, "mark-ordered", {}, "kanei-owner@kanei-trade.co.jp");
     await expect(runFilmOrderAction(designOrderId, "register-receiving", { aiFileName: "early.ai" }, "seven@727.co.jp"))
-      .rejects.toThrow("customer_design_confirmation_required");
+      .rejects.toThrow("film_order_actor_forbidden");
 
     const requested = await runFilmOrderAction(designOrderId, "request-customer-design-upload", {
       note: "元デザインをご入稿ください",
@@ -273,6 +279,7 @@ describe("customer design upload gate", () => {
       metadata: { fileSizeBytes: 1000, contentType: "application/postscript", driveFileId: "customerdesign1" },
     });
     expect(uploaded.customerDesign.status).toBe("received");
+    expect(uploaded.current_proof_round).toBe(1);
     expect(uploaded.files.filter((file) => file.category === "customer_design")).toHaveLength(1);
     expect(uploaded.files.at(-1)?.file_name).toContain("_design_v1_");
 
@@ -297,6 +304,7 @@ describe("customer design upload gate", () => {
       metadata: { fileSizeBytes: 1200, contentType: "application/pdf", driveFileId: "customerdesign2" },
     });
     expect(uploaded2.customerDesign.status).toBe("received");
+    expect(uploaded2.current_proof_round).toBe(2);
     expect(uploaded2.files.filter((file) => file.category === "customer_design")).toHaveLength(2);
     expect(uploaded2.files.at(-1)?.file_name).toContain("_design_v2_");
 
@@ -315,15 +323,6 @@ describe("customer design upload gate", () => {
       db.run("UPDATE film_orders SET procurement_route='Y' WHERE id=?", [designOrderId]),
     );
     await selectFilmMakerForOrder(designOrderId, designMaker.id, "kanei@kanei-trade.co.jp");
-    const receiving = await runFilmOrderAction(designOrderId, "register-receiving", {
-      aiFileName: "confirmed.ai",
-      pdfFileName: "confirmed.pdf",
-      guideAcknowledged: true,
-      aiFileUrl: "https://drive.google.com/file/d/confirmedai/view",
-      pdfFileUrl: "https://drive.google.com/file/d/confirmedpdf/view",
-    }, "seven@727.co.jp");
-    expect(receiving.order.status).toBe("receiving_registered");
-
     const proof = await runFilmOrderAction(designOrderId, "register-proof", {
       aiFileName: `${designOrderId}_proof_v1.ai`,
       aiFileUrl: "https://drive.google.com/file/d/customerproof1/view",

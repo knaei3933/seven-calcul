@@ -1,6 +1,10 @@
 import { getSqlClient } from "@/lib/db";
 import { getCustomer } from "@/lib/customer-store";
 import { isKaneiTradeUser } from "@/lib/film-order-access";
+import {
+  quotationOwnerDomainFromStorage,
+  type QuotationOwnerDomain,
+} from "@/lib/quotation-shared";
 import type { AuthenticatedUser } from "@/lib/auth-store";
 
 export const PORTAL_QUOTE_SOURCE_LABEL = "顧客ポータル";
@@ -34,6 +38,7 @@ export interface AdminPortalQuote {
   publicId: string;
   quotationId: number;
   quotationNumber: string;
+  ownerDomain: QuotationOwnerDomain;
   source: "customer_portal";
   sourceLabel: typeof PORTAL_QUOTE_SOURCE_LABEL;
   customerCode: string;
@@ -86,6 +91,7 @@ interface AdminQuoteRow {
   public_id: string;
   quotation_id: number;
   quotation_number: string;
+  owner_domain: string | null;
   customer_code: string;
   issue_date: string;
   valid_until: string;
@@ -147,6 +153,7 @@ function toAdminQuote(row: AdminQuoteRow, customer: AdminPortalQuote["customer"]
     publicId: row.public_id,
     quotationId: Number(row.quotation_id),
     quotationNumber: row.quotation_number,
+    ownerDomain: quotationOwnerDomainFromStorage(row.owner_domain),
     source: "customer_portal",
     sourceLabel: PORTAL_QUOTE_SOURCE_LABEL,
     customerCode: row.customer_code,
@@ -210,6 +217,7 @@ export async function listAdminPortalQuotes(
     SELECT portal_quote_mappings.public_id,
            portal_quote_mappings.quotation_id,
            quotations.quotation_number,
+           quotations.owner_domain,
            portal_quote_mappings.customer_code,
            quotations.issue_date,
            quotations.valid_until,

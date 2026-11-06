@@ -69,7 +69,7 @@ function context(id: number | string) {
 
 beforeAll(async () => {
   const owner = await createUser({
-    email: "owner@pdf-api.test",
+    email: "owner@727.co.jp",
     name: "PDF Owner",
     password: "owner-pdf-password",
     role: "user",
@@ -104,7 +104,7 @@ describe("quotation PDF API", () => {
       context(quotation.id),
     );
     expect(forbidden.status).toBe(403);
-    await expect(forbidden.json()).resolves.toEqual({ error: "forbidden" });
+    await expect(forbidden.json()).resolves.toEqual({ error: "owner_action_forbidden" });
   });
 
   it("rejects non-file PDF form values with a clear Japanese validation error", async () => {
@@ -170,7 +170,7 @@ describe("quotation PDF API", () => {
   it("round-trips exact bytes through the shared quotation store", async () => {
     const bytes = new Uint8Array(Array.from({ length: 257 }, (_, index) => index % 256));
     const retrieved = await getPdfRoute(
-      request("/api/quotations/1/pdf", {}, otherToken),
+      request("/api/quotations/1/pdf", {}, ownerToken),
       context(quotation.id),
     );
 
@@ -202,6 +202,17 @@ describe("quotation PDF API", () => {
   it("requires authenticated multipart issuance and commits PDF in one API request", async () => {
     const unauthenticated = await issueQuotationRoute(new Request("http://localhost/api/quotations", { method: "POST" }));
     expect(unauthenticated.status).toBe(401);
+    const unresolvedForm = new FormData();
+    unresolvedForm.set("payload", JSON.stringify({ ...baseInput, quotationNumber: "S7-PDF-STORE-UNRESOLVED" }));
+    unresolvedForm.set("pdf", new Blob([Buffer.concat([Buffer.from("%PDF-"), Buffer.from([0x55])])], { type: "application/pdf" }));
+    const unresolvedOwner = await issueQuotationRoute(request("/api/quotations", {
+      method: "POST",
+      body: unresolvedForm,
+    }, otherToken));
+    expect(unresolvedOwner.status).toBe(201);
+    const unresolvedPayload = await unresolvedOwner.json();
+    expect(unresolvedPayload.created).toBe(true);
+    expect(unresolvedPayload.record.ownerDomain).toBe("seven");
     const jsonOnly = await issueQuotationRoute(request("/api/quotations", {
       method: "POST",
       headers: { "content-type": "application/json" },

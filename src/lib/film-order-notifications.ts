@@ -41,6 +41,7 @@ export const FILM_ORDER_NOTIFICATION_AUDIENCES = [
 
 export const FILM_ORDER_NOTIFICATION_LINK_KEYS = [
   "maker_receiving_packet",
+  "maker_customer_design_file",
   "maker_proof_upload",
   "maker_purchase_order",
   "maker_eta_report",
@@ -55,7 +56,7 @@ export type FilmOrderNotificationLinkKey = typeof FILM_ORDER_NOTIFICATION_LINK_K
 export const FILM_ORDER_LINK_ALLOWLISTS: Readonly<
   Record<FilmOrderNotificationAudience, readonly FilmOrderNotificationLinkKey[]>
 > = {
-  maker: ["maker_receiving_packet", "maker_proof_upload", "maker_purchase_order", "maker_eta_report"],
+  maker: ["maker_receiving_packet", "maker_customer_design_file", "maker_proof_upload", "maker_purchase_order", "maker_eta_report"],
   seven: ["seven_order_summary"],
   kanei: FILM_ORDER_NOTIFICATION_LINK_KEYS,
   customer: ["customer_design_upload", "customer_proof_review"],
@@ -361,14 +362,14 @@ const EVENT_TEXT: Record<FilmOrderNotificationEvent, EventText> = {
     nextKo: "수정 제출 후 다시 확인합니다.",
   },
   customer_design_received: {
-    subjectJa: "顧客デザイン入稿",
-    subjectKo: "고객 디자인 제출",
-    makerJa: "顧客デザインを受領しました。",
-    makerKo: "고객 디자인을 수신했습니다.",
-    internalJa: "顧客デザイン原稿を受領しました。",
+    subjectJa: "制作データ受領・校正データ提出依頼",
+    subjectKo: "제작 데이터 수령·교정 데이터 제출 요청",
+    makerJa: "顧客から受領したAI制作データを専用リンクから取得し、校正データを専用ページから提出してください。",
+    makerKo: "고객에게 수령한 AI 제작 데이터를 전용 링크에서 받고, 교정 데이터를 전용 업로드 페이지로 제출해 주십시오.",
+    internalJa: "顧客AIデータを選定フィルムメーカーへ引き継ぎました。",
     customerJa: "デザイン原稿の入稿を受け付けました。",
-    nextJa: "内容確認後に製作可否を判断します。",
-    nextKo: "내용 확인 후 제작 가능 여부를 판단합니다.",
+    nextJa: "受領データを確認して製作を開始してください。",
+    nextKo: "수령 데이터를 확인하고 제작을 시작해 주십시오.",
   },
   production_plan_request: {
     subjectJa: "生産予定確認のお願い",
@@ -412,7 +413,7 @@ const EVENT_PROJECTIONS: Record<
   ship_to_registered: ["customer", "seven", "kanei"],
   customer_design_upload: ["customer", "kanei"],
   customer_design_correction: ["customer", "kanei"],
-  customer_design_received: ["seven", "kanei"],
+  customer_design_received: ["maker", "seven", "kanei"],
   production_plan_request: ["seven"],
   link_resend: ["maker", "seven", "kanei", "customer"],
 };
@@ -424,7 +425,7 @@ const ACTION_AUDIENCES: Record<FilmOrderNotificationEvent, readonly FilmOrderNot
   re_proof_request: ["maker"],
   customer_proof_review: ["customer"],
   customer_proof_decision: [],
-  final_approval: ["maker"],
+  final_approval: ["maker", "seven", "kanei"],
   supplier_purchase_order: ["maker"],
   eta_update: ["maker"],
   shipment_report: [],
@@ -528,6 +529,7 @@ const REQUIRED_LINKS: Record<
     kanei: ["kanei_order_management"],
   },
   customer_design_received: {
+    maker: ["maker_customer_design_file", "maker_proof_upload"],
     seven: ["seven_order_summary"],
     kanei: ["kanei_order_management"],
   },
@@ -568,6 +570,7 @@ const COMPATIBILITY_TEMPLATE_KEYS: Partial<
 
 const LINK_VARIABLES: Record<FilmOrderNotificationLinkKey, string> = {
   maker_receiving_packet: "makerReceivingPacketUrl",
+  maker_customer_design_file: "makerCustomerDesignFileUrl",
   maker_proof_upload: "makerProofUploadUrl",
   maker_purchase_order: "makerPurchaseOrderUrl",
   maker_eta_report: "makerEtaReportUrl",

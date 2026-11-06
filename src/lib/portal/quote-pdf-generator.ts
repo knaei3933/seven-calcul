@@ -1,6 +1,7 @@
 import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import type { PortalQuoteProjection } from "@/lib/portal/quote-projection";
+import { DEFAULT_KANEI_QUOTE_PROFILE, type QuoteOwnerProfile } from "@/lib/quote-owner-profiles";
 
 const A4_WIDTH = 595.28;
 const A4_HEIGHT = 841.89;
@@ -39,7 +40,7 @@ function normalizePdfText(value: string): string {
   return normalized;
 }
 
-function drawPageFrame(page: PDFPage, font: PDFFont): void {
+function drawPageFrame(page: PDFPage, font: PDFFont, ownerProfile: QuoteOwnerProfile): void {
   page.drawRectangle({
     x: 32,
     y: 32,
@@ -48,7 +49,7 @@ function drawPageFrame(page: PDFPage, font: PDFFont): void {
     borderColor: rgb(0.82, 0.85, 0.88),
     borderWidth: 0.8,
   });
-  page.drawText("カネイトレード", {
+  page.drawText(ownerProfile.portalBrandName, {
     x: MARGIN_X,
     y: A4_HEIGHT - MARGIN_Y,
     size: 20,
@@ -173,6 +174,7 @@ function drawSummaryRow(
 export async function generatePortalQuotePdf(
   quote: PortalQuoteProjection,
   fontBytes: Uint8Array | ArrayBuffer,
+  ownerProfile: QuoteOwnerProfile = DEFAULT_KANEI_QUOTE_PROFILE,
 ): Promise<Buffer> {
   try {
     const document = await PDFDocument.create();
@@ -207,7 +209,7 @@ export async function generatePortalQuotePdf(
       if (cursor - required < MARGIN_Y + 32) newPage();
     };
 
-    drawPageFrame(page, font);
+    drawPageFrame(page, font, ownerProfile);
     page.drawText(quote.availability === "expired" ? "有効期限切れ" : "有効", {
       x: A4_WIDTH - MARGIN_X - 96,
       y: A4_HEIGHT - MARGIN_Y,

@@ -42,9 +42,9 @@ beforeAll(async () => {
   await db.run(`
     INSERT INTO film_orders (
       quotation_id,order_number,quotation_number,product_name,customer_name,printing_method,procurement_route,
-      film_composition,order_length_m,web_width_mm,pouch_quantity,supplier_name,supplier_email,seven_contact_email,
+      film_composition,order_length_m,web_width_mm,pouch_quantity,supplier_name,supplier_email,seven_contact_email,buyer_domain,
       supplier_resolution,status,customer_design_status,ship_to_status,purchase_order_json,ordered_at,created_at,updated_at
-    ) VALUES (?, 'G011-001','Q-G011-001','Review pouch','Review customer','digital','Y','PET','300','400','1000','','','seven@727.co.jp',
+    ) VALUES (?, 'G011-001','Q-G011-001','Review pouch','Review customer','digital','Y','PET','300','400','1000','','','seven@727.co.jp','727.co.jp',
               'legacy_unresolved','ordered','not_required','confirmed','{}',?,?,?)
   `, [quotation!.id, now, now, now]);
   const order = await db.get<{ id: number }>("SELECT id FROM film_orders WHERE order_number='G011-001'");
@@ -146,7 +146,7 @@ describe("G011 final review blockers", () => {
     const command = {
       orderId,
       action: "register-proof" as const,
-      actorEmail: "seven@727.co.jp",
+      actorEmail: "kanei@kanei-trade.co.jp",
       origin: "http://localhost:3000" as const,
       proofFileName: "g011-proof.ai",
       proofFileUrl: "https://example.test/g011-proof.ai",

@@ -128,6 +128,17 @@ describe("quotation UI", () => {
     expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
   }
 
+  it("keeps the simulator mounted when the custom target margin is blank", async () => {
+    const { user } = await openCandidateModal("10000");
+    await user.click(screen.getByRole("radio", { name: "利益率 カスタム" }));
+    const marginInput = screen.getByLabelText("カスタム利益率 (%)");
+    await user.clear(marginInput);
+    expect(marginInput).toHaveValue("");
+    expect(marginInput).toBeInvalid();
+    expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
+    expect(screen.getByTestId("customer-total")).toHaveTextContent("-");
+  });
+
   it("does not calculate automatically before server recalculation", async () => {
     render(<QuotationPage />);
     expect(screen.queryByTestId("bulk-usage")).not.toBeInTheDocument();

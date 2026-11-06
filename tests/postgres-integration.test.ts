@@ -99,7 +99,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     expect(Number.isInteger(administratorId)).toBe(true);
 
     const owner = await createUser({
-      email: "owner@pg.test",
+      email: "owner@727.co.jp",
       name: "PG Owner",
       password: "owner-password-123",
       role: "user",
@@ -111,28 +111,31 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
       role: "user",
     });
     await expect(createUser({
-      email: "OWNER@PG.TEST",
+      email: "OWNER@727.CO.JP",
       name: "Duplicate",
       password: "duplicate-password",
       role: "user",
     })).rejects.toThrow("duplicate_email");
-    expect(await authenticate("owner@pg.test", "owner-password-123")).toMatchObject({ id: owner.id });
+    expect(await authenticate("owner@727.co.jp", "owner-password-123")).toMatchObject({ id: owner.id });
 
-    const { saveQuotation, getQuotation, listQuotations, QuotationOwnershipConflictError } = await import("@/lib/quotation-store");
+    const { saveQuotation, getQuotation, listQuotations, QuotationActionForbiddenError } = await import("@/lib/quotation-store");
     const saved = await saveQuotation(baseInput, owner.id, "user");
     expect(saved.quotationNumber).toBe(baseInput.quotationNumber);
     expect(saved.payload).toEqual({ revision: 1 });
-    expect(saved.createdBy.email).toBe("owner@pg.test");
+    expect(saved.createdBy.email).toBe("owner@727.co.jp");
+    expect(saved.ownerDomain).toBe("seven");
 
     await expect(saveQuotation({ ...baseInput, quantity: "999" }, other.id, "user"))
-      .rejects.toBeInstanceOf(QuotationOwnershipConflictError);
+      .rejects.toBeInstanceOf(QuotationActionForbiddenError);
 
     const searched = await listQuotations({ q: "postgresql", limit: 10 });
     expect(searched.some((record) => record.id === saved.id)).toBe(true);
     expect(await getQuotation(saved.id)).not.toBeNull();
 
     const { updateQuotationStatus } = await import("@/lib/quotation-store");
-    const approved = await updateQuotationStatus(saved.id, "approved", other.id);
+    await expect(updateQuotationStatus(saved.id, "approved", other.id))
+      .rejects.toBeInstanceOf(QuotationActionForbiddenError);
+    const approved = await updateQuotationStatus(saved.id, "approved", owner.id);
     expect(approved?.status).toBe("approved");
 
     const { createChecklistsForQuotation, getChecklistsForQuotation, updateChecklistItem } = await import("@/lib/quotation-store");
@@ -224,7 +227,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     const marker = await db.get<{ version: string }>(
       "SELECT version FROM film_order_schema_migrations WHERE slot='film_orders'",
     );
-    expect(marker?.version).toBe("2026-11-04-digital-route-default-1");
+    expect(marker?.version).toBe("2026-11-06-extensible-proof-rounds-1");
     const quotation = await db.get<{ id: number }>("SELECT id FROM quotations WHERE quotation_number='S7-PG-INTEGRITY-001'");
     await db.exec(`
       INSERT INTO film_orders (
@@ -335,7 +338,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     const marker = await db.get<{ version: string }>(
       "SELECT version FROM film_order_schema_migrations WHERE slot='film_orders'",
     );
-    expect(marker?.version).toBe("2026-11-04-digital-route-default-1");
+    expect(marker?.version).toBe("2026-11-06-extensible-proof-rounds-1");
     const columns = await db.all<{ column_name: string }>(`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema=current_schema() AND table_name='film_orders'
@@ -468,7 +471,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     const { listFilmOrders, runFilmOrderAction } = await import("@/lib/film-orders");
     const { getSqlClient } = await import("@/lib/db");
     const db = await getSqlClient("quotations");
-    const orders = await listFilmOrders("pg-admin@kanei-trade.co.jp");
+    const orders = await listFilmOrders("pg-owner@727.co.jp");
     const order = orders.find((entry) => entry.order_number === "F-202611-PG-001");
     expect(order).toBeTruthy();
     await db.run("UPDATE film_orders SET customer_code='PG-001' WHERE id=?", [order!.id]);
@@ -480,16 +483,16 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
         shipToPhone: "03-0000-0000",
         saveShipToMaster: false,
       }],
-    }, "pg-admin@kanei-trade.co.jp");
+    }, "pg-owner@727.co.jp");
     expect(registered.order.shipTo.status).toBe("registered");
 
     const attempts = await Promise.allSettled([
-      runFilmOrderAction(order!.id, "confirm-ship-to", {}, "pg-admin@kanei-trade.co.jp"),
+      runFilmOrderAction(order!.id, "confirm-ship-to", {}, "pg-owner@727.co.jp"),
       runFilmOrderAction(order!.id, "confirm-ship-to", {}, "pg-workflow@kanei-trade.co.jp"),
     ]);
     expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
-    const confirmed = await listFilmOrders("pg-admin@kanei-trade.co.jp");
+    const confirmed = await listFilmOrders("pg-owner@727.co.jp");
     const reloaded = confirmed.find((entry) => entry.id === order!.id)!;
     expect(reloaded.shipTo.status).toBe("confirmed");
     expect(reloaded.shipTo.destinations.every((destination) => destination.confirmedAt)).toBe(true);
@@ -663,7 +666,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     const marker = await db.get<{ version: string }>(
       "SELECT version FROM film_order_schema_migrations WHERE slot='film_orders'",
     );
-    expect(marker?.version).toBe("2026-11-04-digital-route-default-1");
+    expect(marker?.version).toBe("2026-11-06-extensible-proof-rounds-1");
     const { persistFilmOrderMailEnvelopes, listFilmOrderMailOutboxForKanei, listFilmOrderMailOutboxForAudience } =
       await import("@/lib/film-order-mail-outbox");
     const persisted = await persistFilmOrderMailEnvelopes(envelopes("supplier_purchase_order"), {

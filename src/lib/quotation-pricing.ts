@@ -1,13 +1,15 @@
 import type { CostResult } from "./calculation";
 import { CONNECTED_FILLING_SURCHARGE } from "./constants";
-import { ceilTo, D, Decimal } from "./decimal";
+import { D, Decimal } from "./decimal";
 
 const FILM_METER_PRICE_MIN = D(380);
 const FILM_METER_PRICE_MAX = D(480);
-// グラビアの客提示フィルムm単価は90〜220円の帯に制限し、
+// グラビアの客提示フィルムm単価は100〜170円の帯に制限し、
 // 帯によって生じる差額は充填・加工単価で補う。
-export const GRAVURE_FILM_METER_PRICE_MIN = D(90);
-export const GRAVURE_FILM_METER_PRICE_MAX = D(220);
+export const GRAVURE_FILM_METER_PRICE_MIN = D(100);
+export const GRAVURE_FILM_METER_PRICE_MAX = D(170);
+// カスタム費用は原価に関係なく見積書へ固定金額で出力する。
+export const CUSTOM_QUOTE_TOTAL_YEN = D(300000);
 export const COPPER_TARGET_MARGIN_RATE = D("0.10");
 export const COPPER_SELLING_MARKUP = D(1).plus(COPPER_TARGET_MARGIN_RATE);
 export const COPPER_QUOTE_UNIT_MAX_YEN = D("38000");
@@ -46,6 +48,7 @@ export type AutomaticQuotationTotals = {
   totalCostPerPiece: Decimal;
   copperColorCount: Decimal;
   fillingSellingUnit: Decimal;
+  pouchPricePerPiece: Decimal;
   bulkSellingUnit: Decimal;
   copperSellingUnit: Decimal;
   filmSellingUnit: Decimal;
@@ -63,6 +66,7 @@ export type AutomaticQuotationTotals = {
   grandTotal: Decimal;
   display: {
     pricePerPiece: string;
+    pouchPricePerPiece: string;
     fillingUnit: string;
     fillingAmount: string;
     bulkUnit: string;
@@ -155,9 +159,9 @@ export function calculateAutomaticQuotation(
   const bulkSellingTotal = bulkCostPerPiece.times(quantity).times(BULK_SELLING_MARKUP);
   const bulkSellingUnit = bulkUsage.gt(0) ? bulkSellingTotal.div(bulkUsage) : D(0);
   const filmSellingUnit = filmCostPerPiece.div(D(1).minus(margin));
-  const customSaleBase = customLotCost.div(customQuantity).div(D(1).minus(margin));
-  const customUnit = ceilTo(customSaleBase, 1000);
-  const customSaleTotal = customUnit.times(customQuantity);
+  const hasCustomLot = customLotCost.gt(0);
+  const customSaleTotal = hasCustomLot ? CUSTOM_QUOTE_TOTAL_YEN : D(0);
+  const customUnit = customQuantity.gt(0) ? customSaleTotal.div(customQuantity) : D(0);
   const customSalePerPiece = customSaleTotal.div(quantity);
 
   const copperQuote = calculateCopperQuotation({
@@ -168,10 +172,10 @@ export function calculateAutomaticQuotation(
   const copperSellingUnit = copperQuote?.copperSellingUnit ?? D(0);
   const copperColorUnit = copperQuote?.copperColorUnit ?? D(0);
   const copperAmount = copperQuote?.copperAmount ?? D(0);
+  // カスタムは独立固定金額ラインのため、充填・フィルムの目標配分から除外する。
   const allocationPricePerPiece = fillingSellingUnit
     .plus(copperSellingUnit)
-    .plus(filmSellingUnit)
-    .plus(customSalePerPiece);
+    .plus(filmSellingUnit);
   const allocationSubtotal = allocationPricePerPiece.times(quantity);
   const idealSubtotal = allocationSubtotal.floor();
   const roundingAdjustment = idealSubtotal.minus(allocationSubtotal);
@@ -199,7 +203,7 @@ export function calculateAutomaticQuotation(
       : D(0);
     filmMeterUnit = clampGravureFilmMeterUnit(residualMeterUnit).toDecimalPlaces(1, Decimal.ROUND_UP);
     const bandedFilmAmount = filmMeterUnit.times(filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-    // フィルムm単価を90〜220円の帯へ制限したことで生じた差額は充填・加工で補う。
+    // フィルムm単価を100〜170円の帯へ制限したことで生じた差額は充填・加工で補う。
     fillingUnit = quantity.gt(0)
       ? roundUnit(Decimal.max(targetTotal.minus(bandedFilmAmount).minus(copperAmount), 0).div(quantity))
       : D(0);
@@ -220,6 +224,9 @@ export function calculateAutomaticQuotation(
   const customAmount = customUnit.times(customQuantity);
   const filmPouchUnit = quantity.gt(0) ? filmAmount.div(quantity) : D(0);
   const lineTotal = fillingAmount.plus(bulkAmount).plus(filmAmount).plus(copperAmount).plus(customAmount);
+  const pouchPricePerPiece = quantity.gt(0)
+    ? lineTotal.minus(copperAmount).minus(customAmount).div(quantity)
+    : D(0);
   const displayedTax = lineTotal.times(taxRate).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
   const displayedGrandTotal = lineTotal.plus(displayedTax);
   const displayedPricePerPiece = quantity.gt(0) ? lineTotal.div(quantity) : D(0);
@@ -238,6 +245,7 @@ export function calculateAutomaticQuotation(
     totalCostPerPiece,
     copperColorCount,
     fillingSellingUnit,
+    pouchPricePerPiece,
     bulkSellingUnit,
     processingCostPerPiece,
     bulkCostPerPiece,
@@ -259,6 +267,7 @@ export function calculateAutomaticQuotation(
     grandTotal: displayedGrandTotal,
     display: {
       pricePerPiece: displayedPricePerPiece.toString(),
+      pouchPricePerPiece: pouchPricePerPiece.toString(),
       fillingUnit: fillingUnit.toString(),
       fillingAmount: fillingAmount.toString(),
       bulkUnit: bulkUnit.toString(),

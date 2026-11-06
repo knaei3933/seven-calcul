@@ -6,6 +6,22 @@ export type QuotationStatus = "draft" | "sent" | "approved" | "rejected" | "expi
 
 export const quotationStatuses: QuotationStatus[] = ["draft", "sent", "approved", "rejected", "expired"];
 
+export type QuotationOwnerDomain = "kanei" | "seven" | "unresolved";
+
+export function quotationOwnerDomainOf(email: string | null | undefined): QuotationOwnerDomain {
+  const normalizedEmail = email?.trim().toLowerCase();
+  if (!normalizedEmail) return "unresolved";
+  if (normalizedEmail.endsWith("@kanei-trade.co.jp")) return "kanei";
+  if (normalizedEmail.endsWith("@727.co.jp")) return "seven";
+  return "unresolved";
+}
+
+export function quotationOwnerDomainFromStorage(
+  ownerDomain: string | null | undefined,
+): QuotationOwnerDomain {
+  return ownerDomain === "kanei" || ownerDomain === "seven" ? ownerDomain : "unresolved";
+}
+
 export interface QuotationApprovalSnapshot {
   approvedAt: string;
   approvedBy: UserSummary | null;
@@ -43,6 +59,7 @@ export interface QuotationRecordInput {
 
 export interface QuotationRecord extends QuotationRecordInput {
   id: number;
+  ownerDomain: QuotationOwnerDomain;
   createdAt: string;
   updatedAt: string;
   createdBy: UserSummary;

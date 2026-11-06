@@ -41,7 +41,7 @@ export const filmOrderWorkflowStageLabels: Record<FilmOrderWorkflowStage, string
   complete: "完了",
 };
 
-export type FilmOrderActorRole = "buyer" | "kanei" | "customer" | "maker" | "system";
+export type FilmOrderActorRole = "buyer" | "kanei" | "seven" | "customer" | "maker" | "system";
 
 export type FilmOrderGuardReasonCode =
   | "film_maker_resolution_required"
@@ -204,9 +204,9 @@ const ACTOR_ROLE_ACTIONS: Partial<Record<FilmWorkflowAction, readonly FilmOrderA
   "send-proof-notice": ["kanei"],
   "rotate-supplier-proof-token": ["kanei"],
   "register-proof": ["kanei", "maker"],
-  "send-customer-proof-review": ["kanei"],
+  "send-customer-proof-review": ["buyer"],
   "record-customer-proof-approval": ["kanei"],
-  "approve": ["buyer"],
+  "approve": ["seven"],
   "request-re-proof": ["buyer"],
   "send-po": ["kanei"],
   "update-eta": ["maker"],
@@ -312,7 +312,6 @@ function transitionGuardReasons(order: FilmOrderGuardInput, action: FilmWorkflow
     case "approve":
       if (order.status !== "proof_registered") reasons.push("invalid_status_transition");
       if (!proofApproved) reasons.push("customer_proof_release_required");
-      if (!supplierApproved) reasons.push("supplier_approval_required");
       break;
     case "request-re-proof":
       if (order.status !== "proof_registered") reasons.push("invalid_status_transition");

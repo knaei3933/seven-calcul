@@ -78,9 +78,9 @@ async function createRecord(number: string, creatorId: number): Promise<Quotatio
 }
 
 describe("quotation ownership permissions", () => {
-  it("allows shared reads and restricts status/delete to creator or admin", { timeout: 30_000 }, async () => {
+  it("scopes reads and mutations to creator/owner while preserving admin-only reads", { timeout: 30_000 }, async () => {
     const owner = await createUser({
-      email: "owner@permissions.test",
+      email: "gotou@727.co.jp",
       name: "Owner",
       password: "owner-permission-password",
       role: "user",
@@ -101,10 +101,17 @@ describe("quotation ownership permissions", () => {
       role: "admin",
     });
     const kaneiAdminToken = await loginToken(kaneiAdmin.email, "kanei-approver-password");
+    const sevenApprover = await createUser({
+      email: "approver@727.co.jp",
+      name: "Seven Approver",
+      password: "seven-approver-password",
+      role: "user",
+    });
+    const sevenApproverToken = await loginToken(sevenApprover.email, "seven-approver-password");
     const record = await createRecord("S7-PERMISSION-001", owner.id);
     const context = { params: Promise.resolve({ id: String(record.id) }) };
 
-    await expect(getQuotationRoute(request("http://localhost/api/quotations/1", {}, readerToken), context)).resolves.toMatchObject({ status: 200 });
+    await expect(getQuotationRoute(request("http://localhost/api/quotations/1", {}, readerToken), context)).resolves.toMatchObject({ status: 403 });
     const forbidden = await patchQuotation(request("http://localhost/api/quotations/1", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -120,11 +127,28 @@ describe("quotation ownership permissions", () => {
     expect(ownerPatch.status).toBe(409);
     await expect(ownerPatch.json()).resolves.toEqual({ error: "invalid_status_transition" });
 
+    const adminRead = await getQuotationRoute(request("http://localhost/api/quotations/1", {}, adminToken), context);
+    expect(adminRead.status).toBe(200);
+    const adminPatch = await patchQuotation(request("http://localhost/api/quotations/1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "sent" }),
+    }, adminToken), context);
+    expect(adminPatch.status).toBe(403);
+    await expect(adminPatch.json()).resolves.toEqual({ error: "owner_action_forbidden" });
+
+    const kaneiAdminPatch = await patchQuotation(request("http://localhost/api/quotations/1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "sent" }),
+    }, kaneiAdminToken), context);
+    expect(kaneiAdminPatch.status).toBe(403);
+
     // Customer approval is evidence only. A sales owner must move the sent
     // quotation to 成約 explicitly before film-order synchronization.
     await approveQuotationGate(record.id, "internal", owner.id);
     await updateQuotationStatus(record.id, "sent", owner.id);
-    const approvalResponse = await postQuotationApproval(request(
+    const wrongOwnerApproval = await postQuotationApproval(request(
       "http://localhost/api/quotations/1/approvals",
       {
         method: "POST",
@@ -132,6 +156,18 @@ describe("quotation ownership permissions", () => {
         body: JSON.stringify({ gate: "customerApproval" }),
       },
       kaneiAdminToken,
+    ), context);
+    expect(wrongOwnerApproval.status).toBe(403);
+    await expect(wrongOwnerApproval.json()).resolves.toEqual({ error: "customer_approval_forbidden" });
+
+    const approvalResponse = await postQuotationApproval(request(
+      "http://localhost/api/quotations/1/approvals",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ gate: "customerApproval" }),
+      },
+      sevenApproverToken,
     ), context);
     expect(approvalResponse.status).toBe(200);
     const approvalPayload = await approvalResponse.json();

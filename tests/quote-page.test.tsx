@@ -464,6 +464,36 @@ describe("quotation page stale draft", () => {
     expect(screen.getByTestId("setup-line")).toHaveTextContent("￥333");
   });
 
+  it("shows a custom charge line when the simulator includes a custom lot cost", async () => {
+    sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
+      productSummary: "充填物1",
+      sizeSummary: "60×80mm / 1連",
+      quantity: "10000",
+      targetMargin: "0.4",
+      customLotCost: "270000",
+      customQuantity: "1",
+      fillingCostPerPiece: "53.8",
+      filmCostPerPiece: "20.1",
+      filmMeterPrice: "402",
+      filmOrderLengthM: "500",
+      totalCostPerPiece: "73.9",
+      calculationVersion: "simulator-linked",
+      resultHash: "custom-line-test",
+      calculationFilmTotal: "201000",
+      calculationChecklistSnapshot: { bulkUsageMl: "486000" },
+    }));
+    render(<QuotePage />);
+
+    await waitFor(() => expect(screen.getByTestId("custom-line")).toBeVisible());
+    expect(screen.getByTestId("custom-unit-price")).toHaveTextContent("300,000");
+    expect(screen.getByTestId("custom-line")).toHaveTextContent("1 個");
+    expect(screen.getByTestId("custom-line")).toHaveTextContent("￥300,000");
+    const pouchPrice = within(screen.getByTestId("quote-pouch-price-per-piece")).getByText(/￥/).textContent ?? "";
+    const allInPrice = within(screen.getByTestId("quote-price-per-piece")).getByText(/￥/).textContent ?? "";
+    const parseYen = (value: string) => Number(value.replace(/[^\d.-]/g, ""));
+    expect(parseYen(allInPrice) - parseYen(pouchPrice)).toBeCloseTo(30, 8);
+  });
+
   it("keeps the issue panel fixed, restores saved customers, and fills test data", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (url: RequestInfo | URL) => {

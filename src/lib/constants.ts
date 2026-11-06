@@ -1,4 +1,4 @@
-import type { CostParameters, DecimalValue, SizeMaster, SizeKey } from "./types";
+import type { CostParameters, DecimalValue, PouchSpec, SizeMaster, SizeKey } from "./types";
 
 export type { SizeKey };
 import { D } from "./decimal";
@@ -76,10 +76,10 @@ export function defaultProductionSpeedForSpec(spec: {
 export const sizeMaster: Record<SizeKey, SizeMaster> = {
   "round-50x60": base("round-50x60", "round", "ラウンド 50×60", 50, 60, 4, 476, "lte570", 6, 1),
   "round-50x80": base("round-50x80", "round", "ラウンド 50×80", 50, 80, 4, 476, "lte570", 8, 1),
-  "round-60x80": base("round-60x80", "round", "ラウンド 60×80", 60, 80, 4, 556, "lte570", 6, 1),
+  "round-60x80": base("round-60x80", "round", "ラウンド 60×80（2連可）", 60, 80, 4, 556, "lte570", 6, 1),
   "round-60x100": base("round-60x100", "round", "ラウンド 60×100", 60, 100, 4, 580, "571to740", 6, 1),
   "round-60x120": base("round-60x120", "round", "ラウンド 60×120", 60, 120, 4, 556, "lte570", 6, 1),
-  "round-70x120": base("round-70x120", "round", "ラウンド 70×120", 70, 120, 4, 620, "571to740", 6, 1),
+  "round-70x120": base("round-70x120", "round", "ラウンド 70×120（3連可）", 70, 120, 4, 620, "571to740", 6, 1),
   "round-60x80-2": base("round-60x80-2", "round", "ラウンド 60×80（2連）", 60, 80, 2, 512, "lte570", 6, 1),
   "round-70x120-3": base("round-70x120-3", "round", "ラウンド 70×120（3連）", 70, 120, 1, 464, "lte570", 6, 1),
   "circle-70x70": base("circle-70x70", "circle", "丸形 70×70", 70, 70, 4, 620, "571to740", 6, 1),
@@ -94,6 +94,14 @@ export const sizeMaster: Record<SizeKey, SizeMaster> = {
   "xra-38.5x90": switchableWeb("xra-38.5x90", "xraRound", "Xraラウンド 38.5×90", 38.5, 90, 368),
   "mouthwash-40x145": base("mouthwash-40x145", "mouthWash", "マウスウォッシュ用 40×145", 40, 145, 4, 396, "lte570", 6, 1),
 };
+
+export function standardSizeMasterForSpec(spec: Pick<PouchSpec, "sizeKey" | "connectedChambers">): SizeMaster {
+  const base = sizeMaster[spec.sizeKey];
+  if (!base) throw new Error("size_not_found");
+  if (spec.sizeKey === "round-60x80" && spec.connectedChambers === 2) return sizeMaster["round-60x80-2"];
+  if (spec.sizeKey === "round-70x120" && spec.connectedChambers === 3) return sizeMaster["round-70x120-3"];
+  return base;
+}
 
 export const defaultParameters: CostParameters = {
   lossRate: "0.10",
@@ -111,7 +119,7 @@ export const defaultParameters: CostParameters = {
   inspectionSpeed: "1500",
   setupTime: "3",
   cleanupTime: "2",
-  customPouchCharge: "220000",
+  customPouchCharge: "270000",
   hopperInitialChargeMl: "2000",
   pressureInitialChargeMl: "8000",
   digitalFilmMinTotalM: "500",

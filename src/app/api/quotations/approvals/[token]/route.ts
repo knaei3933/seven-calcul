@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { customerApprovalIpHash } from "@/lib/quotation-approval-token";
+import { quotationOwnerProfile } from "@/lib/quote-owner-profiles";
 import {
   approveQuotationByCustomerToken,
   CustomerApprovalExpiredError,
@@ -19,6 +20,8 @@ function clientIpHash(request: Request): string | null {
 }
 
 function summary(record: Awaited<ReturnType<typeof getQuotationForCustomerApproval>>) {
+  const owner = quotationOwnerProfile(record.ownerDomain);
+  if (!owner) throw new Error("unresolved_quote_owner");
   return {
     quotationNumber: record.quotationNumber,
     customerName: record.customerName,
@@ -30,6 +33,26 @@ function summary(record: Awaited<ReturnType<typeof getQuotationForCustomerApprov
     status: record.status,
     approvedAt: record.customerApproval?.approvedAt ?? null,
     customerApprovalRecorded: Boolean(record.customerApproval),
+    owner: {
+      ownerDomain: owner.ownerDomain,
+      brandLabel: owner.brandLabel,
+      portalBrandName: owner.portalBrandName,
+      englishName: owner.englishName,
+      legalName: owner.legalName,
+      representative: owner.representative,
+      postalCode: owner.postalCode,
+      address: owner.address,
+      telephone: owner.telephone,
+      fax: owner.fax,
+      website: owner.website,
+      logoUrl: owner.logoUrl,
+      logoAlt: owner.logoAlt,
+      defaultContactEmail: owner.defaultContactEmail,
+      defaultContactTelephone: owner.defaultContactTelephone,
+      approvalIntro: owner.approvalIntro,
+      approvalActionLabel: owner.approvalActionLabel,
+      approvalFooterNote: owner.approvalFooterNote,
+    },
   };
 }
 
@@ -41,6 +64,9 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
   } catch (error) {
     if (error instanceof CustomerApprovalExpiredError) {
       return NextResponse.json({ error: "customer_approval_expired" }, { status: 410 });
+    }
+    if (error instanceof Error && error.message === "unresolved_quote_owner") {
+      return NextResponse.json({ error: "unresolved_quote_owner" }, { status: 409 });
     }
     if (error instanceof CustomerApprovalTokenError || error instanceof QuotationApprovalTransitionError) {
       return NextResponse.json({ error: "invalid_customer_approval_token" }, { status: 403 });
@@ -64,6 +90,9 @@ export async function POST(request: Request, context: Context): Promise<NextResp
   } catch (error) {
     if (error instanceof CustomerApprovalExpiredError) {
       return NextResponse.json({ error: "customer_approval_expired" }, { status: 410 });
+    }
+    if (error instanceof Error && error.message === "unresolved_quote_owner") {
+      return NextResponse.json({ error: "unresolved_quote_owner" }, { status: 409 });
     }
     if (error instanceof CustomerApprovalTokenError || error instanceof QuotationApprovalTransitionError) {
       return NextResponse.json({ error: "invalid_customer_approval_token" }, { status: 403 });

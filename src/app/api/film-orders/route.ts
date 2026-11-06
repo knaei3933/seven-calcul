@@ -11,13 +11,17 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request): Promise<NextResponse> {
   const user = await getSessionUser(request);
   if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
-  if (!canViewFilmOrders(user.email)) return NextResponse.json({ error: "film_order_forbidden" }, { status: 403 });
+  // Role-admin is a read-disclosure supervisor. Mutation ownership is still checked
+  // separately against the order's durable buyer domain.
+  if (user.role !== "admin" && !canViewFilmOrders(user.email)) {
+    return NextResponse.json({ error: "film_order_forbidden" }, { status: 403 });
+  }
   try {
     const created = await syncFilmOrdersFromQuotations(user.email);
-    const orders = await listFilmOrderSummaries(user.email);
+    const orders = await listFilmOrderSummaries(user.email, user.role);
     return NextResponse.json({
       created,
-      orders: orders.map((order) => serializeFilmOrderForActor(order, user.email)),
+      orders: orders.map((order) => serializeFilmOrderForActor(order, user.email, user.role)),
       driveConfigured: driveConfigured(),
     });
   } catch {

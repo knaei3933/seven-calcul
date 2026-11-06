@@ -25,6 +25,7 @@ import {
   type FilmOrderNotificationInput,
   type FilmOrderNotificationLink,
   type FilmOrderNotificationLinkKey,
+  type FilmOrderMailAttachmentMetadata,
 } from "./film-order-notifications";
 import {
   assertFilmOrderActionGuard,
@@ -35,6 +36,7 @@ import {
   type FilmWorkflowAction,
 } from "./film-order-stage";
 import { sendMail } from "./mailer";
+import { filmOrderBuyerDomainOf, filmOrderExecutionActorRoleOf } from "./film-order-access";
 import { effectiveSmtpSenderAddress, getStrictMailSettings, interpolateMailTemplate, parseStrictMailSettings, resolveMailTemplate, type MailSettings } from "./mail-settings";
 import type { SqlClient } from "./db";
 import type { FilmOrderFileRecord } from "./film-order-shared";
@@ -52,6 +54,8 @@ export interface FilmOrderMailPrepareCommand {
   note?: string;
   supplierMessage?: string;
   supplierOrderNote?: string;
+  mailSubject?: string;
+  mailBody?: string;
   aiFileName?: string;
   aiFileUrl?: string;
   pdfFileName?: string;
@@ -87,6 +91,12 @@ export interface FilmOrderMailPrepareCommand {
   customerDesignFileName?: string;
   customerDesignFileUrl?: string;
   customerDesignNote?: string;
+  customerDesignFileSizeBytes?: number | null;
+  customerDesignContentType?: string | null;
+  customerDesignChecksum?: string | null;
+  customerDesignChecksumAlgorithm?: string | null;
+  customerDesignDriveFileId?: string | null;
+  customerDesignUploadedVia?: string | null;
   ipAddressHash?: string | null;
 }
 
@@ -96,6 +106,7 @@ type FilmOrderMailTokenPurpose =
   | "customer_proof_review"
   | "customer_ship_to"
   | "customer_design"
+  | "maker_customer_design"
   | "maker_eta";
 
 interface FilmOrderMailStagedToken {
@@ -166,14 +177,14 @@ const ACTION_EVENTS: Record<FilmOrderLifecycleWorkflowAction, FilmOrderNotificat
   "customer-proof-decision": "customer_proof_decision",
 };
 
-const ACTION_ROLES: Record<FilmOrderLifecycleWorkflowAction, "buyer" | "kanei" | "maker" | "system" | "customer"> = {
+const ACTION_ROLES: Record<FilmOrderLifecycleWorkflowAction, "buyer" | "kanei" | "seven" | "maker" | "system" | "customer"> = {
   "register-receiving": "buyer",
   "send-proof-notice": "kanei",
   "rotate-supplier-proof-token": "kanei",
   "register-proof": "kanei",
-  "send-customer-proof-review": "kanei",
+  "send-customer-proof-review": "buyer",
   "record-customer-proof-approval": "kanei",
-  approve: "buyer",
+  approve: "seven",
   "request-re-proof": "buyer",
   "send-po": "kanei",
   "resend-supplier-links": "kanei",
@@ -181,8 +192,8 @@ const ACTION_ROLES: Record<FilmOrderLifecycleWorkflowAction, "buyer" | "kanei" |
   "request-production-plan": "kanei",
   "request-ship-to-registration": "buyer",
   "ship-to-registered": "system",
-  "request-customer-design-upload": "kanei",
-  "request-customer-design-correction": "kanei",
+  "request-customer-design-upload": "buyer",
+  "request-customer-design-correction": "buyer",
   "customer-design-received": "customer",
   "production-plan-request": "kanei",
   "update-eta": "maker",
@@ -204,6 +215,7 @@ function eventRequiresMaker(event: FilmOrderNotificationEvent): boolean {
     "delivery_report",
     "receipt_completion",
     "link_resend",
+    "customer_design_received",
   ].includes(event);
 }
 
@@ -237,6 +249,7 @@ interface RawOrder {
   supplier_name: string;
   supplier_email: string;
   seven_contact_email: string;
+  buyer_domain: string;
   po_sent_at: string | null;
   eta_updated_at: string | null;
   eta_date: string | null;
@@ -276,8 +289,20 @@ function assertLifecycleGuard(
   action: FilmOrderLifecycleWorkflowAction,
   actorRole: FilmOrderActorRole,
 ): void {
+  const buyerScopedCustomerAction = [
+    "request-customer-design-upload",
+    "request-customer-design-correction",
+    "send-customer-proof-review",
+    "record-customer-proof-approval",
+  ].includes(action);
   if ((STAGE_GUARD_ACTIONS as readonly string[]).includes(action)) {
-    assertFilmOrderActionGuard(guard, action as FilmWorkflowAction, actorRole);
+    // The shared stage table predates buyer-scoped customer actions. Its transition
+    // guards remain applicable, while this module's custom guard checks the buyer.
+    assertFilmOrderActionGuard(
+      guard,
+      action as FilmWorkflowAction,
+      buyerScopedCustomerAction ? undefined : actorRole,
+    );
   }
   assertCustomLifecycleGuard(guard, action, actorRole);
 }
@@ -287,10 +312,21 @@ function assertCustomLifecycleGuard(
   action: FilmOrderLifecycleWorkflowAction,
   actorRole: FilmOrderActorRole,
 ): void {
-  const fail = (code: string): void => { throw new Error(code); };
+  const fail = (code: string): void => {
+    throw new Error(code);
+  };
+  const buyerScopedCustomerAction = [
+    "request-customer-design-upload",
+    "request-customer-design-correction",
+    "send-customer-proof-review",
+  ].includes(action);
+  if (
+    action === "record-customer-proof-approval"
+    && !["buyer", "kanei", "seven"].includes(actorRole)
+  ) fail("film_order_actor_role_forbidden");
   if (
     ["request-customer-design-upload","request-customer-design-correction"].includes(action)
-    && actorRole !== "kanei"
+    && actorRole !== "buyer"
   ) fail("film_order_actor_role_forbidden");
   if (action === "request-ship-to-registration" && (guard.status === "pending" || guard.shipToStatus === "confirmed")) fail("invalid_status_transition");
   if (action === "ship-to-registered" && !["not_provided", "registered"].includes(guard.shipToStatus ?? "")) fail("invalid_status_transition");
@@ -413,7 +449,7 @@ function strictMakerSnapshot(row: RawOrder): {
   };
 }
 
-function latestMailAttachments(files: readonly FilmOrderFileRecord[]): FilmOrderNotificationInput["attachments"] {
+function latestMailAttachments(files: readonly FilmOrderFileRecord[]): FilmOrderMailAttachmentMetadata[] {
   const selected = new Map<string, FilmOrderFileRecord>();
   const order = (file: FilmOrderFileRecord): readonly [number, string, number] => [
     Number(file.version ?? 0),
@@ -437,6 +473,22 @@ function latestMailAttachments(files: readonly FilmOrderFileRecord[]): FilmOrder
   return [...selected.values()]
     .sort((left, right) => Number(left.id ?? 0) - Number(right.id ?? 0))
     .map((file) => ({ fileName: file.file_name, category: file.category, version: file.version, contentType: file.content_type ?? undefined }));
+}
+
+function nextCustomerDesignAttachment(
+  command: FilmOrderMailPrepareCommand,
+  files: readonly FilmOrderFileRecord[],
+): FilmOrderMailAttachmentMetadata | null {
+  if (command.action !== "customer-design-received" || !command.customerDesignFileName) return null;
+  const version = Math.max(1, Number(files
+    .filter((file) => file.category === "customer_design")
+    .reduce((maximum, file) => Math.max(maximum, Number(file.version ?? 0)), 0) + 1));
+  return {
+    fileName: command.customerDesignFileName,
+    category: "customer_design",
+    version,
+    contentType: command.customerDesignContentType ?? undefined,
+  };
 }
 
 function stableFingerprint(value: unknown): string {
@@ -497,9 +549,11 @@ async function projectLifecycleMail(context: LifecycleMailProjectionContext): Pr
     },
     senderIdentity: {
       maker: "Kanei Trade Film Workflow",
-      seven: "Kanei Trade Film Workflow",
+      seven: filmOrderBuyerDomainOf(context.raw) === "kanei" ? "Kanei Trade Film Workflow" : "Seven Chemical Film Workflow",
       kanei: "Film Workflow System",
-      customer: "Kanei Trade Film Workflow",
+      customer: filmOrderBuyerDomainOf(context.raw) === "kanei"
+        ? "Kanei Trade Film Workflow"
+        : "Seven Chemical Film Workflow",
     },
     senderEmail: settings.sender.email,
     maker: maker ? {
@@ -511,37 +565,64 @@ async function projectLifecycleMail(context: LifecycleMailProjectionContext): Pr
     customerName: context.raw.customer_name,
     quotationNumber: context.raw.quotation_number,
     links: context.links,
-    attachments: latestMailAttachments(context.currentFiles),
+    attachments: [
+      ...latestMailAttachments(context.currentFiles),
+      ...[nextCustomerDesignAttachment(context.command, context.currentFiles)]
+        .filter((attachment): attachment is FilmOrderMailAttachmentMetadata => attachment !== null),
+    ],
     customerMessage: context.command.customerMessage ?? undefined,
     customerReceivingInputRequired: false,
     customerEtaActionRequired: context.event === "eta_update" || context.event === "production_plan_request",
     linkResendAudiences: context.event === "link_resend" ? ["maker", "seven", "kanei"] : undefined,
     bindingFingerprint: stableFingerprint({ maker: maker?.source ?? null, templateSettings: settings.templates }),
+    overrides: context.command.action === "send-po" && (context.command.mailSubject?.trim() || context.command.mailBody?.trim())
+      ? {
+        "film_order.supplier_purchase_order.maker": {
+          ...(context.command.mailSubject?.trim() ? { subject: context.command.mailSubject } : {}),
+          ...(context.command.mailBody?.trim() ? { body: context.command.mailBody } : {}),
+        },
+      }
+      : undefined,
   };
   const built = buildFilmOrderNotifications(context.event, input);
   if (!built.ok) throw new Error(`invalid_film_order_mail:${built.errors.map((issue) => `${issue.audience ?? "*"}:${issue.code}`).join(",")}`);
   const effective = built.envelopes.map((envelope) => {
     const override = settings.templates[envelope.effectiveTemplateIdentity.key] ?? settings.templates[envelope.templateKey];
-    if (!override) return envelope;
+    const ownerBranded = { ...envelope };
+    if (filmOrderBuyerDomainOf(context.raw) === "seven" && envelope.audience === "customer") {
+      // Shared customer templates historically used the Kanei-facing Package Lab voice.
+      // A Seven-owned customer must receive Seven's customer-facing brand instead.
+      ownerBranded.senderIdentity = "Seven Chemical Film Workflow";
+      ownerBranded.body = ownerBranded.body.replaceAll("パッケージラボ", "株式会社セブン化学");
+    }
+    if (!override) {
+      const rendered = { ...ownerBranded, contentHash: filmOrderNotificationEnvelopeHash(ownerBranded) };
+      const validation = validateFilmOrderNotification(rendered, {
+        makerCompanyName: input.maker?.companyName,
+        makerContact: [input.maker?.contactName, input.maker?.email].filter(Boolean).join(" "),
+      });
+      if (!validation.ok) throw new Error(`invalid_film_order_mail_template:${validation.issues.map((issue) => issue.code).join(",")}`);
+      return rendered;
+    }
     const variables = {
-      orderNumber: envelope.orderNumber,
-      productName: envelope.productName,
-      productSpecification: envelope.productSpecification,
-      workflowStage: envelope.workflowStage,
+      orderNumber: ownerBranded.orderNumber,
+      productName: ownerBranded.productName,
+      productSpecification: ownerBranded.productSpecification,
+      workflowStage: ownerBranded.workflowStage,
       customerName: input.customerName ?? "",
       quotationNumber: input.quotationNumber ?? "",
       makerCompanyName: input.maker?.companyName ?? "",
-      deadlineAt: envelope.deadlineAt ?? "",
-      originalSubject: envelope.subject,
-      originalBody: envelope.body,
+      deadlineAt: ownerBranded.deadlineAt ?? "",
+      originalSubject: ownerBranded.subject,
+      originalBody: ownerBranded.body,
     };
-    const resolved = resolveMailTemplate(settings, envelope.effectiveTemplateIdentity.key, { subject: envelope.subject, body: envelope.body }, variables);
+    const resolved = resolveMailTemplate(settings, ownerBranded.effectiveTemplateIdentity.key, { subject: ownerBranded.subject, body: ownerBranded.body }, variables);
     const candidate = {
-      ...envelope,
+      ...ownerBranded,
       subject: interpolateMailTemplate(resolved.subject, variables),
       body: interpolateMailTemplate(resolved.body, variables),
-      cc: override.cc ? [...new Set(override.cc)] : envelope.cc,
-      effectiveTemplateIdentity: { ...envelope.effectiveTemplateIdentity, source: "override" as const },
+      cc: override.cc ? [...new Set(override.cc)] : ownerBranded.cc,
+      effectiveTemplateIdentity: { ...ownerBranded.effectiveTemplateIdentity, source: "override" as const },
     };
     const rendered = { ...candidate, contentHash: filmOrderNotificationEnvelopeHash(candidate) };
     const validation = validateFilmOrderNotification(rendered, {
@@ -630,7 +711,8 @@ export async function prepareFilmOrderMail(
     } else if (command.action === "register-proof") {
       guard.customerProofPdfRegistered = /\.pdf$/iu.test(command.proofPdfFileName ?? "");
     }
-    assertLifecycleGuard(guard, command.action, ACTION_ROLES[command.action]);
+    const lifecycleActorRole = ACTION_ROLES[command.action];
+    assertLifecycleGuard(guard, command.action, lifecycleActorRole);
 
     const event = ACTION_EVENTS[command.action];
     const requiresMaker = eventRequiresMaker(event);
@@ -697,6 +779,36 @@ export async function prepareFilmOrderMail(
     }
     if (event === "supplier_purchase_order" || event === "eta_update") {
       await stageToken("maker_eta_report", "maker_eta", `${command.origin}/film-orders/eta/__TOKEN__`, 14, makerRecipient);
+    }
+    if (event === "customer_design_received") {
+      const fileUrl = command.customerDesignFileUrl ?? "";
+      const isAiFile = (command.customerDesignFileName ?? "").toLowerCase().endsWith(".ai");
+      // AI upload is the initial handoff. A PDF-only follow-up reuses the latest
+      // registered AI so the maker always receives one stable handoff link.
+      const designAiUrl = isAiFile
+        ? fileUrl
+        : currentFiles.filter((file) =>
+          file.category === "customer_design"
+          && file.file_name.toLowerCase().endsWith(".ai")
+        ).at(-1)?.url ?? "";
+      const fileId = designAiUrl.match(/\/d\/([\w-]{10,})\//u)?.[1];
+      if (!fileId) throw new Error("customer_design_file_required");
+      await stageToken(
+        "maker_customer_design_file",
+        "maker_customer_design",
+        `${command.origin}/api/film-orders/design-download/__TOKEN__?fileId=${encodeURIComponent(fileId)}`,
+        30,
+        makerRecipient,
+      );
+    }
+    if (event === "customer_design_received") {
+      await stageToken(
+        "maker_proof_upload",
+        "supplier_proof",
+        `${command.origin}/film-orders/upload/__TOKEN__`,
+        30,
+        makerRecipient,
+      );
     }
     const proofPdf = currentFiles.filter((file) => file.category === "proof" && file.file_name.toLowerCase().endsWith(".pdf")).at(-1);
     if (event === "customer_proof_review" || event === "link_resend") {
@@ -876,7 +988,7 @@ async function commitBusinessTransition(tx: SqlClient, command: FilmOrderMailPre
         `, [command.orderId, command.proofPdfFileName, command.proofPdfFileUrl, proofVersion, actor, now]);
       }
       await tx.run(`
-        UPDATE film_orders SET status='proof_registered', proof_registered_at=?, updated_at=?, updated_by_email=?
+        UPDATE film_orders SET status='proof_registered', proof_registered_at=?, current_proof_round=CASE WHEN status='re_proof_requested' THEN current_proof_round+1 ELSE 1 END, updated_at=?, updated_by_email=?
         WHERE id=? AND status IN ('receiving_registered','re_proof_requested') AND updated_at=?
       `, [now, now, actor, command.orderId, (await loadLifecycleOrder(tx, command.orderId)).updated_at]);
       return;
@@ -884,7 +996,7 @@ async function commitBusinessTransition(tx: SqlClient, command: FilmOrderMailPre
     case "request-re-proof": {
       const current = await loadLifecycleOrder(tx, command.orderId);
       await tx.run(`
-        UPDATE film_orders SET status='re_proof_requested', re_proof_count=?, re_proof_requested_at=?, updated_at=?, updated_by_email=?
+        UPDATE film_orders SET status='re_proof_requested', re_proof_count=?, current_proof_round=current_proof_round+1, re_proof_requested_at=?, updated_at=?, updated_by_email=?
         WHERE id=? AND status='proof_registered' AND updated_at=?
       `, [current.re_proof_count + 1, now, now, actor, command.orderId, current.updated_at]);
       return;
@@ -897,29 +1009,39 @@ async function commitBusinessTransition(tx: SqlClient, command: FilmOrderMailPre
       return;
     }
     case "record-customer-proof-approval": {
-      await tx.run("INSERT INTO film_order_events (order_id,type,detail,actor_email,created_at) VALUES (?,?,?,?,?)", [command.orderId, "customer_proof", `金井貿易校正承認: 承認者 ${command.approverName ?? "-"} / 根拠 ${command.offlineEvidence ?? command.evidence ?? "-"} / 理由 ${command.offlineReason ?? "-"}`, actor, now]);
+      const approvalCompany = filmOrderExecutionActorRoleOf(actor) === "seven"
+        ? "セブン化学"
+        : "金井貿易";
+      await tx.run("INSERT INTO film_order_events (order_id,type,detail,actor_email,created_at) VALUES (?,?,?,?,?)", [command.orderId, "customer_proof", `${approvalCompany}校正承認: 承認者 ${command.approverName ?? "-"} / 根拠 ${command.offlineEvidence ?? command.evidence ?? "-"} / 理由 ${command.offlineReason ?? "-"}`, actor, now]);
       await tx.run(`
         UPDATE film_orders SET customer_proof_status='approved', customer_proof_approved_at=?,
           supplier_approval_status='approved', supplier_approval_at=?, supplier_approval_by=?,
+          status=CASE WHEN buyer_approval_status='approved' THEN 'final_approved' ELSE status END,
+          final_approved_at=CASE WHEN buyer_approval_status='approved' THEN ? ELSE final_approved_at END,
           updated_at=?, updated_by_email=?
         WHERE id=? AND status='proof_registered' AND customer_proof_status IN ('pending','requested','approved')
           AND supplier_approval_status='pending' AND updated_at=?
-      `, [now, now, actor, now, actor, command.orderId, (await loadLifecycleOrder(tx, command.orderId)).updated_at]);
+      `, [now, now, actor, now, now, actor, command.orderId, (await loadLifecycleOrder(tx, command.orderId)).updated_at]);
       return;
     }
     case "approve": {
+      await tx.run("INSERT INTO film_order_events (order_id,type,detail,actor_email,created_at) VALUES (?,?,?,?,?)", [command.orderId, "customer_proof", `${filmOrderExecutionActorRoleOf(actor) === "seven" ? "セブン化学" : "金井貿易"}校正承認: 承認者 ${command.approverName ?? "-"}`, actor, now]);
       if (command.finalFileName) {
         await tx.run(`
           INSERT INTO film_order_files (order_id,category,file_name,url,version,uploaded_by_email,created_at)
           VALUES (?,'final',?,?,1,?,?)
         `, [command.orderId, command.finalFileName, command.finalFileUrl ?? "", actor, now]);
       }
-      await tx.run(`
-        UPDATE film_orders SET status='final_approved', final_approved_at=?, buyer_approval_status='approved',
+      const approveResult = await tx.run(`
+        UPDATE film_orders SET status=CASE WHEN supplier_approval_status IN ('approved','legacy_exempt') THEN 'final_approved' ELSE status END,
+          final_approved_at=CASE WHEN supplier_approval_status IN ('approved','legacy_exempt') THEN ? ELSE final_approved_at END,
+          buyer_approval_status='approved',
+          supplier_approval_at=COALESCE(supplier_approval_at, ?),
+          supplier_approval_by=CASE WHEN supplier_approval_by <> '' THEN supplier_approval_by ELSE ? END,
           buyer_approval_at=?, buyer_approval_by=?, updated_at=?, updated_by_email=?
         WHERE id=? AND status='proof_registered' AND customer_proof_status IN ('approved','legacy_exempt')
-          AND supplier_approval_status IN ('approved','legacy_exempt') AND buyer_approval_status='pending' AND updated_at=?
-      `, [now, now, actor, now, actor, command.orderId, (await loadLifecycleOrder(tx, command.orderId)).updated_at]);
+          AND buyer_approval_status='pending' AND updated_at=?
+      `, [now, now, actor, now, actor, now, actor, command.orderId, (await loadLifecycleOrder(tx, command.orderId)).updated_at]);
       return;
     }
     case "send-po": {
@@ -983,14 +1105,44 @@ async function commitBusinessTransition(tx: SqlClient, command: FilmOrderMailPre
       const fileName = command.customerDesignFileName ?? "";
       const fileUrl = command.customerDesignFileUrl ?? "";
       if (!fileName || !fileUrl) throw new Error("customer_design_file_required");
+      const versionRow = await tx.get<{ version: number | null }>(
+        "SELECT MAX(version) AS version FROM film_order_files WHERE order_id=? AND category='customer_design'",
+        [command.orderId],
+      );
+      const customerDesignVersion = Math.max(1, Number(versionRow?.version ?? 0) + 1);
       await tx.run(`
-        INSERT INTO film_order_files (order_id,category,file_name,url,version,note,uploaded_by_email,uploaded_via,created_at)
-        VALUES (?,'customer_design',?,?,1,?,?,'customer_design',?)
-      `, [command.orderId, fileName, fileUrl, command.customerDesignNote ?? "", actor, now]);
+        INSERT INTO film_order_files (
+          order_id,category,file_name,url,version,note,uploaded_by_email,
+          file_size_bytes,content_type,checksum,checksum_algorithm,drive_file_id,
+          uploaded_via,created_at
+        ) VALUES (?, 'customer_design', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        command.orderId,
+        fileName,
+        fileUrl,
+        customerDesignVersion,
+        command.customerDesignNote ?? "",
+        actor,
+        command.customerDesignFileSizeBytes ?? null,
+        command.customerDesignContentType ?? null,
+        command.customerDesignChecksum ?? null,
+        command.customerDesignChecksumAlgorithm ?? null,
+        command.customerDesignDriveFileId ?? null,
+        command.customerDesignUploadedVia ?? "customer_design",
+        now,
+      ]);
       await tx.run(`
         UPDATE film_orders SET customer_design_status='received', customer_design_received_at=?, updated_at=?, updated_by_email=?
         WHERE id=? AND customer_design_status IN ('requested','correction_requested') AND updated_at=?
       `, [now, now, actor, command.orderId, (await loadLifecycleOrder(tx, command.orderId)).updated_at]);
+      await tx.run(`
+        UPDATE film_orders SET status='receiving_registered', receiving_registered_at=?, updated_at=?, updated_by_email=?
+        WHERE id=? AND status='ordered' AND updated_at=?
+      `, [now, now, actor, command.orderId, (await loadLifecycleOrder(tx, command.orderId)).updated_at]);
+      await tx.run(`
+        INSERT INTO film_order_events(order_id,type,detail,actor_email,created_at)
+        VALUES (?,?,?,?,?)
+      `, [command.orderId, 'status', '고객 AI 원고를 제조사에 자동 인계했습니다.', actor, now]);
       return;
     }
     case "production-plan-request":
@@ -1047,9 +1199,10 @@ async function commitBusinessTransition(tx: SqlClient, command: FilmOrderMailPre
         const current = await loadLifecycleOrder(tx, command.orderId);
         await tx.run(`
           UPDATE film_orders SET customer_proof_status='correction_requested',
-            customer_proof_correction_count=?, customer_proof_correction_reason=?, updated_at=?, updated_by_email='customer'
+            customer_proof_correction_count=?, re_proof_count=?, current_proof_round=current_proof_round+1,
+            customer_proof_correction_reason=?, updated_at=?, updated_by_email='customer'
           WHERE id=? AND status='proof_registered' AND customer_proof_status='requested' AND updated_at=?
-        `, [current.customer_proof_correction_count + 1, command.customerMessage ?? "", now, command.orderId, current.updated_at]);
+        `, [current.customer_proof_correction_count + 1, current.re_proof_count + 1, command.customerMessage ?? "", now, command.orderId, current.updated_at]);
       }
       return;
     }

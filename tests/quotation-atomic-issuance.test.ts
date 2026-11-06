@@ -26,7 +26,7 @@ const {
 const pdf = Buffer.concat([Buffer.from("%PDF-"), Buffer.from([0x01, 0x02, 0xff, 0xfe])]);
 const changedPdf = Buffer.concat([Buffer.from("%PDF-"), Buffer.from([0x03, 0x04, 0xaa, 0xbb])]);
 const actor = await createUser({
-  email: "owner@atomic.test",
+  email: "owner@727.co.jp",
   name: "Atomic Owner",
   password: "owner-atomic-password",
   role: "user",

@@ -2,12 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ceilTo, D, Decimal, parseDecimal } from "@/lib/decimal";
+import { D, Decimal, parseDecimal } from "@/lib/decimal";
 import { formatCurrency, formatNumber } from "@/lib/serialization";
 import {
   QUOTATION_DRAFT_KEY,
   parseQuotationDraft,
-  sevenChemical,
   type QuotationDraft,
 } from "@/lib/quotation-draft";
 import {
@@ -16,10 +15,15 @@ import {
   SIMULATOR_STALE_STATUS_KEY,
 } from "@/lib/quotation-shared";
 import { sizeMaster } from "@/lib/constants";
-import { BULK_SELLING_MARKUP, calculateCopperQuotation, clampGravureFilmMeterUnit, COPPER_QUOTE_UNIT_MAX_YEN, COPPER_SELLING_MARKUP, COPPER_TARGET_MARGIN_RATE } from "@/lib/quotation-pricing";
+import { BULK_SELLING_MARKUP, calculateCopperQuotation, clampGravureFilmMeterUnit, COPPER_QUOTE_UNIT_MAX_YEN, COPPER_SELLING_MARKUP, COPPER_TARGET_MARGIN_RATE, CUSTOM_QUOTE_TOTAL_YEN } from "@/lib/quotation-pricing";
 import { shortIssuerContactName } from "@/lib/issuer-contact";
 import { fileNameFromContentDisposition } from "@/lib/content-disposition";
+import {
+  quotationOwnerProfile,
+  type QuoteOwnerProfile,
+} from "@/lib/quote-owner-profiles";
 import type { CustomerMaster } from "@/lib/quotation-shared";
+import type { QuotationOwnerDomain } from "@/lib/quotation-shared";
 import { buildQuotationPdfFileName, type FilmQuotationData } from "@/lib/film-quotation";
 
 const LAST_CHECKLIST_URL_KEY = "pouch-last-checklist-url-v1";
@@ -291,13 +295,13 @@ const defaultQuote: QuoteForm = {
   customerEmail: "",
   documentEnglish: "QUOTATION",
   documentHeading: "お見積書",
-  issuerName: sevenChemical.name,
-  issuerEnglishName: sevenChemical.englishName,
-  issuerPostalCode: sevenChemical.postalCode,
-  issuerAddress: sevenChemical.address,
-  issuerTelephone: sevenChemical.telephone,
-  issuerFax: sevenChemical.fax,
-  issuerWebsite: sevenChemical.website,
+  issuerName: "",
+  issuerEnglishName: "",
+  issuerPostalCode: "",
+  issuerAddress: "",
+  issuerTelephone: "",
+  issuerFax: "",
+  issuerWebsite: "",
   greeting: "平素より格別のお引き立てを賜り、厚く御礼申し上げます。下記の通りお見積りを申し上げます。",
   productName: "パウチ製品",
   sizeSummary: "50×60mm / 1連",
@@ -386,6 +390,32 @@ const defaultQuote: QuoteForm = {
 
 const CUSTOMER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const DEFAULT_OWNER_PROFILE = quotationOwnerProfile("seven")!;
+const SEVEN_BULK_SAMPLE_NOTE = "初回製作時は、バルクサンプルを株式会社セブン化学 責任技術者：福井　健二 宛にご送付ください。";
+
+function quoteFormDefaults(profile: QuoteOwnerProfile | null | undefined): QuoteForm {
+  const owner = profile ?? DEFAULT_OWNER_PROFILE;
+  const hasResolvedOwner = Boolean(profile);
+  return {
+    ...defaultQuote,
+    issuerName: hasResolvedOwner ? owner.legalName : "",
+    issuerEnglishName: hasResolvedOwner ? owner.englishName : "",
+    issuerPostalCode: hasResolvedOwner ? owner.postalCode : "",
+    issuerAddress: hasResolvedOwner ? owner.address : "",
+    issuerTelephone: hasResolvedOwner ? owner.telephone : "",
+    issuerFax: hasResolvedOwner ? owner.fax : "",
+    issuerWebsite: hasResolvedOwner ? owner.website : "",
+      // The sample recipient is Seven's internal filling responsibility, not a
+      // neutral business term. Kanei-origin quotes must not claim it by default.
+      notes: profile?.ownerDomain === "seven"
+        ? defaultQuote.notes
+        : defaultQuote.notes
+          .split("\n")
+          .filter((note) => note !== SEVEN_BULK_SAMPLE_NOTE)
+          .join("\n"),
+  };
+}
+
 function isFiniteNumber(value: string) {
   return parseDecimal(value) !== null;
 }
@@ -465,15 +495,19 @@ function EditableText({ value, label, className, multiline = false, onCommit }: 
 export default function PrintableQuotationPage({
   approverName = "",
   initialQuotationNumber = "",
+  ownerDomain = "seven",
+  ownerProfile = DEFAULT_OWNER_PROFILE,
   issuerContact = {
-    companyName: sevenChemical.name,
+    companyName: DEFAULT_OWNER_PROFILE.legalName,
     contactName: "",
     email: "",
-    telephone: "TEL 072-971-0726",
+    telephone: DEFAULT_OWNER_PROFILE.defaultContactTelephone,
   },
 }: {
   approverName?: string;
   initialQuotationNumber?: string;
+  ownerDomain?: QuotationOwnerDomain;
+  ownerProfile?: QuoteOwnerProfile;
   issuerContact?: {
     companyName: string;
     contactName: string;
@@ -483,7 +517,7 @@ export default function PrintableQuotationPage({
 } = {}) {
   const router = useRouter();
   const quoteFitRef = useRef<HTMLDivElement | null>(null);
-  const [form, setForm] = useState<QuoteForm>(defaultQuote);
+  const [form, setForm] = useState<QuoteForm>(() => quoteFormDefaults(ownerProfile));
   const [sourceVersion, setSourceVersion] = useState("");
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -734,12 +768,18 @@ export default function PrintableQuotationPage({
     [customerSearchResults, customerSearchVisibleCount],
   );
 
+  const quotationOwnerPrefix = ownerDomain === "seven"
+    ? "S7-"
+    : ownerDomain === "kanei"
+      ? "KT-"
+      : "";
+
   const fillTestData = () => {
     const suffix = "0001";
     setForm((old) => ({
       ...old,
       // E2E issuance helpers need independent immutable quotation identities.
-      quotationNumber: `S7-${Date.now().toString(36).toUpperCase()}`,
+      quotationNumber: `${quotationOwnerPrefix}${Date.now().toString(36).toUpperCase()}`,
       customerCode: `TEST-${suffix}`,
       customerName: `テスト顧客株式会社 ${suffix}`,
       customerPostalCode: `10${suffix.slice(0, 2)}-0001`,
@@ -820,7 +860,7 @@ export default function PrintableQuotationPage({
           selectedCandidateShortage?: unknown;
           checklistUrl?: unknown;
         };
-        const restoredForm = { ...defaultQuote, ...(active.form ?? {}) };
+        const restoredForm = { ...quoteFormDefaults(ownerProfile), ...(active.form ?? {}) };
         if (!Array.isArray(restoredForm.skuNames) || restoredForm.skuNames.length === 0) restoredForm.skuNames = [""];
         if (typeof restoredForm.revisionOf !== "string") restoredForm.revisionOf = "";
         restoredForm.paymentTerms = normalizeQuotePaymentTerms(restoredForm.paymentTerms);
@@ -847,7 +887,7 @@ export default function PrintableQuotationPage({
           calculationChecklistSnapshot?: CalculationChecklistSnapshot;
           selectedCandidateShortage?: boolean;
         };
-        const restoredForm = { ...defaultQuote };
+        const restoredForm = { ...quoteFormDefaults(ownerProfile) };
         (Object.keys(defaultQuote) as (keyof QuoteForm)[]).forEach((key) => {
           const value = restored[key];
           if (typeof value === "string" && !Array.isArray(restoredForm[key])) restoredForm[key] = value as never;
@@ -950,10 +990,10 @@ export default function PrintableQuotationPage({
       issueDate: old.issueDate || isoDate(now),
       validUntil: old.validUntil || isoDate(valid),
       quotationNumber: old.quotationNumber || initialQuotationNumber
-        || `S7-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-001`,
+        || `${quotationOwnerPrefix}${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-001`,
     }));
     setStorageLoaded(true);
-  }, [initialQuotationNumber]);
+  }, [initialQuotationNumber, ownerProfile, ownerDomain, quotationOwnerPrefix]);
 
   const update = <K extends keyof QuoteForm>(key: K, value: QuoteForm[K]) =>
     setForm((old) => ({ ...old, [key]: value }));
@@ -982,6 +1022,10 @@ export default function PrintableQuotationPage({
   });
 
   const saveToHistory = async (): Promise<string | false> => {
+    if (unresolvedQuoteOwner) {
+      setSaveError("unresolved_quote_owner");
+      return false;
+    }
     if (issuanceInFlightRef.current) return false;
     if (!totals) return false;
     if (!shownTotals) return false;
@@ -1093,6 +1137,7 @@ export default function PrintableQuotationPage({
           resultHash: sourceVersion,
           payload: {
             ...form,
+            ownerDomain,
             sampleBulkRequired,
             sampleBulkConfirmation: {
               required: sampleBulkRequired,
@@ -1189,7 +1234,7 @@ export default function PrintableQuotationPage({
   };
 
   const openChecklist = async () => {
-    if (!valid || checklistOpening) return;
+    if (!valid || unresolvedQuoteOwner || checklistOpening) return;
     setChecklistOpening(true);
     const url = await saveToHistory();
     setChecklistOpening(false);
@@ -1197,6 +1242,10 @@ export default function PrintableQuotationPage({
   };
 
   const printPdf = async () => {
+    if (unresolvedQuoteOwner) {
+      setSaveError("unresolved_quote_owner");
+      return;
+    }
     if (pdfDownloadInFlightRef.current) return;
     if (savedRecordId === null) {
       setSaveError("PDFは発行後に保存されます。先に「見積書を発行」してください。");
@@ -1274,8 +1323,9 @@ export default function PrintableQuotationPage({
   form.skuNames.forEach((name, index) => {
     if (!name.trim()) missingIssueFields.push(`製品名（SKU-${index + 1}）`);
   });
-  const issueReady = valid && missingIssueFields.length === 0;
-  const linkedQuoteActionsDisabled = !valid || saving || quoteDraftStale;
+  const unresolvedQuoteOwner = ownerDomain === "unresolved" || !ownerProfile;
+  const issueReady = valid && missingIssueFields.length === 0 && !unresolvedQuoteOwner;
+  const linkedQuoteActionsDisabled = !valid || unresolvedQuoteOwner || saving || quoteDraftStale;
   const issueButtonDisabled = !issueReady || saving || quoteDraftStale;
 
   const totals = (() => {
@@ -1295,11 +1345,9 @@ export default function PrintableQuotationPage({
     });
     const copperSellingUnit = copperQuote?.copperSellingUnit ?? D(0);
     const filmSellingUnit = parsedFilmCost.div(D(1).minus(parsedTargetMargin ?? D(0)));
-    const customLotSaleBase = parsedCustomLotCost
-      .div(parsedCustomQuantity)
-      .div(D(1).minus(parsedTargetMargin ?? D(0)));
-    const customSellingUnit = ceilTo(customLotSaleBase, 1000);
-    const customSaleTotal = customSellingUnit.times(parsedCustomQuantity);
+    const hasCustomLot = parsedCustomLotCost.gt(0);
+    const customSaleTotal = hasCustomLot ? CUSTOM_QUOTE_TOTAL_YEN : D(0);
+    const customSellingUnit = parsedCustomQuantity.gt(0) ? customSaleTotal.div(parsedCustomQuantity) : D(0);
     const customSalePerPiece = customSaleTotal.div(quantity);
     const setupQuantity = parsedSetupQuantity && parsedSetupQuantity.gt(0)
       ? parsedSetupQuantity
@@ -1312,7 +1360,8 @@ export default function PrintableQuotationPage({
     const setupSalePerPiece = setupSaleTotal.div(quantity);
     const filmMeterDisplayUnit = parsedFilmMeterPrice;
     // 充填・加工の残額配分対象には、別ラインのバルク売上を含めない。
-    const allocationPricePerPiece = fillingSellingUnit.plus(copperSellingUnit).plus(filmSellingUnit).plus(customSalePerPiece);
+    // カスタムは独立固定金額ラインのため、充填・フィルムの目標配分から除外する。
+    const allocationPricePerPiece = fillingSellingUnit.plus(copperSellingUnit).plus(filmSellingUnit);
     const pricePerPiece = allocationPricePerPiece.plus(setupSalePerPiece).plus(bulkSellingTotal.div(quantity));
     const subtotalBeforeAdjustment = pricePerPiece.times(quantity);
     const subtotal = subtotalBeforeAdjustment.floor();
@@ -1368,14 +1417,13 @@ export default function PrintableQuotationPage({
     const copperAmount = parseDecimal(form.copperAmountDisplay) ?? copperColorUnit.times(copperColorCount);
     const copperUnit = totals.quantity.gt(0) ? copperAmount.div(totals.quantity) : D(0);
     const customQuantity = parseDecimal(form.customQuantity) ?? D(1);
-    const customUnitOverride = parseDecimal(form.customUnitDisplay);
-    const customUnit = customUnitOverride ?? totals.customUnit;
+    const customUnit = totals.customUnit;
 
     const isGravure = form.printingMethod === "gravure";
     let fillingUnit: Decimal;
     let filmMeterUnit: Decimal;
     if (isGravure) {
-      // グラビアの客提示フィルムm単価は90〜220円の帯に制限する。
+      // グラビアの客提示フィルムm単価は100〜170円の帯に制限する。
       // 帯によって生じた差額は充填・加工単価で補う。
       const provisionalFillingUnit = (parsedPricingFillingCost ?? parsedFillingCost ?? D(0))
         .div(D(1).minus(parsedTargetMargin ?? D(0)));
@@ -1387,8 +1435,10 @@ export default function PrintableQuotationPage({
       const residualMeterUnit = totals.filmOrderLength.gt(0)
         ? residualFilmAmount.div(totals.filmOrderLength)
         : D(0);
-      filmMeterUnit = parseDecimal(form.filmUnitDisplay)
-        ?? clampGravureFilmMeterUnit(residualMeterUnit).toDecimalPlaces(1, Decimal.ROUND_UP);
+      const requestedGravureFilmMeterUnit = parseDecimal(form.filmUnitDisplay);
+      filmMeterUnit = requestedGravureFilmMeterUnit
+        ? clampGravureFilmMeterUnit(requestedGravureFilmMeterUnit)
+        : clampGravureFilmMeterUnit(residualMeterUnit).toDecimalPlaces(1, Decimal.ROUND_UP);
       const bandedFilmAmount = filmMeterUnit.times(totals.filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
       fillingUnit = parseDecimal(form.fillingUnitDisplay)
         ?? (totals.quantity.gt(0)
@@ -1410,10 +1460,17 @@ export default function PrintableQuotationPage({
     const bulkUnitFinal = bulkUnit;
     const bulkAmountFinal = bulkAmount;
     const fillingAmount = parseDecimal(form.fillingAmountDisplay) ?? fillingUnit.times(totals.quantity);
-    const customAmount = parseDecimal(form.customAmountDisplay) ?? customUnit.times(customQuantity);
+    const customAmount = totals.customSaleTotal;
     const setupAmountFinal = setupAmount;
     const filmPouchUnit = totals.quantity.gt(0) ? filmAmount.div(totals.quantity) : D(0);
     const lineTotal = fillingAmount.plus(bulkAmountFinal).plus(setupAmountFinal).plus(filmAmount).plus(copperAmount).plus(customAmount);
+    const pouchLineTotal = lineTotal.minus(copperAmount).minus(customAmount);
+    const pouchPricePerPiece = totals.quantity.gt(0)
+      ? pouchLineTotal.div(totals.quantity)
+      : D(0);
+    const allInPricePerPiece = totals.quantity.gt(0)
+      ? lineTotal.div(totals.quantity)
+      : D(0);
     const adjustment = form.adjustmentDisplay.trim() === "" ? "-" : form.adjustmentDisplay;
     const adjustmentAmount = adjustment === "-" ? D(0) : D(adjustment);
     const subtotal = parseDecimal(form.subtotalDisplay) ?? lineTotal.plus(adjustmentAmount);
@@ -1421,7 +1478,8 @@ export default function PrintableQuotationPage({
     const grandTotal = parseDecimal(form.grandTotalDisplay) ?? subtotal.plus(tax);
 
     return {
-      pricePerPiece: (totals.quantity.gt(0) ? lineTotal.div(totals.quantity) : D(0)).toString(),
+      pricePerPiece: allInPricePerPiece.toString(),
+      pouchPricePerPiece: pouchPricePerPiece.toString(),
       fillingUnit: fillingUnit.toString(),
       fillingAmount: fillingAmount.toString(),
       bulkUnit: bulkUnitFinal.toString(),
@@ -1540,23 +1598,6 @@ export default function PrintableQuotationPage({
     });
   };
 
-  const commitSheetPrice = (raw: string, node: HTMLElement) => {
-    const price = parseDisplayedNumber(raw);
-    const quantity = parseDecimal(form.quantity);
-    if (!price || price.lt(0) || !quantity || quantity.gt(0) === false) {
-      rejectInvalidNumber(node, moneyDisplay(shownTotals?.pricePerPiece ?? "0"));
-      return;
-    }
-    const fillingUnit = D(shownTotals!.fillingUnit);
-    const fillingAmount = fillingUnit.times(quantity);
-    const bulkAmount = D(shownTotals!.bulkAmount);
-    const copperAmount = D(shownTotals!.copperAmount);
-    const customAmount = D(shownTotals!.customAmount);
-    const setupAmount = D(shownTotals!.setupAmount);
-    const filmAmount = Decimal.max(price.times(quantity).minus(fillingAmount).minus(bulkAmount).minus(copperAmount).minus(customAmount), 0);
-    applyLineTotals(fillingUnit, filmAmount, copperAmount, customAmount, bulkAmount, setupAmount);
-  };
-
   const applyLineTotals = (
     fillingUnit: Decimal,
     filmAmount: Decimal,
@@ -1572,7 +1613,7 @@ export default function PrintableQuotationPage({
     if (!quantity || !quantity.gt(0) || !orderLength || !orderLength.gt(0)) return null;
     const fillingAmount = fillingUnit.times(quantity);
     const filmMeterUnit = form.printingMethod === "gravure"
-      ? filmAmount.div(orderLength)
+      ? clampGravureFilmMeterUnit(filmAmount.div(orderLength))
       : clampFilmMeterUnit(filmAmount.div(orderLength));
     const clampedFilmAmount = filmMeterUnit.times(orderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
     const displayFilmMeterUnit = orderLength.gt(0) ? clampedFilmAmount.div(orderLength) : filmMeterUnit;
@@ -1689,7 +1730,10 @@ export default function PrintableQuotationPage({
       rejectInvalidNumber(node, moneyDisplay(shownTotals?.filmUnit ?? "0"));
       return;
     }
-    applyLineTotals(D(shownTotals.fillingUnit), meterUnit.times(orderLength), D(shownTotals.copperAmount), D(shownTotals.customAmount), D(shownTotals.bulkAmount), D(shownTotals.setupAmount));
+    const clampedMeterUnit = form.printingMethod === "gravure"
+      ? clampGravureFilmMeterUnit(meterUnit)
+      : meterUnit;
+    applyLineTotals(D(shownTotals.fillingUnit), clampedMeterUnit.times(orderLength), D(shownTotals.copperAmount), D(shownTotals.customAmount), D(shownTotals.bulkAmount), D(shownTotals.setupAmount));
   };
 
   const commitFilmPouchUnit = (raw: string, node: HTMLElement) => {
@@ -1757,27 +1801,6 @@ export default function PrintableQuotationPage({
       taxDisplay: "",
       grandTotalDisplay: "",
     });
-  };
-
-  const commitCustomUnit = (raw: string, node: HTMLElement) => {
-    const quantity = parseDecimal(form.customQuantity);
-    const unit = parseDisplayedNumber(raw);
-    if (!shownTotals || !quantity || !quantity.gt(0) || unit === null || unit.lt(0)) {
-      rejectInvalidNumber(node, moneyDisplay(shownTotals?.customUnit ?? "0", undefined, 2));
-      return;
-    }
-    const customAmount = unit.times(quantity);
-    applyLineTotals(D(shownTotals.fillingUnit), D(shownTotals.filmAmount), D(shownTotals.copperAmount), customAmount, D(shownTotals.bulkAmount), D(shownTotals.setupAmount));
-  };
-
-  const commitCustomAmount = (raw: string, node: HTMLElement) => {
-    const quantity = parseDecimal(form.customQuantity);
-    const amount = parseDisplayedNumber(raw);
-    if (!shownTotals || !quantity || !quantity.gt(0) || amount === null || amount.lt(0)) {
-      rejectInvalidNumber(node, moneyDisplay(shownTotals?.customAmount ?? "0"));
-      return;
-    }
-    commitCustomUnit(amount.div(quantity).toString(), node);
   };
 
   const commitCustomQuantity = (raw: string, node: HTMLElement) => {
@@ -1909,6 +1932,11 @@ export default function PrintableQuotationPage({
   return (
     <main className="quote-page">
       <section className="issue-workbench" data-testid="issue-required-fields" aria-label="見積書発行ワークベンチ">
+        {unresolvedQuoteOwner ? (
+          <p className="error" role="alert" data-testid="unresolved-quote-owner">
+            作成者の会社ドメインを解決できないため、見積書のブランド表示と発行はできません。（unresolved_quote_owner）
+          </p>
+        ) : null}
         <section className="quote-header" aria-labelledby="quote-toolbar-title">
           <div className="quote-header-top">
             <div className="quote-header-title">
@@ -2156,17 +2184,24 @@ export default function PrintableQuotationPage({
               </dl>
               <p className="greeting"><EditableText value={form.greeting} label="宛先文言" multiline onCommit={(next) => update("greeting", next)} /></p>
             </div>
-            <aside className="party-card issuer-card">
+            <aside className="party-card issuer-card" data-testid="issuer-party">
               <h3>お見積発行者</h3>
               <div className="issuer-logo">
-                {/* eslint-disable-next-line @next/next/no-img-element -- A4 capture/print uses an ordinary img so html2canvas preserves the exact rendered size. */}
-                <img
-                  className="issuer-brand-logo"
-                  src="/seven-chemical-logo.png"
-                  width={100}
-                  height={45}
-                  alt="セブン化學ロゴ"
-                />
+                {ownerProfile ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element -- A4 capture/print uses an ordinary img so html2canvas preserves the exact rendered size. */}
+                    <img
+                      className="issuer-brand-logo"
+                      src={ownerProfile.logoUrl}
+                      width={100}
+                      height={45}
+                      alt={ownerProfile.logoAlt}
+                      data-testid="quote-owner-logo"
+                    />
+                  </>
+                ) : (
+                  <span className="logo-mark large" aria-hidden="true">?</span>
+                )}
                 <div>
                   <strong><EditableText value={form.issuerName} label="発行者名" onCommit={(next) => update("issuerName", next.trim())} /></strong>
                   <small><EditableText value={form.issuerEnglishName} label="発行者英字名" onCommit={(next) => update("issuerEnglishName", next.trim())} /></small>
@@ -2234,20 +2269,29 @@ export default function PrintableQuotationPage({
           {shownTotals ? (
             <>
               <section className="price-highlight">
-                <div>
-                  <span>お見積単価（税抜）</span>
-                  <strong data-testid="quote-price-per-piece">
-                    <EditableText value={moneyDisplay(shownTotals.pricePerPiece, form.pricePerPieceDisplay, 2)} label="お見積単価" className="money" onCommit={commitSheetPrice} />
-                    <small> /枚</small>
+                <div className="price-card price-card-muted">
+                  <span className="price-label">パウチ単価</span>
+                  <span className="price-condition">（金型・銅版除く／税抜）</span>
+                  <strong data-testid="quote-pouch-price-per-piece">
+                    <span className="price-value money">{moneyDisplay(shownTotals.pouchPricePerPiece, undefined, 2)}</span>
+                    <small className="price-unit"> /枚</small>
                   </strong>
                 </div>
-                <div>
-                  <span>数量</span>
-                  <strong><EditableText value={numberDisplay(form.quantity)} label="数量" className="money" onCommit={commitQuantity} /><small> 枚</small></strong>
+                <div className="price-card">
+                  <span className="price-label">総費用込単価</span>
+                  <span className="price-condition">（金型・銅版含む／税抜）</span>
+                  <strong data-testid="quote-price-per-piece">
+                    <span className="price-value money">{moneyDisplay(shownTotals.pricePerPiece, undefined, 2)}</span>
+                    <small className="price-unit"> /枚</small>
+                  </strong>
                 </div>
-                <div>
-                  <span>税込合計</span>
-                  <strong><EditableText value={moneyDisplay(shownTotals.grandTotal, form.grandTotalDisplay)} label="税込合計" className="money" onCommit={commitSheetGrandTotal} /></strong>
+                <div className="price-card">
+                  <span className="price-label">数量</span>
+                  <strong className="price-value"><EditableText value={numberDisplay(form.quantity)} label="数量" className="money" onCommit={commitQuantity} /><small className="price-unit"> 枚</small></strong>
+                </div>
+                <div className="price-card">
+                  <span className="price-label">税込合計</span>
+                  <strong className="price-value"><EditableText value={moneyDisplay(shownTotals.grandTotal, form.grandTotalDisplay)} label="税込合計" className="money" onCommit={commitSheetGrandTotal} /></strong>
                 </div>
               </section>
 
@@ -2294,7 +2338,7 @@ export default function PrintableQuotationPage({
                       ) : null}
                     </td>
                     <td>
-                      <strong data-testid="film-meter-price"><EditableText value={moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay, 2)} label="フィルム販売m単価" className="money" onCommit={commitFilmMeterUnit} /> /m</strong>
+                      <span data-testid="film-meter-price"><EditableText value={moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay, 2)} label="フィルム販売m単価" className="money" onCommit={commitFilmMeterUnit} /> /m</span>
                       <small data-testid="film-pouch-price">パウチ換算 <EditableText value={moneyDisplay(shownTotals.filmPouchUnit, form.filmPouchUnitDisplay, 2)} label="フィルムパウチ換算単価" className="money" onCommit={(next, node) => commitFilmPouchUnit(next, node)} /> /枚</small>
                     </td>
                     <td><span data-testid="film-order-length"><EditableText value={numberDisplay(shownTotals.filmOrderLength, form.filmOrderLengthM)} label="フィルム発注長さ" onCommit={(next, node) => {
@@ -2343,6 +2387,17 @@ export default function PrintableQuotationPage({
                       <td data-testid="setup-unit-price"><EditableText value={moneyDisplay(shownTotals.setupUnit, form.setupUnitDisplay, 2)} label="セットアップ販売単価" className="money" onCommit={commitSetupUnit} /> /個</td>
                       <td><EditableText value={numberDisplay(form.setupQuantity)} label="セットアップ数量" className="money" onCommit={commitSetupQuantity} /> 個</td>
                       <td><EditableText value={moneyDisplay(shownTotals.setupAmount, form.setupAmountDisplay)} label="セットアップ金額" className="money" onCommit={commitSetupAmount} /></td>
+                    </tr>
+                  ) : null}
+                  {shownTotals && D(shownTotals.customAmount).gt(0) ? (
+                    <tr data-testid="custom-line">
+                      <td>
+                        <strong><EditableText value={form.customItemName} label="カスタム費用項目名" onCommit={(next) => update("customItemName", next.trim())} /></strong>
+                        <small><EditableText value={form.customItemDescription} label="カスタム費用説明" multiline onCommit={(next) => update("customItemDescription", next)} /></small>
+                      </td>
+                      <td data-testid="custom-unit-price"><span className="money">{moneyDisplay(shownTotals.customUnit, undefined, 2)}</span> /個</td>
+                      <td><EditableText value={numberDisplay(form.customQuantity)} label="カスタム費用数量" className="money" onCommit={commitCustomQuantity} /> 個</td>
+                      <td><span className="money" data-testid="custom-amount-fixed">{moneyDisplay(shownTotals.customAmount, undefined, 2)}</span></td>
                     </tr>
                   ) : null}
                   <tr>

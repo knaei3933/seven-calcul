@@ -218,6 +218,39 @@ describe("film orders Seven-buyer UI", () => {
       .toBe("金井貿易側の自社製作データで進行");
   });
 
+  it("renders a neutral role-admin read-only view and quarantines invalid ownership", async () => {
+    const projectedOrder = { ...order } as Partial<typeof order> & { ownerCompany?: string };
+    delete projectedOrder.buyer_domain;
+    projectedOrder.ownerCompany = "seven";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/film-orders") {
+        return Response.json({ orders: [projectedOrder], created: 0, driveConfigured: false });
+      }
+      if (url === "/api/film-orders/1001") return Response.json({ order: projectedOrder });
+      return Response.json({ error: "not_found" }, { status: 404 });
+    }));
+    render(<FilmOrdersClient userEmail="audit@example.test" userRole="admin" />);
+    expect(await screen.findByTestId("film-order-card-1001")).toBeInTheDocument();
+    expect(screen.getByText("管理者（閲覧のみ）")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getAllByTestId("film-order-card-1001")[0]!.firstElementChild!);
+    expect((await screen.findAllByText("F-202610-001")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "発注書送信済みにする" })).not.toBeInTheDocument();
+
+    cleanup();
+    const invalidOrder = { ...order, buyer_domain: "invalid-owner" };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/film-orders") {
+        return Response.json({ orders: [invalidOrder], created: 0, driveConfigured: false });
+      }
+      if (url === "/api/film-orders/1001") return Response.json({ order: invalidOrder });
+      return Response.json({ error: "not_found" }, { status: 404 });
+    }));
+    render(<FilmOrdersClient userEmail="audit@example.test" userRole="admin" />);
+    await screen.findByText(/所有会社が未解決/);
+  });
+
   it("supports registering multiple delivery destinations", async () => {
     const user = userEvent.setup();
     render(<FilmOrdersClient userEmail="buyer@727.co.jp" />);
@@ -604,7 +637,7 @@ describe("G007 role-aware workflow UI", () => {
     for (const action of ["mark-ordered", "register-receiving", "approve", "confirm-film-receipt", "send-po", "resend-supplier-links"]) {
       expect(screen.getByTestId(`workflow-action-${action}`)).toBeInTheDocument();
     }
-    expect(screen.getByTestId("workflow-action-send-po")).toHaveTextContent("この操作を実行できる権限がありません。");
+    expect(screen.getByTestId("workflow-action-send-po")).toHaveTextContent("金井貿易側のみ実行できます。");
     expect(screen.getByRole("button", { name: "発注メールを送る" })).toBeDisabled();
   });
 
@@ -646,14 +679,14 @@ describe("G007 role-aware workflow UI", () => {
 
     const dialog = screen.getByRole("dialog", { name: "発注メールを送る" });
     const modalWarnings = within(dialog).getByTestId("mail-preview-warnings");
-    expect(modalWarnings).toHaveTextContent("保存済みメール設定のテストモードが有効です。");
+    expect(modalWarnings).not.toHaveTextContent("保存済みメール設定のテストモードが有効です。");
     expect(modalWarnings).toHaveTextContent("環境変数 MAIL_RECIPIENT_OVERRIDE が有効です。");
     expect(dialog).toHaveTextContent("maker@example.test");
     expect(dialog).toHaveTextContent("seven@example.test");
     expect(screen.getByTestId("workflow-mail-envelope")).toHaveAttribute("data-language", "ko");
     expect(dialog).toHaveTextContent("hash-maker");
     expect(dialog).toHaveTextContent("art.ai");
-    expect(dialog).toHaveTextContent("テストモード ON");
+    expect(dialog).not.toHaveTextContent("テストモード ON");
     expect(dialog).toHaveTextContent("フィルムメーカー発注済みへ進めます。");
 
     await user.click(screen.getByTestId("workflow-mail-confirm"));

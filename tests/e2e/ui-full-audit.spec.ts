@@ -67,7 +67,7 @@ test("audits empty film-order shell, workflow terminology, and role disclosure",
   await expect(page.getByRole("heading", { name: "フィルム発注管理" })).toBeVisible();
   await expect(page.getByText("セブン化学").first()).toBeVisible();
   await expect(page.getByText("金井貿易側").first()).toBeVisible();
-  await expect(page.getByText("得意先はパウチ充填製造をセブン化学へ発注し、セブン化学がフィルムを金井貿易側へ発注します。成約見積から自動作成された発注を、ステップに沿って管理します。")).toBeVisible();
+  await expect(page.getByText("成約見積の所有会社がフィルム発注の buyer になります。Seven-origin（S7）はセブン化学、Kanei-origin（KT）は金井貿易側が発注側操作を担い、金井貿易側がフィルム発注・supplier approval を行います。")).toBeVisible();
   await expect(page.getByText("校正データ登録・金井貿易側承認・フィルムメーカー発注・納期")).toBeVisible();
   const orderButton = page.locator("[data-testid^='film-order-']").first();
   const emptyMessage = page.getByText("該当する発注はありません").first();

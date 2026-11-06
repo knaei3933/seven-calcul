@@ -1,4 +1,4 @@
-import { isKaneiTradeUser, isSevenChemicalUser } from "./film-order-access";
+import { filmOrderBuyerDomainOf, isKaneiTradeUser, isSevenChemicalUser } from "./film-order-access";
 import type { FilmOrderView } from "./film-order-shared";
 
 export type FilmOrderDisclosureAudience = "seven" | "kanei" | "customer" | "maker" | "unknown";
@@ -47,6 +47,14 @@ const CUSTOMER_FORBIDDEN_KEYS = new Set([
   "buyerApprovalBy",
 ]);
 
+function safeFilmOrderOwnerCompany(order: FilmOrderView): "seven" | "kanei" | "unresolved" {
+  try {
+    return filmOrderBuyerDomainOf(order);
+  } catch {
+    return "unresolved";
+  }
+}
+
 function cloneWithoutForbidden(value: unknown, forbidden: Set<string>): unknown {
   if (Array.isArray(value)) return value.map((item) => cloneWithoutForbidden(item, forbidden));
   if (!value || typeof value !== "object" || value instanceof Date) return value;
@@ -73,6 +81,7 @@ function cloneWithoutForbidden(value: unknown, forbidden: Set<string>): unknown 
 export function serializeFilmOrderForActor(
   order: FilmOrderView,
   actorEmail: string | null | undefined,
+  viewerRole?: string | null,
 ): Record<string, unknown> {
   const audience = filmOrderDisclosureAudience(actorEmail);
   if (audience === "kanei") return structuredClone(order) as unknown as Record<string, unknown>;
@@ -91,6 +100,9 @@ export function serializeFilmOrderForActor(
         created_at: source.created_at,
       };
     });
+  }
+  if (viewerRole === "admin" && audience === "unknown") {
+    projected.ownerCompany = safeFilmOrderOwnerCompany(order);
   }
   return projected;
 }
@@ -134,10 +146,11 @@ interface FilmOrderActionResult {
 export function serializeFilmOrderActionForActor(
   result: FilmOrderActionResult,
   actorEmail: string | null | undefined,
+  viewerRole?: string | null,
 ): Record<string, unknown> {
   const audience = filmOrderDisclosureAudience(actorEmail);
   if (audience === "kanei") return structuredClone(result) as unknown as Record<string, unknown>;
-  const order = result.order ? serializeFilmOrderForActor(result.order, actorEmail) : undefined;
+  const order = result.order ? serializeFilmOrderForActor(result.order, actorEmail, viewerRole) : undefined;
   const outcomes = (result.lifecycle?.outcomes ?? [])
     .filter((outcome) => outcome.audience === audience)
     .map((outcome) => ({

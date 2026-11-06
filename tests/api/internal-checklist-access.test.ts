@@ -11,10 +11,13 @@ process.env.ADMIN_PASSWORD = "gotou-admin-password";
 process.env.ADMIN_NAME = "Gotou Admin";
 
 const { POST: login } = await import("@/app/api/auth/login/route");
-const { GET: getChecklists, PATCH: patchChecklist } = await import("@/app/api/quotations/[id]/checklists/route");
+const { GET: getChecklists, PATCH: patchChecklist, POST: rebuildChecklists } = await import(
+  "@/app/api/quotations/[id]/checklists/route"
+);
 const { saveQuotation } = await import("@/lib/quotation-store");
 const { createChecklistsForQuotation } = await import("@/lib/quotation-store");
 const { createUser } = await import("@/lib/auth-store");
+const { createSession } = await import("@/lib/auth-store");
 const { calculatePouchCost } = await import("@/lib/calculation");
 const { buildCalculationChecklistSnapshot } = await import("@/lib/calculation-checklist");
 
@@ -38,15 +41,23 @@ async function loginToken(email: string, password: string): Promise<string | und
   return response.headers.get("set-cookie")?.match(/pouch_session=([^;]+)/)?.[1];
 }
 
-describe("internal (Kanei Trade) checklist visibility and updates", () => {
+describe("owner-scoped quotation checklist visibility and updates", () => {
   let quotationId = 0;
   let firstInternalItemId = "";
   let kaneiToken: string | undefined;
   let sevenToken: string | undefined;
+  let neutralAdminToken: string | undefined;
 
   beforeAll(async () => {
-    await createUser({ email: "kim@kanei-trade.co.jp", name: "Kanei QA", password: "kanei-password-123", role: "admin" });
-    kaneiToken = await loginToken("kim@kanei-trade.co.jp", "kanei-password-123");
+    const kaneiViewer = await createUser({ email: "kim@kanei-trade.co.jp", name: "Kanei QA", password: "kanei-password-123", role: "user" });
+    kaneiToken = await createSession(kaneiViewer.id).then((session) => session.token);
+    const neutralAdmin = await createUser({
+      email: "neutral-audit@example.test",
+      name: "Neutral Audit Admin",
+      password: "neutral-admin-password-123",
+      role: "admin",
+    });
+    neutralAdminToken = await createSession(neutralAdmin.id).then((session) => session.token);
     sevenToken = await loginToken("gotou@727.co.jp", "gotou-admin-password");
     const calculated = calculatePouchCost({
       spec: {
@@ -97,18 +108,19 @@ describe("internal (Kanei Trade) checklist visibility and updates", () => {
     await createChecklistsForQuotation(record, snapshot);
   });
 
-  it("hides the internal QA checklist from non-Kanei users in GET", async () => {
-    const response = await getChecklists(
-      request(`http://localhost/api/quotations/${quotationId}/checklists`, {}, sevenToken),
-      { params: Promise.resolve({ id: String(quotationId) }) } as never,
-    );
-    const payload = await response.json() as { checklists: Array<{ audience: string }> };
-    expect(payload.checklists.map((record) => record.audience)).toEqual(["CUSTOMER"]);
-  });
-
-  it("shows both checklists to Kanei Trade users in GET", async () => {
+  it("rejects a Kanei cross-company checklist read", async () => {
     const response = await getChecklists(
       request(`http://localhost/api/quotations/${quotationId}/checklists`, {}, kaneiToken),
+      { params: Promise.resolve({ id: String(quotationId) }) } as never,
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(403);
+    expect(payload).toEqual({ error: "checklist_forbidden" });
+  });
+
+  it("shows both checklists to Seven responsible users", async () => {
+    const response = await getChecklists(
+      request(`http://localhost/api/quotations/${quotationId}/checklists`, {}, sevenToken),
       { params: Promise.resolve({ id: String(quotationId) }) } as never,
     );
     const payload = await response.json() as { checklists: Array<{ audience: string; items: Array<{ id: string }> }> };
@@ -117,7 +129,17 @@ describe("internal (Kanei Trade) checklist visibility and updates", () => {
     firstInternalItemId = internal!.items[0]!.id;
   });
 
-  it("rejects internal QA updates from non-Kanei users", async () => {
+  it("hides Seven internal QA from a neutral cross-company admin", async () => {
+    const response = await getChecklists(
+      request(`http://localhost/api/quotations/${quotationId}/checklists`, {}, neutralAdminToken),
+      { params: Promise.resolve({ id: String(quotationId) }) } as never,
+    );
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { checklists: Array<{ audience: string }> };
+    expect(payload.checklists.map((record) => record.audience)).toEqual(["CUSTOMER"]);
+  });
+
+  it("accepts Seven internal QA updates from a Seven responsible user", async () => {
     const response = await patchChecklist(
       request(`http://localhost/api/quotations/${quotationId}/checklists`, {
         method: "PATCH",
@@ -126,11 +148,10 @@ describe("internal (Kanei Trade) checklist visibility and updates", () => {
       }, sevenToken),
       { params: Promise.resolve({ id: String(quotationId) }) } as never,
     );
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({ error: "internal_checklist_forbidden" });
+    expect(response.status).toBe(200);
   });
 
-  it("accepts internal QA updates from Kanei Trade users", async () => {
+  it("rejects Kanei internal QA updates on a Seven-owned quote", async () => {
     const response = await patchChecklist(
       request(`http://localhost/api/quotations/${quotationId}/checklists`, {
         method: "PATCH",
@@ -139,9 +160,26 @@ describe("internal (Kanei Trade) checklist visibility and updates", () => {
       }, kaneiToken),
       { params: Promise.resolve({ id: String(quotationId) }) } as never,
     );
-    expect(response.status).toBe(200);
-    const payload = await response.json() as { checklist: { audience: string; acceptedCount: number } };
-    expect(payload.checklist.audience).toBe("INTERNAL_QA");
-    expect(payload.checklist.acceptedCount).toBe(1);
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "owner_action_forbidden" });
+  });
+
+  it("allows checklist rebuild only through an explicit owner-company action", async () => {
+    const denied = await rebuildChecklists(
+      request(`http://localhost/api/quotations/${quotationId}/checklists`, { method: "POST" }, kaneiToken),
+      { params: Promise.resolve({ id: String(quotationId) }) } as never,
+    );
+    expect(denied.status).toBe(403);
+    await expect(denied.json()).resolves.toEqual({ error: "owner_action_forbidden" });
+
+    const allowed = await rebuildChecklists(
+      request(`http://localhost/api/quotations/${quotationId}/checklists`, { method: "POST" }, sevenToken),
+      { params: Promise.resolve({ id: String(quotationId) }) } as never,
+    );
+    expect(allowed.status).toBe(200);
+    const payload = await allowed.json() as { checklists: Array<{ audience: string; checkedBy: string | null }> };
+    expect(payload.checklists).toHaveLength(2);
+    expect(payload.checklists.find((record) => record.audience === "INTERNAL_QA")?.checkedBy)
+      .toBe("株式会社セブン化学 内部QA");
   });
 });

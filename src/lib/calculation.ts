@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalize } from "./canonical-json";
-import { CALCULATION_VERSION, CONNECTED_FILLING_SURCHARGE, CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForSpec, GRAVURE_MASTER_CALCULATION_VERSION, sizeMaster } from "./constants";
+import { CALCULATION_VERSION, CONNECTED_FILLING_SURCHARGE, CONNECTED_PRODUCTION_SPEED_FACTOR, defaultParameters, defaultProductionSpeedForSpec, GRAVURE_MASTER_CALCULATION_VERSION, sizeMaster, standardSizeMasterForSpec } from "./constants";
 import { D, Decimal, ceilTo, eq, maxD, roundTo2, roundUp1, sum } from "./decimal";
 import { normalizeDigitalFilmOrder, QuotationValidationError, type FilmOrderAdjustment, type FilmSkuOrder } from "./digital-film";
 import { calculateRequiredProductionLength, deriveCustomSizeMaster, shippingUnitForWidth } from "./size-calculations";
@@ -737,7 +737,7 @@ export function displayAmount(value: string): string {
 }
 
 export function getSizeMaster(spec: PouchSpec): SizeMaster {
-  const base = sizeMaster[spec.sizeKey];
+  const base = standardSizeMasterForSpec(spec);
   if (!base) throw validationError("size_not_found");
   if (!spec.isCustom) {
     const width = spec.customWidthMm ?? base.widthMm;

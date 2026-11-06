@@ -102,7 +102,7 @@ describe("SQLite film-order mail outbox", () => {
     const marker = await db.get<{ version: string }>(
       "SELECT version FROM film_order_schema_migrations WHERE slot='film_orders'",
     );
-    expect(marker?.version).toBe("2026-11-04-g011-mail-boundary-1");
+    expect(marker?.version).toBe("2026-11-06-extensible-proof-rounds-1");
     const outboxColumns = await db.all<{ name: string }>("PRAGMA table_info(film_order_mail_outbox)");
     const attemptColumns = await db.all<{ name: string }>("PRAGMA table_info(film_order_mail_attempts)");
     expect(outboxColumns.map((column) => column.name)).toEqual(expect.arrayContaining([
@@ -262,6 +262,47 @@ describe("SQLite film-order mail outbox", () => {
 
     const sevenAttempts = (await listFilmOrderMailOutboxForAudience(orderId, "seven", "seven@727.co.jp", "seven@727.co.jp"))[0]!.attempts;
     expect(sevenAttempts.every((attempt) => !("actualTo" in attempt) && !("smtpMessageId" in attempt))).toBe(true);
+  });
+
+  it("records terminal failed attempts separately from retry-required attempts", async () => {
+    const { persistFilmOrderMailEnvelopes, startFilmOrderMailAttempt, recordFilmOrderMailAttemptOutcome } =
+      await import("@/lib/film-order-mail-outbox");
+    const dispatchGroupId = "failed-g006-sqlite";
+    const envelopes = envelopesForEvent("link_resend").map((envelope) => ({
+      ...envelope,
+      dispatchGroupId,
+      contentHash: filmOrderNotificationEnvelopeHash({
+        ...envelope,
+        dispatchGroupId,
+      }),
+    }));
+    const persisted = await persistFilmOrderMailEnvelopes(envelopes, {
+      requestedByEmail: "operator@kanei-trade.co.jp",
+      envelopeStatus: "composed",
+    });
+    const started = await startFilmOrderMailAttempt({
+      outboxId: persisted[0]!.id,
+      requestedByEmail: "dispatcher@kanei-trade.co.jp",
+    });
+    const failed = await recordFilmOrderMailAttemptOutcome({
+      outboxId: persisted[0]!.id,
+      attemptCount: started.attemptCount,
+      status: "failed",
+      errorCode: "smtp_connect_failed",
+    });
+
+    expect(started).toMatchObject({ attemptCount: 1, status: "sending" });
+    expect(failed).toMatchObject({
+      attemptCount: 1,
+      status: "failed",
+      errorCode: "smtp_connect_failed",
+      attemptFinishedAt: expect.any(String),
+    });
+    await expect(recordFilmOrderMailAttemptOutcome({
+      outboxId: persisted[0]!.id,
+      attemptCount: started.attemptCount,
+      status: "sent",
+    })).rejects.toThrow("film_order_mail_attempt_already_final");
   });
 
   it("rejects persistence when a final envelope is mutated without recomputing the hash", async () => {

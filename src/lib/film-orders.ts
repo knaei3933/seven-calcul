@@ -4,8 +4,15 @@ import { sendMail, type MailSendResult } from "./mailer";
 import { registeredJapaneseDisplayNameKo } from "./japanese-text-ko";
 import { withRecipientSubjectPrefix, type MailAudience } from "./mail-subject";
 import type { PurchaseOrderSnapshot } from "./purchase-order";
-import type { QuotationRecord } from "./quotation-shared";
-import { canViewFilmOrderRow, isSevenChemicalUser, isKaneiTradeUser, type SupplierLocale } from "./film-order-access";
+import { quotationOwnerDomainFromStorage, type QuotationRecord } from "./quotation-shared";
+import {
+  canPerformFilmOrderActorAction,
+  canViewFilmOrderRow,
+  filmOrderBuyerDomainOf,
+  isSevenChemicalUser,
+  isKaneiTradeUser,
+  type SupplierLocale,
+} from "./film-order-access";
 import {
   DEFAULT_FILM_PROOF_EMAIL,
   type CustomerDesignTracking,
@@ -73,6 +80,114 @@ export function sevenChemicalContactEmail(): string {
 }
 
 /**
+ * Durable film-order buyer ownership comes from the quotation owner, never the actor who
+ * happens to open the list. With owner_domain present, only explicit resolved owners may
+ * backfill a truly missing/empty buyer. Unknown and explicitly unresolved rows stay closed.
+ */
+async function reconcileFilmOrderOwnership(db: SqlClient): Promise<void> {
+  const hasQuotationOwnerColumn = db.dialect === "postgres"
+    ? Boolean((await db.get<{ exists: number | boolean }>(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'quotations' AND column_name = 'owner_domain'
+      ) AS exists
+    `))?.exists)
+    : Boolean((await db.all<{ name: string }>("PRAGMA table_info(quotations)"))
+      .some((column) => column.name === "owner_domain"));
+  if (!hasQuotationOwnerColumn) {
+    const hasQuotationsTable = db.dialect === "postgres"
+      ? Boolean((await db.get<{ exists: number | boolean }>(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_name = 'quotations'
+        ) AS exists
+      `))?.exists)
+      : Boolean((await db.all<{ name: string }>(`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='quotations'
+      `)).length);
+    if (!hasQuotationsTable) return;
+    const hasUsersTable = db.dialect === "postgres"
+      ? Boolean((await db.get<{ exists: number | boolean }>(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_name = 'users'
+        ) AS exists
+      `))?.exists)
+      : Boolean((await db.all<{ name: string }>(`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='users'
+      `)).length);
+    if (!hasUsersTable) return;
+    // Film-order-only test databases and pre-G001 replicas still carry creator identity.
+    // Keep reconciliation alive, but never invent an owner from an unrelated actor.
+    await db.exec(db.dialect === "postgres" ? `
+      UPDATE film_orders f
+      SET buyer_domain = CASE
+        WHEN u.email LIKE '%@727.co.jp' THEN '727.co.jp'
+        WHEN u.email LIKE '%@kanei-trade.co.jp' THEN 'kanei-trade.co.jp'
+        ELSE f.buyer_domain
+      END
+      FROM quotations q JOIN users u ON u.id=q.created_by
+      WHERE f.quotation_id=q.id
+    ` : `
+      UPDATE film_orders
+      SET buyer_domain = CASE
+        WHEN u.email LIKE '%@727.co.jp' THEN '727.co.jp'
+        WHEN u.email LIKE '%@kanei-trade.co.jp' THEN 'kanei-trade.co.jp'
+        ELSE film_orders.buyer_domain
+      END
+      FROM quotations q JOIN users u ON u.id=q.created_by
+      WHERE film_orders.quotation_id=q.id
+    `);
+    return;
+  }
+  await db.exec(db.dialect === "postgres" ? `
+    UPDATE film_orders f
+    SET buyer_domain = CASE
+      WHEN q.owner_domain = 'seven' THEN '727.co.jp'
+      WHEN q.owner_domain = 'kanei' THEN 'kanei-trade.co.jp'
+      ELSE f.buyer_domain
+    END
+    FROM quotations q
+    WHERE f.quotation_id = q.id
+      AND q.owner_domain IN ('seven', 'kanei')
+      AND (f.buyer_domain IS NULL OR f.buyer_domain = '')
+  ` : `
+    UPDATE film_orders
+    SET buyer_domain = CASE
+      WHEN q.owner_domain = 'seven' THEN '727.co.jp'
+      WHEN q.owner_domain = 'kanei' THEN 'kanei-trade.co.jp'
+      ELSE film_orders.buyer_domain
+    END
+    FROM quotations q
+    WHERE film_orders.quotation_id = q.id
+      AND q.owner_domain IN ('seven', 'kanei')
+      AND (
+        film_orders.buyer_domain IS NULL
+        OR film_orders.buyer_domain = ''
+      )
+  `);
+  await db.run(`
+    UPDATE film_orders
+    SET seven_contact_email = ?
+    WHERE buyer_domain = '727.co.jp'
+      AND (seven_contact_email IS NULL OR seven_contact_email = '' OR seven_contact_email NOT LIKE '%@727.co.jp')
+  `, [sevenChemicalContactEmail()]);
+  await db.run(`
+    UPDATE film_orders
+    SET seven_contact_email = created_by_email
+    WHERE buyer_domain = 'kanei-trade.co.jp'
+      AND created_by_email LIKE '%@kanei-trade.co.jp'
+      AND (seven_contact_email IS NULL OR seven_contact_email = '' OR seven_contact_email NOT LIKE '%@kanei-trade.co.jp')
+  `);
+  await db.run(`
+    UPDATE film_orders
+    SET seven_contact_email = ?
+    WHERE buyer_domain = 'kanei-trade.co.jp'
+      AND (seven_contact_email IS NULL OR seven_contact_email = '')
+  `, [filmDesignNotificationTo()]);
+}
+
+/**
  * Film-order recipients are owned by the selected maker snapshot or explicit order supplier email.
  * Route/configured fallbacks are forbidden; centralized test-mode routing happens only in the mailer.
  */
@@ -107,6 +222,7 @@ interface FilmOrderRow {
   proof_upload_expires_at: string | null;
   status: FilmOrderStatus;
   re_proof_count: number;
+  current_proof_round: number;
   ordered_at: string | null;
   receiving_registered_at: string | null;
   proof_registered_at: string | null;
@@ -388,6 +504,7 @@ const BASE_SCHEMA = `
     customer_proof_approved_at TEXT,
     customer_proof_correction_count INTEGER NOT NULL DEFAULT 0,
     customer_proof_correction_reason TEXT NOT NULL DEFAULT '',
+    current_proof_round INTEGER NOT NULL DEFAULT 1,
     supplier_approval_status TEXT NOT NULL DEFAULT 'pending' CHECK(supplier_approval_status IN ('pending','approved','legacy_exempt')),
     supplier_approval_at TEXT,
     supplier_approval_by TEXT NOT NULL DEFAULT '',
@@ -428,7 +545,7 @@ const BASE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS film_order_external_tokens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     film_order_id INTEGER NOT NULL REFERENCES film_orders(id) ON DELETE CASCADE,
-    purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_eta')),
+    purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_customer_design','maker_eta')),
     token_hash TEXT NOT NULL UNIQUE,
     token_state TEXT NOT NULL DEFAULT 'active' CHECK(token_state IN ('staged','active','revoked')),
     dispatch_group_id TEXT,
@@ -510,6 +627,7 @@ const EXTERNAL_TOKEN_PURPOSES = [
   "customer_proof_review",
   "supplier_po",
   "customer_ship_to",
+  "maker_customer_design",
   "maker_eta",
 ] as const;
 
@@ -947,7 +1065,7 @@ async function migrateExternalTokenPurposes(db: SqlClient): Promise<void> {
       CREATE TABLE film_order_external_tokens (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         film_order_id INTEGER NOT NULL REFERENCES film_orders(id) ON DELETE CASCADE,
-        purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_eta')),
+        purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_customer_design','maker_eta')),
         token_hash TEXT NOT NULL UNIQUE,
         token_state TEXT NOT NULL DEFAULT 'active' CHECK(token_state IN ('staged','active','revoked')),
         dispatch_group_id TEXT,
@@ -983,7 +1101,7 @@ async function migrateExternalTokenPurposes(db: SqlClient): Promise<void> {
     const invalidPurposes = await db.all<{ purpose: string }>(`
       SELECT DISTINCT purpose FROM film_order_external_tokens
       WHERE purpose NOT IN (
-        'supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_eta'
+        'supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_customer_design','maker_eta'
       )
     `);
     if (invalidPurposes.length > 0) throw new Error("invalid_film_external_token_purpose");
@@ -997,7 +1115,7 @@ async function migrateExternalTokenPurposes(db: SqlClient): Promise<void> {
   await db.exec(`
     ALTER TABLE film_order_external_tokens
     ADD CONSTRAINT film_order_external_tokens_purpose_check
-    CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_eta'))
+    CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_customer_design','maker_eta'))
   `);
 }
 
@@ -1012,7 +1130,7 @@ async function migrateExternalTokenStateConsistency(db: SqlClient): Promise<void
       CREATE TABLE film_order_external_tokens (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         film_order_id INTEGER NOT NULL REFERENCES film_orders(id) ON DELETE CASCADE,
-        purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_eta')),
+        purpose TEXT NOT NULL CHECK(purpose IN ('supplier_proof','customer_design','customer_proof_review','supplier_po','customer_ship_to','maker_customer_design','maker_eta')),
         token_hash TEXT NOT NULL UNIQUE,
         token_state TEXT NOT NULL DEFAULT 'active' CHECK(token_state IN ('staged','active','revoked')),
         dispatch_group_id TEXT,
@@ -1266,7 +1384,7 @@ export interface UploadFileMetadata {
   userAgent?: string | null;
 }
 
-const FILM_SCHEMA_VERSION = "2026-11-04-digital-route-default-1";
+const FILM_SCHEMA_VERSION = "2026-11-06-extensible-proof-rounds-1";
 
 async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
@@ -1291,18 +1409,7 @@ async function getDatabase(): Promise<SqlClient> {
         WHERE procurement_route = ''
           AND printing_method = 'digital'
       `);
-      // 現行商流では Seven Chemical が buyer。旧データが kanei/空でも毎回正規化する。
-      await db.exec(`
-        UPDATE film_orders
-        SET buyer_domain = '727.co.jp'
-        WHERE buyer_domain IS NULL OR buyer_domain = '' OR buyer_domain NOT LIKE '%727%'
-      `);
-      await db.run(`
-        UPDATE film_orders
-        SET seven_contact_email = ?
-        WHERE buyer_domain LIKE '%727%'
-          AND (seven_contact_email IS NULL OR seven_contact_email = '' OR seven_contact_email NOT LIKE '%@727.co.jp')
-      `, [sevenChemicalContactEmail()]);
+      await reconcileFilmOrderOwnership(db);
       return db;
     }
     await db.exec(db.dialect === "postgres" ? POSTGRES_SCHEMA : BASE_SCHEMA);
@@ -1327,6 +1434,7 @@ async function getDatabase(): Promise<SqlClient> {
       ["film_orders_seven_contact", "ALTER TABLE film_orders ADD COLUMN seven_contact_email TEXT NOT NULL DEFAULT ''"],
       ["film_orders_po_sent", "ALTER TABLE film_orders ADD COLUMN po_sent_at TEXT"],
       ["film_orders_customer_code", "ALTER TABLE film_orders ADD COLUMN customer_code TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_current_proof_round", "ALTER TABLE film_orders ADD COLUMN current_proof_round INTEGER NOT NULL DEFAULT 1"],
       ["film_orders_eta_token", "ALTER TABLE film_orders ADD COLUMN eta_token TEXT"],
       ["film_orders_eta_expires", "ALTER TABLE film_orders ADD COLUMN eta_expires_at TEXT"],
       ["film_orders_eta_date", "ALTER TABLE film_orders ADD COLUMN eta_date TEXT"],
@@ -1471,28 +1579,7 @@ async function getDatabase(): Promise<SqlClient> {
         `);
       }
     }
-    try {
-      // フィルム発注の buyer は実製造会社である Seven Chemical に固定する。
-      // created_by_email は営業チャネル所有者として保持する。
-      await db.exec(`
-        UPDATE film_orders f
-        SET buyer_domain = '727.co.jp',
-            created_by_email = COALESCE(NULLIF(f.created_by_email, ''), u.email)
-        FROM quotations q
-        JOIN users u ON u.id = q.created_by
-        WHERE f.quotation_id = q.id
-      `);
-      await db.exec("UPDATE film_orders SET buyer_domain = '727.co.jp' WHERE buyer_domain IS NULL OR buyer_domain = ''");
-      await db.run(`
-        UPDATE film_orders
-        SET seven_contact_email = ?
-        WHERE buyer_domain LIKE '%727%'
-          AND created_by_email NOT LIKE '%@727.co.jp'
-          AND (seven_contact_email IS NULL OR seven_contact_email = '' OR seven_contact_email NOT LIKE '%@727.co.jp')
-      `, [sevenChemicalContactEmail()]);
-    } catch {
-      // 無視（初回は空）。
-    }
+    await reconcileFilmOrderOwnership(db);
     {
       // 既存発注にも見積のバルク使用量から追跡カードを作成する。
       const existing = await db.all<{ id: number; payload_json: string }>(`
@@ -1772,6 +1859,7 @@ function mapOrder(row: FilmOrderRow): FilmOrder {
   };
   const customerProof: CustomerProofTracking = {
     status: row.customer_proof_status,
+    currentRound: Number(row.current_proof_round || 1),
     requestedAt: row.customer_proof_requested_at,
     approvedAt: row.customer_proof_approved_at,
     correctionCount: Number(row.customer_proof_correction_count || 0),
@@ -1856,7 +1944,8 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
     SELECT quotations.id
     FROM quotations
     LEFT JOIN film_orders ON film_orders.quotation_id = quotations.id
-    WHERE quotations.status = 'approved' AND film_orders.id IS NULL
+    WHERE (quotations.internal_approved_at IS NOT NULL OR quotations.status = 'approved')
+      AND film_orders.id IS NULL
     ORDER BY quotations.id
   `);
   const { getQuotation } = await import("./quotation-store");
@@ -1864,6 +1953,9 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
   for (const row of rows) {
     const quotation = await getQuotation(row.id);
     if (!quotation) continue;
+    // Approval does not repair provenance. An unresolved owner must not enter either
+    // company's procurement workflow until an explicit owner migration resolves it.
+    if (quotation.ownerDomain !== "seven" && quotation.ownerDomain !== "kanei") continue;
     const snapshot = purchaseOrderOf(quotation);
     const customerCode = typeof quotation.payload.customerCode === "string"
       ? quotation.payload.customerCode.trim()
@@ -1889,8 +1981,10 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
       quotation.quantity,
       "",
       "",
-      isSevenChemicalUser(quotation.createdBy.email) ? quotation.createdBy.email : sevenChemicalContactEmail(),
-      "727.co.jp",
+      quotation.ownerDomain === "seven"
+        ? (isSevenChemicalUser(quotation.createdBy.email) ? quotation.createdBy.email : sevenChemicalContactEmail())
+        : (isKaneiTradeUser(quotation.createdBy.email) ? quotation.createdBy.email : filmDesignNotificationTo()),
+      quotation.ownerDomain === "seven" ? "727.co.jp" : "kanei-trade.co.jp",
       "pending",
       JSON.stringify(snapshot ?? {}),
       "pending",
@@ -1904,19 +1998,26 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
     if (inserted) {
       await db.run(
         "INSERT INTO film_order_events (order_id,type,detail,actor_email,created_at) VALUES (?,?,?,?,?)",
-        [inserted.id, "created", `成約見積 ${quotation.quotationNumber} から発注 ${orderNumber} を作成`, actorEmail, now],
+        [inserted.id, "created", `内部承認見積 ${quotation.quotationNumber} から発注 ${orderNumber} を作成`, actorEmail, now],
       );
+      // The approved projection already fixes route and printing method. With one
+      // matching active master, procurement starts without another redundant choice.
+      const { autoSelectFilmMakerForOrder } = await import("./film-maker-store");
+      await autoSelectFilmMakerForOrder(inserted.id, actorEmail);
       created += 1;
     }
   }
   return created;
 }
 
-export async function listFilmOrders(actorEmail?: string): Promise<FilmOrderView[]> {
+export async function listFilmOrders(
+  actorEmail?: string,
+  actorRole?: "admin" | "user",
+): Promise<FilmOrderView[]> {
   const db = await getDatabase();
   const rows = await db.all<FilmOrderRow>("SELECT * FROM film_orders ORDER BY created_at DESC, id DESC");
   const visible = rows.filter((row) => {
-    return canViewFilmOrderRow(row.buyer_domain, actorEmail);
+    return canViewFilmOrderRow(row.buyer_domain, actorEmail, actorRole);
   });
   const files = await db.all<FilmOrderFileRecord>("SELECT * FROM film_order_files ORDER BY created_at, id");
   const events = await db.all<FilmOrderEventRecord>("SELECT * FROM film_order_events ORDER BY created_at, id");
@@ -1931,12 +2032,15 @@ export async function listFilmOrders(actorEmail?: string): Promise<FilmOrderView
  * 一覧カードには親行のみ返す。ファイル・履歴はカード展開時に getFilmOrder で取得する。
  * 成約案件が増えたときに全注文の子テーブルを転送しないことが目的。
  */
-export async function listFilmOrderSummaries(actorEmail?: string): Promise<FilmOrderView[]> {
+export async function listFilmOrderSummaries(
+  actorEmail?: string,
+  actorRole?: "admin" | "user",
+): Promise<FilmOrderView[]> {
   const db = await getDatabase();
   const rows = await db.all<FilmOrderRow>("SELECT * FROM film_orders ORDER BY created_at DESC, id DESC");
   return rows
     .filter((row) => {
-      return canViewFilmOrderRow(row.buyer_domain, actorEmail);
+      return canViewFilmOrderRow(row.buyer_domain, actorEmail, actorRole);
     })
     .map((row) => ({ ...mapOrder(row), files: [], events: [] }));
 }
@@ -2398,7 +2502,7 @@ function buildSupplierPurchaseOrderMailParts(
       "お忙しいところ恐れ入りますが、何卒よろしくお願い申し上げます。",
     ].join("\n");
   const japaneseText = [
-    "株式会社セブン化学 ご担当者様",
+    `${buyerCompanyLabelOfOrder(order)} ご担当者様`,
     "",
     "いつも大変お世話になっております。パッケージラボでございます。",
     "",
@@ -2564,7 +2668,7 @@ export async function recordSupplierProofDownload(params: {
 export async function updateEtaFromToken(
   token: string,
   etaDate: string,
-  note: string,
+  note?: string,
   origin?: string,
   request?: { headers: { get(name: string): string | null } },
 ): Promise<(FilmOrderView & { mails?: MailSendResult[] }) | null> {
@@ -2579,7 +2683,7 @@ export async function updateEtaFromToken(
   assertFilmOrderActionGuard(filmOrderGuardInputOf(row, mapOrder(row)), "update-eta");
   const result = await runFilmOrderAction(resolved.orderId, "update-eta", {
     etaDate: date,
-    note: note.slice(0, 1000),
+    note: note?.slice(0, 1000) ?? "",
     origin: resolveFilmOrderExternalOrigin(origin),
     expectedUpdatedAt: row.updated_at,
   }, "machine:maker");
@@ -2716,9 +2820,8 @@ function localizedMailBody(order: FilmOrder, locale: MailLocale): string {
   return mailBodyBase(order);
 }
 
-function buyerCompanyOfOrder(order: Pick<FilmOrder, "buyer_domain" | "created_by_email">): "seven" | "kanei" {
-  if (order.buyer_domain.includes("727") || isSevenChemicalUser(order.created_by_email)) return "seven";
-  return "kanei";
+function buyerCompanyOfOrder(order: Pick<FilmOrder, "buyer_domain">): "seven" | "kanei" {
+  return filmOrderBuyerDomainOf(order);
 }
 
 function buyerCompanyLabelOfOrder(order: Pick<FilmOrder, "buyer_domain" | "created_by_email">): string {
@@ -2952,6 +3055,25 @@ async function executeFilmOrderLifecycle(
     customerDesignFileName: validFileName(params.customerDesignFileName) ?? undefined,
     customerDesignFileUrl: validFileUrl(params.customerDesignFileUrl) ?? undefined,
     customerDesignNote: trimParam(params.customerDesignNote, 1000) || undefined,
+    customerDesignFileSizeBytes: Number.isFinite(Number(params.customerDesignFileSizeBytes))
+      && Number(params.customerDesignFileSizeBytes) >= 0
+      ? Number(params.customerDesignFileSizeBytes)
+      : null,
+    customerDesignContentType: typeof params.customerDesignContentType === "string"
+      ? params.customerDesignContentType.trim().slice(0, 255) || null
+      : null,
+    customerDesignChecksum: typeof params.customerDesignChecksum === "string"
+      ? params.customerDesignChecksum.trim().slice(0, 255) || null
+      : null,
+    customerDesignChecksumAlgorithm: typeof params.customerDesignChecksumAlgorithm === "string"
+      ? params.customerDesignChecksumAlgorithm.trim().slice(0, 64) || null
+      : null,
+    customerDesignDriveFileId: typeof params.customerDesignDriveFileId === "string"
+      ? params.customerDesignDriveFileId.trim().slice(0, 255) || null
+      : null,
+    customerDesignUploadedVia: typeof params.customerDesignUploadedVia === "string"
+      ? params.customerDesignUploadedVia.trim().slice(0, 64) || "customer_design"
+      : "customer_design",
   } satisfies Parameters<typeof prepareFilmOrderMail>[0];
   const previewDispatchGroupId = typeof params.mailDispatchGroupId === "string"
     ? params.mailDispatchGroupId.trim()
@@ -3059,6 +3181,12 @@ export async function runFilmOrderAction(
     customerDesignFileName?: unknown;
     customerDesignFileUrl?: unknown;
     customerDesignNote?: unknown;
+    customerDesignFileSizeBytes?: unknown;
+    customerDesignContentType?: unknown;
+    customerDesignChecksum?: unknown;
+    customerDesignChecksumAlgorithm?: unknown;
+    customerDesignDriveFileId?: unknown;
+    customerDesignUploadedVia?: unknown;
   },
   actorEmail: string,
 ): Promise<{ order: FilmOrderView; mails?: MailSendResult[]; preview?: SupplierOrderMailPreview | FilmOrderMailPreview; lifecycle?: FilmOrderMailConfirmResult }> {
@@ -3071,6 +3199,9 @@ export async function runFilmOrderAction(
     : typeof params.origin === "string" ? params.origin.trim() : "";
   const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [id]);
   if (!row) throw new Error("film_order_not_found");
+  if (!canPerformFilmOrderActorAction(action, actorEmail, row.buyer_domain)) {
+    throw new Error("film_order_actor_forbidden");
+  }
   const order = mapOrder(row);
 
   const workflowGuard = filmOrderGuardInputOf(row, order);
@@ -3403,7 +3534,7 @@ export async function runFilmOrderAction(
       "UPDATE film_orders SET status = 'ordered', ordered_at = ?, updated_at = ?, updated_by_email = ? WHERE id = ?",
       [now, now, actorEmail, id],
     );
-    await addEvent(db, id, "status", "成約 → 発注書送信済み（セブン化学からメール送信）", actorEmail);
+    await addEvent(db, id, "status", `成約 → 発注書送信済み（${buyerCompanyLabelOfOrder(order)}からメール送信）`, actorEmail);
   } else if (action === "update-supplier-order-note") {
     if (order.status !== "final_approved") throw new Error("invalid_status_transition");
     const supplierOrderNote = trimParam(params.supplierOrderNote, 4000);
@@ -3570,7 +3701,7 @@ function customerShipToFormValuesOfDestination(destination: CustomerDeliveryDest
 
 /** 納品先の顧客マスタ解決順。K-コードなどは buyer と異なるオーナーで管理されているため両ドメインを試す。 */
 export function shipToCustomerOwnerCandidatesOf(order: Pick<FilmOrder, "buyer_domain">): Array<"seven" | "kanei"> {
-  const primary: "seven" | "kanei" = order.buyer_domain.includes("727") ? "seven" : "kanei";
+  const primary: "seven" | "kanei" = filmOrderBuyerDomainOf(order);
   return primary === "seven" ? ["seven", "kanei"] : ["kanei", "seven"];
 }
 
@@ -3799,6 +3930,40 @@ export async function getFilmOrderForCustomerDesign(
   return order;
 }
 
+export async function getFilmOrderForMakerCustomerDesign(
+  token: string,
+  request?: { headers: { get(name: string): string | null } },
+): Promise<FilmOrderView | null> {
+  const db = await getDatabase();
+  const resolved = await resolveExternalToken(db, token, "maker_customer_design");
+  if (!resolved) throw new Error("invalid_maker_customer_design_token");
+  await markFilmOrderExternalTokenUseForLifecycle(db, resolved.token, request);
+  return getFilmOrder(resolved.orderId);
+}
+
+export async function recordMakerCustomerDesignDownload(params: {
+  request: { headers: { get(name: string): string | null } };
+  token: string;
+  fileId: string;
+  order: FilmOrderView;
+}): Promise<boolean> {
+  const db = await getDatabase();
+  const resolved = await resolveExternalToken(db, params.token, "maker_customer_design");
+  if (!resolved) return false;
+  const allowed = params.order.files.some((file) =>
+    file.category === "customer_design"
+    && file.url.includes(`/d/${params.fileId}/`)
+  );
+  await addEvent(
+    db,
+    resolved.orderId,
+    "token_access",
+    `maker_customer_design download ${allowed ? "allowed" : "denied"}: ${params.fileId}`,
+    "external:maker_customer_design",
+  );
+  return allowed;
+}
+
 export function nextCustomerDesignFileName(
   order: FilmOrderView,
   originalFileName: string,
@@ -3836,14 +4001,159 @@ export async function registerCustomerDesignFromUploadToken(params: {
   const hasAiFile = Boolean(stored?.files.some((file) => file.category === "customer_design" && file.file_name.toLowerCase().endsWith(".ai")));
   assertCustomerDesignUploadPolicy(order, params.fileName, undefined, hasAiFile);
   if (params.guideAcknowledged !== true) throw new Error("upload_guide_acknowledgement_required");
+  // An existing AI upload already produced the one-time maker handoff. A supplemental
+  // PDF is durable file evidence only and must not duplicate that handoff.
+  if (hasAiFile && params.fileName.toLowerCase().endsWith(".pdf")) {
+    await db.transaction(async (tx) => {
+      await addFile(
+        tx,
+        resolved.orderId,
+        "customer_design",
+        params.fileName,
+        params.fileUrl,
+        params.note ?? "",
+        "machine:customer",
+        {
+          ...params.metadata,
+          uploadedVia: params.metadata?.uploadedVia ?? "customer_design",
+        },
+      );
+      await addEvent(
+        tx,
+        resolved.orderId,
+        "status",
+        "追加確認用PDFを受入しました。",
+        "machine:customer",
+      );
+      await tx.run(`
+        UPDATE film_orders
+        SET customer_design_status='received', customer_design_received_at=?, current_proof_round=current_proof_round+1, updated_at=?, updated_by_email=?
+        WHERE id=? AND customer_design_status IN ('requested','correction_requested')
+      `, [new Date().toISOString(), new Date().toISOString(), "machine:customer", resolved.orderId]);
+    });
+    const updated = await getFilmOrder(resolved.orderId);
+    if (!updated) throw new Error("film_order_update_failed");
+    return updated;
+  }
   const result = await runFilmOrderAction(resolved.orderId, "customer-design-received", {
     customerDesignFileName: params.fileName,
     customerDesignFileUrl: params.fileUrl,
     customerDesignNote: params.note,
+    customerDesignFileSizeBytes: params.metadata?.fileSizeBytes,
+    customerDesignContentType: params.metadata?.contentType,
+    customerDesignChecksum: params.metadata?.checksum,
+    customerDesignChecksumAlgorithm: params.metadata?.checksumAlgorithm,
+    customerDesignDriveFileId: params.metadata?.driveFileId,
+    customerDesignUploadedVia: params.metadata?.uploadedVia ?? "customer_design",
     token: params.token,
     ipAddressHash: params.request ? externalClientIpHash(params.request) : null,
     origin: resolveFilmOrderExternalOrigin(params.origin),
-  }, params.uploader?.slice(0, 200) || "customer");
+  }, "machine:customer");
+  return result.order;
+}
+
+export interface InternalCustomerDesignIntakeTarget {
+  quotationId: number;
+  quotationNumber: string;
+  ownerDomain: "seven" | "kanei";
+  order: FilmOrderView;
+}
+
+export async function getFilmOrderForInternalIntakeUpload(
+  quotationId: number,
+): Promise<InternalCustomerDesignIntakeTarget | null> {
+  if (!Number.isInteger(quotationId) || quotationId <= 0) return null;
+  const db = await getDatabase();
+  const row = await db.get<FilmOrderRow & {
+    owner_domain: string | null;
+    internal_quotation_number: string;
+  }>(`
+    SELECT
+      film_orders.*,
+      quotations.owner_domain,
+      quotations.quotation_number AS internal_quotation_number
+    FROM quotations
+    JOIN film_orders ON film_orders.quotation_id = quotations.id
+    WHERE quotations.id = ?
+  `, [quotationId]);
+  if (!row) return null;
+  const ownerDomain = quotationOwnerDomainFromStorage(row.owner_domain);
+  if (ownerDomain === "unresolved") return null;
+  const order = await getFilmOrder(Number(row.id));
+  if (!order) return null;
+  return {
+    quotationId,
+    quotationNumber: row.internal_quotation_number,
+    ownerDomain,
+    order,
+  };
+}
+
+export async function registerCustomerDesignFromInternalIntake(params: {
+  quotationId: number;
+  fileName: string;
+  fileUrl: string;
+  uploader?: string;
+  note?: string;
+  guideAcknowledged?: boolean;
+  metadata?: UploadFileMetadata;
+  request?: { headers: { get(name: string): string | null } };
+  origin?: unknown;
+}): Promise<FilmOrderView> {
+  const target = await getFilmOrderForInternalIntakeUpload(params.quotationId);
+  if (!target) throw new Error("film_order_not_found");
+  const order = target.order;
+  const hasAiFile = order.files.some((file) =>
+    file.category === "customer_design" && file.file_name.toLowerCase().endsWith(".ai")
+  );
+  assertCustomerDesignUploadPolicy(order, params.fileName, undefined, hasAiFile);
+  if (params.guideAcknowledged !== true) throw new Error("upload_guide_acknowledgement_required");
+  // AI transfers through the lifecycle action. Once AI is present, a supplemental PDF
+  // is already within the same received intake and must not restart that lifecycle.
+  if (hasAiFile && params.fileName.toLowerCase().endsWith(".pdf")) {
+    const db = await getDatabase();
+    await addFile(
+      db,
+      order.id,
+      "customer_design",
+      params.fileName,
+      params.fileUrl,
+      params.note ?? "",
+      "machine:customer",
+      {
+        ...params.metadata,
+        uploadedVia: params.metadata?.uploadedVia ?? "internal_customer_design",
+      },
+    );
+    await addEvent(
+      db,
+      order.id,
+      "status",
+      "追加確認用PDFを受入しました。",
+      "machine:customer",
+    );
+      await db.run(`
+        UPDATE film_orders
+        SET customer_design_status='received', customer_design_received_at=?, current_proof_round=current_proof_round+1, updated_at=?, updated_by_email=?
+        WHERE id=? AND customer_design_status IN ('requested','correction_requested')
+      `, [new Date().toISOString(), new Date().toISOString(), "machine:customer", order.id]);
+    const updated = await getFilmOrder(order.id);
+    if (!updated) throw new Error("film_order_update_failed");
+    return updated;
+  }
+  const result = await runFilmOrderAction(target.order.id, "customer-design-received", {
+    customerDesignFileName: params.fileName,
+    customerDesignFileUrl: params.fileUrl,
+    customerDesignNote: params.note,
+    customerDesignFileSizeBytes: params.metadata?.fileSizeBytes,
+    customerDesignContentType: params.metadata?.contentType,
+    customerDesignChecksum: params.metadata?.checksum,
+    customerDesignChecksumAlgorithm: params.metadata?.checksumAlgorithm,
+    customerDesignDriveFileId: params.metadata?.driveFileId,
+    customerDesignUploadedVia: params.metadata?.uploadedVia ?? "internal_customer_design",
+    ipAddressHash: params.request ? externalClientIpHash(params.request) : null,
+    origin: resolveFilmOrderExternalOrigin(params.origin),
+  }, "machine:customer");
   return result.order;
 }
 
@@ -3876,6 +4186,6 @@ export async function registerProofFromUploadToken(params: {
     token: params.token,
     ipAddressHash: params.request ? externalClientIpHash(params.request) : null,
     origin: resolveFilmOrderExternalOrigin(params.origin),
-  }, params.uploader?.slice(0, 200) || "supplier");
+  }, "machine:maker");
   return result.order;
 }

@@ -15,7 +15,15 @@ const {
   updateQuotationSampleBulkConfirmation,
 } = await import("@/lib/quotation-store");
 
-const actorId = await ensureAdministratorSeed();
+await ensureAdministratorSeed();
+const { createUser } = await import("@/lib/auth-store");
+const actor = await createUser({
+  email: "gotou@727.co.jp",
+  name: "Seven Sample Approver",
+  password: "seven-sample-approver-password",
+  role: "user",
+});
+const actorId = actor.id;
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });

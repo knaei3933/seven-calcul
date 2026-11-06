@@ -8,7 +8,11 @@ import {
   type QuotationStatus,
 } from "@/lib/quotation-store";
 import { getSessionUser } from "@/lib/api-auth";
-import type { AuthenticatedUser } from "@/lib/auth-store";
+import {
+  canMutateQuotation,
+  canPerformOwnerWorkflowAction,
+  canReadQuotation,
+} from "@/lib/quotation-access";
 import { filmOrderExistsForQuotation, syncFilmOrdersFromQuotations } from "@/lib/film-orders";
 
 export const runtime = "nodejs";
@@ -31,6 +35,9 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
     if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
     const record = await getQuotation(Number(id));
     if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
+    if (!canReadQuotation(user, record)) {
+      return NextResponse.json({ error: "quotation_forbidden" }, { status: 403 });
+    }
     return NextResponse.json({ record });
   } catch {
     return NextResponse.json({ error: "quotation_get_failed" }, { status: 500 });
@@ -52,8 +59,8 @@ export async function PATCH(request: Request, context: Context): Promise<NextRes
     if (!emailProvided && !status) return NextResponse.json({ error: "invalid_status" }, { status: 400 });
     const existing = await getQuotation(Number(id));
     if (!existing) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
-    if (!canManageQuotation(user, existing.createdBy.id)) {
-      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    if (!canPerformOwnerWorkflowAction(user, existing)) {
+      return NextResponse.json({ error: "owner_action_forbidden" }, { status: 403 });
     }
 
     if (emailProvided) {
@@ -100,20 +107,16 @@ export async function DELETE(request: Request, context: Context): Promise<NextRe
     if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
     const existing = await getQuotation(Number(id));
     if (!existing) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
-    if (!canManageQuotation(user, existing.createdBy.id)) {
-      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    if (!canMutateQuotation(user, existing)) {
+      return NextResponse.json({ error: "quotation_forbidden" }, { status: 403 });
     }
     if (await filmOrderExistsForQuotation(Number(id))) {
       return NextResponse.json({ error: "film_order_exists" }, { status: 409 });
     }
-    const deleted = await deleteQuotation(Number(id));
+    const deleted = await deleteQuotation(Number(id), user.id);
     if (!deleted) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
     return NextResponse.json({ deleted: true });
   } catch {
     return NextResponse.json({ error: "quotation_delete_failed" }, { status: 500 });
   }
-}
-
-function canManageQuotation(user: AuthenticatedUser, creatorId: number): boolean {
-  return user.role === "admin" || user.id === creatorId;
 }

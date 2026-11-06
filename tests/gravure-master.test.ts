@@ -386,7 +386,7 @@ describe("gravure master foundation", () => {
       role: "admin",
     });
     const user = await createUser({
-      email: "seven@example.com",
+      email: "seven@727.co.jp",
       name: "Seven User",
       password: "seven-user-password",
       role: "user",
@@ -456,7 +456,7 @@ describe("gravure master foundation", () => {
       publicProjection: { ...publicProjection, publicProjectionHash: userPayload.returnedProjection.publicProjectionHash },
     });
     const quotation = {
-      quotationNumber: "G-SNAPSHOT-1",
+      quotationNumber: "S7-SNAPSHOT-1",
       status: "draft",
       issueDate: "2026-10-11",
       validUntil: "2026-11-11",
@@ -513,7 +513,7 @@ describe("gravure master foundation", () => {
     // canonical projection, proving both role projection contracts coexist.
     const kanaiQuotation: Record<string, unknown> = {
       ...quotation,
-      quotationNumber: "G-SNAPSHOT-KANAI-1",
+      quotationNumber: "S7-SNAPSHOT-KANAI-1",
       resultHash: adminPayload.result.audit.resultJsonSha256,
     };
     kanaiQuotation.payload = {
@@ -538,7 +538,7 @@ describe("gravure master foundation", () => {
       publicProjection: { ...publicProjection, publicProjectionHash: "0".repeat(64) },
     })).rejects.toThrow("pricing_projection_hash_invalid");
 
-    const oldBypass: Record<string, unknown> = { ...quotation, quotationNumber: "G-OLD-BYPASS-1" };
+    const oldBypass: Record<string, unknown> = { ...quotation, quotationNumber: "S7-OLD-BYPASS-1" };
     oldBypass.calculationVersion = "legacy";
     oldBypass.payload = {
       ...quotation.payload,
@@ -549,7 +549,7 @@ describe("gravure master foundation", () => {
     expect(oldBypassResponse.status).toBe(400);
     await expect(oldBypassResponse.json()).resolves.toEqual({ error: "pricing_snapshot_required" });
 
-    const tampered: Record<string, unknown> = { ...quotation, quotationNumber: "G-SNAPSHOT-2" };
+    const tampered: Record<string, unknown> = { ...quotation, quotationNumber: "S7-SNAPSHOT-2" };
     const tamperedProjection = { ...publicProjection, quantity: "1" };
     tampered.payload = {
       ...quotation.payload,

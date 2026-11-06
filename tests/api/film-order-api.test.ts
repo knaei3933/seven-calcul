@@ -190,7 +190,7 @@ describe("film order API permissions and workflow", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "request-customer-design-upload" }),
-      }, sevenToken),
+      }, kaneiToken),
       { params: Promise.resolve({ id: String(orderId) }) } as never,
     );
     expect(forbiddenPreview.status).toBe(403);

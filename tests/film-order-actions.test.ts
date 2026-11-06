@@ -154,16 +154,16 @@ describe("film order proof upload flow", () => {
 });
 
 describe("ship-to registration request permission", () => {
-  it("allows either Seven or Kanei to manage ship-to regardless of buyer domain", () => {
+  it("keeps ship-to management on the quotation-owner buyer side", () => {
     const seven = order("727.co.jp");
     const kanei = order("kanei-trade.co.jp");
 
     expect(canPerformFilmOrderAction("request-ship-to-registration", "seven@727.co.jp", "727.co.jp")).toBe(true);
-    expect(canPerformFilmOrderAction("request-ship-to-registration", "kanei@kanei-trade.co.jp", "727.co.jp")).toBe(true);
+    expect(canPerformFilmOrderAction("request-ship-to-registration", "kanei@kanei-trade.co.jp", "727.co.jp")).toBe(false);
     expect(canPerformFilmOrderAction("request-ship-to-registration", "kanei@kanei-trade.co.jp", "kanei-trade.co.jp")).toBe(true);
-    expect(canPerformFilmOrderAction("request-ship-to-registration", "seven@727.co.jp", "kanei-trade.co.jp")).toBe(true);
-    expect(canPerformFilmOrderAction("register-ship-to", "kanei@kanei-trade.co.jp", "727.co.jp")).toBe(true);
-    expect(canPerformFilmOrderAction("confirm-ship-to", "kanei@kanei-trade.co.jp", "727.co.jp")).toBe(true);
+    expect(canPerformFilmOrderAction("request-ship-to-registration", "seven@727.co.jp", "kanei-trade.co.jp")).toBe(false);
+    expect(canPerformFilmOrderAction("register-ship-to", "kanei@kanei-trade.co.jp", "727.co.jp")).toBe(false);
+    expect(canPerformFilmOrderAction("confirm-ship-to", "kanei@kanei-trade.co.jp", "727.co.jp")).toBe(false);
     expect(canPerformFilmOrderAction("request-ship-to-registration", "customer@example.test", "727.co.jp")).toBe(false);
     void seven;
     void kanei;

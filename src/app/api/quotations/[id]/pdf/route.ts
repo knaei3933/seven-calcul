@@ -10,16 +10,15 @@ import {
   saveQuotationPdf,
 } from "@/lib/quotation-store";
 import { buildQuotationPdfFileName } from "@/lib/film-quotation";
-import type { AuthenticatedUser } from "@/lib/auth-store";
+import {
+  canPerformOwnerWorkflowAction,
+  canReadQuotation,
+} from "@/lib/quotation-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ id: string }> };
-
-function canManageQuotation(user: AuthenticatedUser, creatorId: number): boolean {
-  return user.role === "admin" || user.id === creatorId;
-}
 
 export async function POST(request: Request, context: Context): Promise<NextResponse> {
   const { id } = await context.params;
@@ -34,8 +33,8 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     const record = await getQuotation(quotationId);
     const recordMs = performance.now() - recordStartedAt;
     if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
-    if (!canManageQuotation(user, record.createdBy.id)) {
-      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    if (!canPerformOwnerWorkflowAction(user, record)) {
+      return NextResponse.json({ error: "owner_action_forbidden" }, { status: 403 });
     }
     const formData = await request.formData();
     const pdfValue = formData.get("pdf");
@@ -59,11 +58,16 @@ export async function POST(request: Request, context: Context): Promise<NextResp
         message: "PDFが不正です。A4形式のPDF（10MB以内）を添付してください。",
       }, { status: 400 });
     }
-    const saved = await saveQuotationPdf(quotationId, buffer, buildQuotationPdfFileName({
-      issueDate: record.issueDate,
-      productName: record.productName,
-      customerName: record.customerName,
-    }));
+    const saved = await saveQuotationPdf(
+      quotationId,
+      buffer,
+      buildQuotationPdfFileName({
+        issueDate: record.issueDate,
+        productName: record.productName,
+        customerName: record.customerName,
+      }),
+      user.id,
+    );
     if (!saved) {
       const canonical = await getQuotationPdf(quotationId);
       if (canonical) {
@@ -92,6 +96,11 @@ export async function GET(request: Request, context: Context): Promise<Response>
   }
   try {
     const pdfStartedAt = performance.now();
+    const record = await getQuotation(quotationId);
+    if (!record) return NextResponse.json({ error: "pdf_not_found" }, { status: 404 });
+    if (!canReadQuotation(user, record)) {
+      return NextResponse.json({ error: "pdf_forbidden" }, { status: 403 });
+    }
     const pdfMeta = await getQuotationPdfDownloadMeta(quotationId);
     const metaMs = performance.now() - pdfStartedAt;
     if (!pdfMeta) return NextResponse.json({ error: "pdf_not_found" }, { status: 404 });

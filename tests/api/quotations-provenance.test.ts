@@ -21,7 +21,7 @@ const { createSession } = await import("@/lib/auth-store");
 const { createUser } = await import("@/lib/auth-store");
 
 const author = await createUser({
-  email: "author@provenance.test",
+  email: "author@727.co.jp",
   name: "Provenance Author",
   password: "author-provenance-password",
   role: "user",

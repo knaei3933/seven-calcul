@@ -59,11 +59,11 @@ async function insertOrder(orderNumber: string): Promise<number> {
   await db.run(`
     INSERT INTO film_orders (
       quotation_id,order_number,quotation_number,product_name,customer_name,printing_method,procurement_route,
-      film_composition,order_length_m,web_width_mm,pouch_quantity,supplier_name,supplier_email,seven_contact_email,
+      film_composition,order_length_m,web_width_mm,pouch_quantity,supplier_name,supplier_email,seven_contact_email,buyer_domain,
       film_maker_id,film_maker_snapshot_json,supplier_resolution,status,customer_design_status,ship_to_status,
       purchase_order_json,ordered_at,created_at,updated_at
     ) VALUES (?, ?, ?, 'G012 pouch','G012 customer','gravure','K','PET','300','400','1000',
-              'G012 Maker','g012-maker@example.test','seven@727.co.jp',901,?,
+              'G012 Maker','g012-maker@example.test','seven@727.co.jp','727.co.jp',901,?,
               'master_selected','ordered','pending','confirmed','{}',?,?,?)
   `, [quotation!.id, orderNumber, `Q-${orderNumber}`, snapshotJson(), now, now, now]);
   const order = await db.get<{ id: number }>("SELECT id FROM film_orders WHERE order_number=?", [orderNumber]);

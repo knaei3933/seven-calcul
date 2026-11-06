@@ -17,6 +17,7 @@ export interface SendMailInput {
   templateKey?: string;
   templateVars?: Record<string, unknown>;
   attachments?: MailAttachment[];
+  fromName?: string;
 }
 
 export function isSmtpConfigured(): boolean {
@@ -61,7 +62,7 @@ export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
   const transport = createTransport();
   const from = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "";
   const info = await transport.sendMail({
-    from: `"パッケージラボ" <${from}>`,
+    from: `"${input.fromName?.trim() || "パッケージラボ"}" <${from}>`,
     to: route.to,
     text: resolved.body,
     subject,

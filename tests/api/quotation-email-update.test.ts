@@ -74,7 +74,7 @@ afterAll(async () => {
 describe("issued quotation customer email correction", () => {
   it("corrects a missing or stale address on draft and sent quotations without changing the PDF", async () => {
     const owner = await createUser({
-      email: "owner@email-update.test",
+      email: "gotou@727.co.jp",
       name: "Email Update Owner",
       password: "owner-email-update-password",
       role: "user",

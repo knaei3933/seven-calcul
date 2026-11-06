@@ -1,5 +1,6 @@
-import { sevenChemical } from "./quotation-draft";
 import { isKaneiTradeUser } from "./film-order-access";
+import { quotationOwnerProfile } from "./quote-owner-profiles";
+import { quotationOwnerDomainOf } from "./quotation-shared";
 
 export type IssuerContact = {
   companyName: string;
@@ -14,27 +15,36 @@ export function shortIssuerContactName(name: string): string {
 }
 
 export function issuerContactForUser(user: { email: string; name: string }): IssuerContact {
-  if (user.email.trim().toLowerCase() === "kim@kanei-trade.co.jp") {
+  const profile = quotationOwnerProfile(quotationOwnerDomainOf(user.email));
+  if (!profile) {
     return {
       companyName: "",
       contactName: shortIssuerContactName(user.name),
-      email: "shapepouch@package-lab.com",
-      telephone: "TEL 050-3613-9673",
+      email: "",
+      telephone: "",
+    };
+  }
+  if (user.email.trim().toLowerCase() === "kim@kanei-trade.co.jp") {
+    return {
+      companyName: profile.legalName,
+      contactName: shortIssuerContactName(user.name),
+      email: profile.defaultContactEmail,
+      telephone: profile.defaultContactTelephone,
     };
   }
   if (isKaneiTradeUser(user.email)) {
     return {
-      companyName: "金井貿易株式会社",
+      companyName: profile.legalName,
       contactName: shortIssuerContactName(user.name),
       email: user.email,
-      telephone: "TEL 050-3613-9673",
+      telephone: profile.defaultContactTelephone,
     };
   }
   // 세븐화학 계정에는 개인 전화번호 데이터가 없다. 대표번호를 담당 TEL로 재노출하지 않는다.
   return {
-    companyName: sevenChemical.name,
+    companyName: profile.legalName,
     contactName: shortIssuerContactName(user.name),
     email: user.email,
-    telephone: "",
+    telephone: profile.defaultContactTelephone,
   };
 }

@@ -46,17 +46,20 @@ export async function GET(request: Request, context: Context): Promise<NextRespo
   const { id } = await context.params;
   const user = await getSessionUser(request);
   if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
-  if (!canViewFilmOrders(user.email)) return NextResponse.json({ error: "film_order_forbidden" }, { status: 403 });
   const orderId = Number(id);
   if (!Number.isInteger(orderId) || orderId <= 0) {
     return NextResponse.json({ error: "invalid_film_order_id" }, { status: 400 });
   }
+  const isAdminRead = user.role === "admin";
+  if (!isAdminRead && !canViewFilmOrders(user.email)) {
+    return NextResponse.json({ error: "film_order_forbidden" }, { status: 403 });
+  }
   try {
     const order = await getFilmOrder(orderId);
-    if (!order || !canViewFilmOrderRow(order.buyer_domain, user.email)) {
+    if (!order || !(isAdminRead || canViewFilmOrderRow(order.buyer_domain, user.email))) {
       return NextResponse.json({ error: "film_order_not_found" }, { status: 404 });
     }
-    return NextResponse.json({ order: serializeFilmOrderForActor(order, user.email) });
+    return NextResponse.json({ order: serializeFilmOrderForActor(order, user.email, user.role) });
   } catch {
     return NextResponse.json({ error: "film_order_get_failed" }, { status: 500 });
   }
@@ -153,7 +156,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       { ...(body as Parameters<typeof runFilmOrderAction>[2]), origin, mailMode: body.mailMode === "confirm" ? "confirm" : "preview" },
       user.email,
     );
-    return NextResponse.json(serializeFilmOrderActionForActor(result, user.email));
+    return NextResponse.json(serializeFilmOrderActionForActor(result, user.email, user.role));
   } catch (error) {
     const message = error instanceof Error ? error.message : "film_order_action_failed";
     return NextResponse.json({ error: message }, { status: statusForError(message) });

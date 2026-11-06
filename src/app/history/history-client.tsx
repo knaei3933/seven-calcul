@@ -19,7 +19,12 @@ import {
   type UserSummary,
 } from "@/lib/quotation-shared";
 import type { AuthenticatedUser } from "@/lib/auth-store";
-import { isKaneiTradeUser } from "@/lib/film-order-access";
+import { quotationOwnerProfile } from "@/lib/quote-owner-profiles";
+import {
+  canMutateQuotation,
+  canPerformOwnerWorkflowAction,
+  quotationOwnerActionReason,
+} from "@/lib/quotation-access";
 
 const statusLabels: Record<QuotationStatus, string> = {
   draft: "下書き",
@@ -51,6 +56,12 @@ function requestedHistoryDetailTab(): HistoryDetailTab {
   return ["film", "sample", "data"].includes(tab) ? tab as HistoryDetailTab : "document";
 }
 
+function quoteOwnerBadge(ownerDomain: QuotationRecord["ownerDomain"]): string {
+  if (ownerDomain === "kanei") return "KT";
+  if (ownerDomain === "seven") return "S7";
+  return "未解決";
+}
+
 export default function HistoryClient({ currentUser }: { currentUser: AuthenticatedUser }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -64,6 +75,9 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   const [initialDetailTab, setInitialDetailTab] = useState<HistoryDetailTab>(requestedHistoryDetailTab);
   const requestOrder = useRef(0);
   const selectedRecord = records.find((record) => record.id === selectedId) ?? null;
+  const selectedRecordOwnerActionsAllowed = selectedRecord
+    ? canPerformOwnerWorkflowAction(currentUser, selectedRecord)
+    : false;
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailMessage, setEmailMessage] = useState("");
   const [approvingGateId, setApprovingGateId] = useState<number | null>(null);
@@ -129,6 +143,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   }, [selectedRecord]);
 
   const restore = (record: QuotationRecord) => {
+    if (!canPerformOwnerWorkflowAction(currentUser, record)) return;
     // 発行済みPDFは不変。復元は常に修正見積として新しい見積番号で発行する。
     const nowJst = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" });
     const validUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
@@ -162,6 +177,8 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
         setHistoryActionError(
           payload.error === "internal_approval_required"
             ? "成約にするには内部承認が必要です。"
+            : payload.error === "owner_action_forbidden"
+              ? quotationOwnerActionReason(currentUser, record)
             : `${record.quotationNumber} の状態を変更できませんでした。`,
         );
         return;
@@ -178,7 +195,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
   };
 
   const approveGate = async (record: QuotationRecord, gate: QuotationApprovalGate) => {
-    if (gate === "internal" && currentUser.email.trim().toLowerCase() !== "kim@kanei-trade.co.jp") return;
+    if (!canPerformOwnerWorkflowAction(currentUser, record)) return;
     setApprovingGateId(record.id);
     setEmailMessage("");
     try {
@@ -197,8 +214,8 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
         } else {
           setEmailMessage(`${record.quotationNumber} を内部承認しました。`);
         }
-      } else if (payload.error === "internal_approval_forbidden") {
-        setEmailMessage("内部承認はKimのみ実行できます。");
+      } else if (payload.error === "internal_approval_forbidden" || payload.error === "quote_owner_action_forbidden") {
+        setEmailMessage(quotationOwnerActionReason(currentUser, record));
       } else if (payload.error === "invalid_approval_transition") {
         setEmailMessage("現在の状態では承認できません。");
       } else {
@@ -225,7 +242,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
       if (payload.error === "film_order_exists") {
         setHistoryActionError(`${record.quotationNumber} はフィルム発注管理に反映済みのため削除できません。`);
       } else if (response.status === 403) {
-        setHistoryActionError(`${record.quotationNumber} は作成者または管理者のみ削除できます。`);
+        setHistoryActionError(`${record.quotationNumber} ${quotationOwnerActionReason(currentUser, record)}`);
       } else {
         setHistoryActionError(`${record.quotationNumber} を削除できませんでした。`);
       }
@@ -313,7 +330,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
     }
   };
 
-  const canManage = (record: QuotationRecord) => currentUser.role === "admin" || currentUser.id === record.createdBy.id;
+  const canManage = (record: QuotationRecord) => canMutateQuotation(currentUser, record);
 
   return (
     <main className="history-page">
@@ -377,6 +394,17 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
                 <tr key={record.id}>
                   <td>
                     <strong>{record.quotationNumber}</strong>
+                    <span
+                      className={record.ownerDomain === "kanei"
+                        ? "badge owner-badge owner-kanei"
+                        : record.ownerDomain === "seven" ? "badge owner-badge owner-seven" : "badge owner-badge owner-unresolved"}
+                      data-testid="history-quote-owner-badge"
+                      title={record.ownerDomain === "kanei"
+                        ? "Kanei Trade"
+                        : record.ownerDomain === "seven" ? "Seven Chemical" : "未解決の見積所有者"}
+                    >
+                      {quoteOwnerBadge(record.ownerDomain)}
+                    </span>
                     <small>{record.resultHash ? `ID ${record.resultHash.slice(0, 8)}` : "手入力"}</small>
                   </td>
                   <td>{record.issueDate}</td>
@@ -390,9 +418,8 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
                       aria-label={`${record.quotationNumber} の状態`}
                       value={record.status}
                       disabled={!canManage(record)}
-                      title={canManage(record)
-                        ? (record.internalApproval ? undefined : "成約にするには、詳細画面で内部承認を完了してください")
-                        : "作成者または管理者のみ変更できます"}
+                      title={quotationOwnerActionReason(currentUser, record)
+                        || (record.internalApproval ? undefined : "成約にするには、詳細画面で内部承認を完了してください")}
                       onChange={(event) => void changeStatus(record, event.target.value as QuotationStatus)}
                     >
                       {manualStatusOptions(record).map((item) => (
@@ -416,7 +443,12 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
                     <button
                       className="button secondary small"
                       type="button"
-                      title={record.status === "expired" ? "新しい見積番号で更新発行します" : "修正見積として復元します"}
+                      disabled={!canPerformOwnerWorkflowAction(currentUser, record)}
+                      title={quotationOwnerActionReason(currentUser, record)
+                        || (record.status === "expired"
+                          ? "新しい見積番号で更新発行します"
+                          : "修正見積として復元します")}
+                      data-testid="history-restore"
                       onClick={() => restore(record)}
                     >
                       {record.status === "expired" ? "更新" : "復元"}
@@ -425,7 +457,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
                       className="button danger small"
                       type="button"
                       disabled={!canManage(record)}
-                      title={canManage(record) ? undefined : "作成者または管理者のみ削除できます"}
+                      title={quotationOwnerActionReason(currentUser, record) || undefined}
                       onClick={() => void remove(record)}
                     >削除</button>
                   </td>
@@ -451,6 +483,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
             onSendEmail={(record, draft) => sendQuotationEmail(record, draft)}
             onApproveGate={(record, gate) => { void approveGate(record, gate); }}
             canEditEmail={canManage(selectedRecord) && ["draft", "sent"].includes(selectedRecord.status)}
+            ownerActionBlockedReason={quotationOwnerActionReason(currentUser, selectedRecord)}
             editingEmail={editingEmailId === selectedRecord.id}
             editingEmailValue={editingEmail}
             onEditingEmailChange={setEditingEmail}
@@ -459,8 +492,8 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
             onSaveEmail={(record) => { void saveCustomerEmail(record); }}
             updatingEmail={updatingEmail}
             approvingGate={approvingGateId === selectedRecord.id}
-            canApproveInternally={currentUser.email.trim().toLowerCase() === "kim@kanei-trade.co.jp"}
-            canRecordCustomerApproval={isKaneiTradeUser(currentUser.email)}
+            canApproveInternally={selectedRecordOwnerActionsAllowed}
+            canRecordCustomerApproval={selectedRecordOwnerActionsAllowed}
             sendingEmail={sendingEmail}
             onSampleBulkUpdated={(updated) => {
               setRecords((old) => old.map((item) => (item.id === updated.id ? updated : item)));
@@ -515,6 +548,7 @@ function QuotationDetailModal({
   onSendEmail,
   onApproveGate,
   canEditEmail,
+  ownerActionBlockedReason,
   editingEmail,
   editingEmailValue,
   onEditingEmailChange,
@@ -535,6 +569,7 @@ function QuotationDetailModal({
   onSendEmail: (record: QuotationRecord, draft?: QuotationEmailDraft) => Promise<boolean>;
   onApproveGate: (record: QuotationRecord, gate: QuotationApprovalGate) => void;
   canEditEmail: boolean;
+  ownerActionBlockedReason: string;
   editingEmail: boolean;
   editingEmailValue: string;
   onEditingEmailChange: (value: string) => void;
@@ -751,13 +786,30 @@ function QuotationDetailModal({
     const value = record.payload[key];
     return typeof value === "string" && value.trim() ? value : fallback;
   };
-  const issuerName = payloadText("issuerName", "株式会社セブン化学");
-  const issuerEnglishName = payloadText("issuerEnglishName", "SEVEN CHEMICAL CO., LTD.");
-  const issuerPostalCode = payloadText("issuerPostalCode", "〒582-0017");
-  const issuerAddress = payloadText("issuerAddress", "大阪府柏原市太平寺1丁目12番1号");
-  const issuerTelephone = payloadText("issuerTelephone", "TEL 072-971-0726");
-  const issuerWebsite = payloadText("issuerWebsite", "https://7chemical.co.jp/");
-  const issuerRepresentative = payloadText("representative", "代表取締役社長 吾藤 靖");
+  const ownerProfile = quotationOwnerProfile(record.ownerDomain);
+  // Older records stored Seven defaults before ownership was persisted. Migrate
+  // only that exact fingerprint; a user-edited issuer remains custom evidence.
+  const LEGACY_SEVEN_DEFAULTS = {
+    issuerName: "株式会社セブン化学",
+    issuerEnglishName: "SEVEN CHEMICAL CO., LTD.",
+    issuerPostalCode: "〒582-0017",
+    issuerAddress: "大阪府柏原市太平寺1丁目12番1号",
+    issuerTelephone: "TEL 072-971-0726",
+    issuerFax: "FAX 072-971-5800",
+    representative: "代表取締役社長 吾藤 靖",
+    issuerWebsite: "https://7chemical.co.jp/",
+  } as const;
+  const ownerIssuerText = (payloadKey: keyof typeof LEGACY_SEVEN_DEFAULTS, fallback: string) => {
+    const stored = record.payload[payloadKey];
+    return stored === LEGACY_SEVEN_DEFAULTS[payloadKey] ? fallback : payloadText(payloadKey, fallback);
+  };
+  const issuerName = ownerIssuerText("issuerName", ownerProfile?.legalName ?? "未解決の見積所有者");
+  const issuerEnglishName = ownerIssuerText("issuerEnglishName", ownerProfile?.englishName ?? "");
+  const issuerPostalCode = ownerIssuerText("issuerPostalCode", ownerProfile?.postalCode ?? "");
+  const issuerAddress = ownerIssuerText("issuerAddress", ownerProfile?.address ?? "");
+  const issuerTelephone = ownerIssuerText("issuerTelephone", ownerProfile?.telephone ?? "");
+  const issuerRepresentative = ownerIssuerText("representative", ownerProfile?.representative ?? "");
+  const issuerWebsite = ownerIssuerText("issuerWebsite", ownerProfile?.website ?? "");
   const storedCostDifference = analysis.costUnit.minus(analysis.storedCostUnit);
   const profitVerificationDifference = finalProfit.minus(analysis.storedProfitUnit.times(analysis.quantity));
   const fitContentRefs = useRef<Array<HTMLDivElement | null>>([]);
@@ -1035,12 +1087,10 @@ function QuotationDetailModal({
                 data-testid="history-mail-link"
               >メール作成</button>
             ) : null}
-            {record.status === "draft" && !record.internalApproval && canRecordCustomerApproval ? (
+            {record.status === "draft" && !record.internalApproval ? (
               (() => {
                 const sampleBulkConfirmed = !sampleBulk?.required || sampleBulk.status === "confirmed";
-                const blockedReason = !canApproveInternally
-                  ? "内部承認はKimのみ実行できます。"
-                  : "";
+                const blockedReason = ownerActionBlockedReason;
                 return (
                   <>
                     <button
@@ -1065,23 +1115,37 @@ function QuotationDetailModal({
                 className="button small"
                 type="button"
                 disabled={sendingEmail || !record.internalApproval}
-                title={record.internalApproval
-                  ? "保存済み見積書PDFを添付して送信し、状態を送付済みにします。テスト設定では宛先が強制変更される場合があります。"
-                  : "送信前に内部承認が必要です。"}
+                title={ownerActionBlockedReason
+                  || (record.internalApproval
+                    ? "保存済み見積書PDFを添付して送信し、状態を送付済みにします。テスト設定では宛先が強制変更される場合があります。"
+                    : "送信前に内部承認が必要です。")}
                 onClick={() => onSendEmail(record)}
                 data-testid="history-auto-send"
               >
                 {sendingEmail ? "送信中..." : "メール送信（PDF添付）"}
               </button>
             ) : null}
-            {record.status === "sent" && record.internalApproval && !record.customerApproval && canRecordCustomerApproval ? (
-              <button
-                className="button small"
-                type="button"
-                disabled={approvingGate}
-                onClick={() => onApproveGate(record, "customerApproval")}
-                data-testid="history-customer-approval-record"
-              >{approvingGate ? "承認中..." : "顧客承認を記録"}</button>
+            {record.status === "sent" && record.internalApproval && !record.customerApproval ? (
+              <>
+                <button
+                  className="button small"
+                  type="button"
+                  disabled={approvingGate || !canRecordCustomerApproval}
+                  title={ownerActionBlockedReason || undefined}
+                  onClick={() => onApproveGate(record, "customerApproval")}
+                  data-testid="history-customer-approval-record"
+                >
+                  {approvingGate ? "承認中..." : "顧客承認を記録"}
+                </button>
+                {!canRecordCustomerApproval ? (
+                  <span
+                    className="approval-block-reason"
+                    data-testid="history-customer-approval-blocked-reason"
+                  >
+                    {ownerActionBlockedReason}
+                  </span>
+                ) : null}
+              </>
             ) : null}
             <button className="button secondary small" type="button" onClick={onClose}>閉じる</button>
           </div>
@@ -1172,7 +1236,7 @@ function QuotationDetailModal({
 
                 {/* ── 宛先・背景説明 ── */}
                 <section className="film-quote-recipient">
-                  <p className="to">株式会社セブン化学 御中</p>
+                  <p className="to">{ownerProfile?.legalName ?? "未解決の見積所有者"} 御中</p>
                   <p className="subject">貴社パウチ充填用フィルムにつきまして、下記の通りお見積りを申し上げます。</p>
                 </section>
 
@@ -1340,7 +1404,12 @@ function QuotationDetailModal({
                 <header className="sheet-header">
                   <div className="issuer">
                     <div className="issuer-logo">
-                      <span className="logo-mark large" aria-hidden="true">7</span>
+                      <span className="logo-mark large" aria-hidden="true">
+                        {ownerProfile?.ownerDomain === "seven" ? "7" : ownerProfile ? "K" : "?"}
+                      </span>
+                      <span data-testid="history-quote-owner" title={ownerProfile?.legalName ?? "未解決の見積所有者"}>
+                        {quoteOwnerBadge(record.ownerDomain)}
+                      </span>
                       <div>
                         <strong>{issuerName}</strong>
                         <small>{issuerEnglishName}</small>

@@ -4,7 +4,10 @@ import {
   listQuotations,
   MAX_QUOTATION_PDF_BYTES,
   QuotationOwnershipConflictError,
+  QuotationActionForbiddenError,
   QuotationCanonicalPdfExistsError,
+  QuotationOwnerPrefixMismatchError,
+  UnresolvedQuotationOwnerError,
   saveIssuedQuotation,
   validateQuotationInput,
 } from "@/lib/quotation-store";
@@ -16,10 +19,13 @@ import { activeMaterialWidthMm, type PurchaseOrderSnapshot } from "@/lib/purchas
 import { defaultParameters, GRAVURE_MASTER_CALCULATION_VERSION } from "@/lib/constants";
 import { defaultGravureRollParameters, GRAVURE_ROLL_COPPER_PLATE_MINIMUM_YEN } from "@/lib/gravure-roll";
 import { candidateSkuOrderLengthM } from "@/lib/print-recommendation";
-import type { QuotationRecord, QuotationRecordInput } from "@/lib/quotation-shared";
+import { quotationOwnerDomainOf, type QuotationRecord, type QuotationRecordInput } from "@/lib/quotation-shared";
 import { getSessionUser } from "@/lib/api-auth";
+import {
+  canMutateQuotation,
+  canReadQuotation,
+} from "@/lib/quotation-access";
 import { getQuotationByNumber } from "@/lib/quotation-store";
-import type { AuthenticatedUser } from "@/lib/auth-store";
 import { buildFilmQuotationFromRecord, buildQuotationPdfFileName } from "@/lib/film-quotation";
 import {
   GravureDurableDatabaseRequiredError,
@@ -324,7 +330,8 @@ export async function GET(request: Request): Promise<NextResponse> {
       limit: Number(url.searchParams.get("limit") ?? 100),
       creatorId: url.searchParams.has("creatorId") ? Number(url.searchParams.get("creatorId")) : undefined,
     });
-    return NextResponse.json({ records });
+    const visibleRecords = records.filter((record) => canReadQuotation(user, record));
+    return NextResponse.json({ records: visibleRecords });
   } catch {
     return NextResponse.json({ error: "quotation_list_failed" }, { status: 500 });
   }
@@ -379,7 +386,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const input = validateQuotationInput(rawPayload);
     if (!input) return NextResponse.json({ error: "invalid_quotation" }, { status: 400 });
     const existing = await getQuotationByNumber(input.quotationNumber);
-    if (existing && !canManageQuotation(user, existing.createdBy.id)) {
+    if (existing && !canMutateQuotation(user, existing)) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
     if (isGravureIssuance(input)) {
@@ -465,8 +472,20 @@ export async function POST(request: Request): Promise<NextResponse> {
       pdf: { saved: true, sha256: issued.pdfSha256, size: pdfData.byteLength },
     }, { status: 201 });
   } catch (error) {
+    if (error instanceof UnresolvedQuotationOwnerError) {
+      return NextResponse.json({
+        error: "unresolved_quote_owner",
+        message: "作成者の会社ドメインを解決できないため、見積書を発行できません。",
+      }, { status: 409 });
+    }
+    if (error instanceof QuotationOwnerPrefixMismatchError) {
+      return NextResponse.json({ error: "quotation_owner_prefix_mismatch" }, { status: 400 });
+    }
     if (error instanceof QuotationOwnershipConflictError) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+    if (error instanceof QuotationActionForbiddenError) {
+      return NextResponse.json({ error: "owner_action_forbidden" }, { status: 403 });
     }
     if (error instanceof QuotationCanonicalPdfExistsError) {
       return NextResponse.json({
@@ -479,8 +498,4 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
     return NextResponse.json({ error: "quotation_save_failed" }, { status: 500 });
   }
-}
-
-function canManageQuotation(user: AuthenticatedUser, creatorId: number): boolean {
-  return user.role === "admin" || user.id === creatorId;
 }

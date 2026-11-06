@@ -4,13 +4,16 @@ import {
   approveQuotationGate,
   getQuotation,
   QuotationApprovalTransitionError,
+  QuotationApprovalForbiddenError,
   SampleBulkConfirmationRequiredError,
   type QuotationApprovalGate,
 } from "@/lib/quotation-store";
 import {
-  canRecordCustomerApproval,
-  isInternalQuotationApprover,
+  canInternalApproveQuotation,
+  canManageQuotationCustomerRequest,
 } from "@/lib/quotation-access";
+import { UnresolvedQuotationOwnerError } from "@/lib/quotation-store";
+import { syncFilmOrdersFromQuotations } from "@/lib/film-orders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,22 +41,41 @@ export async function POST(request: Request, context: Context): Promise<NextResp
     }
     const record = await getQuotation(quotationId);
     if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
+    if (record.ownerDomain === "unresolved") {
+      return NextResponse.json({ error: "unresolved_quote_owner" }, { status: 409 });
+    }
 
-    if (gate === "internal" && !isInternalQuotationApprover(user.email)) {
+    if (
+      gate === "internal"
+      && !canInternalApproveQuotation(user.email, record.ownerDomain)
+    ) {
       return NextResponse.json({ error: "internal_approval_forbidden" }, { status: 403 });
     }
-    if (gate !== "internal" && !canRecordCustomerApproval(user.email)) {
+    if (
+      gate !== "internal"
+      && !canManageQuotationCustomerRequest(user.email, record.ownerDomain)
+    ) {
       return NextResponse.json({ error: "customer_approval_forbidden" }, { status: 403 });
     }
 
     const approved = await approveQuotationGate(quotationId, gate, user.id);
-    return NextResponse.json({ record: approved, gate, filmOrderSynced: false });
+    // Durable internal approval—not customer evidence—is the intake transfer trigger.
+    const filmOrderSynced = gate === "internal"
+      ? (await syncFilmOrdersFromQuotations(user.email)) > 0
+      : false;
+    return NextResponse.json({ record: approved, gate, filmOrderSynced });
   } catch (error) {
     if (error instanceof SampleBulkConfirmationRequiredError) {
       return NextResponse.json({ error: "sample_bulk_confirmation_required" }, { status: 409 });
     }
     if (error instanceof QuotationApprovalTransitionError) {
       return NextResponse.json({ error: "invalid_approval_transition" }, { status: 409 });
+    }
+    if (error instanceof UnresolvedQuotationOwnerError) {
+      return NextResponse.json({ error: "unresolved_quote_owner" }, { status: 409 });
+    }
+    if (error instanceof QuotationApprovalForbiddenError) {
+      return NextResponse.json({ error: "quote_owner_action_forbidden" }, { status: 403 });
     }
     return NextResponse.json({ error: "quotation_approval_failed" }, { status: 500 });
   }

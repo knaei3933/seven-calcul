@@ -59,7 +59,7 @@ function nextTime(seconds = 1): void {
 }
 
 function issueDateOf(date: Date = controlledClockStart): string {
-  return date.toISOString().slice(0, 10);
+  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" });
 }
 
 function addDays(days: number, date: Date = controlledClockStart): string {

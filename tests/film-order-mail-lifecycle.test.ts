@@ -95,10 +95,10 @@ beforeAll(async () => {
   await db.run(`
     INSERT INTO film_orders (
       quotation_id,order_number,quotation_number,product_name,customer_name,printing_method,procurement_route,
-      film_composition,order_length_m,web_width_mm,pouch_quantity,supplier_name,supplier_email,seven_contact_email,
+      film_composition,order_length_m,web_width_mm,pouch_quantity,supplier_name,supplier_email,seven_contact_email,buyer_domain,
       film_maker_id,film_maker_snapshot_json,supplier_resolution,status,customer_design_status,ship_to_status,
       purchase_order_json,ordered_at,created_at,updated_at
-    ) VALUES (?, 'LIFE-001','Q-LIFE-001','Lifecycle pouch','Lifecycle customer','gravure','K','PET/AL/PE','300','400','1000','Lifecycle Maker','maker@example.test','seven@727.co.jp',?,?, 'master_selected','ordered','not_required','confirmed','{}',?,?,?)
+    ) VALUES (?, 'LIFE-001','Q-LIFE-001','Lifecycle pouch','Lifecycle customer','gravure','K','PET/AL/PE','300','400','1000','Lifecycle Maker','maker@example.test','seven@727.co.jp','727.co.jp',?,?, 'master_selected','ordered','not_required','confirmed','{}',?,?,?)
   `, [quotation!.id, maker!.id, JSON.stringify(snapshot), now, now, now]);
   const inserted = await db.get<{ id: number }>("SELECT id FROM film_orders WHERE order_number='LIFE-001'");
   orderId = Number(inserted!.id);
@@ -115,10 +115,10 @@ beforeAll(async () => {
   await db.run(`
     INSERT INTO film_orders (
       quotation_id,order_number,quotation_number,product_name,customer_name,printing_method,procurement_route,
-      film_composition,order_length_m,web_width_mm,pouch_quantity,supplier_name,supplier_email,seven_contact_email,
+      film_composition,order_length_m,web_width_mm,pouch_quantity,supplier_name,supplier_email,seven_contact_email,buyer_domain,
       film_maker_id,film_maker_snapshot_json,supplier_resolution,status,customer_design_status,ship_to_status,
       purchase_order_json,ordered_at,created_at,updated_at
-    ) VALUES (?, 'LIFE-002','Q-LIFE-002','Resend pouch','Lifecycle customer','gravure','K','PET/AL/PE','300','400','1000','Lifecycle Maker','maker@example.test','seven@727.co.jp',?,?,'master_selected','ordered','not_required','confirmed','{}',?,?,?)
+    ) VALUES (?, 'LIFE-002','Q-LIFE-002','Resend pouch','Lifecycle customer','gravure','K','PET/AL/PE','300','400','1000','Lifecycle Maker','maker@example.test','seven@727.co.jp','727.co.jp',?,?,'master_selected','ordered','not_required','confirmed','{}',?,?,?)
   `, [resendQuotation!.id, maker!.id, JSON.stringify(snapshot), now, now, now]);
   const resendInserted = await db.get<{ id: number }>("SELECT id FROM film_orders WHERE order_number='LIFE-002'");
   resendOrderId = Number(resendInserted!.id);
@@ -128,10 +128,10 @@ beforeAll(async () => {
   await db.run(`
     INSERT INTO film_orders (
       quotation_id,order_number,quotation_number,product_name,customer_name,printing_method,procurement_route,
-      film_composition,order_length_m,web_width_mm,pouch_quantity,supplier_name,supplier_email,seven_contact_email,
+      film_composition,order_length_m,web_width_mm,pouch_quantity,supplier_name,supplier_email,seven_contact_email,buyer_domain,
       supplier_resolution,status,customer_design_status,ship_to_status,purchase_order_json,ordered_at,created_at,updated_at
     ) VALUES (?, 'LIFE-LEGACY-001','Q-LIFE-LEGACY','Legacy pouch','Lifecycle customer','gravure','K',
-              'PET/AL/PE','300','400','1000','Historical Maker','legacy-external@example.test','seven@727.co.jp',
+              'PET/AL/PE','300','400','1000','Historical Maker','legacy-external@example.test','seven@727.co.jp','727.co.jp',
               'legacy_unresolved','ordered','not_required','confirmed','{}',?,?,?)
   `, [legacyQuotation!.id, now, now, now]);
 });

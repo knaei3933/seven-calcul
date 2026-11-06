@@ -2799,6 +2799,11 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 3mm; }
 .eta-form input, .eta-form textarea { border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; min-height: 44px; }
 .eta-ok { color: #166534; font-weight: 800; margin: 0; }
 .eta-error { color: var(--danger); font-weight: 800; margin: 0; }
+.quote-owner-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.quote-owner-header img { max-height: 46px; width: auto; object-fit: contain; }
+.quote-owner-header p { margin: 0; }
+.quote-owner-footer { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.7; }
+.quote-owner-footer p { margin: 0; }
 .film-order-eta-badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; background: #ecfeff; border: 1px solid #a5f3fc; color: #155e75; padding: 2px 10px; font-size: 11.5px; font-weight: 900; }
 .film-order-eta-row { display: flex; align-items: center; gap: 8px; padding: 0 16px 10px; flex-wrap: wrap; }
 .film-order-eta-row small { color: var(--muted); font-size: 11.5px; }
@@ -4222,4 +4227,111 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 3mm; }
 @media (max-width: 720px) {
   .workflow-action-grid { grid-template-columns: 1fr; }
   .film-order-stage-chip { white-space: normal; }
+}
+.owner-badge { margin-left: 6px; }
+.owner-badge.owner-kanei { background: #e0f2fe; border-color: #7dd3fc; color: #075985; }
+.owner-badge.owner-seven { background: #ecfccb; border-color: #bef264; color: #3f6212; }
+.owner-badge.owner-unresolved { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
+.intake-table { min-width: 1280px; }
+.intake-table td { vertical-align: top; }
+.intake-actions { display: flex; flex-direction: column; align-items: end; gap: 4px; }
+.intake-action { min-height: 30px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; font-size: 11.5px; background: #f8fafc; color: #64748b; }
+.intake-action.authorized { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.intake-action:disabled { cursor: not-allowed; opacity: .78; }
+.intake-pagination { display: flex; justify-content: end; align-items: center; gap: 10px; margin-top: 10px; }
+.intake-pagination button { min-height: 36px; border: 1px solid var(--line); border-radius: 8px; background: white; padding: 0 10px; font: inherit; }
+.intake-pagination button:disabled { color: #94a3b8; cursor: not-allowed; }
+/* Simulator result metrics and quote price cards */
+.price-highlight {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.8mm;
+  align-items: stretch;
+}
+.price-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: .8mm;
+  min-width: 0;
+  height: 100%;
+  min-height: 24mm;
+  padding: 1.4mm;
+  border: 1px solid #e2e8f0;
+  border-radius: 1mm;
+  background: white;
+  box-sizing: border-box;
+}
+.price-card .price-label {
+  min-height: 0;
+  margin-bottom: .2mm;
+  font-size: 10pt;
+  color: #64748b;
+  font-weight: 700;
+}
+.price-card .price-condition {
+  min-height: 0;
+  margin: 0 0 .8mm;
+  font-size: 10pt;
+  color: #64748b;
+  line-height: 1.25;
+  font-weight: 700;
+}
+.price-value {
+  margin-top: auto;
+  display: flex;
+  align-items: baseline;
+  gap: .8mm;
+  min-width: 0;
+  line-height: 1;
+}
+.price-unit {
+  flex: 0 0 auto;
+}
+ .price-card .price-value,
+ .price-card .price-value * {
+   font-size: 16.8pt;
+   color: #17223a;
+   font-weight: 900;
+   line-height: 1;
+ }
+.result-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.result-metric-card {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+.result-metric-card span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.result-metric-card strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.2;
+}
+.result-metric-card.metric-accent {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+@media (max-width: 900px) {
+  .price-highlight {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .result-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

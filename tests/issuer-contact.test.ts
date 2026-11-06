@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { issuerContactForUser } from "@/lib/issuer-contact";
 
 describe("issuer contact", () => {
-  it("uses the Shape Pouch contact for Kim without a company line", () => {
+  it("uses the Shape Pouch contact and Kanei issuer identity for Kim", () => {
     expect(issuerContactForUser({
       email: "kim@kanei-trade.co.jp",
       name: "Kim Admin",
     })).toEqual({
-      companyName: "",
+      companyName: "金井貿易株式会社",
       contactName: "Kim Admin",
       email: "shapepouch@package-lab.com",
       telephone: "TEL 050-3613-9673",

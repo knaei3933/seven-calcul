@@ -3,10 +3,11 @@ import { getSessionUser } from "@/lib/api-auth";
 import {
   getQuotation,
   QuotationApprovalTransitionError,
+  QuotationActionForbiddenError,
   SampleBulkConfirmationRequiredError,
   updateQuotationSampleBulkConfirmation,
 } from "@/lib/quotation-store";
-import { isInternalQuotationApprover } from "@/lib/quotation-access";
+import { canPerformOwnerWorkflowAction, canReadQuotation } from "@/lib/quotation-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,19 +24,27 @@ export async function GET(_request: Request, context: Context): Promise<NextResp
   }
   const record = await getQuotation(quotationId);
   if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
+  if (!canReadQuotation(user, record)) {
+    return NextResponse.json({ error: "sample_bulk_forbidden" }, { status: 403 });
+  }
+  if (record.ownerDomain === "unresolved") {
+    return NextResponse.json({ error: "unresolved_quote_owner" }, { status: 409 });
+  }
   return NextResponse.json({ confirmation: record.payload.sampleBulkConfirmation ?? null });
 }
 
 export async function POST(request: Request, context: Context): Promise<NextResponse> {
   const user = await getSessionUser(request);
   if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
-  if (!isInternalQuotationApprover(user.email)) {
-    return NextResponse.json({ error: "sample_bulk_confirmation_forbidden" }, { status: 403 });
-  }
   const { id } = await context.params;
   const quotationId = Number(id);
   if (!Number.isInteger(quotationId) || quotationId <= 0) {
     return NextResponse.json({ error: "invalid_quotation_id" }, { status: 400 });
+  }
+  const record = await getQuotation(quotationId);
+  if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
+  if (!canPerformOwnerWorkflowAction(user, record)) {
+    return NextResponse.json({ error: "sample_bulk_confirmation_forbidden" }, { status: 403 });
   }
   try {
     const body = await request.json() as {
@@ -58,6 +67,9 @@ export async function POST(request: Request, context: Context): Promise<NextResp
   } catch (error) {
     if (error instanceof QuotationApprovalTransitionError) {
       return NextResponse.json({ error: "invalid_sample_bulk_transition" }, { status: 409 });
+    }
+    if (error instanceof QuotationActionForbiddenError) {
+      return NextResponse.json({ error: "sample_bulk_confirmation_forbidden" }, { status: 403 });
     }
     if (error instanceof SampleBulkConfirmationRequiredError) {
       return NextResponse.json({ error: "sample_bulk_confirmation_required" }, { status: 409 });

@@ -137,7 +137,7 @@ beforeAll(async () => {
   await saveQuotationPdf(secondQuote.quotationId, Buffer.from("%PDF-1.7\nG011"), "portal-g011.pdf");
   const { saveQuotation } = await import("@/lib/quotation-store");
   await saveQuotation({
-    quotationNumber: "S7-G011-INTERNAL-001",
+    quotationNumber: "KT-G011-INTERNAL-001",
     status: "draft",
     issueDate: "2026-10-23",
     validUntil: "2026-11-22",
@@ -239,12 +239,14 @@ describe("portal quote admin projection", () => {
     expect(oldest.pdfAvailable).toBe(false);
     expect(newest.status).toBe("draft");
     expect(oldest.status).toBe("draft");
+    expect(newest.ownerDomain).toBe("kanei");
     expect(Object.keys(newest).sort()).toEqual([
       "customer",
       "customerCode",
       "displayedTotals",
       "issueDate",
       "mappingCreatedAt",
+      "ownerDomain",
       "pdfAvailable",
       "productName",
       "publicId",
