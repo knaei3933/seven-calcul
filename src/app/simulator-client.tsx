@@ -2999,7 +2999,7 @@ export default function QuotationPage({
                         <div>
                           <div>パウチ単価（金型・銅版除く）：{formatCurrency(quotationPreview.display.pouchPricePerPiece, 2)}</div>
                           <div>総費用込単価：{formatCurrency(quotationPreview.display.pricePerPiece, 2)}</div>
-                          <span className="help">（総原価 {formatCurrency(quotationPreview.totalCostPerPiece.toString(), 2)} /枚）</span>
+                          <span className="help">（参考費用 {formatCurrency(quotationPreview.totalCostPerPiece.toString(), 2)} /枚）</span>
                         </div>
                       </>
                     ) : "-"}

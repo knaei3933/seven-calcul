@@ -14,6 +14,7 @@ import {
   type CustomerDesignStatus,
   type FilmOrderStatus,
   type FilmOrderView,
+  type DeliveryNoteDraft,
 } from "@/lib/film-order-shared";
 import {
   FILM_ORDER_WORKFLOW_STAGES,
@@ -1981,6 +1982,7 @@ function NextStepPanel({
               <a key={document.url} href={document.url} target="_blank" rel="noreferrer">{document.name}</a>
             ))}
           </div>
+          {order.po_sent_at ? <DeliveryNotePanel order={order} busy={busy} isKanei={isKanei} /> : null}
           {isKanei && !order.po_sent_at ? (
             <SupplierOrderNoteForm
               key={`${order.id}-${order.supplier_order_note ?? ""}`}
@@ -2264,6 +2266,110 @@ function FilmReceiptConfirmForm({
       </label>
       <button className="button" type="submit" disabled={busy}>{busy ? "確認中..." : "フィルムを受領確認する"}</button>
     </form>
+  );
+}
+
+function DeliveryNotePanel({
+  order,
+  busy,
+  isKanei,
+}: {
+  order: FilmOrderView;
+  busy: boolean;
+  isKanei: boolean;
+}) {
+  const [draft, setDraft] = useState<DeliveryNoteDraft>(() => ({
+    ...(order.deliveryNoteDraft ?? {}),
+  }));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const field = (key: keyof DeliveryNoteDraft, label: string, rows = 1) => (
+    <label>
+      {label}
+      {rows === 1 ? (
+        <input value={draft[key]} onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))} />
+      ) : (
+        <textarea value={draft[key]} rows={rows} onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))} />
+      )}
+    </label>
+  );
+
+  const json = () => JSON.stringify(draft);
+  const save = async (): Promise<boolean> => {
+    setSaving(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/film-orders/${order.id}/delivery-note-draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: json(),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "delivery_note_save_failed");
+      return true;
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "納品書下書きを保存できませんでした。");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const pdf = async () => {
+    if (!(await save())) return;
+    const response = await fetch(`/api/film-orders/${order.id}/delivery-note-pdf`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: json(),
+    });
+    if (!response.ok) {
+      setMessage("納品書PDFを作成できませんでした。");
+      return;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${order.order_number}_納品書.pdf`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setMessage("納品書PDF（A4）を作成しました。");
+  };
+
+  return (
+    <section className="film-order-section" aria-label="納品書下書き" data-testid={`delivery-note-${order.id}`}>
+      <div className="film-order-section-head">
+        <h3>納品書下書き（金井貿易 → セブン化学）</h3>
+        {order.delivery_note_updated_at ? (
+          <small>更新: {order.delivery_note_updated_by} / {new Date(order.delivery_note_updated_at).toLocaleString("ja-JP")}</small>
+        ) : null}
+      </div>
+      <div className="film-order-form delivery-note-grid">
+        {field("recipientName", "納品先")}
+        {field("senderName", "発行者")}
+        {field("issueDate", "発行日")}
+        {field("arrivalEstimateDate", "到着見込")}
+        {field("productName", "品名")}
+        {field("specification", "仕様")}
+        {field("quantity", "数量")}
+        {field("filmLength", "フィルム長")}
+        {field("remarks", "備考", 3)}
+      </div>
+      {message ? <p className="film-order-message" role="status">{message}</p> : null}
+      {isKanei ? (
+        <div className="film-order-inline-actions">
+          <button className="button secondary small" type="button" disabled={busy || saving} onClick={() => void save()}>
+            {saving ? "保存中..." : "納品書下書きを保存"}
+          </button>
+          <button className="button small" type="button" disabled={busy || saving} onClick={() => void pdf()}>
+            納品書PDF出力（A4）
+          </button>
+        </div>
+      ) : (
+        <p className="help">納品書編集は金井貿易側のみ可能です。</p>
+      )}
+    </section>
   );
 }
 

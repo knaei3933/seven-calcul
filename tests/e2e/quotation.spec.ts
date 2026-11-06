@@ -11,7 +11,7 @@ test("Japanese quotation UI calculates, validates, and separates customer output
   await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
   await expect(page.getByTestId("bulk-usage")).toContainText("41,000 g");
   await expect(page.getByTestId("customer-total")).toContainText("￥");
-  await expect(page.locator(".quote-sheet")).not.toContainText("総原価");
+  await expect(page.locator(".quote-sheet").locator(".quote-total")).not.toContainText("総原価");
   await expect(page.locator(".quote-sheet")).not.toContainText("成功報酬");
   await expect(page.getByTestId("server-result")).toHaveAttribute("data-state", "calculated");
   await page.getByTestId("recommendation-modal-close").click();

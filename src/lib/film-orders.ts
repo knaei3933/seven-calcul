@@ -25,6 +25,7 @@ import {
   type ProductionPlanTracking,
   type ProductionPlanStatus,
   type DeliveryDocument,
+  type DeliveryNoteDraft,
   type FilmDeliveryTracking,
   type ShipToStatus,
   type ShipToTracking,
@@ -465,6 +466,9 @@ const BASE_SCHEMA = `
     film_received_at TEXT,
     film_received_note TEXT NOT NULL DEFAULT '',
     film_received_by_email TEXT NOT NULL DEFAULT '',
+    delivery_note_draft_json TEXT NOT NULL DEFAULT '{}',
+    delivery_note_updated_at TEXT,
+    delivery_note_updated_by TEXT NOT NULL DEFAULT '',
     ship_to_destination_id BIGINT,
     ship_to_status TEXT NOT NULL DEFAULT 'not_provided' CHECK(ship_to_status IN ('not_provided','registered','confirmed')),
     ship_to_label TEXT NOT NULL DEFAULT '',
@@ -1454,6 +1458,9 @@ async function getDatabase(): Promise<SqlClient> {
       ["film_orders_film_received_at", "ALTER TABLE film_orders ADD COLUMN film_received_at TEXT"],
       ["film_orders_film_received_note", "ALTER TABLE film_orders ADD COLUMN film_received_note TEXT NOT NULL DEFAULT ''"],
       ["film_orders_film_received_by_email", "ALTER TABLE film_orders ADD COLUMN film_received_by_email TEXT NOT NULL DEFAULT ''"],
+      ["film_orders_delivery_note_draft", "ALTER TABLE film_orders ADD COLUMN delivery_note_draft_json TEXT NOT NULL DEFAULT '{}'"],
+      ["film_orders_delivery_note_updated_at", "ALTER TABLE film_orders ADD COLUMN delivery_note_updated_at TEXT"],
+      ["film_orders_delivery_note_updated_by", "ALTER TABLE film_orders ADD COLUMN delivery_note_updated_by TEXT NOT NULL DEFAULT ''"],
       ["film_orders_ship_to_destination_id", "ALTER TABLE film_orders ADD COLUMN ship_to_destination_id BIGINT"],
       ["film_orders_ship_to_status", "ALTER TABLE film_orders ADD COLUMN ship_to_status TEXT NOT NULL DEFAULT 'not_provided'"],
       ["film_orders_ship_to_label", "ALTER TABLE film_orders ADD COLUMN ship_to_label TEXT NOT NULL DEFAULT ''"],
@@ -1919,6 +1926,33 @@ function mapOrder(row: FilmOrderRow): FilmOrder {
     updatedAt: row.production_plan_updated_at,
     updatedBy: row.production_plan_updated_by,
   };
+  let deliveryNoteDraft: DeliveryNoteDraft = {
+    recipientName: "株式会社セブン化学",
+    senderName: "金井貿易株式会社",
+    issueDate: "",
+    arrivalEstimateDate: "",
+    productName: row.product_name,
+    specification: `${row.film_composition}${row.web_width_mm ? ` / ${row.web_width_mm}mm` : ""}`,
+    quantity: row.pouch_quantity,
+    filmLength: row.order_length_m,
+    remarks: "",
+  };
+  try {
+    const parsed = JSON.parse(row.delivery_note_draft_json || "{}");
+    deliveryNoteDraft = {
+      recipientName: typeof parsed.recipientName === "string" ? parsed.recipientName : deliveryNoteDraft.recipientName,
+      senderName: typeof parsed.senderName === "string" ? parsed.senderName : deliveryNoteDraft.senderName,
+      issueDate: typeof parsed.issueDate === "string" ? parsed.issueDate : "",
+      arrivalEstimateDate: typeof parsed.arrivalEstimateDate === "string" ? parsed.arrivalEstimateDate : "",
+      productName: typeof parsed.productName === "string" && parsed.productName ? parsed.productName : deliveryNoteDraft.productName,
+      specification: typeof parsed.specification === "string" && parsed.specification ? parsed.specification : deliveryNoteDraft.specification,
+      quantity: typeof parsed.quantity === "string" && parsed.quantity ? parsed.quantity : deliveryNoteDraft.quantity,
+      filmLength: typeof parsed.filmLength === "string" && parsed.filmLength ? parsed.filmLength : deliveryNoteDraft.filmLength,
+      remarks: typeof parsed.remarks === "string" ? parsed.remarks : "",
+    };
+  } catch {
+    // A corrupt draft remains editable from its safe defaults.
+  }
   return {
     ...rest,
     makerLanguage,
@@ -1931,6 +1965,7 @@ function mapOrder(row: FilmOrderRow): FilmOrder {
     productionPlan,
     delivery,
     shipTo,
+    deliveryNoteDraft,
   };
 }
 
@@ -2064,6 +2099,43 @@ export async function getFilmOrder(id: number): Promise<FilmOrderView | null> {
   const shipToDestinations = await listFilmOrderShipToDestinations(db, id);
   const order = mapOrder(row);
   return { ...order, files, events, shipTo: { ...order.shipTo, destinations: shipToDestinations } };
+}
+
+export async function saveDeliveryNoteDraft(
+  id: number,
+  input: Record<string, unknown>,
+  actorEmail: string,
+): Promise<FilmOrderView> {
+  if (!isKaneiTradeUser(actorEmail)) throw new Error("film_order_actor_forbidden");
+  const db = await getDatabase();
+  const row = await db.get<FilmOrderRow>("SELECT * FROM film_orders WHERE id = ?", [id]);
+  if (!row) throw new Error("film_order_not_found");
+  if (!row.po_sent_at) throw new Error("invalid_status_transition");
+  const str = (key: string, max = 500): string => {
+    const value = input[key];
+    if (value == null) return "";
+    if (typeof value !== "string") throw new Error("invalid_delivery_note");
+    return value.slice(0, max).trim();
+  };
+  const draft: DeliveryNoteDraft = {
+    recipientName: str("recipientName") || "株式会社セブン化学",
+    senderName: str("senderName") || "金井貿易株式会社",
+    issueDate: str("issueDate", 10),
+    arrivalEstimateDate: str("arrivalEstimateDate", 10),
+    productName: str("productName", 300),
+    specification: str("specification", 1000),
+    quantity: str("quantity", 100),
+    filmLength: str("filmLength", 100),
+    remarks: str("remarks", 4000),
+  };
+  const now = new Date().toISOString();
+  await db.run(`
+    UPDATE film_orders SET delivery_note_draft_json=?, delivery_note_updated_at=?, delivery_note_updated_by=?, updated_at=?, updated_by_email=?
+    WHERE id=? AND po_sent_at IS NOT NULL
+  `, [JSON.stringify(draft), now, actorEmail, now, actorEmail, id]);
+  const saved = await getFilmOrder(id);
+  if (!saved) throw new Error("film_order_update_failed");
+  return saved;
 }
 
 interface ShipToDestinationDbRow {

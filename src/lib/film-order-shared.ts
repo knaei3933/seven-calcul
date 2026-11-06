@@ -218,6 +218,9 @@ export interface FilmOrderRow {
   updated_at: string;
   created_by_email: string;
   updated_by_email: string;
+  delivery_note_draft_json: string;
+  delivery_note_updated_at: string | null;
+  delivery_note_updated_by: string;
 }
 
 export interface CustomerDesignTracking {
@@ -354,7 +357,20 @@ export type FilmOrder = FilmOrderRow & {
   productionPlan: ProductionPlanTracking;
   delivery: FilmDeliveryTracking;
   shipTo: ShipToTracking;
+  deliveryNoteDraft: DeliveryNoteDraft;
 };
+
+export interface DeliveryNoteDraft {
+  recipientName: string;
+  senderName: string;
+  issueDate: string;
+  arrivalEstimateDate: string;
+  productName: string;
+  specification: string;
+  quantity: string;
+  filmLength: string;
+  remarks: string;
+}
 
 export interface ProductionPlanTracking {
   status: ProductionPlanStatus;

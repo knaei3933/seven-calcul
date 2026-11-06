@@ -4,7 +4,7 @@ const routes = [
   { path: "/", heading: "パウチ参考原価・販売価格シミュレーター" },
   { path: "/quote", heading: "見積書発行" },
   { path: "/history", heading: "見積履歴" },
-  { path: "/film-orders", heading: "フィルム発注管理" },
+  { path: "/film-orders", heading: "データ受入" },
   { path: "/film-makers", heading: "フィルムメーカー管理" },
   { path: "/film-makers/legacy-reconciliation", heading: "レガシー供給者整理" },
   { path: "/settings/mail", heading: "メール送信設定" },
@@ -62,14 +62,11 @@ test("audits film-maker create, edit, deactivate, and reconciliation guard", asy
   await expect(page.getByText("正規化メール・調達ルート・印刷方式が有効メーカーと完全一致する場合のみ提案します。提案は代入ではありません。")).toBeVisible();
 });
 
-test("audits empty film-order shell, workflow terminology, and role disclosure", async ({ page }) => {
+test("audits data-intake shell and workflow terminology", async ({ page }) => {
   await page.goto("/film-orders");
-  await expect(page.getByRole("heading", { name: "フィルム発注管理" })).toBeVisible();
-  await expect(page.getByText("セブン化学").first()).toBeVisible();
-  await expect(page.getByText("金井貿易側").first()).toBeVisible();
-  await expect(page.getByText("成約見積の所有会社がフィルム発注の buyer になります。Seven-origin（S7）はセブン化学、Kanei-origin（KT）は金井貿易側が発注側操作を担い、金井貿易側がフィルム発注・supplier approval を行います。")).toBeVisible();
-  await expect(page.getByText("校正データ登録・金井貿易側承認・フィルムメーカー発注・納期")).toBeVisible();
-  const orderButton = page.locator("[data-testid^='film-order-']").first();
-  const emptyMessage = page.getByText("該当する発注はありません").first();
-  await expect(orderButton.or(emptyMessage)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "データ受入" })).toBeVisible();
+  await expect(page.getByText("内部承認済み見積と既存フィルム発注の共有進捗です。")).toBeVisible();
+  await expect(page.getByText("Six件").or(page.getByText(/\d+ 件/)).first()).toBeVisible();
+  await expect(page.getByTestId("intake-table").or(page.getByText("対象データはありません"))).toBeVisible();
+  await expect(page.getByRole("button", { name: "データ入稿" }).first()).toBeVisible();
 });

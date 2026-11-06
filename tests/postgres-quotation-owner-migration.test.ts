@@ -172,6 +172,6 @@ describe.skipIf(!sourceDatabaseUrl || !databaseUrl)("PostgreSQL quotation owner 
     const issued = await saveIssuedQuotation(
       input, creator!.id, "user", Buffer.from("%PDF-pg-owner", "utf8"), "pg-owner.pdf", null,
     );
-    expect(issued.record.ownerDomain).toBe("kanei");
+    expect(issued.record.ownerDomain).toBe("seven");
   });
 });

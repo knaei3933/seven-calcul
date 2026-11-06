@@ -21,6 +21,7 @@ if (databaseUrl) {
   process.env.ADMIN_EMAIL = "pg-admin@integration.test";
   process.env.ADMIN_PASSWORD = "pg-admin-password";
   process.env.ADMIN_NAME = "PG Admin";
+  process.env.FILM_MAIL_SENDER_EMAIL = "workflow-sender@example.test";
 }
 
 // POUCH_TEST_DATABASE_URL が設定されている環境（ローカル検証・CI）でのみ実行する。
@@ -793,6 +794,15 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
   it("runs SQLite-equivalent prepare/cancel/concurrent-confirm lifecycle on PostgreSQL", { timeout: 120_000 }, async () => {
     const { getSqlClient } = await import("@/lib/db");
     const db = await getSqlClient("quotations");
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS mail_settings (
+        id INTEGER PRIMARY KEY CHECK(id = 1),
+        settings_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        updated_by TEXT NOT NULL DEFAULT ''
+      )
+    `);
+    await db.run("DELETE FROM mail_settings WHERE id = 1");
     const now = new Date().toISOString();
     await pool.query(`
       INSERT INTO quotations (
@@ -814,9 +824,9 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
       INSERT INTO film_orders (
         quotation_id,order_number,quotation_number,product_name,customer_name,printing_method,procurement_route,
         film_composition,order_length_m,web_width_mm,pouch_quantity,supplier_name,supplier_email,seven_contact_email,
-        film_maker_id,film_maker_snapshot_json,supplier_resolution,status,customer_design_status,ship_to_status,
+        film_maker_id,film_maker_snapshot_json,supplier_resolution,status,customer_design_status,ship_to_status,buyer_domain,
         purchase_order_json,ordered_at,created_at,updated_at
-      ) VALUES (?, 'F-202611-PG-LIFE-001','Q-PG-LIFE-001','PG lifecycle pouch','PG customer','gravure','K','PET/AL/PE','300','400','1000','PG Film',?, 'seven@727.co.jp',?,?,'master_selected','ordered','not_required','confirmed','{}',?,?,?)
+      ) VALUES (?, 'F-202611-PG-LIFE-001','Q-PG-LIFE-001','PG lifecycle pouch','PG customer','gravure','K','PET/AL/PE','300','400','1000','PG Film',?, 'seven@727.co.jp',?,?,'master_selected','ordered','not_required','confirmed','727.co.jp','{}',?,?,?)
     `, [quotation!.id, maker!.email, maker!.id, JSON.stringify(snapshot), now, now, now]);
     const order = await db.get<{ id: number }>(
       "SELECT id FROM film_orders WHERE order_number='F-202611-PG-LIFE-001'",

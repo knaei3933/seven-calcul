@@ -13,7 +13,8 @@ process.env.FILM_EXTERNAL_LINK_ORIGINS = "http://localhost:3000";
 process.env.SEVEN_CHEMICAL_CONTACT_EMAIL = "seven-order@727.co.jp";
 
 const { createUser, closeDatabaseForTest } = await import("@/lib/auth-store");
-const { runFilmOrderAction, syncFilmOrdersFromQuotations, getDatabaseForFilmMakerStore, decideCustomerProofReview } = await import("@/lib/film-orders");
+const { runFilmOrderAction, syncFilmOrdersFromQuotations, getDatabaseForFilmMakerStore, decideCustomerProofReview, saveDeliveryNoteDraft } = await import("@/lib/film-orders");
+const { generateFilmDeliveryNotePdf } = await import("@/lib/film-delivery-note-pdf");
 const { saveQuotation, getDatabaseForTest } = await import("@/lib/quotation-store");
 const { createFilmMaker } = await import("@/lib/film-maker-store");
 const { saveCustomer } = await import("@/lib/customer-store");
@@ -206,5 +207,23 @@ describe("G007 editable Kanei PO mail", () => {
     expect(makerMail?.text).not.toContain("{issued-after-send}");
     expect(makerMail?.text).toMatch(/\/film-orders\/purchase-order\//u);
     expect(makerMail?.text).toMatch(/\/film-orders\/eta\//u);
+
+    const draft = await saveDeliveryNoteDraft(id, {
+      recipientName: "株式会社セブン化学",
+      senderName: "金井貿易株式会社",
+      issueDate: "2026-11-07",
+      arrivalEstimateDate: "2026-11-20",
+      productName: "G007 Pouch",
+      specification: "PET12+AL7+PET12+LLDPE50 / 476mm",
+      quantity: "10000",
+      filmLength: "500",
+      remarks: "到着後は充填工程へ引き継ぎます。",
+    }, KANEI);
+    expect(draft.deliveryNoteDraft).toMatchObject({ recipientName: "株式会社セブン化学", arrivalEstimateDate: "2026-11-20" });
+    await expect(saveDeliveryNoteDraft(id, { recipientName: "禁止" }, SEVEN))
+      .rejects.toThrow("film_order_actor_forbidden");
+    const notePdf = await generateFilmDeliveryNotePdf(draft.deliveryNoteDraft, "S7-G007-PO-A");
+    expect(Buffer.from(notePdf).subarray(0, 5).toString()).toBe("%PDF-");
+    expect(notePdf.byteLength).toBeGreaterThan(1000);
   });
 });
