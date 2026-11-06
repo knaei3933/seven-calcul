@@ -537,7 +537,7 @@ const REQUIRED_LINKS: Record<
     seven: ["seven_order_summary"],
   },
   link_resend: {
-    maker: ["maker_proof_upload"],
+    maker: ["maker_purchase_order", "maker_eta_report", "maker_proof_upload"],
     seven: ["seven_order_summary"],
     kanei: ["kanei_order_management"],
     customer: ["customer_proof_review"],

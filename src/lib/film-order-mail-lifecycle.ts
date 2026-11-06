@@ -541,6 +541,8 @@ async function projectLifecycleMail(context: LifecycleMailProjectionContext): Pr
     productName: context.raw.product_name,
     productSpecification: context.command.action === "send-po" && context.command.supplierOrderNote
       ? `${specificationOf(context.raw)}; ${context.command.supplierOrderNote}`
+      : context.command.action === "resend-supplier-links" && context.command.supplierMessage
+        ? `${specificationOf(context.raw)}; ${context.command.supplierMessage}`
       : specificationOf(context.raw),
     workflowStage: filmOrderStageOf(context.raw),
     recipients: {
@@ -788,9 +790,11 @@ export async function prepareFilmOrderMail(
       }
     }
     if (event === "supplier_purchase_order" || event === "link_resend") {
-      await stageToken("maker_purchase_order", "supplier_po", `${command.origin}/film-orders/purchase-order/__TOKEN__`, 90, makerRecipient);
+      if (event === "supplier_purchase_order" || raw.po_sent_at) {
+        await stageToken("maker_purchase_order", "supplier_po", `${command.origin}/film-orders/purchase-order/__TOKEN__`, 90, makerRecipient);
+      }
     }
-    if (event === "supplier_purchase_order" || event === "eta_update") {
+    if (event === "supplier_purchase_order" || event === "eta_update" || (event === "link_resend" && raw.po_sent_at)) {
       await stageToken("maker_eta_report", "maker_eta", `${command.origin}/film-orders/eta/__TOKEN__`, 14, makerRecipient);
     }
     if (event === "customer_design_received") {
