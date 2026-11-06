@@ -2432,6 +2432,8 @@ export interface SupplierOrderMailPreview {
   route: "order";
   subject: string;
   body: string;
+  editableSubject: string;
+  editableBody: string;
   etaUrl: string;
   purchaseOrderUrl: string;
 }
@@ -2521,22 +2523,27 @@ export async function buildSupplierPurchaseOrderPreview(
   order: FilmOrder,
   origin: string,
   supplierOrderNote: string,
+  mailSubject?: string,
+  mailBody?: string,
 ): Promise<SupplierOrderMailPreview> {
   if (!order.makerEmail?.trim() || !order.makerLanguage) throw new Error("film_maker_resolution_required");
   const destination = { to: order.makerEmail.trim(), route: "order" as const };
   const etaUrl = `${origin}/film-orders/eta/{issued-after-send}`;
   const purchaseOrderUrl = `${origin}/film-orders/purchase-order/{issued-after-send}`;
   const parts = buildSupplierPurchaseOrderMailParts(order, etaUrl, purchaseOrderUrl, supplierOrderNote, order.makerLanguage);
+  const defaultSubject = withRecipientSubjectPrefix({
+    to: destination.to ?? "",
+    subject: parts.subject,
+    body: parts.supplierText,
+    audience: "supplier",
+  });
   return {
     to: destination.to,
     route: destination.route,
-    subject: withRecipientSubjectPrefix({
-      to: destination.to ?? "",
-      subject: parts.subject,
-      body: parts.supplierText,
-      audience: "supplier",
-    }),
-    body: parts.supplierText,
+    subject: mailSubject?.trim() || defaultSubject,
+    body: mailBody?.trim() || parts.supplierText,
+    editableSubject: mailSubject ?? defaultSubject,
+    editableBody: mailBody ?? parts.supplierText,
     etaUrl,
     purchaseOrderUrl,
   };
@@ -3035,6 +3042,8 @@ async function executeFilmOrderLifecycle(
     evidence: trimParam(params.evidence, 2000) || undefined,
     offlineReason: trimParam(params.offlineReason, 2000) || undefined,
     supplierOrderNote: trimParam(params.supplierOrderNote, 4000) ?? undefined,
+    mailSubject: trimParam(params.mailSubject, 500) ?? undefined,
+    mailBody: typeof params.mailBody === "string" ? params.mailBody.slice(0, 20000) : undefined,
     customerMessage: trimParam(params.customerMessage, 2000) ?? undefined,
     customerEmail: params.customerEmail ? String(params.customerEmail) : customerEmail,
     decision: params.decision === "approve" || params.decision === "correction" ? params.decision : undefined,
@@ -3156,6 +3165,10 @@ export async function runFilmOrderAction(
     shipToNote?: unknown;
     saveShipToMaster?: unknown;
     supplierOrderNote?: unknown;
+    mailSubject?: unknown;
+    mailBody?: unknown;
+    finalFileName?: unknown;
+    finalFileUrl?: unknown;
     guideAcknowledged?: unknown;
     productionPlanStartDate?: unknown;
     productionPlanEndDate?: unknown;
@@ -3553,6 +3566,8 @@ export async function runFilmOrderAction(
       typeof params.supplierOrderNote === "string"
         ? trimParam(params.supplierOrderNote, 4000)
         : order.supplier_order_note,
+      typeof params.mailSubject === "string" ? trimParam(params.mailSubject, 500) : undefined,
+      typeof params.mailBody === "string" ? params.mailBody.slice(0, 20000) : undefined,
     );
     return { order: current, preview };
   } else if (action === "set-customer-design-not-required") {

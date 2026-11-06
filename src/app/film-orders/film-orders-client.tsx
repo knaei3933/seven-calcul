@@ -1951,7 +1951,10 @@ function NextStepPanel({
               initialNote={order.supplier_order_note ?? ""}
               busy={busy}
               onSave={(note) => void onRun({ action: "update-supplier-order-note", supplierOrderNote: note }, "発注時メモを保存しました。")}
-              onSend={(note) => void onRun({ action: "send-po", supplierOrderNote: note }, "発注書をフィルムメーカーへ送信しました。納期入力フォームを案内しました。")}
+              onSend={(note, mailSubject, mailBody) => void onRun(
+                { action: "send-po", supplierOrderNote: note, mailSubject, mailBody },
+                "発注書をフィルムメーカーへ送信しました。納期入力フォームを案内しました。",
+              )}
             />
           ) : null}
           {isKanei && order.po_sent_at ? (
@@ -1973,6 +1976,8 @@ interface SupplierOrderMailPreviewUi {
   route: "A" | "B" | "custom";
   subject: string;
   body: string;
+  editableSubject?: string;
+  editableBody?: string;
 }
 
 type FilmMakerSelectionUi = {
@@ -2104,12 +2109,14 @@ function SupplierOrderNoteForm({
   initialNote: string;
   busy: boolean;
   onSave: (note: string) => void;
-  onSend: (note: string) => void;
+  onSend: (note: string, mailSubject: string, mailBody: string) => void;
 }) {
   const [note, setNote] = useState(initialNote);
   const [preview, setPreview] = useState<SupplierOrderMailPreviewUi | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [error, setError] = useState("");
+  const [mailSubject, setMailSubject] = useState("");
+  const [mailBody, setMailBody] = useState("");
 
   const runPreview = async () => {
     if (previewing || busy) return;
@@ -2119,11 +2126,14 @@ function SupplierOrderNoteForm({
       const response = await fetch(`/api/film-orders/${orderId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "preview-supplier-po", supplierOrderNote: note }),
+        body: JSON.stringify({ action: "preview-supplier-po", supplierOrderNote: note, mailSubject, mailBody }),
       });
       const payload = await response.json();
       if (!response.ok || !payload.preview) throw new Error(payload.error ?? "preview_failed");
-      setPreview(payload.preview as SupplierOrderMailPreviewUi);
+      const nextPreview = payload.preview as SupplierOrderMailPreviewUi;
+      setPreview(nextPreview);
+      setMailSubject(nextPreview.editableSubject ?? nextPreview.subject);
+      setMailBody(nextPreview.editableBody ?? nextPreview.body);
     } catch (caught) {
       setPreview(null);
       setError(caught instanceof Error && caught.message !== "preview_failed" ? caught.message : "プレビューを作成できませんでした。");
@@ -2156,7 +2166,7 @@ function SupplierOrderNoteForm({
         <button className="button secondary small" type="button" disabled={busy || previewing} onClick={() => void runPreview()}>
           {previewing ? "プレビュー作成中..." : "メール本文をプレビュー"}
         </button>
-        <button className="button workflow-action role-kanei" type="button" disabled={busy || previewing} onClick={() => onSend(normalizedNote)}>
+        <button className="button workflow-action role-kanei" type="button" disabled={busy || previewing} onClick={() => onSend(normalizedNote, mailSubject.trim(), mailBody)}>
           この内容で発注する
         </button>
       </div>
@@ -2164,9 +2174,17 @@ function SupplierOrderNoteForm({
       {preview ? (
         <div className="supplier-order-preview" data-testid="supplier-order-preview">
           <div><strong>宛先：</strong><span>{preview.to ?? "未設定"}</span></div>
-          <div><strong>件名：</strong><span>{preview.subject}</span></div>
-          <pre>{preview.body}</pre>
-          <p className="help">納期登録・発注書URLは送信後に確定リンクへ置き換わります。</p>
+          <div className="supplier-order-editable">
+            <label>
+              件名
+              <input value={mailSubject} maxLength={500} onChange={(event) => setMailSubject(event.target.value)} />
+            </label>
+            <label>
+              メール本文
+              <textarea value={mailBody} rows={16} maxLength={20000} onChange={(event) => setMailBody(event.target.value)} />
+            </label>
+          </div>
+          <p className="help">送信時、専用リンクURLは確定トークンへ自動置換されます。リンク行を削除するとメーカーが報告・発注書ページへアクセスできなくなります。</p>
         </div>
       ) : null}
     </section>

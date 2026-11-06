@@ -532,6 +532,8 @@ async function projectLifecycleMail(context: LifecycleMailProjectionContext): Pr
 }> {
   const maker = strictMakerSnapshot(context.raw);
   const settings = await lifecycleMailSettingsOf(context.tx);
+  const customMakerMail = context.command.action === "send-po"
+    && (context.command.mailSubject?.trim() || context.command.mailBody?.trim());
   const input: FilmOrderNotificationInput = {
     orderId: context.raw.id,
     dispatchGroupId: context.dispatchGroupId,
@@ -575,15 +577,26 @@ async function projectLifecycleMail(context: LifecycleMailProjectionContext): Pr
     customerEtaActionRequired: context.event === "eta_update" || context.event === "production_plan_request",
     linkResendAudiences: context.event === "link_resend" ? ["maker", "seven", "kanei"] : undefined,
     bindingFingerprint: stableFingerprint({ maker: maker?.source ?? null, templateSettings: settings.templates }),
-    overrides: context.command.action === "send-po" && (context.command.mailSubject?.trim() || context.command.mailBody?.trim())
-      ? {
-        "film_order.supplier_purchase_order.maker": {
-          ...(context.command.mailSubject?.trim() ? { subject: context.command.mailSubject } : {}),
-          ...(context.command.mailBody?.trim() ? { body: context.command.mailBody } : {}),
-        },
-      }
-      : undefined,
   };
+  if (customMakerMail) {
+    const defaultProjection = buildFilmOrderNotifications(context.event, input);
+    if (!defaultProjection.ok) {
+      throw new Error(`invalid_film_order_mail:${defaultProjection.errors.map((issue) => `${issue.audience ?? "*"}:${issue.code}`).join(",")}`);
+    }
+    const defaultMakerMail = defaultProjection.envelopes.find((envelope) => envelope.audience === "maker");
+    if (!defaultMakerMail) throw new Error("invalid_film_order_mail:maker:default_template_missing");
+    const customBody = (context.command.mailBody?.trim() || "")
+      .replaceAll(`${context.command.origin}/film-orders/purchase-order/{issued-after-send}`,
+        defaultMakerMail.links.find((link) => link.key === "maker_purchase_order")?.url ?? "")
+      .replaceAll(`${context.command.origin}/film-orders/eta/{issued-after-send}`,
+        defaultMakerMail.links.find((link) => link.key === "maker_eta_report")?.url ?? "");
+    input.overrides = {
+      "film_order.supplier_purchase_order.maker": {
+        subject: `${context.command.mailSubject?.trim() || ""} / ${defaultMakerMail.subject}`.trim(),
+        body: `${customBody}\n\n${defaultMakerMail.body}`,
+      },
+    };
+  }
   const built = buildFilmOrderNotifications(context.event, input);
   if (!built.ok) throw new Error(`invalid_film_order_mail:${built.errors.map((issue) => `${issue.audience ?? "*"}:${issue.code}`).join(",")}`);
   const effective = built.envelopes.map((envelope) => {
