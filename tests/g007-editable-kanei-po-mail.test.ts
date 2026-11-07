@@ -13,6 +13,8 @@ process.env.FILM_EXTERNAL_LINK_ORIGINS = "http://localhost:3000";
 process.env.SEVEN_CHEMICAL_CONTACT_EMAIL = "seven-order@727.co.jp";
 
 const { createUser, closeDatabaseForTest } = await import("@/lib/auth-store");
+const { POST: loginRoute } = await import("@/app/api/auth/login/route");
+const { POST: deliveryNoteDraftRoute } = await import("@/app/api/film-orders/[id]/delivery-note-draft/route");
 const { runFilmOrderAction, syncFilmOrdersFromQuotations, getDatabaseForFilmMakerStore, decideCustomerProofReview, saveDeliveryNoteDraft } = await import("@/lib/film-orders");
 const { generateFilmDeliveryNotePdf } = await import("@/lib/film-delivery-note-pdf");
 const { saveQuotation, getDatabaseForTest } = await import("@/lib/quotation-store");
@@ -220,10 +222,36 @@ describe("G007 editable Kanei PO mail", () => {
       remarks: "到着後は充填工程へ引き継ぎます。",
     }, KANEI);
     expect(draft.deliveryNoteDraft).toMatchObject({ recipientName: "株式会社セブン化学", arrivalEstimateDate: "2026-11-20" });
+    const lifecycleDb = await getDatabaseForFilmMakerStore();
+    const draftEvent = await lifecycleDb.get<{ detail: string; actor_email: string }>(
+      "SELECT detail,actor_email FROM film_order_events WHERE order_id=? AND type='delivery_note' ORDER BY id DESC LIMIT 1",
+      [id],
+    );
+    expect(draftEvent).toMatchObject({ actor_email: KANEI, detail: expect.stringContaining("納品書下書き更新") });
     await expect(saveDeliveryNoteDraft(id, { recipientName: "禁止" }, SEVEN))
       .rejects.toThrow("film_order_actor_forbidden");
     const notePdf = await generateFilmDeliveryNotePdf(draft.deliveryNoteDraft, "S7-G007-PO-A");
     expect(Buffer.from(notePdf).subarray(0, 5).toString()).toBe("%PDF-");
     expect(notePdf.byteLength).toBeGreaterThan(1000);
+  });
+
+  it("maps a missing delivery-note order to HTTP 404", async () => {
+    const loginResponse = await loginRoute(new Request("http://localhost:3000/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: KANEI, password: "kanei-approval-order-password" }),
+    }));
+    expect(loginResponse.status).toBe(200);
+    const token = loginResponse.headers.get("set-cookie")?.match(/pouch_session=([^;]+)/u)?.[1]!;
+    const response = await deliveryNoteDraftRoute(
+      new Request("http://localhost:3000/api/film-orders/999999/delivery-note-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", cookie: `pouch_session=${token}` },
+        body: JSON.stringify({ recipientName: "Missing order" }),
+      }),
+      { params: Promise.resolve({ id: "999999" }) } as never,
+    );
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: "film_order_not_found" });
   });
 });

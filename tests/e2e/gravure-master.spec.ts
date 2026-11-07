@@ -56,18 +56,49 @@ async function postJson(context: APIRequestContext, url: string, body: unknown) 
   return context.post(url, { data: body as object });
 }
 
-async function activeYOverrideId(): Promise<number | null> {
+async function activeYOverrideId(): Promise<number> {
   const response = await kanai.get("/api/film-prices/gravure/y");
   expect(response.status()).toBe(200);
   const payload = await response.json() as {
-    prices: Array<Pick<import("../../src/lib/gravure-price-store").GravureYMasterRow,
-      "id" | "webWidthMm" | "laneCount" | "printTierM" | "effectiveFrom" | "effectiveTo">>;
+    prices: Array<import("../../src/lib/gravure-price-store").GravureYMasterRow>;
   };
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" });
-  const active = payload.prices.find((price) => price.webWidthMm === 356
+  const source = {
+    webWidthMm: 356,
+    laneCount: 1,
+    printTierM: 2000,
+    approxOutputLengthM: "1700",
+    supplierUnitPriceYenPerM: "150.00",
+    plateBaseYenPerColor: "27000.50",
+    sellerMarkup: "1.25",
+    effectiveFrom: today,
+  };
+  const active = payload.prices.find((price) => price.webWidthMm === source.webWidthMm
     && price.laneCount === 1 && price.printTierM === 2000
     && price.effectiveFrom <= today && today <= price.effectiveTo);
-  return active?.id ?? null;
+  if (
+    active
+    && active.approxOutputLengthM === source.approxOutputLengthM
+    && active.supplierUnitPriceYenPerM === source.supplierUnitPriceYenPerM
+    && active.plateBaseYenPerColor === source.plateBaseYenPerColor
+    && active.sellerMarkup === source.sellerMarkup
+  ) return active.id;
+  if (active) {
+    const supersede = await postJson(kanai, `/api/film-prices/gravure/y/${active.id}/supersede`, {
+      ...source,
+      memo: "E2E active Y",
+    });
+    expect(supersede.status()).toBe(201);
+    const supersedePayload = await supersede.json() as { price: { id: number } };
+    return supersedePayload.price.id;
+  }
+  const created = await postJson(kanai, "/api/film-prices/gravure/y", {
+    ...source,
+    memo: "E2E active Y",
+  });
+  expect(created.status()).toBe(201);
+  const createdPayload = await created.json() as { price: { id: number } };
+  return createdPayload.price.id;
 }
 
 async function ensureActiveKSource(
@@ -255,23 +286,7 @@ test("no-master baseline exposes authoritative projection and full simulator res
 });
 
 test("Y override changes only the Y route and propagates non-1.12 markup", async ({}) => {
-  yRowId = await activeYOverrideId() ?? 0;
-  if (!yRowId) {
-    const response = await postJson(kanai, "/api/film-prices/gravure/y", {
-      webWidthMm: 356,
-      laneCount: 1,
-      printTierM: 2000,
-      approxOutputLengthM: "1700",
-      supplierUnitPriceYenPerM: "150.00",
-      plateBaseYenPerColor: "27000.50",
-      sellerMarkup: "1.25",
-      memo: "E2E active Y",
-      effectiveFrom: "2026-01-01",
-    });
-    expect(response.status()).toBe(201);
-    const payload = await response.json() as { price: { id: number } };
-    yRowId = payload.price.id;
-  }
+  yRowId = await activeYOverrideId();
   expect(yRowId).toBeGreaterThan(0);
 
   const response2 = await postJson(kanai, "/api/calculate", calculationBody);

@@ -1388,7 +1388,7 @@ export interface UploadFileMetadata {
   userAgent?: string | null;
 }
 
-const FILM_SCHEMA_VERSION = "2026-11-06-extensible-proof-rounds-1";
+const FILM_SCHEMA_VERSION = "2026-11-08-delivery-note-draft-1";
 
 async function getDatabase(): Promise<SqlClient> {
   schemaReady ??= (async () => {
@@ -1545,12 +1545,18 @@ async function getDatabase(): Promise<SqlClient> {
       // BASE_SCHEMA cannot create the order index before an older table gains the new columns.
       await db.exec("CREATE INDEX IF NOT EXISTS idx_film_orders_film_maker ON film_orders(film_maker_id)");
     } else {
-      for (const [, sql] of migrations) {
-        try {
-          await db.exec(sql);
-        } catch {
-          // 既存カラムの場合は無視する。
+      const tableColumns = new Map<string, Set<string>>();
+      const hasColumn = async (table: string, column: string): Promise<boolean> => {
+        if (!tableColumns.has(table)) {
+          const columns = await db.all<{ name: string }>(`PRAGMA table_info(${table})`);
+          tableColumns.set(table, new Set(columns.map(({ name }) => name)));
         }
+        return tableColumns.get(table)!.has(column);
+      };
+      for (const [, sql] of migrations) {
+        const alter = sql.match(/^ALTER TABLE\s+(\S+)\s+ADD COLUMN\s+(?:IF NOT EXISTS\s+)?([^\s(]+)/iu);
+        if (alter && await hasColumn(alter[1]!, alter[2]!)) continue;
+        await db.exec(sql);
       }
     }
     if (db.dialect === "sqlite") {
@@ -1702,6 +1708,19 @@ async function getDatabase(): Promise<SqlClient> {
       WHERE f.ship_to_company_name != ''
         AND NOT EXISTS (SELECT 1 FROM film_order_ship_to_destinations d WHERE d.order_id = f.id)
     `);
+    const requiredColumns = [
+      "film_maker_id", "supplier_resolution", "current_proof_round", "po_sent_at", "customer_code",
+      "ship_to_company_name", "production_plan_status", "delivery_note_draft_json",
+      "delivery_note_updated_at", "delivery_note_updated_by",
+    ];
+    const existingColumns = db.dialect === "sqlite"
+      ? new Set((await db.all<{ name: string }>("PRAGMA table_info(film_orders)")).map(({ name }) => name))
+      : new Set((await db.all<{ column_name: string }>(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'film_orders'
+      `)).map(({ column_name }) => column_name));
+    const missingColumns = requiredColumns.filter((column) => !existingColumns.has(column));
+    if (missingColumns.length > 0) throw new Error(`film_order_migration_incomplete:${missingColumns.join(",")}`);
     await db.run(`
       INSERT INTO film_order_schema_migrations (slot,version,updated_at) VALUES (?,?,?)
       ON CONFLICT(slot) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at
@@ -2129,10 +2148,20 @@ export async function saveDeliveryNoteDraft(
     remarks: str("remarks", 4000),
   };
   const now = new Date().toISOString();
-  await db.run(`
-    UPDATE film_orders SET delivery_note_draft_json=?, delivery_note_updated_at=?, delivery_note_updated_by=?, updated_at=?, updated_by_email=?
-    WHERE id=? AND po_sent_at IS NOT NULL
-  `, [JSON.stringify(draft), now, actorEmail, now, actorEmail, id]);
+  await db.transaction(async (tx) => {
+    const result = await tx.run(`
+      UPDATE film_orders SET delivery_note_draft_json=?, delivery_note_updated_at=?, delivery_note_updated_by=?, updated_at=?, updated_by_email=?
+      WHERE id=? AND po_sent_at IS NOT NULL
+    `, [JSON.stringify(draft), now, actorEmail, now, actorEmail, id]);
+    if (Number(result.changes) !== 1) throw new Error("invalid_status_transition");
+    await addEvent(
+      tx,
+      id,
+      "delivery_note",
+      `納品書下書き更新: ${draft.productName || "-"} / 到着見込 ${draft.arrivalEstimateDate || "-"}`,
+      actorEmail,
+    );
+  });
   const saved = await getFilmOrder(id);
   if (!saved) throw new Error("film_order_update_failed");
   return saved;

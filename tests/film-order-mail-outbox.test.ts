@@ -102,7 +102,7 @@ describe("SQLite film-order mail outbox", () => {
     const marker = await db.get<{ version: string }>(
       "SELECT version FROM film_order_schema_migrations WHERE slot='film_orders'",
     );
-    expect(marker?.version).toBe("2026-11-06-extensible-proof-rounds-1");
+    expect(marker?.version).toBe("2026-11-08-delivery-note-draft-1");
     const outboxColumns = await db.all<{ name: string }>("PRAGMA table_info(film_order_mail_outbox)");
     const attemptColumns = await db.all<{ name: string }>("PRAGMA table_info(film_order_mail_attempts)");
     expect(outboxColumns.map((column) => column.name)).toEqual(expect.arrayContaining([

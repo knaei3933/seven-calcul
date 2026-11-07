@@ -8,7 +8,7 @@ process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
 process.env.POUCH_CUSTOMER_DB = join(databaseDirectory, "customers.db");
 process.env.MAIL_DRY_RUN = "true";
 const LEGACY_SCHEMA_VERSION = "2026-11-04-film-order-cancel-scoping-2";
-const NEW_SCHEMA_VERSION = "2026-11-06-extensible-proof-rounds-1";
+const NEW_SCHEMA_VERSION = "2026-11-08-delivery-note-draft-1";
 
 // Pre-G002 SQLite database: current ship-to schema, no film-maker columns/table/FK.
 const { getSqlClient } = await import("@/lib/db");
@@ -130,6 +130,7 @@ describe("incremental SQLite film-maker migration", () => {
     const columns = await db.all<{ name: string }>("PRAGMA table_info(film_orders)");
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
       "film_maker_id", "film_maker_snapshot_json", "legacy_supplier_match_json", "supplier_resolution",
+      "delivery_note_draft_json", "delivery_note_updated_at", "delivery_note_updated_by",
     ]));
     const makerTable = await db.get<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='film_makers'",

@@ -33,6 +33,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
   } catch (error) {
     const message = error instanceof Error ? error.message : "delivery_note_save_failed";
     const status = message === "film_order_actor_forbidden" ? 403
+      : message === "film_order_not_found" ? 404
       : message === "invalid_status_transition" ? 409
         : message === "invalid_delivery_note" ? 400 : 500;
     return NextResponse.json({ error: message }, { status });

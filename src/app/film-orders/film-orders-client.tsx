@@ -529,8 +529,8 @@ function orderTotalText(order: FilmOrderView): string {
   return `￥${Number(total.toFixed(0)).toLocaleString("ja-JP")}`;
 }
 
-function scheduleMilestoneText(milestone: ScheduleMilestone): string {
-  const status = milestone.status === "complete" ? "受領"
+function scheduleMilestoneText(milestone: ScheduleMilestone, completeLabel: string): string {
+  const status = milestone.status === "complete" ? completeLabel
     : milestone.status === "due_today" ? "本日期限"
       : milestone.status === "overdue" ? `${milestone.overdueDays}営業日超過`
         : "待機中";
@@ -548,8 +548,8 @@ function ShipmentScheduleBadges({ order }: { order: FilmOrderView }) {
   const arrival = arrivalEstimateFromShipment(order.delivery.shippedOn);
   return (
     <div className="film-order-schedule-row" data-testid={`shipment-schedule-${order.id}`}>
-      <span data-testid="schedule-provisional">暫定出荷（発注+3営業日）：{scheduleMilestoneText(schedule.provisional)}</span>
-      <span data-testid="schedule-confirmed">出荷確定（発注+7営業日）：{scheduleMilestoneText(schedule.confirmed)}</span>
+      <span data-testid="schedule-provisional">暫定出荷（発注+3営業日）：{scheduleMilestoneText(schedule.provisional, "報告済み")}</span>
+      <span data-testid="schedule-confirmed">出荷確定（発注+7営業日）：{scheduleMilestoneText(schedule.confirmed, "確定済み")}</span>
       <span data-testid="schedule-arrival">到着見込（出荷+7営業日）：{arrival ?? "-"}</span>
       {schedule.reminderKind ? (
         <span className="film-order-eta-warning">
