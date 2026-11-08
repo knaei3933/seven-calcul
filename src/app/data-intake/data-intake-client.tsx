@@ -243,6 +243,7 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
       const body = kind === "owner_approval"
         ? {
           action,
+          mailMode: "confirm",
           origin: window.location.origin,
           ...(approvalFinalFileName.trim() ? {
             finalFileName: approvalFinalFileName.trim(),
@@ -251,6 +252,7 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
         }
         : {
           action,
+          mailMode: "confirm",
           origin: window.location.origin,
           approverName: approverName.trim() || (approvalTarget.entry.ownerDomain === "seven" ? "Seven Chemical Approver" : "Kanei Approver"),
           offlineEvidence: approvalEvidence.trim(),

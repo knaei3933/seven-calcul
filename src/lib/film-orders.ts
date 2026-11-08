@@ -3141,6 +3141,7 @@ async function executeFilmOrderLifecycle(
     supplierMessage: trimParam(params.supplierMessage, 2000) ?? undefined,
     approverName: trimParam(params.approverName, 200) || undefined,
     evidence: trimParam(params.evidence, 2000) || undefined,
+    offlineEvidence: trimParam(params.offlineEvidence, 2000) || undefined,
     offlineReason: trimParam(params.offlineReason, 2000) || undefined,
     supplierOrderNote: trimParam(params.supplierOrderNote, 4000) ?? undefined,
     mailSubject: trimParam(params.mailSubject, 500) ?? undefined,
@@ -3250,6 +3251,7 @@ export async function runFilmOrderAction(
     customerMessage?: unknown;
     approverName?: unknown;
     evidence?: unknown;
+    offlineEvidence?: unknown;
     offlineReason?: unknown;
     destinationId?: unknown;
     destinations?: unknown;
