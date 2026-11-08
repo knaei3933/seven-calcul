@@ -43,7 +43,8 @@ export type FilmOrderIntakeActionKind =
   | "proof_round"
   | "owner_approval"
   | "kanei_approval"
-  | "purchase_order";
+  | "purchase_order"
+  | "delivery_note";
 
 export interface FilmOrderIntakeAction {
   kind: FilmOrderIntakeActionKind;
@@ -52,7 +53,7 @@ export interface FilmOrderIntakeAction {
   authorized: boolean;
   enabled: boolean;
   reason: string;
-  releaseStory: "G003" | "G004" | "G005" | "G006" | "G007";
+  releaseStory: "G003" | "G004" | "G005" | "G006" | "G007" | "G009";
 }
 
 export interface FilmOrderIntakeViewer {
@@ -103,6 +104,9 @@ export interface FilmOrderIntakeEntry {
   proofRound: number;
   dualApprovalStatus: FilmOrderIntakeDualApprovalStatus;
   poStatus: FilmOrderIntakePoStatus;
+  etaDate: string | null;
+  shippedOn: string | null;
+  shipToStatus: string;
   actions: FilmOrderIntakeAction[];
 }
 
@@ -149,6 +153,9 @@ interface FilmOrderIntakeRow {
   supplier_approval_status: string | null;
   buyer_approval_status: string | null;
   po_sent_at: string | null;
+  eta_date: string | null;
+  film_shipped_on: string | null;
+  ship_to_status: string | null;
 }
 
 function orderOwnerDomainOf(buyerDomain: string | null): CustomerOwnerDomain | "unresolved" {
@@ -211,11 +218,16 @@ function actionsFor(
   viewer: FilmOrderIntakeViewer | null | undefined,
   proofRound: number,
   dualApprovalStatus: FilmOrderIntakeDualApprovalStatus,
+  workflow: { status: string; shipToStatus: string; poSent: boolean; etaDate: string | null },
 ): FilmOrderIntakeAction[] {
   const ownerActor = ownerDomain !== "unresolved" && canActForQuoteOwner(viewer?.email, ownerDomain);
   const kaneiActor = canActForQuoteOwner(viewer?.email, "kanei");
   const future = (story: FilmOrderIntakeAction["releaseStory"]) =>
     `${story}で有効化予定のため、現在は操作できません。`;
+  const poReady = workflow.status === "final_approved"
+    && workflow.shipToStatus === "confirmed"
+    && !workflow.poSent;
+  const deliveryReady = Boolean(workflow.poSent);
 
   return [
     {
@@ -266,8 +278,24 @@ function actionsFor(
       kind: "purchase_order",
       label: "発注",
       authorized: kaneiActor,
-      enabled: false,
-      reason: future("G007"),
+      enabled: kaneiActor && poReady,
+      reason: !kaneiActor
+        ? "金井貿易側のみ操作できます。"
+        : workflow.status !== "final_approved"
+          ? "双方承認後に発注できます。"
+          : workflow.shipToStatus !== "confirmed"
+            ? "納品先確定後に発注できます。"
+            : workflow.poSent ? "発注済みです。" : "発注メールを作成できます。",
+      releaseStory: "G009",
+    },
+    {
+      kind: "delivery_note",
+      label: "納品書",
+      authorized: kaneiActor,
+      enabled: kaneiActor && deliveryReady,
+      reason: !kaneiActor
+        ? "金井貿易側のみ操作できます。"
+        : deliveryReady ? "納品書下書きを作成・出力できます。" : "発注後に作成できます。",
       releaseStory: "G007",
     },
   ];
@@ -385,6 +413,9 @@ export async function listFilmOrderIntakePage(
       , film_orders.supplier_approval_status AS supplier_approval_status
       , film_orders.buyer_approval_status AS buyer_approval_status
       , film_orders.po_sent_at AS po_sent_at
+      , film_orders.eta_date AS eta_date
+      , film_orders.film_shipped_on AS film_shipped_on
+      , film_orders.ship_to_status AS ship_to_status
     FROM quotations
     LEFT JOIN film_orders ON film_orders.quotation_id = quotations.id
     ${where}
@@ -414,7 +445,21 @@ export async function listFilmOrderIntakePage(
       proofRound: proofRoundOf(row),
       dualApprovalStatus: dualApprovalStatusOf(row),
       poStatus: poStatusOf(row),
-      actions: actionsFor(ownerDomain, viewer, proofRoundOf(row), dualApprovalStatusOf(row)),
+      etaDate: row.eta_date,
+      shippedOn: row.film_shipped_on,
+      shipToStatus: row.ship_to_status ?? "not_provided",
+      actions: actionsFor(
+        ownerDomain,
+        viewer,
+        proofRoundOf(row),
+        dualApprovalStatusOf(row),
+        {
+          status: row.film_order_status ?? "",
+          shipToStatus: row.ship_to_status ?? "not_provided",
+          poSent: Boolean(row.po_sent_at),
+          etaDate: row.eta_date,
+        },
+      ),
     };
   });
 

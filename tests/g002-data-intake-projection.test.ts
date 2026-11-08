@@ -189,6 +189,7 @@ describe("G002 data intake projection", () => {
       owner_approval: true,
       kanei_approval: false,
       purchase_order: false,
+      delivery_note: false,
     });
 
     const kaneiActions = authorization(await entryFor("KT-G002-PO", kaneiUser));
@@ -199,6 +200,7 @@ describe("G002 data intake projection", () => {
       owner_approval: true,
       kanei_approval: true,
       purchase_order: true,
+      delivery_note: true,
     });
 
     const seven = await entryFor("S7-G002-LINKED", sevenUser);
@@ -213,7 +215,6 @@ describe("G002 data intake projection", () => {
         expect(action.enabled).toBe(true);
       } else {
         expect(action.enabled).toBe(false);
-        expect(action.reason).toMatch(/G00[3-7]で有効化予定/);
       }
     }
   });

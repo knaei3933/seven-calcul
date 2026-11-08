@@ -20,6 +20,9 @@ const entry: FilmOrderIntakeEntry = {
   proofRound: 1,
   dualApprovalStatus: "pending",
   poStatus: "not_sent",
+  etaDate: null,
+  shippedOn: null,
+  shipToStatus: "registered",
   actions: [
     { kind: "intake_upload", label: "データ入稿", authorized: true, enabled: true, reason: "G003", releaseStory: "G003" },
     { kind: "owner_approval", label: "S7承認", authorized: true, enabled: false, reason: "G006", releaseStory: "G006" },

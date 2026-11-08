@@ -43,6 +43,9 @@ const linkedSeven: FilmOrderIntakeEntry = {
   proofRound: 1,
   dualApprovalStatus: "owner_approved",
   poStatus: "not_sent",
+  etaDate: null,
+  shippedOn: null,
+  shipToStatus: "registered",
   actions: [
     action("intake_upload", "データ入稿", true),
       action("proof_round", "校正確認", false),
@@ -61,6 +64,9 @@ const linkedKanei: FilmOrderIntakeEntry = {
   proofRound: 1,
   dualApprovalStatus: "pending",
   poStatus: "sent",
+  etaDate: "2026-11-10",
+  shippedOn: null,
+  shipToStatus: "registered",
   actions: [
     action("intake_upload", "データ入稿", true),
       action("proof_round", "校正確認", false),
@@ -81,6 +87,9 @@ const unresolved: FilmOrderIntakeEntry = {
   proofRound: 1,
   dualApprovalStatus: "pending",
   poStatus: "unavailable",
+  etaDate: null,
+  shippedOn: null,
+  shipToStatus: "not_provided",
   actions: [
     action("intake_upload", "データ入稿", false),
     action("owner_approval", "S7承認", false),

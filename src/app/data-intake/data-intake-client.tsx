@@ -15,6 +15,7 @@ import type {
   FilmOrderIntakeProofStatus,
   FilmOrderIntakeState,
 } from "@/lib/film-order-intake";
+import type { DeliveryNoteDraft } from "@/lib/film-order-shared";
 
 type Viewer = { id: number; email: string; name: string; role: "admin" | "user" };
 type DataIntakeResponse = FilmOrderIntakePage & { created?: number };
@@ -67,10 +68,14 @@ function IntakeActions({
   entry,
   onUpload,
   onApproval,
+  onPurchaseOrder,
+  onDeliveryNote,
 }: {
   entry: FilmOrderIntakeEntry;
   onUpload: (entry: FilmOrderIntakeEntry) => void;
   onApproval: (entry: FilmOrderIntakeEntry, kind: "owner_approval" | "kanei_approval") => void;
+  onPurchaseOrder: (entry: FilmOrderIntakeEntry) => void;
+  onDeliveryNote: (entry: FilmOrderIntakeEntry) => void;
 }) {
   const upload = entry.actions.find((action) => action.kind === "intake_upload");
   return (
@@ -89,7 +94,11 @@ function IntakeActions({
                 ? () => onApproval(entry, "owner_approval")
                 : action.kind === "kanei_approval" && action.authorized && action.enabled
                   ? () => onApproval(entry, "kanei_approval")
-                  : undefined
+                  : action.kind === "purchase_order" && action.authorized && action.enabled
+                    ? () => onPurchaseOrder(entry)
+                    : action.kind === "delivery_note" && action.authorized && action.enabled
+                      ? () => onDeliveryNote(entry)
+                      : undefined
           }
           title={
             action.kind === "intake_upload" && action.authorized
@@ -131,6 +140,22 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
   const [approvalBusy, setApprovalBusy] = useState(false);
   const [approvalMessage, setApprovalMessage] = useState("");
   const [approvalError, setApprovalError] = useState("");
+  const [purchaseOrderTarget, setPurchaseOrderTarget] = useState<FilmOrderIntakeEntry | null>(null);
+  const [purchaseOrderBusy, setPurchaseOrderBusy] = useState(false);
+  const [purchaseOrderMessage, setPurchaseOrderMessage] = useState("");
+  const [purchaseOrderError, setPurchaseOrderError] = useState("");
+  const [purchaseOrderNote, setPurchaseOrderNote] = useState("");
+  const [purchaseOrderSubject, setPurchaseOrderSubject] = useState("");
+  const [purchaseOrderBody, setPurchaseOrderBody] = useState("");
+  const [deliveryNoteTarget, setDeliveryNoteTarget] = useState<FilmOrderIntakeEntry | null>(null);
+  const [deliveryNoteDraft, setDeliveryNoteDraft] = useState<DeliveryNoteDraft | null>(null);
+  const deliveryNoteDraftRef = useRef<DeliveryNoteDraft | null>(null);
+  useEffect(() => {
+    deliveryNoteDraftRef.current = deliveryNoteDraft;
+  }, [deliveryNoteDraft]);
+  const [deliveryNoteBusy, setDeliveryNoteBusy] = useState(false);
+  const [deliveryNoteMessage, setDeliveryNoteMessage] = useState("");
+  const [deliveryNoteError, setDeliveryNoteError] = useState("");
 
   const load = useCallback(async (nextPage: number, currentQuery: typeof query) => {
     const order = ++requestOrder.current;
@@ -279,6 +304,144 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
     }
   };
 
+  const openPurchaseOrder = async (entry: FilmOrderIntakeEntry) => {
+    setPurchaseOrderTarget(entry);
+    setPurchaseOrderBusy(true);
+    setPurchaseOrderMessage("");
+    setPurchaseOrderError("");
+    try {
+      const response = await fetch(`/api/film-orders/${entry.filmOrder?.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "preview-supplier-po", origin: window.location.origin }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.preview) throw new Error(payload.error ?? "preview_failed");
+      const preview = payload.preview as { subject: string; body: string; editableSubject?: string; editableBody?: string };
+      setPurchaseOrderSubject(preview.editableSubject ?? preview.subject);
+      setPurchaseOrderBody(preview.editableBody ?? preview.body);
+      setPurchaseOrderNote(entry.poStatus === "not_sent" ? "" : "");
+    } catch (cause) {
+      setPurchaseOrderError(cause instanceof Error ? `失敗しました（${cause.message}）` : "発注メールを作成できませんでした。");
+    } finally {
+      setPurchaseOrderBusy(false);
+    }
+  };
+
+  const sendPurchaseOrder = async () => {
+    if (!purchaseOrderTarget || purchaseOrderBusy) return;
+    setPurchaseOrderBusy(true);
+    setPurchaseOrderError("");
+    setPurchaseOrderMessage("");
+    try {
+      const response = await fetch(`/api/film-orders/${purchaseOrderTarget.filmOrder?.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "send-po",
+          mailMode: "confirm",
+          origin: window.location.origin,
+          supplierOrderNote: purchaseOrderNote,
+          mailSubject: purchaseOrderSubject,
+          mailBody: purchaseOrderBody,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "send_po_failed");
+      setPurchaseOrderMessage("発注書をフィルムメーカーへ送信しました。納期入力フォームを案内しました。");
+      setPurchaseOrderTarget(null);
+      await load(page, query);
+    } catch (cause) {
+      setPurchaseOrderError(cause instanceof Error ? `失敗しました（${cause.message}）` : "発注に失敗しました。");
+    } finally {
+      setPurchaseOrderBusy(false);
+    }
+  };
+
+  const openDeliveryNote = async (entry: FilmOrderIntakeEntry) => {
+    setDeliveryNoteTarget(entry);
+    setDeliveryNoteBusy(true);
+    setDeliveryNoteMessage("");
+    setDeliveryNoteError("");
+    try {
+      const response = await fetch(`/api/film-orders/${entry.filmOrder?.id}/delivery-note-draft`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "delivery_note_load_failed");
+      const draft = payload.draft as DeliveryNoteDraft;
+      deliveryNoteDraftRef.current = draft;
+      setDeliveryNoteDraft({
+        ...draft,
+        arrivalEstimateDate: draft.arrivalEstimateDate || entry.etaDate || "",
+      });
+    } catch (cause) {
+      setDeliveryNoteError(cause instanceof Error ? `失敗しました（${cause.message}）` : "納品書下書きを読み込めませんでした。");
+    } finally {
+      setDeliveryNoteBusy(false);
+    }
+  };
+
+  const saveDeliveryNote = async (): Promise<boolean> => {
+    if (!deliveryNoteTarget || !deliveryNoteDraft || deliveryNoteBusy) return false;
+    setDeliveryNoteBusy(true);
+    setDeliveryNoteMessage("");
+    setDeliveryNoteError("");
+    try {
+      const response = await fetch(`/api/film-orders/${deliveryNoteTarget.filmOrder?.id}/delivery-note-draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(deliveryNoteDraft),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "delivery_note_save_failed");
+      const savedDraft = payload.draft as DeliveryNoteDraft;
+      deliveryNoteDraftRef.current = savedDraft;
+      setDeliveryNoteDraft(savedDraft);
+      return true;
+    } catch (cause) {
+        setDeliveryNoteError(cause instanceof Error ? `失敗しました（${cause.message}）` : "納品書を保存できませんでした。");
+      return false;
+    } finally {
+      setDeliveryNoteBusy(false);
+    }
+  };
+
+  const outputDeliveryNotePdf = async () => {
+    const currentDraft = deliveryNoteDraftRef.current;
+    if (!deliveryNoteTarget || !currentDraft || deliveryNoteBusy) return;
+    setDeliveryNoteBusy(true);
+    setDeliveryNoteMessage("");
+    setDeliveryNoteError("");
+    try {
+      const saveResponse = await fetch(`/api/film-orders/${deliveryNoteTarget.filmOrder?.id}/delivery-note-draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(deliveryNoteDraft),
+      });
+      const savePayload = await saveResponse.json();
+      if (!saveResponse.ok) throw new Error(savePayload.error ?? "delivery_note_save_failed");
+      setDeliveryNoteDraft(savePayload.draft as DeliveryNoteDraft);
+      const response = await fetch(`/api/film-orders/${deliveryNoteTarget.filmOrder?.id}/delivery-note-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(currentDraft),
+      });
+      if (!response.ok) throw new Error("delivery_note_pdf_failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${deliveryNoteTarget.filmOrder?.orderNumber ?? deliveryNoteTarget.quotationNumber}_納品書.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setDeliveryNoteMessage("納品書PDF（A4）を作成しました。");
+    } catch (cause) {
+      setDeliveryNoteError(cause instanceof Error ? `失敗しました（${cause.message}）` : "納品書PDFを作成できませんでした。");
+    } finally {
+      setDeliveryNoteBusy(false);
+    }
+  };
+
+
   return (
     <main className="page data-intake-page">
       <section className="history-toolbar">
@@ -365,7 +528,13 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
                   <td>{proofLabels[entry.proofStatus]}<small>R{entry.proofRound}</small></td>
                   <td>{approvalLabels[entry.dualApprovalStatus]}</td>
                   <td>{poLabels[entry.poStatus]}</td>
-                  <td><IntakeActions entry={entry} onUpload={setUploadTarget} onApproval={(entry, kind) => setApprovalTarget({ entry, kind })} /></td>
+                <td><IntakeActions
+                  entry={entry}
+                  onUpload={setUploadTarget}
+                  onApproval={(entry, kind) => setApprovalTarget({ entry, kind })}
+                  onPurchaseOrder={(entry) => void openPurchaseOrder(entry)}
+                  onDeliveryNote={(entry) => void openDeliveryNote(entry)}
+                /></td>
                 </tr>
               ))}
             </tbody>
@@ -446,6 +615,86 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
               {approvalBusy ? "承認中..." : "承認を記録"}
             </button>
           </div>
+        </section>
+      ) : null}
+      {purchaseOrderTarget ? (
+        <section className="panel" aria-labelledby="intake-po-title">
+          <div className="history-meta">
+            <h2 id="intake-po-title">フィルム発注メール — {purchaseOrderTarget.quotationNumber}</h2>
+            <button type="button" onClick={() => setPurchaseOrderTarget(null)}>閉じる</button>
+          </div>
+          {purchaseOrderMessage ? <p className="eta-ok" role="status">{purchaseOrderMessage}</p> : null}
+          {purchaseOrderError ? <p className="eta-error" role="alert">{purchaseOrderError}</p> : null}
+          <div className="eta-form">
+            <label>追加発注指示（任意）
+              <textarea value={purchaseOrderNote} rows={4} onChange={(event) => setPurchaseOrderNote(event.target.value)} />
+            </label>
+            <label>件名
+              <input value={purchaseOrderSubject} onChange={(event) => setPurchaseOrderSubject(event.target.value)} maxLength={500} />
+            </label>
+            <label>メール本文
+              <textarea value={purchaseOrderBody} rows={16} onChange={(event) => setPurchaseOrderBody(event.target.value)} maxLength={20000} />
+            </label>
+            <p className="help">専用リンクは送信時に確定トークンへ自動置換されます。リンク行を削除するとメーカーが報告できなくなります。</p>
+            <button
+              className="button"
+              type="button"
+              disabled={purchaseOrderBusy || !purchaseOrderSubject.trim() || !purchaseOrderBody.trim()}
+              onClick={() => void sendPurchaseOrder()}
+              data-testid="intake-po-send"
+            >
+              {purchaseOrderBusy ? "送信中..." : "この内容で発注する"}
+            </button>
+          </div>
+        </section>
+      ) : null}
+      {deliveryNoteTarget ? (
+        <section className="panel" aria-labelledby="intake-delivery-note-title">
+          <div className="history-meta">
+            <h2 id="intake-delivery-note-title">納品書下書き — {deliveryNoteTarget.quotationNumber}</h2>
+            <button type="button" onClick={() => setDeliveryNoteTarget(null)}>閉じる</button>
+          </div>
+          {deliveryNoteMessage ? <p className="eta-ok" role="status">{deliveryNoteMessage}</p> : null}
+          {deliveryNoteError ? <p className="eta-error" role="alert">{deliveryNoteError}</p> : null}
+          {deliveryNoteDraft ? (
+            <div className="eta-form delivery-note-grid">
+              <label>納品先
+                <input value={deliveryNoteDraft.recipientName} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, recipientName: event.target.value } : current)} />
+              </label>
+              <label>発行者
+                <input value={deliveryNoteDraft.senderName} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, senderName: event.target.value } : current)} />
+              </label>
+              <label>発行日
+                <input type="date" value={deliveryNoteDraft.issueDate} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, issueDate: event.target.value } : current)} />
+              </label>
+              <label>到着見込
+                <input type="date" value={deliveryNoteDraft.arrivalEstimateDate} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, arrivalEstimateDate: event.target.value } : current)} />
+              </label>
+              <label>品名
+                <input value={deliveryNoteDraft.productName} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, productName: event.target.value } : current)} />
+              </label>
+              <label>仕様
+                <input value={deliveryNoteDraft.specification} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, specification: event.target.value } : current)} />
+              </label>
+              <label>数量
+                <input value={deliveryNoteDraft.quantity} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, quantity: event.target.value } : current)} />
+              </label>
+              <label>フィルム長
+                <input value={deliveryNoteDraft.filmLength} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, filmLength: event.target.value } : current)} />
+              </label>
+              <label>備考
+                <textarea value={deliveryNoteDraft.remarks} rows={3} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, remarks: event.target.value } : current)} />
+              </label>
+              <div className="film-order-inline-actions">
+                <button className="button secondary small" type="button" disabled={deliveryNoteBusy} onClick={() => void saveDeliveryNote()}>
+                  {deliveryNoteBusy ? "保存中..." : "下書き保存"}
+                </button>
+                <button className="button small" type="button" disabled={deliveryNoteBusy} onClick={() => void outputDeliveryNotePdf()}>
+                  納品書PDF出力（A4）
+                </button>
+              </div>
+            </div>
+          ) : <p>読み込み中...</p>}
         </section>
       ) : null}
     </main>
