@@ -15,6 +15,7 @@ const entry: FilmOrderIntakeEntry = {
   ownerDomain: "seven",
   state: "linked",
   filmOrder: { id: 9, orderNumber: "F-202611-009", status: "final_approved" },
+  customerDesign: { status: "received", label: "顧客デザイン受領", requestedAt: null, receivedAt: null },
   makerHandoffStatus: "registered",
   proofStatus: "approved",
   proofRound: 1,

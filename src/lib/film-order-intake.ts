@@ -3,6 +3,7 @@ import { filmOrderBuyerDomainOf, type CustomerOwnerDomain } from "./film-order-a
 import { canActForQuoteOwner } from "./quotation-access";
 import { getDatabaseForFilmOrderIntake } from "./quotation-store";
 import { quotationOwnerDomainFromStorage, type QuotationOwnerDomain } from "./quotation-shared";
+import { customerDesignStatusLabels, type CustomerDesignStatus } from "./film-order-shared";
 
 export type FilmOrderIntakeState =
   | "linked"
@@ -14,6 +15,13 @@ export interface FilmOrderIntakeOrderState {
   id: number;
   orderNumber: string;
   status: string;
+}
+
+export interface FilmOrderIntakeCustomerDesignState {
+  status: CustomerDesignStatus;
+  label: string;
+  requestedAt: string | null;
+  receivedAt: string | null;
 }
 
 export type FilmOrderIntakeMakerHandoffStatus =
@@ -99,6 +107,7 @@ export interface FilmOrderIntakeEntry {
   ownerDomain: QuotationOwnerDomain;
   state: FilmOrderIntakeState;
   filmOrder: FilmOrderIntakeOrderState | null;
+  customerDesign: FilmOrderIntakeCustomerDesignState;
   makerHandoffStatus: FilmOrderIntakeMakerHandoffStatus;
   proofStatus: FilmOrderIntakeProofStatus;
   proofRound: number;
@@ -156,6 +165,9 @@ interface FilmOrderIntakeRow {
   eta_date: string | null;
   film_shipped_on: string | null;
   ship_to_status: string | null;
+  customer_design_status: string | null;
+  customer_design_requested_at: string | null;
+  customer_design_received_at: string | null;
 }
 
 function orderOwnerDomainOf(buyerDomain: string | null): CustomerOwnerDomain | "unresolved" {
@@ -164,6 +176,18 @@ function orderOwnerDomainOf(buyerDomain: string | null): CustomerOwnerDomain | "
   } catch {
     return "unresolved";
   }
+}
+
+function customerDesignStateOf(row: FilmOrderIntakeRow): FilmOrderIntakeCustomerDesignState {
+  const values = ["pending","requested","received","correction_requested","confirmed","not_required","legacy_exempt"] as const;
+  const matched = values.find((value) => value === row.customer_design_status);
+  const status: CustomerDesignStatus = matched ?? "pending";
+  return {
+    status,
+    label: customerDesignStatusLabels[status],
+    requestedAt: row.customer_design_requested_at,
+    receivedAt: row.customer_design_received_at,
+  };
 }
 
 function intakeStateOf(
@@ -416,6 +440,9 @@ export async function listFilmOrderIntakePage(
       , film_orders.eta_date AS eta_date
       , film_orders.film_shipped_on AS film_shipped_on
       , film_orders.ship_to_status AS ship_to_status
+      , film_orders.customer_design_status AS customer_design_status
+      , film_orders.customer_design_requested_at AS customer_design_requested_at
+      , film_orders.customer_design_received_at AS customer_design_received_at
     FROM quotations
     LEFT JOIN film_orders ON film_orders.quotation_id = quotations.id
     ${where}
@@ -440,6 +467,7 @@ export async function listFilmOrderIntakePage(
         orderNumber: row.film_order_number ?? "",
         status: row.film_order_status ?? "",
       },
+      customerDesign: customerDesignStateOf(row),
       makerHandoffStatus: makerHandoffStatusOf(row),
       proofStatus: proofStatusOf(row),
       proofRound: proofRoundOf(row),

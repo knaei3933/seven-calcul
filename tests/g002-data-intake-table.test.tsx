@@ -38,6 +38,7 @@ const linkedSeven: FilmOrderIntakeEntry = {
   ownerDomain: "seven",
   state: "linked",
   filmOrder: { id: 11, orderNumber: "F-202611-001", status: "receiving_registered" },
+  customerDesign: { status: "requested", label: "顧客アップロード依頼済み", requestedAt: null, receivedAt: null },
   makerHandoffStatus: "registered",
   proofStatus: "requested",
   proofRound: 1,
@@ -58,6 +59,7 @@ const linkedKanei: FilmOrderIntakeEntry = {
   quotationId: 2,
   quotationNumber: "KT-G002-TABLE",
   ownerDomain: "kanei",
+  customerDesign: { status: "pending", label: "入稿方式未選択", requestedAt: null, receivedAt: null },
   filmOrder: { id: 12, orderNumber: "F-202611-002", status: "pending" },
   makerHandoffStatus: "not_registered",
   proofStatus: "pending",
@@ -192,8 +194,8 @@ describe("G002 data intake table", () => {
     expect(within(rows[0]!).queryByTestId("intake-action-owner_approval")).not.toBeInTheDocument();
     expect(within(rows[0]!).queryByTestId("intake-action-proof_round")).not.toBeInTheDocument();
 
-    expect(within(rows[1]!).getByTestId("intake-next-task")).toHaveTextContent("データ入稿");
-    expect(within(rows[1]!).getByTestId("intake-action-intake_upload")).toBeEnabled();
+    expect(within(rows[1]!).getByTestId("intake-next-task")).toHaveTextContent("得意先に依頼");
+    expect(within(rows[1]!).getByTestId("intake-action-customer_request")).toBeEnabled();
     expect(within(rows[1]!).queryByTestId("intake-action-purchase_order")).not.toBeInTheDocument();
   });
 

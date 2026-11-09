@@ -92,6 +92,16 @@ test("data-intake UI completes PO mail and delivery-note PDF after dual approval
   await sevenPage.getByTestId("intake-apply").click();
   const intakeRow = sevenPage.getByTestId("intake-row").filter({ hasText: customer }).first();
   await intakeRow.waitFor({ timeout: 30_000 });
+  const customerRequestResponse = sevenPage.waitForResponse(
+    (response) => response.request().method() === "POST" && response.url().includes("/api/film-orders/") && response.request().postData()?.includes("request-customer-design-upload") === true,
+    { timeout: 60_000 },
+  );
+  await intakeRow.getByTestId("intake-action-customer_request").click();
+  await sevenPage.getByTestId("intake-customer-request-note").fill("Completion UI: upload AI data");
+  await sevenPage.getByTestId("intake-customer-request-submit").click();
+  const customerRequest = await customerRequestResponse;
+  expect(customerRequest.ok()).toBeTruthy();
+  await expect(intakeRow.getByTestId("intake-action-intake_upload")).toBeEnabled({ timeout: 60_000 });
   await intakeRow.getByTestId("intake-action-intake_upload").click();
   await expect(sevenPage.getByTestId("intake-upload-submit")).toBeVisible();
 

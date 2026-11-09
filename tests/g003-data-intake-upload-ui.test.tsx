@@ -15,6 +15,7 @@ const entry: FilmOrderIntakeEntry = {
   ownerDomain: "seven",
   state: "linked",
   filmOrder: { id: 17, orderNumber: "F-202611-001", status: "ordered" },
+  customerDesign: { status: "requested", label: "顧客アップロード依頼済み", requestedAt: null, receivedAt: null },
   makerHandoffStatus: "not_registered",
   proofStatus: "unavailable",
   proofRound: 1,
@@ -53,6 +54,9 @@ beforeEach(() => {
     if (url.startsWith("/api/data-intake?") && !url.includes("/upload-")) return listResponse();
     if (url.endsWith("/docs/data-upload/data-input-guide-1.pdf") || url.endsWith("2.pdf") || url.endsWith("3.pdf")) {
       return new Response(null, { status: 200 });
+    }
+    if (url.endsWith("/api/film-orders/17") && init?.method === "POST" && String(init?.body).includes("request-customer-design-upload")) {
+      return { ok: true, json: async () => ({ order: { id: 17, customerDesignStatus: "requested" }, mails: [] }) } as Response;
     }
     if (url === "/api/data-intake/7/upload-session") {
       return { ok: true, json: async () => ({ sessionUri: "http://drive.test/session", fileName: "F_design_v1_customer.ai", maxBytes: 1 }) } as Response;
@@ -111,5 +115,42 @@ describe("G003 direct intake upload UI", () => {
     )).toBe(true);
     const body = JSON.parse(String(fetchMock.mock.calls.find(([url]) => String(url).endsWith("/upload-complete"))?.[1]?.body));
     expect(body).toMatchObject({ originalFileName: "customer.ai", expectedFileName: "F_design_v1_customer.ai", fileId: "drive-ai", guideAcknowledged: true });
+  });
+
+  it("sends the customer design upload request from the order card", async () => {
+    const user = userEvent.setup();
+    const pendingEntry = { ...entry, customerDesign: { ...entry.customerDesign, status: "pending" as const, label: "入稿方式未選択" } };
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/data-intake?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            entries: [pendingEntry],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+            pageCount: 1,
+            hasNext: false,
+            hasPrevious: false,
+          }),
+        } as Response;
+      }
+      if (url.endsWith("/api/film-orders/17") && init?.method === "POST" && String(init?.body).includes("request-customer-design-upload")) {
+        return { ok: true, json: async () => ({ order: { id: 17, customerDesignStatus: "requested" }, mails: [] }) } as Response;
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    render(<DataIntakeClient viewer={viewer} />);
+    const row = await screen.findByTestId("intake-row");
+    const button = await within(row).findByTestId("intake-action-customer_request", {}, { timeout: 5000 });
+    expect(button).toBeEnabled();
+    await user.click(button);
+    await screen.findByTestId("intake-customer-request-submit");
+    await user.type(screen.getByTestId("intake-customer-request-note"), "AI原稿をお願いします");
+    await user.click(screen.getByTestId("intake-customer-request-submit"));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith("/api/film-orders/17") && init?.method === "POST" && String(init?.body).includes("request-customer-design-upload")
+    )).toBe(true));
   });
 });

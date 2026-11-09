@@ -61,6 +61,15 @@ type ShipToForm = {
   note: string;
 };
 
+const customerDesignLabels: Record<string, string> = {
+  pending: "入稿方式未選択",
+  requested: "得意先依頼済み",
+  received: "データ受領",
+  correction_requested: "修正依頼中",
+  confirmed: "データ確定",
+  not_required: "自社データ",
+  legacy_exempt: "既存対象外",
+};
 const emptyShipToForm: ShipToForm = {
   companyName: "",
   postalCode: "",
@@ -129,7 +138,7 @@ function workflowStages(entry: FilmOrderIntakeEntry): Array<{
   ];
 }
 
-function nextWorkflowAction(entry: FilmOrderIntakeEntry): (Omit<FilmOrderIntakeAction, "kind"> & { kind: FilmOrderIntakeAction["kind"] | "ship_to" }) | null {
+function nextWorkflowAction(entry: FilmOrderIntakeEntry): (Omit<FilmOrderIntakeAction, "kind"> & { kind: FilmOrderIntakeAction["kind"] | "ship_to" | "customer_request" }) | null {
   const byKind = new Map(entry.actions.map((action) => [action.kind, action]));
   const pick = (kind: FilmOrderIntakeAction["kind"]): (Omit<FilmOrderIntakeAction, "kind"> & { kind: FilmOrderIntakeAction["kind"] | "ship_to" }) | null => {
     const action = byKind.get(kind);
@@ -140,6 +149,21 @@ function nextWorkflowAction(entry: FilmOrderIntakeEntry): (Omit<FilmOrderIntakeA
     return action ? { ...action, reason: "所有会社が未解決のため操作できません。" } : null;
   }
   if (entry.makerHandoffStatus !== "registered") {
+    if (entry.customerDesign.status === "pending") {
+      const owner = byKind.get("intake_upload");
+      return {
+        kind: "customer_request",
+        label: "得意先に依頼",
+        authorized: Boolean(owner?.authorized),
+        enabled: true,
+        reason: "AI原稿を受領するため、得意先へアップロード依頼を送信してください。",
+        releaseStory: "G003",
+      };
+    }
+    if (entry.customerDesign.status === "requested" || entry.customerDesign.status === "correction_requested") {
+      const action = pick("intake_upload");
+      return action ? { ...action, reason: "得意先から受領したAI原稿、または受領済みAI原稿を入稿します。" } : null;
+    }
     const action = pick("intake_upload");
     return action ? { ...action, reason: "AI原稿をアップロードしてメーカーへ引き継ぎます。" } : null;
   }
@@ -188,6 +212,11 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
   const [uploadError, setUploadError] = useState("");
+  const [customerRequestTarget, setCustomerRequestTarget] = useState<FilmOrderIntakeEntry | null>(null);
+  const [customerRequestNote, setCustomerRequestNote] = useState("");
+  const [customerRequestBusy, setCustomerRequestBusy] = useState(false);
+  const [customerRequestMessage, setCustomerRequestMessage] = useState("");
+  const [customerRequestError, setCustomerRequestError] = useState("");
   const [approvalTarget, setApprovalTarget] = useState<{ entry: FilmOrderIntakeEntry; kind: "owner_approval" | "kanei_approval" } | null>(null);
   const [approverName, setApproverName] = useState("");
   const [approvalEvidence, setApprovalEvidence] = useState("");
@@ -294,6 +323,41 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
     const complete = await completeResponse.json();
     if (!completeResponse.ok) throw new Error(complete.error ?? "complete_failed");
     return complete;
+  };
+
+  const openCustomerRequest = (entry: FilmOrderIntakeEntry) => {
+    setCustomerRequestTarget(entry);
+    setCustomerRequestNote("");
+    setCustomerRequestMessage("");
+    setCustomerRequestError("");
+  };
+
+  const submitCustomerRequest = async () => {
+    if (!customerRequestTarget?.filmOrder?.id || customerRequestBusy) return;
+    setCustomerRequestBusy(true);
+    setCustomerRequestError("");
+    setCustomerRequestMessage("");
+    try {
+      const response = await fetch(`/api/film-orders/${customerRequestTarget.filmOrder.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "request-customer-design-upload",
+          mailMode: "confirm",
+          origin: window.location.origin,
+          note: customerRequestNote.trim() || undefined,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "customer_request_failed");
+      setCustomerRequestMessage("得意先へアップロード依頼を送信しました。");
+      setCustomerRequestTarget(null);
+      await load(page, query);
+    } catch (cause) {
+      setCustomerRequestError(cause instanceof Error ? `失敗しました（${cause.message}）` : "得意先への依頼に失敗しました。");
+    } finally {
+      setCustomerRequestBusy(false);
+    }
   };
 
   const submitUpload = async () => {
@@ -579,12 +643,14 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
 
 
   const activeTaskId = uploadTarget?.quotationId
+    ?? customerRequestTarget?.quotationId
     ?? approvalTarget?.entry.quotationId
     ?? shipToTarget?.quotationId
     ?? purchaseOrderTarget?.quotationId
     ?? deliveryNoteTarget?.quotationId;
   const isCardActive = (entry: FilmOrderIntakeEntry) => activeTaskId != null && activeTaskId === entry.quotationId;
   const closeWorkspace = () => {
+    setCustomerRequestTarget(null);
     setUploadTarget(null);
     setApprovalTarget(null);
     setShipToTarget(null);
@@ -592,6 +658,35 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
     setDeliveryNoteTarget(null);
   };
   const renderWorkspace = (workspaceEntry: FilmOrderIntakeEntry) => {
+      if (customerRequestTarget?.quotationId === workspaceEntry.quotationId) return (
+        <section className="intake-card-workspace" data-testid="intake-customer-request-workspace" aria-labelledby="intake-customer-request-title">
+          <div className="history-meta">
+            <h2 id="intake-customer-request-title">得意先データ入稿依頼 — {customerRequestTarget.quotationNumber}</h2>
+            <button type="button" onClick={() => setCustomerRequestTarget(null)}>閉じる</button>
+          </div>
+          {customerRequestMessage ? <p className="eta-ok" role="status">{customerRequestMessage}</p> : null}
+          {customerRequestError ? <p className="eta-error" role="alert">{customerRequestError}</p> : null}
+          <form className="eta-form" onSubmit={(event) => { event.preventDefault(); void submitCustomerRequest(); }}>
+            <label>依頼メモ（任意）
+              <textarea
+                value={customerRequestNote}
+                rows={3}
+                onChange={(event) => setCustomerRequestNote(event.target.value)}
+                data-testid="intake-customer-request-note"
+              />
+            </label>
+            <button
+              className="button"
+              type="submit"
+              disabled={customerRequestBusy}
+              data-testid="intake-customer-request-submit"
+            >
+              {customerRequestBusy ? "送信中..." : "得意先にアップロード依頼"}
+            </button>
+            <p className="help">AI原稿アップロード用URLを得意先へ送信します。受領後は同じカードからデータ入稿できます。</p>
+          </form>
+        </section>
+      );
       if (uploadTarget?.quotationId === workspaceEntry.quotationId) return (
         <section className="intake-card-workspace" data-testid="intake-card-workspace" aria-labelledby="intake-upload-title">
           <div className="history-meta">
@@ -908,7 +1003,8 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
                 return;
               }
               if (!next || !nextReady || !entry) return;
-              if (next.kind === "intake_upload") setUploadTarget(entry);
+              if (next.kind === "customer_request") void openCustomerRequest(entry);
+              else if (next.kind === "intake_upload") setUploadTarget(entry);
               else if (next.kind === "owner_approval") setApprovalTarget({ entry, kind: "owner_approval" });
               else if (next.kind === "kanei_approval") setApprovalTarget({ entry, kind: "kanei_approval" });
               else if (next.kind === "ship_to") void openShipTo(entry);
@@ -929,6 +1025,7 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
                   <span>{entry.customerName || "得意先未設定"}</span>
                   <small>{entry.productName || "品名未設定"}</small>
                   <small>{Number(entry.quantity || 0).toLocaleString("ja-JP")} 枚 ／ {stateLabels[entry.state]}</small>
+                  <small>入稿方式: {customerDesignLabels[entry.customerDesign.status] ?? entry.customerDesign.label}</small>
                 </div>
 
                 <div className={`intake-next ${nextReady ? "ready" : "waiting"}`} data-testid="intake-next-task">
