@@ -65,7 +65,11 @@ test("audits film-maker create, edit, deactivate, and reconciliation guard", asy
 test("audits data-intake shell and workflow terminology", async ({ page }) => {
   await page.goto("/film-orders");
   await expect(page.getByRole("heading", { name: "データ受入" })).toBeVisible();
-  await expect(page.getByText("内部承認済み見積と既存フィルム発注の共有進捗です。")).toBeVisible();
+  await expect(page.getByText("成約・内部承認後の案件を、入稿から納品書まで順番に管理します。")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "作業の順番" })).toBeVisible();
+  const guide = page.getByTestId("intake-guide");
+  await expect(guide.getByText("データ入稿")).toBeVisible();
+  await expect(guide.getByText("納品先確定", { exact: true })).toBeVisible();
   await expect(page.getByText("Six件").or(page.getByText(/\d+ 件/)).first()).toBeVisible();
   await expect(page.getByTestId("intake-table").or(page.getByText("対象データはありません"))).toBeVisible();
   await expect(page.getByRole("button", { name: "データ入稿" }).first()).toBeVisible();

@@ -121,6 +121,56 @@ describe("G007/G009 data-intake completion UI", () => {
     }));
   });
 
+  it("registers and confirms the next ship-to from data-intake", async () => {
+    const sevenViewer = { id: 1, email: "seven@727.co.jp", name: "Seven", role: "user" as const };
+    const pendingShipEntry: FilmOrderIntakeEntry = {
+      ...entry,
+      ownerDomain: "seven",
+      shipToStatus: "not_provided",
+      actions: [
+        { kind: "owner_approval", label: "Seven承認", authorized: true, enabled: false, reason: "承認済みです。", releaseStory: "G006" },
+        { kind: "purchase_order", label: "発注", authorized: true, enabled: false, reason: "納品先確定後に発注できます。", releaseStory: "G009" },
+      ],
+    };
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, init });
+      if (url.startsWith("/api/data-intake?")) {
+        return jsonResponse({ entries: [pendingShipEntry], total: 1, page: 1, pageSize: 20, pageCount: 1, hasNext: false, hasPrevious: false });
+      }
+      if (url.endsWith("/api/film-orders/9") && method === "GET") {
+        return jsonResponse({ order: { shipTo: { status: "not_provided" } } });
+      }
+      if (url.endsWith("/api/film-orders/9") && method === "POST" && String(init?.body).includes("register-ship-to")) {
+        return jsonResponse({ order: { shipToStatus: "registered" } });
+      }
+      if (url.endsWith("/api/film-orders/9") && method === "POST" && String(init?.body).includes("confirm-ship-to")) {
+        return jsonResponse({ order: { shipToStatus: "confirmed" } });
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    const user = userEvent.setup();
+    render(<DataIntakeClient viewer={sevenViewer} />);
+    const row = await screen.findByTestId("intake-row");
+    expect(within(row).getByTestId("intake-action-ship_to")).toHaveClass("next-action");
+    await user.click(within(row).getByTestId("intake-action-ship_to"));
+    await screen.findByTestId("intake-ship-to-submit");
+    await user.type(screen.getByLabelText("納品先会社名 ★"), "Ship To KK");
+    await user.type(screen.getByLabelText("郵便番号 ★"), "650-0001");
+    await user.type(screen.getByLabelText("住所 ★"), "Kobe 1-1-1");
+    await user.click(screen.getByTestId("intake-ship-to-submit"));
+    await waitFor(() => expect(calls.some((call) => call.url.endsWith("/api/film-orders/9") && String(call.init?.body).includes("confirm-ship-to"))).toBe(true));
+    const registerCall = calls.find((call) => call.url.endsWith("/api/film-orders/9") && String(call.init?.body).includes("register-ship-to"));
+    expect(JSON.parse(String(registerCall?.init?.body))).toMatchObject({
+      action: "register-ship-to",
+      shipToCompanyName: "Ship To KK",
+      shipToPostalCode: "650-0001",
+      shipToAddress: "Kobe 1-1-1",
+      saveShipToMaster: true,
+    });
+  });
+
   it("loads, saves, and downloads the Kanei-to-Seven delivery note", async () => {
     const user = userEvent.setup();
     render(<DataIntakeClient viewer={viewer} />);

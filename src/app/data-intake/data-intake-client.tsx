@@ -52,6 +52,103 @@ const poLabels: Record<FilmOrderIntakePoStatus, string> = {
   sent: "発注済み",
 };
 
+type ShipToForm = {
+  companyName: string;
+  postalCode: string;
+  address: string;
+  phone: string;
+  email: string;
+  note: string;
+};
+
+const emptyShipToForm: ShipToForm = {
+  companyName: "",
+  postalCode: "",
+  address: "",
+  phone: "",
+  email: "",
+  note: "",
+};
+
+const workflowGuide = [
+  { step: 1, title: "データ入稿", owner: "見積所有会社", detail: "AI原稿を受入し、メーカーへ引き継ぎます。" },
+  { step: 2, title: "校正確認", owner: "見積所有会社", detail: "校正ラウンドを確認し、修正または承認します。" },
+  { step: 3, title: "双承認", owner: "所有会社 + 金井貿易", detail: "両社の承認が完了すると発注準備になります。" },
+  { step: 4, title: "納品先確定", owner: "見積所有会社", detail: "納品先を登録し、内容を確定します。" },
+  { step: 5, title: "フィルム発注", owner: "金井貿易", detail: "納品先確定後に発注メールを送信します。" },
+  { step: 6, title: "納品書", owner: "金井貿易", detail: "到着見込を設定し、A4納品書を出力します。" },
+] as const;
+
+type WorkflowStageStatus = "done" | "active" | "waiting";
+
+function workflowStages(entry: FilmOrderIntakeEntry): Array<{
+  title: string;
+  status: WorkflowStageStatus;
+  value: string;
+}> {
+  const dataDone = entry.makerHandoffStatus === "registered";
+  const proofDone = entry.proofStatus === "approved" || entry.proofStatus === "legacy_exempt";
+  const poDone = entry.poStatus === "sent";
+  const approvalsDone = entry.dualApprovalStatus === "approved";
+  const shipToDone = entry.shipToStatus === "confirmed";
+  return [
+    {
+      title: "データ入稿",
+      status: dataDone ? "done" : entry.state === "linked" ? "active" : "waiting",
+      value: makerLabels[entry.makerHandoffStatus],
+    },
+    {
+      title: "校正",
+      status: proofDone ? "done" : dataDone ? "active" : "waiting",
+      value: proofLabels[entry.proofStatus],
+    },
+    {
+      title: "双承認",
+      status: entry.dualApprovalStatus === "approved"
+        ? "done"
+        : entry.dualApprovalStatus === "pending"
+          ? dataDone && proofDone ? "active" : "waiting"
+          : "active",
+      value: approvalLabels[entry.dualApprovalStatus],
+    },
+    {
+      title: "納品先",
+      status: shipToDone ? "done" : approvalsDone ? "active" : "waiting",
+      value: shipToDone ? "確定済み" : entry.shipToStatus === "registered" ? "登録済み" : "未登録",
+    },
+    {
+      title: "発注",
+      status: poDone ? "done" : shipToDone ? "active" : "waiting",
+      value: poLabels[entry.poStatus],
+    },
+    {
+      title: "納品書",
+      status: entry.shippedOn ? "done" : poDone ? "active" : "waiting",
+      value: entry.shippedOn ? `出荷 ${entry.shippedOn}` : poDone ? "作成可能" : "発注後",
+    },
+  ];
+}
+
+function nextWorkflowAction(entry: FilmOrderIntakeEntry): (Omit<FilmOrderIntakeAction, "kind"> & { kind: FilmOrderIntakeAction["kind"] | "ship_to" }) | null {
+  const byKind = new Map(entry.actions.map((action) => [action.kind, action]));
+  const pick = (kind: FilmOrderIntakeAction["kind"]): FilmOrderIntakeAction | null => {
+    const action = byKind.get(kind);
+    return action?.authorized && action.enabled ? action : null;
+  };
+  if (entry.state === "unresolved_owner") return null;
+  if (entry.makerHandoffStatus !== "registered") return pick("intake_upload");
+  if (entry.proofStatus !== "approved" && entry.proofStatus !== "legacy_exempt") return pick("proof_round");
+  if (entry.dualApprovalStatus === "pending" || entry.dualApprovalStatus === "kanei_approved") return pick("owner_approval");
+  if (entry.dualApprovalStatus === "owner_approved") return pick("kanei_approval");
+  if (entry.shipToStatus !== "confirmed") {
+    const ownerAction = byKind.get("owner_approval");
+    if (!ownerAction?.authorized) return null;
+    return { ...ownerAction, kind: "ship_to", label: "納品先登録・確定" };
+  }
+  if (entry.poStatus !== "sent") return pick("purchase_order");
+  return pick("delivery_note");
+}
+
 function ownerBadgeClass(owner: FilmOrderIntakeEntry["ownerDomain"]): string {
   return owner === "kanei"
     ? "badge owner-badge owner-kanei"
@@ -66,14 +163,18 @@ function ownerBadge(owner: FilmOrderIntakeEntry["ownerDomain"]): string {
 
 function IntakeActions({
   entry,
+  nextKind,
   onUpload,
   onApproval,
+  onShipTo,
   onPurchaseOrder,
   onDeliveryNote,
 }: {
   entry: FilmOrderIntakeEntry;
+  nextKind?: FilmOrderIntakeAction["kind"] | "ship_to";
   onUpload: (entry: FilmOrderIntakeEntry) => void;
   onApproval: (entry: FilmOrderIntakeEntry, kind: "owner_approval" | "kanei_approval") => void;
+  onShipTo: (entry: FilmOrderIntakeEntry) => void;
   onPurchaseOrder: (entry: FilmOrderIntakeEntry) => void;
   onDeliveryNote: (entry: FilmOrderIntakeEntry) => void;
 }) {
@@ -107,11 +208,30 @@ function IntakeActions({
                 ? `${action.reason} 承認フォームを開きます。`
                 : action.reason
           }
-          className={action.authorized ? "intake-action authorized" : "intake-action"}
+          className={[
+            "intake-action",
+            action.authorized ? "authorized" : "",
+            action.kind === nextKind && action.authorized && action.enabled ? "next-action" : "",
+          ].filter(Boolean).join(" ")}
         >
+          {action.kind === nextKind && action.authorized && action.enabled ? <span className="intake-action-step">NEXT</span> : null}
           {action.label}
         </button>
       ))}
+      {entry.state === "linked"
+        && entry.dualApprovalStatus === "approved"
+        && entry.shipToStatus !== "confirmed"
+        && entry.actions.find((action) => action.kind === "owner_approval")?.authorized ? (
+          <button
+            type="button"
+            className={`intake-action authorized ${nextKind === "ship_to" ? "next-action" : ""}`}
+            data-testid="intake-action-ship_to"
+            onClick={() => onShipTo(entry)}
+          >
+            {nextKind === "ship_to" ? <span className="intake-action-step">NEXT</span> : null}
+            納品先登録・確定
+          </button>
+        ) : null}
     </div>
   );
 }
@@ -156,6 +276,11 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
   const [deliveryNoteBusy, setDeliveryNoteBusy] = useState(false);
   const [deliveryNoteMessage, setDeliveryNoteMessage] = useState("");
   const [deliveryNoteError, setDeliveryNoteError] = useState("");
+  const [shipToTarget, setShipToTarget] = useState<FilmOrderIntakeEntry | null>(null);
+  const [shipToForm, setShipToForm] = useState<ShipToForm>(emptyShipToForm);
+  const [shipToBusy, setShipToBusy] = useState(false);
+  const [shipToMessage, setShipToMessage] = useState("");
+  const [shipToError, setShipToError] = useState("");
 
   const load = useCallback(async (nextPage: number, currentQuery: typeof query) => {
     const order = ++requestOrder.current;
@@ -358,6 +483,81 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
     }
   };
 
+  const openShipTo = async (entry: FilmOrderIntakeEntry) => {
+    setShipToTarget(entry);
+    setShipToMessage("");
+    setShipToError("");
+    setShipToForm(emptyShipToForm);
+    if (!entry.filmOrder?.id) return;
+    setShipToBusy(true);
+    try {
+      const response = await fetch(`/api/film-orders/${entry.filmOrder.id}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "ship_to_load_failed");
+      const shipTo = payload.order?.shipTo as {
+        companyName?: string; postalCode?: string; address?: string;
+        phone?: string; email?: string; note?: string;
+      } | undefined;
+      if (shipTo?.companyName || shipTo?.address) {
+        setShipToForm({
+          companyName: shipTo.companyName ?? "",
+          postalCode: shipTo.postalCode ?? "",
+          address: shipTo.address ?? "",
+          phone: shipTo.phone ?? "",
+          email: shipTo.email ?? "",
+          note: shipTo.note ?? "",
+        });
+      }
+    } catch (cause) {
+      setShipToError(cause instanceof Error ? `失敗しました（${cause.message}）` : "納品先を読み込めませんでした。");
+    } finally {
+      setShipToBusy(false);
+    }
+  };
+
+  const submitShipTo = async () => {
+    if (!shipToTarget?.filmOrder?.id || shipToBusy) return;
+    if (!shipToForm.companyName.trim() || !shipToForm.postalCode.trim() || !shipToForm.address.trim()) {
+      setShipToError("納品先情報が不足しています。");
+      return;
+    }
+    setShipToBusy(true);
+    setShipToError("");
+    setShipToMessage("");
+    try {
+      const register = await fetch(`/api/film-orders/${shipToTarget.filmOrder.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "register-ship-to",
+          shipToCompanyName: shipToForm.companyName.trim(),
+          shipToPostalCode: shipToForm.postalCode.trim(),
+          shipToAddress: shipToForm.address.trim(),
+          shipToPhone: shipToForm.phone.trim(),
+          shipToEmail: shipToForm.email.trim(),
+          shipToNote: shipToForm.note.trim(),
+          saveShipToMaster: true,
+        }),
+      });
+      const registerPayload = await register.json();
+      if (!register.ok) throw new Error(registerPayload.error ?? "ship_to_register_failed");
+      const confirm = await fetch(`/api/film-orders/${shipToTarget.filmOrder.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "confirm-ship-to" }),
+      });
+      const confirmPayload = await confirm.json();
+      if (!confirm.ok) throw new Error(confirmPayload.error ?? "ship_to_confirm_failed");
+      setShipToMessage("納品先を登録して確定しました。");
+      setShipToTarget(null);
+      await load(page, query);
+    } catch (cause) {
+      setShipToError(cause instanceof Error ? `失敗しました（${cause.message}）` : "納品先の確定に失敗しました。");
+    } finally {
+      setShipToBusy(false);
+    }
+  };
+
   const openDeliveryNote = async (entry: FilmOrderIntakeEntry) => {
     setDeliveryNoteTarget(entry);
     setDeliveryNoteBusy(true);
@@ -447,7 +647,7 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
       <section className="history-toolbar">
         <div>
           <h1>データ受入</h1>
-          <p>内部承認済み見積と既存フィルム発注の共有進捗です。将来リリースの操作は所有会社境界に従って表示します。</p>
+          <p>成約・内部承認後の案件を、入稿から納品書まで順番に管理します。青い NEXT ボタンが現在の操作です。</p>
         </div>
         <form className="history-controls" onSubmit={(event) => { event.preventDefault(); applyFilters(); }}>
           <label>検索
@@ -500,6 +700,23 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
         </form>
       </section>
 
+      <section className="panel intake-guide" aria-labelledby="intake-guide-title" data-testid="intake-guide">
+        <div className="history-meta">
+          <h2 id="intake-guide-title">作業の順番</h2>
+          <span>左から右へ進めます</span>
+        </div>
+        <ol className="intake-guide-steps">
+          {workflowGuide.map((step) => (
+            <li key={step.step}>
+              <span className="intake-guide-number">{step.step}</span>
+              <strong>{step.title}</strong>
+              <small>{step.owner}</small>
+              <p>{step.detail}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
       <section className="panel" aria-labelledby="intake-table-title">
         <div className="history-meta">
           <h2 id="intake-table-title">受入進捗</h2>
@@ -510,7 +727,7 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
           <table className="table history-table intake-table" data-testid="intake-table">
             <thead>
               <tr>
-                <th>見積 / 所有</th><th>得意先 / 品名</th><th>数量</th><th>受入</th><th>メーカー連携</th><th>校正</th><th>双承認</th><th>発注</th><th>予定操作</th>
+                <th>見積 / 得意先</th><th>進行状況</th><th>次の操作・全操作</th>
               </tr>
             </thead>
             <tbody>
@@ -520,18 +737,27 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
                     <strong>{entry.quotationNumber}</strong>
                     <span className={ownerBadgeClass(entry.ownerDomain)}>{ownerBadge(entry.ownerDomain)}</span>
                     <small>{entry.filmOrder ? `${entry.filmOrder.orderNumber} / ID ${entry.filmOrder.id}` : `見積 ID ${entry.quotationId}`}</small>
+	                    <small>{entry.customerName || "—"} ／ {entry.productName || "—"}</small>
+	                    <small>{Number(entry.quantity || 0).toLocaleString("ja-JP")} 枚</small>
+	                    <small>{stateLabels[entry.state]}</small>
                   </td>
-                  <td>{entry.customerName || "—"}<small>{entry.productName || "—"}</small></td>
-                  <td>{entry.quantity}</td>
-                  <td>{stateLabels[entry.state]}</td>
-                  <td>{makerLabels[entry.makerHandoffStatus]}</td>
-                  <td>{proofLabels[entry.proofStatus]}<small>R{entry.proofRound}</small></td>
-                  <td>{approvalLabels[entry.dualApprovalStatus]}</td>
-                  <td>{poLabels[entry.poStatus]}</td>
+	                  <td>
+	                    <ol className="intake-steps">
+	                      {workflowStages(entry).map((stage) => (
+	                        <li key={stage.title} data-status={stage.status}>
+	                          <span aria-hidden="true">{stage.status === "done" ? "✓" : stage.status === "active" ? "●" : "○"}</span>
+	                          <strong>{stage.title}</strong>
+	                          <small>{stage.value}</small>
+	                        </li>
+	                      ))}
+	                    </ol>
+	                  </td>
                 <td><IntakeActions
                   entry={entry}
+	                  nextKind={nextWorkflowAction(entry)?.kind}
                   onUpload={setUploadTarget}
                   onApproval={(entry, kind) => setApprovalTarget({ entry, kind })}
+	                  onShipTo={(entry) => void openShipTo(entry)}
                   onPurchaseOrder={(entry) => void openPurchaseOrder(entry)}
                   onDeliveryNote={(entry) => void openDeliveryNote(entry)}
                 /></td>
@@ -614,6 +840,70 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
             >
               {approvalBusy ? "承認中..." : "承認を記録"}
             </button>
+          </div>
+        </section>
+      ) : null}
+      {shipToTarget ? (
+        <section className="panel" aria-labelledby="intake-ship-to-title">
+          <div className="history-meta">
+            <h2 id="intake-ship-to-title" data-testid="intake-ship-to-title">
+              納品先登録・確定 — {shipToTarget.quotationNumber}
+            </h2>
+            <button type="button" onClick={() => setShipToTarget(null)}>閉じる</button>
+          </div>
+          {shipToMessage ? <p className="eta-ok" role="status">{shipToMessage}</p> : null}
+          {shipToError ? <p className="eta-error" role="alert">{shipToError}</p> : null}
+          <div className="eta-form delivery-note-grid">
+            <label>納品先会社名 ★
+              <input
+                value={shipToForm.companyName}
+                onChange={(event) => setShipToForm((current) => ({ ...current, companyName: event.target.value }))}
+                data-testid="intake-ship-to-company"
+              />
+            </label>
+            <label>郵便番号 ★
+              <input
+                value={shipToForm.postalCode}
+                onChange={(event) => setShipToForm((current) => ({ ...current, postalCode: event.target.value }))}
+              />
+            </label>
+            <label>住所 ★
+              <input
+                value={shipToForm.address}
+                onChange={(event) => setShipToForm((current) => ({ ...current, address: event.target.value }))}
+              />
+            </label>
+            <label>電話番号
+              <input
+                value={shipToForm.phone}
+                onChange={(event) => setShipToForm((current) => ({ ...current, phone: event.target.value }))}
+              />
+            </label>
+            <label>メール
+              <input
+                value={shipToForm.email}
+                onChange={(event) => setShipToForm((current) => ({ ...current, email: event.target.value }))}
+              />
+            </label>
+            <label>備考
+              <textarea
+                rows={3}
+                value={shipToForm.note}
+                onChange={(event) => setShipToForm((current) => ({ ...current, note: event.target.value }))}
+              />
+            </label>
+            <div className="film-order-inline-actions">
+              <button
+                className="button"
+                type="button"
+                disabled={shipToBusy || !shipToForm.companyName.trim() || !shipToForm.postalCode.trim() || !shipToForm.address.trim()}
+                onClick={() => void submitShipTo()}
+                data-testid="intake-ship-to-submit"
+              >
+                {shipToBusy ? "処理中..." : "登録して確定"}
+              </button>
+            </div>
+            <p className="help">納品先は住所録に保存されます。確定後にフィルム発注メールを作成できます。</p>
           </div>
         </section>
       ) : null}

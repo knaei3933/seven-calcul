@@ -13,6 +13,7 @@ const menuItems = [
   { href: "/", label: "原価シミュレーター" },
   { href: "/quote", label: "見積書発行" },
   { href: "/history", label: "見積履歴" },
+  { href: "/data-intake", label: "データ受入・発注" },
 ] as const;
 
 export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
@@ -67,19 +68,12 @@ export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
             {item.label}
           </Link>
         ))}
-        {user?.role === "admin" ? (
-          <Link href="/admin/users" aria-current={pathname === "/admin/users" ? "page" : undefined}>
-            ユーザー管理
-          </Link>
-        ) : null}
-        {user?.role === "admin" && isKaneiTradeUser(user.email) ? (
-          <Link href="/admin/film-prices" aria-current={pathname === "/admin/film-prices" ? "page" : undefined}>
-            フィルム単価
-          </Link>
-        ) : null}
-        {canViewFilmOrders(user?.email) ? (
-          <Link href="/film-orders" aria-current={pathname === "/film-orders" ? "page" : undefined}>
-            フィルム発注
+        {canViewFilmOrders(user?.email) && menuItems.some((item) => item.href === "/data-intake") ? (
+          <Link
+            href="/data-intake"
+            aria-current={pathname === "/data-intake" ? "page" : undefined}
+          >
+            データ受入・発注
           </Link>
         ) : null}
       </nav>
