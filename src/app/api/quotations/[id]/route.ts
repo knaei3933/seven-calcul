@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   deleteQuotation,
+  QuotationActionForbiddenError,
   getQuotation,
   quotationStatuses,
   updateQuotationCustomerEmail,
@@ -17,7 +18,7 @@ import {
 import {
   deleteFilmOrdersForQuotation,
   filmOrderExistsForQuotation,
-  syncFilmOrdersFromQuotations,
+  syncFilmOrderFromQuotationRecord,
 } from "@/lib/film-orders";
 
 export const runtime = "nodejs";
@@ -89,18 +90,22 @@ export async function PATCH(request: Request, context: Context): Promise<NextRes
     if (status === "approved" && !existing.internalApproval) {
       return NextResponse.json({ error: "internal_approval_required" }, { status: 409 });
     }
-    const record = await updateQuotationStatus(Number(id), status, user.id);
+    const record = await updateQuotationStatus(Number(id), status, user.id, { currentRecord: existing });
     if (!record) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
     if (status === "approved") {
       // 成約時にフィルム発注管理へ自動反映する。失敗してもステータス更新は取り消さない。
       try {
-        await syncFilmOrdersFromQuotations(user.email);
+        await syncFilmOrderFromQuotationRecord(record, user.email);
       } catch (error) {
         console.error("[film-orders] sync after approval failed", error);
       }
     }
     return NextResponse.json({ record });
-  } catch {
+  } catch (error) {
+    if (error instanceof QuotationActionForbiddenError) {
+      return NextResponse.json({ error: "quotation_forbidden" }, { status: 403 });
+    }
+    console.error("[quotation-update] failed", error);
     return NextResponse.json({ error: "quotation_update_failed" }, { status: 500 });
   }
 }

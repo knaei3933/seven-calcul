@@ -529,14 +529,20 @@ export function validateQuotationInput(value: unknown): QuotationRecordInput | n
 async function activeActorFor(
   db: SqlClient,
   actorId: number,
-): Promise<{ id: number; email: string | null; isActive: boolean }> {
-  const actor = await db.get<{ id: number; email: string; name: string; is_active: number }>(
-    "SELECT id, email, name, is_active FROM users WHERE id = ?",
+): Promise<{ id: number; email: string | null; name: string | null; role: "admin" | "user" | null; isActive: boolean }> {
+  const actor = await db.get<{ id: number; email: string; name: string; role: string; is_active: number }>(
+    "SELECT id, email, name, role, is_active FROM users WHERE id = ?",
     [actorId],
   );
   return actor && Number(actor.is_active) === 1
-    ? { id: actorId, email: actor.email, isActive: true }
-    : { id: actorId, email: null, isActive: false };
+    ? {
+      id: actorId,
+      email: actor.email,
+      name: actor.name,
+      role: actor.role === "admin" ? "admin" : "user",
+      isActive: true,
+    }
+    : { id: actorId, email: null, name: null, role: null, isActive: false };
 }
 
 async function assertQuotationMutation(
@@ -946,16 +952,31 @@ export async function getQuotationByNumber(quotationNumber: string): Promise<Quo
   return row ? mapRow(row) : null;
 }
 
-export async function updateQuotationStatus(id: number, status: QuotationStatus, actorId: number): Promise<QuotationRecord | null> {
+export async function updateQuotationStatus(
+  id: number,
+  status: QuotationStatus,
+  actorId: number,
+  options?: { currentRecord?: QuotationRecord },
+): Promise<QuotationRecord | null> {
   const db = await getDatabase();
   if (!Number.isInteger(id) || id <= 0 || !quotationStatuses.includes(status)) return null;
-  const current = await getQuotation(id);
+  const current = options?.currentRecord ?? await getQuotation(id);
   if (current) await assertQuotationMutation(db, current, actorId);
+  const now = new Date().toISOString();
   const result = await db.run(
     "UPDATE quotations SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?",
-    [status, actorId, new Date().toISOString(), id],
+    [status, actorId, now, id],
   );
   if (Number(result.changes) === 0) return null;
+  if (current) {
+    const actor = await activeActorFor(db, actorId);
+    return {
+      ...current,
+      status,
+      updatedAt: now,
+      updatedBy: actor ? { id: actorId, email: actor.email ?? "", name: actor.name ?? "" } : null,
+    };
+  }
   return getQuotation(id);
 }
 
