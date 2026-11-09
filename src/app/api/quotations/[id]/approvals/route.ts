@@ -65,6 +65,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       : false;
     return NextResponse.json({ record: approved, gate, filmOrderSynced });
   } catch (error) {
+    console.error("[quotation-approval] failed", error);
     if (error instanceof SampleBulkConfirmationRequiredError) {
       return NextResponse.json({ error: "sample_bulk_confirmation_required" }, { status: 409 });
     }

@@ -651,7 +651,9 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
       {deliveryNoteTarget ? (
         <section className="panel" aria-labelledby="intake-delivery-note-title">
           <div className="history-meta">
-            <h2 id="intake-delivery-note-title">納品書下書き — {deliveryNoteTarget.quotationNumber}</h2>
+            <h2 id="intake-delivery-note-title" data-testid="intake-delivery-note-title">
+              納品書下書き — {deliveryNoteTarget.quotationNumber}
+            </h2>
             <button type="button" onClick={() => setDeliveryNoteTarget(null)}>閉じる</button>
           </div>
           {deliveryNoteMessage ? <p className="eta-ok" role="status">{deliveryNoteMessage}</p> : null}
