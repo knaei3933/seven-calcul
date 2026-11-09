@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DataIntakeClient from "@/app/data-intake/data-intake-client";
@@ -87,10 +87,12 @@ describe("G003 direct intake upload UI", () => {
       expect(fetchMock.mock.calls.length).toBeGreaterThan(0);
       expect(screen.getByTestId("intake-count")).toHaveTextContent("1 件");
     }, { timeout: 5000 });
-    const uploadButton = await screen.findByTestId("intake-action-intake_upload", {}, { timeout: 5000 });
+    const row = await screen.findByTestId("intake-row");
+    const uploadButton = await within(row).findByTestId("intake-action-intake_upload", {}, { timeout: 5000 });
     expect(uploadButton).toBeEnabled();
-    expect(screen.queryByTestId("intake-action-owner_approval")).not.toBeInTheDocument();
+    expect(within(row).queryByTestId("intake-action-owner_approval")).not.toBeInTheDocument();
     await user.click(uploadButton);
+    expect(within(row).getByTestId("intake-card-workspace")).toBeInTheDocument();
 
     const aiInput = screen.getByLabelText("AIデータ（必須）");
     await user.upload(aiInput, new File(["AI"], "customer.ai", { type: "application/postscript" }));

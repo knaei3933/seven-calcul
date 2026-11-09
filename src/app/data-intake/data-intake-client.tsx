@@ -578,6 +578,239 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
   };
 
 
+  const activeTaskId = uploadTarget?.quotationId
+    ?? approvalTarget?.entry.quotationId
+    ?? shipToTarget?.quotationId
+    ?? purchaseOrderTarget?.quotationId
+    ?? deliveryNoteTarget?.quotationId;
+  const isCardActive = (entry: FilmOrderIntakeEntry) => activeTaskId != null && activeTaskId === entry.quotationId;
+  const closeWorkspace = () => {
+    setUploadTarget(null);
+    setApprovalTarget(null);
+    setShipToTarget(null);
+    setPurchaseOrderTarget(null);
+    setDeliveryNoteTarget(null);
+  };
+  const renderWorkspace = (workspaceEntry: FilmOrderIntakeEntry) => {
+      if (uploadTarget?.quotationId === workspaceEntry.quotationId) return (
+        <section className="intake-card-workspace" data-testid="intake-card-workspace" aria-labelledby="intake-upload-title">
+          <div className="history-meta">
+            <h2 id="intake-upload-title">直接データ入稿 — {uploadTarget.quotationNumber}</h2>
+            <button type="button" onClick={() => setUploadTarget(null)}>閉じる</button>
+          </div>
+          {uploadMessage ? <p className="eta-ok" role="status">{uploadMessage}</p> : null}
+          {uploadError ? <p className="eta-error" role="alert">{uploadError}</p> : null}
+          <div className="eta-form">
+            <label>AIデータ（必須）
+              <input type="file" accept=".ai" onChange={(event) => setAiFile(event.target.files?.[0] ?? null)} />
+            </label>
+            <label>確認用PDF（AI入稿後に任意）
+              <input type="file" accept=".pdf" onChange={(event) => setPdfFile(event.target.files?.[0] ?? null)} />
+            </label>
+            <UploadGuideAcknowledgement
+              checks={guideChecks}
+              onChange={(index, checked) => setGuideChecks((old) => old.map((value, itemIndex) => itemIndex === index ? checked : value))}
+            />
+            <label>備考（任意）<textarea value={uploadNote} rows={3} onChange={(event) => setUploadNote(event.target.value)} /></label>
+            <button
+              className="button"
+              type="button"
+              disabled={!aiFile || uploadBusy || !allUploadGuidesChecked(guideChecks)}
+              onClick={() => void submitUpload()}
+              data-testid="intake-upload-submit"
+            >
+              {uploadBusy ? "アップロード中..." : "デザインデータを入稿"}
+            </button>
+          </div>
+        </section>
+      );
+      if (approvalTarget?.entry.quotationId === workspaceEntry.quotationId) return (
+        <section className="intake-card-workspace" data-testid="intake-card-workspace" aria-labelledby="intake-approval-title">
+          <div className="history-meta">
+            <h2 id="intake-approval-title">校正承認 — {approvalTarget.entry.quotationNumber}</h2>
+            <button type="button" onClick={() => setApprovalTarget(null)}>閉じる</button>
+          </div>
+          {approvalMessage ? <p className="eta-ok" role="status">{approvalMessage}</p> : null}
+          {approvalError ? <p className="eta-error" role="alert">{approvalError}</p> : null}
+          <div className="eta-form">
+            {approvalTarget.kind === "owner_approval" ? (
+              <label>最終承認データ名（任意）
+                <input value={approvalFinalFileName} onChange={(event) => setApprovalFinalFileName(event.target.value)} />
+              </label>
+            ) : (
+              <>
+                <label>承認者
+                  <input value={approverName} onChange={(event) => setApproverName(event.target.value)} />
+                </label>
+                <label>確認根拠（必須）
+                  <input value={approvalEvidence} onChange={(event) => setApprovalEvidence(event.target.value)} />
+                </label>
+                <label>確認理由（必須）
+                  <input value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} />
+                </label>
+              </>
+            )}
+            <button
+              className="button"
+              type="button"
+              disabled={approvalBusy || (approvalTarget.kind === "kanei_approval" && (!approvalEvidence.trim() || !approvalReason.trim()))}
+              onClick={() => void submitApproval()}
+              data-testid="intake-approval-submit"
+            >
+              {approvalBusy ? "承認中..." : "承認を記録"}
+            </button>
+          </div>
+        </section>
+      );
+      if (shipToTarget?.quotationId === workspaceEntry.quotationId) return (
+        <section className="intake-card-workspace" data-testid="intake-card-workspace" aria-labelledby="intake-ship-to-title">
+          <div className="history-meta">
+            <h2 id="intake-ship-to-title" data-testid="intake-ship-to-title">
+              納品先登録・確定 — {shipToTarget.quotationNumber}
+            </h2>
+            <button type="button" onClick={() => setShipToTarget(null)}>閉じる</button>
+          </div>
+          {shipToMessage ? <p className="eta-ok" role="status">{shipToMessage}</p> : null}
+          {shipToError ? <p className="eta-error" role="alert">{shipToError}</p> : null}
+          <div className="eta-form delivery-note-grid">
+            <label>納品先会社名 ★
+              <input
+                value={shipToForm.companyName}
+                onChange={(event) => setShipToForm((current) => ({ ...current, companyName: event.target.value }))}
+                data-testid="intake-ship-to-company"
+              />
+            </label>
+            <label>郵便番号 ★
+              <input
+                value={shipToForm.postalCode}
+                onChange={(event) => setShipToForm((current) => ({ ...current, postalCode: event.target.value }))}
+              />
+            </label>
+            <label>住所 ★
+              <input
+                value={shipToForm.address}
+                onChange={(event) => setShipToForm((current) => ({ ...current, address: event.target.value }))}
+              />
+            </label>
+            <label>電話番号
+              <input
+                value={shipToForm.phone}
+                onChange={(event) => setShipToForm((current) => ({ ...current, phone: event.target.value }))}
+              />
+            </label>
+            <label>メール
+              <input
+                value={shipToForm.email}
+                onChange={(event) => setShipToForm((current) => ({ ...current, email: event.target.value }))}
+              />
+            </label>
+            <label>備考
+              <textarea
+                rows={3}
+                value={shipToForm.note}
+                onChange={(event) => setShipToForm((current) => ({ ...current, note: event.target.value }))}
+              />
+            </label>
+            <div className="film-order-inline-actions">
+              <button
+                className="button"
+                type="button"
+                disabled={shipToBusy || !shipToForm.companyName.trim() || !shipToForm.postalCode.trim() || !shipToForm.address.trim()}
+                onClick={() => void submitShipTo()}
+                data-testid="intake-ship-to-submit"
+              >
+                {shipToBusy ? "処理中..." : "登録して確定"}
+              </button>
+            </div>
+            <p className="help">納品先は住所録に保存されます。確定後にフィルム発注メールを作成できます。</p>
+          </div>
+        </section>
+      );
+      if (purchaseOrderTarget?.quotationId === workspaceEntry.quotationId) return (
+        <section className="intake-card-workspace" data-testid="intake-card-workspace" aria-labelledby="intake-po-title">
+          <div className="history-meta">
+            <h2 id="intake-po-title">フィルム発注メール — {purchaseOrderTarget.quotationNumber}</h2>
+            <button type="button" onClick={() => setPurchaseOrderTarget(null)}>閉じる</button>
+          </div>
+          {purchaseOrderMessage ? <p className="eta-ok" role="status">{purchaseOrderMessage}</p> : null}
+          {purchaseOrderError ? <p className="eta-error" role="alert">{purchaseOrderError}</p> : null}
+          <div className="eta-form">
+            <label>追加発注指示（任意）
+              <textarea value={purchaseOrderNote} rows={4} onChange={(event) => setPurchaseOrderNote(event.target.value)} />
+            </label>
+            <label>件名
+              <input value={purchaseOrderSubject} onChange={(event) => setPurchaseOrderSubject(event.target.value)} maxLength={500} />
+            </label>
+            <label>メール本文
+              <textarea value={purchaseOrderBody} rows={16} onChange={(event) => setPurchaseOrderBody(event.target.value)} maxLength={20000} />
+            </label>
+            <p className="help">専用リンクは送信時に確定トークンへ自動置換されます。リンク行を削除するとメーカーが報告できなくなります。</p>
+            <button
+              className="button"
+              type="button"
+              disabled={purchaseOrderBusy || !purchaseOrderSubject.trim() || !purchaseOrderBody.trim()}
+              onClick={() => void sendPurchaseOrder()}
+              data-testid="intake-po-send"
+            >
+              {purchaseOrderBusy ? "送信中..." : "この内容で発注する"}
+            </button>
+          </div>
+        </section>
+      );
+      if (deliveryNoteTarget?.quotationId === workspaceEntry.quotationId) return (
+        <section className="intake-card-workspace" data-testid="intake-card-workspace" aria-labelledby="intake-delivery-note-title">
+          <div className="history-meta">
+            <h2 id="intake-delivery-note-title" data-testid="intake-delivery-note-title">
+              納品書下書き — {deliveryNoteTarget.quotationNumber}
+            </h2>
+            <button type="button" onClick={() => setDeliveryNoteTarget(null)}>閉じる</button>
+          </div>
+          {deliveryNoteMessage ? <p className="eta-ok" role="status">{deliveryNoteMessage}</p> : null}
+          {deliveryNoteError ? <p className="eta-error" role="alert">{deliveryNoteError}</p> : null}
+          {deliveryNoteDraft ? (
+            <div className="eta-form delivery-note-grid">
+              <label>納品先
+                <input value={deliveryNoteDraft.recipientName} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, recipientName: event.target.value } : current)} />
+              </label>
+              <label>発行者
+                <input value={deliveryNoteDraft.senderName} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, senderName: event.target.value } : current)} />
+              </label>
+              <label>発行日
+                <input type="date" value={deliveryNoteDraft.issueDate} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, issueDate: event.target.value } : current)} />
+              </label>
+              <label>到着見込
+                <input type="date" value={deliveryNoteDraft.arrivalEstimateDate} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, arrivalEstimateDate: event.target.value } : current)} />
+              </label>
+              <label>品名
+                <input value={deliveryNoteDraft.productName} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, productName: event.target.value } : current)} />
+              </label>
+              <label>仕様
+                <input value={deliveryNoteDraft.specification} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, specification: event.target.value } : current)} />
+              </label>
+              <label>数量
+                <input value={deliveryNoteDraft.quantity} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, quantity: event.target.value } : current)} />
+              </label>
+              <label>フィルム長
+                <input value={deliveryNoteDraft.filmLength} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, filmLength: event.target.value } : current)} />
+              </label>
+              <label>備考
+                <textarea value={deliveryNoteDraft.remarks} rows={3} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, remarks: event.target.value } : current)} />
+              </label>
+              <div className="film-order-inline-actions">
+                <button className="button secondary small" type="button" disabled={deliveryNoteBusy} onClick={() => void saveDeliveryNote()}>
+                  {deliveryNoteBusy ? "保存中..." : "下書き保存"}
+                </button>
+                <button className="button small" type="button" disabled={deliveryNoteBusy} onClick={() => void outputDeliveryNotePdf()}>
+                  納品書PDF出力（A4）
+                </button>
+              </div>
+            </div>
+          ) : <p>読み込み中...</p>}
+        </section>
+      );
+    return null;
+  };
+
   return (
     <main className="page data-intake-page">
       <section className="history-toolbar">
@@ -670,6 +903,10 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
               ? "金井貿易側"
               : ownerCompany;
             const openNext = () => {
+              if (isCardActive(entry)) {
+                closeWorkspace();
+                return;
+              }
               if (!next || !nextReady || !entry) return;
               if (next.kind === "intake_upload") setUploadTarget(entry);
               else if (next.kind === "owner_approval") setApprovalTarget({ entry, kind: "owner_approval" });
@@ -679,7 +916,7 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
               else if (next.kind === "delivery_note") void openDeliveryNote(entry);
             };
             return (
-              <article key={`${entry.quotationId}-${entry.filmOrder?.id ?? "none"}`} className="intake-card" data-testid="intake-row">
+              <article key={`${entry.quotationId}-${entry.filmOrder?.id ?? "none"}`} className={`intake-card ${isCardActive(entry) ? "active" : ""}`} data-testid="intake-row">
                 <header className="intake-card-head">
                   <div>
                     <small>{entry.filmOrder ? `発注 ${entry.filmOrder.orderNumber}` : `見積 ID ${entry.quotationId}`}</small>
@@ -702,12 +939,13 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
                   </div>
                   <button
                     type="button"
-                    disabled={!nextReady}
+                    disabled={!nextReady && !isCardActive(entry)}
+                    aria-expanded={isCardActive(entry)}
                     data-testid={`intake-action-${next?.kind ?? "waiting"}`}
                     data-authorized={nextReady ? "true" : "false"}
                     onClick={openNext}
                   >
-                    {nextReady ? "開く" : "操作不可"}
+                    {isCardActive(entry) ? "閉じる" : nextReady ? "開く" : "操作不可"}
                   </button>
                 </div>
 
@@ -727,6 +965,8 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
                     ))}
                   </ol>
                 </div>
+
+                {renderWorkspace(entry)}
               </article>
             );
           })}
@@ -738,222 +978,6 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
           <button type="button" disabled={!result?.hasNext || loading} onClick={() => setPage((current) => current + 1)}>次へ</button>
         </div>
       </section>
-      {uploadTarget ? (
-        <section className="panel" aria-labelledby="intake-upload-title">
-          <div className="history-meta">
-            <h2 id="intake-upload-title">直接データ入稿 — {uploadTarget.quotationNumber}</h2>
-            <button type="button" onClick={() => setUploadTarget(null)}>閉じる</button>
-          </div>
-          {uploadMessage ? <p className="eta-ok" role="status">{uploadMessage}</p> : null}
-          {uploadError ? <p className="eta-error" role="alert">{uploadError}</p> : null}
-          <div className="eta-form">
-            <label>AIデータ（必須）
-              <input type="file" accept=".ai" onChange={(event) => setAiFile(event.target.files?.[0] ?? null)} />
-            </label>
-            <label>確認用PDF（AI入稿後に任意）
-              <input type="file" accept=".pdf" onChange={(event) => setPdfFile(event.target.files?.[0] ?? null)} />
-            </label>
-            <UploadGuideAcknowledgement
-              checks={guideChecks}
-              onChange={(index, checked) => setGuideChecks((old) => old.map((value, itemIndex) => itemIndex === index ? checked : value))}
-            />
-            <label>備考（任意）<textarea value={uploadNote} rows={3} onChange={(event) => setUploadNote(event.target.value)} /></label>
-            <button
-              className="button"
-              type="button"
-              disabled={!aiFile || uploadBusy || !allUploadGuidesChecked(guideChecks)}
-              onClick={() => void submitUpload()}
-              data-testid="intake-upload-submit"
-            >
-              {uploadBusy ? "アップロード中..." : "デザインデータを入稿"}
-            </button>
-          </div>
-        </section>
-      ) : null}
-      {approvalTarget ? (
-        <section className="panel" aria-labelledby="intake-approval-title">
-          <div className="history-meta">
-            <h2 id="intake-approval-title">校正承認 — {approvalTarget.entry.quotationNumber}</h2>
-            <button type="button" onClick={() => setApprovalTarget(null)}>閉じる</button>
-          </div>
-          {approvalMessage ? <p className="eta-ok" role="status">{approvalMessage}</p> : null}
-          {approvalError ? <p className="eta-error" role="alert">{approvalError}</p> : null}
-          <div className="eta-form">
-            {approvalTarget.kind === "owner_approval" ? (
-              <label>最終承認データ名（任意）
-                <input value={approvalFinalFileName} onChange={(event) => setApprovalFinalFileName(event.target.value)} />
-              </label>
-            ) : (
-              <>
-                <label>承認者
-                  <input value={approverName} onChange={(event) => setApproverName(event.target.value)} />
-                </label>
-                <label>確認根拠（必須）
-                  <input value={approvalEvidence} onChange={(event) => setApprovalEvidence(event.target.value)} />
-                </label>
-                <label>確認理由（必須）
-                  <input value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} />
-                </label>
-              </>
-            )}
-            <button
-              className="button"
-              type="button"
-              disabled={approvalBusy || (approvalTarget.kind === "kanei_approval" && (!approvalEvidence.trim() || !approvalReason.trim()))}
-              onClick={() => void submitApproval()}
-              data-testid="intake-approval-submit"
-            >
-              {approvalBusy ? "承認中..." : "承認を記録"}
-            </button>
-          </div>
-        </section>
-      ) : null}
-      {shipToTarget ? (
-        <section className="panel" aria-labelledby="intake-ship-to-title">
-          <div className="history-meta">
-            <h2 id="intake-ship-to-title" data-testid="intake-ship-to-title">
-              納品先登録・確定 — {shipToTarget.quotationNumber}
-            </h2>
-            <button type="button" onClick={() => setShipToTarget(null)}>閉じる</button>
-          </div>
-          {shipToMessage ? <p className="eta-ok" role="status">{shipToMessage}</p> : null}
-          {shipToError ? <p className="eta-error" role="alert">{shipToError}</p> : null}
-          <div className="eta-form delivery-note-grid">
-            <label>納品先会社名 ★
-              <input
-                value={shipToForm.companyName}
-                onChange={(event) => setShipToForm((current) => ({ ...current, companyName: event.target.value }))}
-                data-testid="intake-ship-to-company"
-              />
-            </label>
-            <label>郵便番号 ★
-              <input
-                value={shipToForm.postalCode}
-                onChange={(event) => setShipToForm((current) => ({ ...current, postalCode: event.target.value }))}
-              />
-            </label>
-            <label>住所 ★
-              <input
-                value={shipToForm.address}
-                onChange={(event) => setShipToForm((current) => ({ ...current, address: event.target.value }))}
-              />
-            </label>
-            <label>電話番号
-              <input
-                value={shipToForm.phone}
-                onChange={(event) => setShipToForm((current) => ({ ...current, phone: event.target.value }))}
-              />
-            </label>
-            <label>メール
-              <input
-                value={shipToForm.email}
-                onChange={(event) => setShipToForm((current) => ({ ...current, email: event.target.value }))}
-              />
-            </label>
-            <label>備考
-              <textarea
-                rows={3}
-                value={shipToForm.note}
-                onChange={(event) => setShipToForm((current) => ({ ...current, note: event.target.value }))}
-              />
-            </label>
-            <div className="film-order-inline-actions">
-              <button
-                className="button"
-                type="button"
-                disabled={shipToBusy || !shipToForm.companyName.trim() || !shipToForm.postalCode.trim() || !shipToForm.address.trim()}
-                onClick={() => void submitShipTo()}
-                data-testid="intake-ship-to-submit"
-              >
-                {shipToBusy ? "処理中..." : "登録して確定"}
-              </button>
-            </div>
-            <p className="help">納品先は住所録に保存されます。確定後にフィルム発注メールを作成できます。</p>
-          </div>
-        </section>
-      ) : null}
-      {purchaseOrderTarget ? (
-        <section className="panel" aria-labelledby="intake-po-title">
-          <div className="history-meta">
-            <h2 id="intake-po-title">フィルム発注メール — {purchaseOrderTarget.quotationNumber}</h2>
-            <button type="button" onClick={() => setPurchaseOrderTarget(null)}>閉じる</button>
-          </div>
-          {purchaseOrderMessage ? <p className="eta-ok" role="status">{purchaseOrderMessage}</p> : null}
-          {purchaseOrderError ? <p className="eta-error" role="alert">{purchaseOrderError}</p> : null}
-          <div className="eta-form">
-            <label>追加発注指示（任意）
-              <textarea value={purchaseOrderNote} rows={4} onChange={(event) => setPurchaseOrderNote(event.target.value)} />
-            </label>
-            <label>件名
-              <input value={purchaseOrderSubject} onChange={(event) => setPurchaseOrderSubject(event.target.value)} maxLength={500} />
-            </label>
-            <label>メール本文
-              <textarea value={purchaseOrderBody} rows={16} onChange={(event) => setPurchaseOrderBody(event.target.value)} maxLength={20000} />
-            </label>
-            <p className="help">専用リンクは送信時に確定トークンへ自動置換されます。リンク行を削除するとメーカーが報告できなくなります。</p>
-            <button
-              className="button"
-              type="button"
-              disabled={purchaseOrderBusy || !purchaseOrderSubject.trim() || !purchaseOrderBody.trim()}
-              onClick={() => void sendPurchaseOrder()}
-              data-testid="intake-po-send"
-            >
-              {purchaseOrderBusy ? "送信中..." : "この内容で発注する"}
-            </button>
-          </div>
-        </section>
-      ) : null}
-      {deliveryNoteTarget ? (
-        <section className="panel" aria-labelledby="intake-delivery-note-title">
-          <div className="history-meta">
-            <h2 id="intake-delivery-note-title" data-testid="intake-delivery-note-title">
-              納品書下書き — {deliveryNoteTarget.quotationNumber}
-            </h2>
-            <button type="button" onClick={() => setDeliveryNoteTarget(null)}>閉じる</button>
-          </div>
-          {deliveryNoteMessage ? <p className="eta-ok" role="status">{deliveryNoteMessage}</p> : null}
-          {deliveryNoteError ? <p className="eta-error" role="alert">{deliveryNoteError}</p> : null}
-          {deliveryNoteDraft ? (
-            <div className="eta-form delivery-note-grid">
-              <label>納品先
-                <input value={deliveryNoteDraft.recipientName} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, recipientName: event.target.value } : current)} />
-              </label>
-              <label>発行者
-                <input value={deliveryNoteDraft.senderName} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, senderName: event.target.value } : current)} />
-              </label>
-              <label>発行日
-                <input type="date" value={deliveryNoteDraft.issueDate} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, issueDate: event.target.value } : current)} />
-              </label>
-              <label>到着見込
-                <input type="date" value={deliveryNoteDraft.arrivalEstimateDate} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, arrivalEstimateDate: event.target.value } : current)} />
-              </label>
-              <label>品名
-                <input value={deliveryNoteDraft.productName} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, productName: event.target.value } : current)} />
-              </label>
-              <label>仕様
-                <input value={deliveryNoteDraft.specification} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, specification: event.target.value } : current)} />
-              </label>
-              <label>数量
-                <input value={deliveryNoteDraft.quantity} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, quantity: event.target.value } : current)} />
-              </label>
-              <label>フィルム長
-                <input value={deliveryNoteDraft.filmLength} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, filmLength: event.target.value } : current)} />
-              </label>
-              <label>備考
-                <textarea value={deliveryNoteDraft.remarks} rows={3} onChange={(event) => setDeliveryNoteDraft((current) => current ? { ...current, remarks: event.target.value } : current)} />
-              </label>
-              <div className="film-order-inline-actions">
-                <button className="button secondary small" type="button" disabled={deliveryNoteBusy} onClick={() => void saveDeliveryNote()}>
-                  {deliveryNoteBusy ? "保存中..." : "下書き保存"}
-                </button>
-                <button className="button small" type="button" disabled={deliveryNoteBusy} onClick={() => void outputDeliveryNotePdf()}>
-                  納品書PDF出力（A4）
-                </button>
-              </div>
-            </div>
-          ) : <p>読み込み中...</p>}
-        </section>
-      ) : null}
     </main>
   );
 }

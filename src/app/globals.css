@@ -4292,6 +4292,35 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 3mm; }
   border-radius: 14px;
   background: white;
   box-shadow: 0 4px 16px rgba(15, 23, 42, .04);
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.intake-card.active {
+  border-color: #2563eb;
+  background: #fbfdff;
+  box-shadow: 0 10px 26px rgba(37, 99, 235, .13);
+}
+.intake-card-workspace {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+.intake-card-workspace > .history-meta {
+  margin: 0;
+}
+.intake-card-workspace h2 {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.25;
+}
+.intake-card-workspace .eta-form {
+  align-content: start;
+}
+.intake-card-workspace .button {
+  min-height: 40px;
 }
 .intake-card-head {
   display: flex;
