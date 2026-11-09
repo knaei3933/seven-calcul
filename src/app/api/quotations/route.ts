@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { performance } from "node:perf_hooks";
 import {
   InvalidQuotationPdfError,
   listQuotations,
@@ -347,6 +348,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const requestStartedAt = performance.now();
   try {
     const user = await getSessionUser(request);
     if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
@@ -485,6 +487,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       productName: input.productName,
       customerName: input.customerName,
     });
+    const saveStartedAt = performance.now();
     const issued = await saveIssuedQuotation(
       input,
       user.id,
@@ -494,6 +497,14 @@ export async function POST(request: Request): Promise<NextResponse> {
       snapshot,
       serverCanonicalIssuance ? { canonicalPdfFactory: renderCanonicalQuotationPdfFactory } : {},
     );
+    const saveMs = performance.now() - saveStartedAt;
+    console.info("[quotation-save] timing", {
+      quotationId: issued.record.id,
+      quotationNumber: issued.record.quotationNumber,
+      pdfBytes: issued.pdfByteLength,
+      saveMs: Math.round(saveMs),
+      totalMs: Math.round(performance.now() - requestStartedAt),
+    });
     return NextResponse.json({
       record: issued.record,
       created: issued.created,

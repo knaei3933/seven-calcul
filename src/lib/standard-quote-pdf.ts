@@ -338,8 +338,8 @@ export async function generateStandardQuotationPdf(
   document.setCreationDate(businessTime);
   document.setModificationDate(businessTime);
   // CJK subset embedding can drop glyphs in fontkit; embed the complete quote font.
-  const regular = await document.embedFont(new Uint8Array(fontRegular), { subset: false });
-  const bold = await document.embedFont(new Uint8Array(fontBold), { subset: false });
+  const regular = await document.embedFont(new Uint8Array(fontRegular), { subset: true });
+  const bold = await document.embedFont(new Uint8Array(fontBold), { subset: true });
   const flow: DrawPage = {
     page: document.addPage([A4_WIDTH, A4_HEIGHT]),
     y: A4_HEIGHT - TOP_MARGIN,

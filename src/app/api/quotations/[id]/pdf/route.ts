@@ -101,25 +101,22 @@ export async function GET(request: Request, context: Context): Promise<Response>
     if (!canReadQuotation(user, record)) {
       return NextResponse.json({ error: "pdf_forbidden" }, { status: 403 });
     }
-    const pdfMeta = await getQuotationPdfDownloadMeta(quotationId);
-    const metaMs = performance.now() - pdfStartedAt;
-    if (!pdfMeta) return NextResponse.json({ error: "pdf_not_found" }, { status: 404 });
-    const etag = `"${pdfMeta.sha256}"`;
+    const pdf = await getQuotationPdfDownload(quotationId);
+    const pdfMs = performance.now() - pdfStartedAt;
+    if (!pdf) return NextResponse.json({ error: "pdf_not_found" }, { status: 404 });
+    const etag = `"${pdf.sha256}"`;
     if ((request.headers.get("if-none-match") ?? "").includes(etag)) {
       return new Response(null, {
         status: 304,
         headers: {
           ETag: etag,
           "Cache-Control": "private, no-cache",
-          "Server-Timing": `auth;dur=${(pdfStartedAt - startedAt).toFixed(1)},meta;dur=${metaMs.toFixed(1)},pdf;dur=0`,
+          "Server-Timing": `auth;dur=${(pdfStartedAt - startedAt).toFixed(1)},pdf;dur=${pdfMs.toFixed(1)}`,
         },
       });
     }
-    const pdf = await getQuotationPdfDownload(quotationId);
-    const pdfMs = performance.now() - pdfStartedAt;
-    if (!pdf) return NextResponse.json({ error: "pdf_not_found" }, { status: 404 });
     const totalMs = performance.now() - startedAt;
-    console.info("[quotation-pdf] download timing", { quotationId, bytes: pdf.data.byteLength, authMs: pdfStartedAt - startedAt, metaMs, pdfMs, totalMs, cached: false });
+    console.info("[quotation-pdf] download timing", { quotationId, bytes: pdf.data.byteLength, authMs: pdfStartedAt - startedAt, pdfMs, totalMs, cached: false });
     return new Response(new Uint8Array(pdf.data), {
       headers: {
         "Content-Type": "application/pdf",
@@ -127,7 +124,7 @@ export async function GET(request: Request, context: Context): Promise<Response>
         "Content-Length": String(pdf.data.byteLength),
         ETag: etag,
         "Cache-Control": "private, no-cache",
-        "Server-Timing": `auth;dur=${(pdfStartedAt - startedAt).toFixed(1)},meta;dur=${metaMs.toFixed(1)},pdf;dur=${(pdfMs - metaMs).toFixed(1)}`,
+        "Server-Timing": `auth;dur=${(pdfStartedAt - startedAt).toFixed(1)},pdf;dur=${pdfMs.toFixed(1)}`,
       },
     });
   } catch (error) {
