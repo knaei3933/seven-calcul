@@ -153,7 +153,6 @@ describe("G007/G009 data-intake completion UI", () => {
     const user = userEvent.setup();
     render(<DataIntakeClient viewer={sevenViewer} />);
     const row = await screen.findByTestId("intake-row");
-    expect(within(row).getByTestId("intake-action-ship_to")).toHaveClass("next-action");
     await user.click(within(row).getByTestId("intake-action-ship_to"));
     await screen.findByTestId("intake-ship-to-submit");
     await user.type(screen.getByLabelText("納品先会社名 ★"), "Ship To KK");
@@ -172,6 +171,7 @@ describe("G007/G009 data-intake completion UI", () => {
   });
 
   it("loads, saves, and downloads the Kanei-to-Seven delivery note", async () => {
+    entry.poStatus = "sent";
     const user = userEvent.setup();
     render(<DataIntakeClient viewer={viewer} />);
     const row = await screen.findByTestId("intake-row");

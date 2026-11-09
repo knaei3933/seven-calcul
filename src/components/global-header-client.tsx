@@ -68,14 +68,6 @@ export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
             {item.label}
           </Link>
         ))}
-        {canViewFilmOrders(user?.email) && menuItems.some((item) => item.href === "/data-intake") ? (
-          <Link
-            href="/data-intake"
-            aria-current={pathname === "/data-intake" ? "page" : undefined}
-          >
-            データ受入・発注
-          </Link>
-        ) : null}
       </nav>
 
       <div className="global-user-area">

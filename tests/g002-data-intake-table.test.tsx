@@ -124,7 +124,7 @@ afterEach(() => {
 });
 
 describe("G002 data intake table", () => {
-  it("renders the shared database-style table and owner-derived badges", async () => {
+  it("renders per-order workflow cards and owner-derived badges", async () => {
     render(<DataIntakeClient viewer={currentViewer} />);
     const table = await screen.findByTestId("intake-table");
     expect(table).toBeInTheDocument();
@@ -183,46 +183,28 @@ describe("G002 data intake table", () => {
     expect(new URL(String(fetchMock.mock.lastCall?.[0]), "http://localhost").searchParams.get("page")).toBe("2");
   });
 
-  it("renders owner-specific action authorization", async () => {
+  it("shows only the next action for each order", async () => {
     render(<DataIntakeClient viewer={currentViewer} />);
     await screen.findByTestId("intake-table");
-    const firstRows = screen.getAllByTestId("intake-row");
-    expect(within(firstRows[0]!).getByTestId("intake-action-intake_upload")).toHaveAttribute("data-authorized", "true");
-    expect(within(firstRows[0]!).getByTestId("intake-action-kanei_approval")).toHaveAttribute("data-authorized", "false");
-    expect(within(firstRows[0]!).getByTestId("intake-action-intake_upload")).toBeEnabled();
-    expect(within(firstRows[0]!).getByTestId("intake-action-owner_approval")).toBeDisabled();
-    expect(within(firstRows[0]!).getByTestId("intake-action-proof_round")).toBeDisabled();
-    cleanup();
-    render(<DataIntakeClient viewer={kaneiViewer} />);
-    await screen.findByTestId("intake-table");
     const rows = screen.getAllByTestId("intake-row");
-    expect(within(rows[0]!).getByTestId("intake-action-kanei_approval")).toHaveAttribute("data-authorized", "false");
-    expect(within(rows[0]!).getByTestId("intake-action-owner_approval")).toHaveAttribute("data-authorized", "false");
-    expect(within(rows[1]!).getByTestId("intake-action-kanei_approval")).toHaveAttribute("data-authorized", "true");
-    expect(within(rows[1]!).getByTestId("intake-action-owner_approval")).toHaveAttribute("data-authorized", "true");
+    expect(within(rows[0]!).getByTestId("intake-next-task")).toHaveTextContent("金井承認");
+    expect(within(rows[0]!).getByTestId("intake-action-kanei_approval")).toBeDisabled();
+    expect(within(rows[0]!).queryByTestId("intake-action-owner_approval")).not.toBeInTheDocument();
+    expect(within(rows[0]!).queryByTestId("intake-action-proof_round")).not.toBeInTheDocument();
 
-    cleanup();
-    fetchMock.mockResolvedValue(Response.json(payload([{
-      ...linkedSeven,
-      actions: [
-        action("intake_upload", "データ入稿", false),
-        action("owner_approval", "S7承認", false),
-        action("kanei_approval", "金井承認", false),
-      ],
-    }])));
-    render(<DataIntakeClient viewer={neutralViewer} />);
-    await screen.findByTestId("intake-table");
-    expect(screen.getAllByTestId("intake-action-intake_upload")[0]).toHaveAttribute("data-authorized", "false");
+    expect(within(rows[1]!).getByTestId("intake-next-task")).toHaveTextContent("データ入稿");
+    expect(within(rows[1]!).getByTestId("intake-action-intake_upload")).toBeEnabled();
+    expect(within(rows[1]!).queryByTestId("intake-action-purchase_order")).not.toBeInTheDocument();
   });
 
   it("keeps unresolved rows visible but fail-closed", async () => {
     fetchMock.mockResolvedValue(Response.json(payload([unresolved])));
     render(<DataIntakeClient viewer={currentViewer} />);
     expect(await screen.findByText("UNRESOLVED-G002")).toBeInTheDocument();
-    expect(within(screen.getByTestId("intake-table")).getAllByText("所有未解決").length).toBeGreaterThan(0);
-    for (const kind of ["intake_upload", "owner_approval", "kanei_approval"]) {
-      expect(screen.getByTestId(`intake-action-${kind}`)).toHaveAttribute("data-authorized", "false");
-      expect(screen.getByTestId(`intake-action-${kind}`)).toBeDisabled();
-    }
+    expect(within(screen.getByTestId("intake-table")).getAllByText(/所有未解決/u).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("intake-action-intake_upload")).toHaveAttribute("data-authorized", "false");
+    expect(screen.getByTestId("intake-action-intake_upload")).toBeDisabled();
+    expect(screen.queryByTestId("intake-action-owner_approval")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("intake-action-kanei_approval")).not.toBeInTheDocument();
   });
 });

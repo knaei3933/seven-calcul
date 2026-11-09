@@ -89,7 +89,7 @@ describe("G003 direct intake upload UI", () => {
     }, { timeout: 5000 });
     const uploadButton = await screen.findByTestId("intake-action-intake_upload", {}, { timeout: 5000 });
     expect(uploadButton).toBeEnabled();
-    expect(screen.getByTestId("intake-action-owner_approval")).toBeDisabled();
+    expect(screen.queryByTestId("intake-action-owner_approval")).not.toBeInTheDocument();
     await user.click(uploadButton);
 
     const aiInput = screen.getByLabelText("AIデータ（必須）");

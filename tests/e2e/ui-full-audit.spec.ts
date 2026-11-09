@@ -72,5 +72,5 @@ test("audits data-intake shell and workflow terminology", async ({ page }) => {
   await expect(guide.getByText("納品先確定", { exact: true })).toBeVisible();
   await expect(page.getByText("Six件").or(page.getByText(/\d+ 件/)).first()).toBeVisible();
   await expect(page.getByTestId("intake-table").or(page.getByText("対象データはありません"))).toBeVisible();
-  await expect(page.getByRole("button", { name: "データ入稿" }).first()).toBeVisible();
+  await expect(page.getByTestId("intake-next-task").first()).toBeVisible();
 });

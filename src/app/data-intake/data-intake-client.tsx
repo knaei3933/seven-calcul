@@ -131,19 +131,30 @@ function workflowStages(entry: FilmOrderIntakeEntry): Array<{
 
 function nextWorkflowAction(entry: FilmOrderIntakeEntry): (Omit<FilmOrderIntakeAction, "kind"> & { kind: FilmOrderIntakeAction["kind"] | "ship_to" }) | null {
   const byKind = new Map(entry.actions.map((action) => [action.kind, action]));
-  const pick = (kind: FilmOrderIntakeAction["kind"]): FilmOrderIntakeAction | null => {
+  const pick = (kind: FilmOrderIntakeAction["kind"]): (Omit<FilmOrderIntakeAction, "kind"> & { kind: FilmOrderIntakeAction["kind"] | "ship_to" }) | null => {
     const action = byKind.get(kind);
-    return action?.authorized && action.enabled ? action : null;
+    return action ?? null;
   };
-  if (entry.state === "unresolved_owner") return null;
-  if (entry.makerHandoffStatus !== "registered") return pick("intake_upload");
-  if (entry.proofStatus !== "approved" && entry.proofStatus !== "legacy_exempt") return pick("proof_round");
+  if (entry.state === "unresolved_owner") {
+    const action = byKind.get("intake_upload");
+    return action ? { ...action, reason: "所有会社が未解決のため操作できません。" } : null;
+  }
+  if (entry.makerHandoffStatus !== "registered") {
+    const action = pick("intake_upload");
+    return action ? { ...action, reason: "AI原稿をアップロードしてメーカーへ引き継ぎます。" } : null;
+  }
+  if (entry.proofStatus === "requested" || entry.proofStatus === "correction_requested") {
+    if (entry.dualApprovalStatus === "pending") return pick("kanei_approval");
+    if (entry.dualApprovalStatus === "kanei_approved") return pick("owner_approval");
+    if (entry.dualApprovalStatus === "owner_approved") return pick("kanei_approval");
+  }
   if (entry.dualApprovalStatus === "pending" || entry.dualApprovalStatus === "kanei_approved") return pick("owner_approval");
   if (entry.dualApprovalStatus === "owner_approved") return pick("kanei_approval");
+  if (entry.proofStatus !== "approved" && entry.proofStatus !== "legacy_exempt") return pick("proof_round");
   if (entry.shipToStatus !== "confirmed") {
     const ownerAction = byKind.get("owner_approval");
-    if (!ownerAction?.authorized) return null;
-    return { ...ownerAction, kind: "ship_to", label: "納品先登録・確定" };
+    if (!ownerAction) return null;
+    return { ...ownerAction, kind: "ship_to", label: "納品先登録・確定", reason: "納品先を登録して確定してください。", enabled: true };
   }
   if (entry.poStatus !== "sent") return pick("purchase_order");
   return pick("delivery_note");
@@ -159,81 +170,6 @@ function ownerBadgeClass(owner: FilmOrderIntakeEntry["ownerDomain"]): string {
 
 function ownerBadge(owner: FilmOrderIntakeEntry["ownerDomain"]): string {
   return owner === "kanei" ? "KT" : owner === "seven" ? "S7" : "未解決";
-}
-
-function IntakeActions({
-  entry,
-  nextKind,
-  onUpload,
-  onApproval,
-  onShipTo,
-  onPurchaseOrder,
-  onDeliveryNote,
-}: {
-  entry: FilmOrderIntakeEntry;
-  nextKind?: FilmOrderIntakeAction["kind"] | "ship_to";
-  onUpload: (entry: FilmOrderIntakeEntry) => void;
-  onApproval: (entry: FilmOrderIntakeEntry, kind: "owner_approval" | "kanei_approval") => void;
-  onShipTo: (entry: FilmOrderIntakeEntry) => void;
-  onPurchaseOrder: (entry: FilmOrderIntakeEntry) => void;
-  onDeliveryNote: (entry: FilmOrderIntakeEntry) => void;
-}) {
-  const upload = entry.actions.find((action) => action.kind === "intake_upload");
-  return (
-    <div className="intake-actions">
-      {entry.actions.map((action: FilmOrderIntakeAction) => (
-        <button
-          key={action.kind}
-          type="button"
-          disabled={!action.authorized || !action.enabled}
-          data-testid={`intake-action-${action.kind}`}
-          data-authorized={action.authorized ? "true" : "false"}
-          onClick={
-            action.kind === "intake_upload" && action.authorized
-              ? () => onUpload(entry)
-              : action.kind === "owner_approval" && action.authorized && action.enabled
-                ? () => onApproval(entry, "owner_approval")
-                : action.kind === "kanei_approval" && action.authorized && action.enabled
-                  ? () => onApproval(entry, "kanei_approval")
-                  : action.kind === "purchase_order" && action.authorized && action.enabled
-                    ? () => onPurchaseOrder(entry)
-                    : action.kind === "delivery_note" && action.authorized && action.enabled
-                      ? () => onDeliveryNote(entry)
-                      : undefined
-          }
-          title={
-            action.kind === "intake_upload" && action.authorized
-              ? "AI原稿を直接アップロードします。"
-              : (action.kind === "owner_approval" || action.kind === "kanei_approval") && action.authorized && action.enabled
-                ? `${action.reason} 承認フォームを開きます。`
-                : action.reason
-          }
-          className={[
-            "intake-action",
-            action.authorized ? "authorized" : "",
-            action.kind === nextKind && action.authorized && action.enabled ? "next-action" : "",
-          ].filter(Boolean).join(" ")}
-        >
-          {action.kind === nextKind && action.authorized && action.enabled ? <span className="intake-action-step">NEXT</span> : null}
-          {action.label}
-        </button>
-      ))}
-      {entry.state === "linked"
-        && entry.dualApprovalStatus === "approved"
-        && entry.shipToStatus !== "confirmed"
-        && entry.actions.find((action) => action.kind === "owner_approval")?.authorized ? (
-          <button
-            type="button"
-            className={`intake-action authorized ${nextKind === "ship_to" ? "next-action" : ""}`}
-            data-testid="intake-action-ship_to"
-            onClick={() => onShipTo(entry)}
-          >
-            {nextKind === "ship_to" ? <span className="intake-action-step">NEXT</span> : null}
-            納品先登録・確定
-          </button>
-        ) : null}
-    </div>
-  );
 }
 
 export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
@@ -719,52 +655,81 @@ export default function DataIntakeClient({ viewer }: { viewer: Viewer }) {
 
       <section className="panel" aria-labelledby="intake-table-title">
         <div className="history-meta">
-          <h2 id="intake-table-title">受入進捗</h2>
+          <h2 id="intake-table-title">案件ごとの進行</h2>
           <span data-testid="intake-count">{loading ? "読み込み中..." : `${result?.total ?? 0} 件`}</span>
         </div>
         {error ? <p className="error" role="alert">{error}</p> : null}
-        <div className="history-table-wrap">
-          <table className="table history-table intake-table" data-testid="intake-table">
-            <thead>
-              <tr>
-                <th>見積 / 得意先</th><th>進行状況</th><th>次の操作・全操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(result?.entries ?? []).map((entry) => (
-                <tr key={`${entry.quotationId}-${entry.filmOrder?.id ?? "none"}`} data-testid="intake-row">
-                  <td>
+        <div className="intake-card-list" data-testid="intake-table">
+          {(result?.entries ?? []).map((entry) => {
+            const stages = workflowStages(entry);
+            const doneCount = stages.filter((stage) => stage.status === "done").length;
+            const next = nextWorkflowAction(entry);
+            const nextReady = Boolean(next?.authorized && next?.enabled);
+            const ownerCompany = entry.ownerDomain === "kanei" ? "金井貿易側" : "セブン化学側";
+            const ownerLabel = next?.kind === "kanei_approval" || next?.kind === "purchase_order" || next?.kind === "delivery_note"
+              ? "金井貿易側"
+              : ownerCompany;
+            const openNext = () => {
+              if (!next || !nextReady || !entry) return;
+              if (next.kind === "intake_upload") setUploadTarget(entry);
+              else if (next.kind === "owner_approval") setApprovalTarget({ entry, kind: "owner_approval" });
+              else if (next.kind === "kanei_approval") setApprovalTarget({ entry, kind: "kanei_approval" });
+              else if (next.kind === "ship_to") void openShipTo(entry);
+              else if (next.kind === "purchase_order") void openPurchaseOrder(entry);
+              else if (next.kind === "delivery_note") void openDeliveryNote(entry);
+            };
+            return (
+              <article key={`${entry.quotationId}-${entry.filmOrder?.id ?? "none"}`} className="intake-card" data-testid="intake-row">
+                <header className="intake-card-head">
+                  <div>
+                    <small>{entry.filmOrder ? `発注 ${entry.filmOrder.orderNumber}` : `見積 ID ${entry.quotationId}`}</small>
                     <strong>{entry.quotationNumber}</strong>
-                    <span className={ownerBadgeClass(entry.ownerDomain)}>{ownerBadge(entry.ownerDomain)}</span>
-                    <small>{entry.filmOrder ? `${entry.filmOrder.orderNumber} / ID ${entry.filmOrder.id}` : `見積 ID ${entry.quotationId}`}</small>
-	                    <small>{entry.customerName || "—"} ／ {entry.productName || "—"}</small>
-	                    <small>{Number(entry.quantity || 0).toLocaleString("ja-JP")} 枚</small>
-	                    <small>{stateLabels[entry.state]}</small>
-                  </td>
-	                  <td>
-	                    <ol className="intake-steps">
-	                      {workflowStages(entry).map((stage) => (
-	                        <li key={stage.title} data-status={stage.status}>
-	                          <span aria-hidden="true">{stage.status === "done" ? "✓" : stage.status === "active" ? "●" : "○"}</span>
-	                          <strong>{stage.title}</strong>
-	                          <small>{stage.value}</small>
-	                        </li>
-	                      ))}
-	                    </ol>
-	                  </td>
-                <td><IntakeActions
-                  entry={entry}
-	                  nextKind={nextWorkflowAction(entry)?.kind}
-                  onUpload={setUploadTarget}
-                  onApproval={(entry, kind) => setApprovalTarget({ entry, kind })}
-	                  onShipTo={(entry) => void openShipTo(entry)}
-                  onPurchaseOrder={(entry) => void openPurchaseOrder(entry)}
-                  onDeliveryNote={(entry) => void openDeliveryNote(entry)}
-                /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                  <span className={ownerBadgeClass(entry.ownerDomain)}>{ownerBadge(entry.ownerDomain)}</span>
+                </header>
+
+                <div className="intake-card-summary">
+                  <span>{entry.customerName || "得意先未設定"}</span>
+                  <small>{entry.productName || "品名未設定"}</small>
+                  <small>{Number(entry.quantity || 0).toLocaleString("ja-JP")} 枚 ／ {stateLabels[entry.state]}</small>
+                </div>
+
+                <div className={`intake-next ${nextReady ? "ready" : "waiting"}`} data-testid="intake-next-task">
+                  <div>
+                    <span>NEXT</span>
+                    <strong>{next?.label ?? "状態確認"}</strong>
+                    <small>{ownerLabel} ／ {next?.reason || "現在の状態を確認してください。"}</small>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!nextReady}
+                    data-testid={`intake-action-${next?.kind ?? "waiting"}`}
+                    data-authorized={nextReady ? "true" : "false"}
+                    onClick={openNext}
+                  >
+                    {nextReady ? "開く" : "操作不可"}
+                  </button>
+                </div>
+
+                <div className="intake-card-progress">
+                  <div className="intake-progress-meta">
+                    <span>進行 {doneCount} / {stages.length}</span>
+                    <span>{Math.round((doneCount / stages.length) * 100)}%</span>
+                  </div>
+                  <progress value={doneCount} max={stages.length} aria-label={`${entry.quotationNumber} の進行率`} />
+                  <ol className="intake-stage-rail">
+                    {stages.map((stage) => (
+                      <li key={stage.title} data-status={stage.status}>
+                        <span aria-hidden="true">{stage.status === "done" ? "✓" : stage.status === "active" ? "●" : "○"}</span>
+                        <strong>{stage.title}</strong>
+                        <small>{stage.value}</small>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </article>
+            );
+          })}
         </div>
         {!loading && result?.entries?.length === 0 ? <p className="empty">対象データはありません。</p> : null}
         <div className="intake-pagination">
