@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { getSqlClient, type SqlClient } from "./db";
 import { sendMail, type MailSendResult } from "./mailer";
 import { registeredJapaneseDisplayNameKo } from "./japanese-text-ko";
@@ -1992,7 +1993,79 @@ function mapOrder(row: FilmOrderRow): FilmOrder {
  * 成約（approved）済み見積のうち、発注管理に未反映のものを発注待ちとして登録する。
  * 冪等なので一覧取得のたびに実行してよい。
  */
+export async function syncFilmOrderFromQuotationRecord(
+  quotation: QuotationRecord,
+  actorEmail = "system",
+): Promise<boolean> {
+  const syncStartedAt = performance.now();
+  if (quotation.ownerDomain !== "seven" && quotation.ownerDomain !== "kanei") return false;
+  const db = await getDatabase();
+  const existing = await db.get<{ id: number }>(
+    "SELECT id FROM film_orders WHERE quotation_id = ?",
+    [quotation.id],
+  );
+  if (existing) return false;
+  const orderStartedAt = performance.now();
+  const snapshot = purchaseOrderOf(quotation);
+  const customerCode = typeof quotation.payload.customerCode === "string"
+    ? quotation.payload.customerCode.trim()
+    : "";
+  const now = new Date().toISOString();
+  const orderNumber = await nextOrderNumber(db);
+  await db.run(`
+    INSERT INTO film_orders (
+      order_number, quotation_id, quotation_number, customer_code, product_name, customer_name, printing_method, procurement_route, film_composition, order_length_m, web_width_mm, pouch_quantity, supplier_name, supplier_email, seven_contact_email, buyer_domain, status, purchase_order_json, sample_bulk_status, bulk_usage_reference_ml, created_at, updated_at, created_by_email, updated_by_email
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    orderNumber,
+    quotation.id,
+    quotation.quotationNumber,
+    customerCode,
+    quotation.productName,
+    quotation.customerName,
+    snapshot?.printingMethod ?? "",
+    snapshot?.procurementRoute ?? (snapshot?.printingMethod === "digital" ? "K" : ""),
+    snapshot?.filmComposition ?? "",
+    snapshot?.orderLengthM ?? "",
+    String(snapshot?.webWidthsMm?.[0] ?? snapshot?.webWidthMm ?? ""),
+    quotation.quantity,
+    "",
+    "",
+    quotation.ownerDomain === "seven"
+      ? (isSevenChemicalUser(quotation.createdBy.email) ? quotation.createdBy.email : sevenChemicalContactEmail())
+      : (isKaneiTradeUser(quotation.createdBy.email) ? quotation.createdBy.email : filmDesignNotificationTo()),
+    quotation.ownerDomain === "seven" ? "727.co.jp" : "kanei-trade.co.jp",
+    "pending",
+    JSON.stringify(snapshot ?? {}),
+    "pending",
+    productionBulkUsageMlOf(quotation),
+    now,
+    now,
+    quotation.createdBy.email,
+    quotation.createdBy.email,
+  ]);
+  const inserted = await db.get<{ id: number }>("SELECT id FROM film_orders WHERE order_number = ?", [orderNumber]);
+  if (!inserted) return false;
+  await db.run(
+    "INSERT INTO film_order_events (order_id,type,detail,actor_email,created_at) VALUES (?,?,?,?,?)",
+    [inserted.id, "created", `内部承認見積 ${quotation.quotationNumber} から発注 ${orderNumber} を作成`, actorEmail, now],
+  );
+  const { autoSelectFilmMakerForOrder } = await import("./film-maker-store");
+  await autoSelectFilmMakerForOrder(inserted.id, actorEmail);
+  console.info("[film-orders] targeted sync timing", {
+    quotationId: quotation.id,
+    orderId: inserted.id,
+    ms: Math.round(performance.now() - orderStartedAt),
+  });
+  console.info("[film-orders] targeted sync timing", {
+    quotationId: quotation.id,
+    ms: Math.round(performance.now() - syncStartedAt),
+  });
+  return true;
+}
+
 export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promise<number> {
+  const syncStartedAt = performance.now();
   const db = await getDatabase();
   const rows = await db.all<{ id: number }>(`
     SELECT quotations.id
@@ -2005,6 +2078,7 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
   const { getQuotation } = await import("./quotation-store");
   let created = 0;
   for (const row of rows) {
+    const orderStartedAt = performance.now();
     const quotation = await getQuotation(row.id);
     if (!quotation) continue;
     // Approval does not repair provenance. An unresolved owner must not enter either
@@ -2059,8 +2133,18 @@ export async function syncFilmOrdersFromQuotations(actorEmail = "system"): Promi
       const { autoSelectFilmMakerForOrder } = await import("./film-maker-store");
       await autoSelectFilmMakerForOrder(inserted.id, actorEmail);
       created += 1;
+      console.info("[film-orders] sync order timing", {
+        quotationId: quotation.id,
+        orderId: inserted.id,
+        ms: Math.round(performance.now() - orderStartedAt),
+      });
     }
   }
+  console.info("[film-orders] sync timing", {
+    candidates: rows.length,
+    created,
+    ms: Math.round(performance.now() - syncStartedAt),
+  });
   return created;
 }
 

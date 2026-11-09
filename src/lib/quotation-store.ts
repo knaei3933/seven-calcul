@@ -530,8 +530,8 @@ async function activeActorFor(
   db: SqlClient,
   actorId: number,
 ): Promise<{ id: number; email: string | null; isActive: boolean }> {
-  const actor = await db.get<{ email: string; is_active: number }>(
-    "SELECT email, is_active FROM users WHERE id = ?",
+  const actor = await db.get<{ id: number; email: string; name: string; is_active: number }>(
+    "SELECT id, email, name, is_active FROM users WHERE id = ?",
     [actorId],
   );
   return actor && Number(actor.is_active) === 1
@@ -1101,14 +1101,15 @@ export async function approveQuotationGate(
   id: number,
   gate: QuotationApprovalGate,
   actorId: number,
+  options?: { currentRecord?: QuotationRecord },
 ): Promise<QuotationRecord> {
   if (!Number.isInteger(id) || id <= 0) throw new QuotationApprovalTransitionError();
   const db = await getDatabase();
-  const current = await getQuotation(id);
+  const current = options?.currentRecord ?? await getQuotation(id);
   if (!current) throw new QuotationApprovalTransitionError();
   if (current.ownerDomain === "unresolved") throw new UnresolvedQuotationOwnerError();
-  const actor = await db.get<{ email: string; is_active: number }>(
-    "SELECT email, is_active FROM users WHERE id = ?",
+  const actor = await db.get<{ id: number; email: string; name: string; is_active: number }>(
+    "SELECT id, email, name, is_active FROM users WHERE id = ?",
     [actorId],
   );
   const actorEmail = actor && Number(actor.is_active) === 1 ? actor.email : null;
@@ -1137,6 +1138,30 @@ export async function approveQuotationGate(
         AND internal_approved_at IS NOT NULL AND customer_approved_at IS NULL
     `, [now, actorId, actorId, now, id]);
     if (Number(result.changes) !== 1) throw new QuotationApprovalTransitionError();
+  }
+
+  if (options?.currentRecord) {
+    const approver = actor ? { id: actorId, email: actor.email ?? "", name: actor.name ?? "" } : null;
+    const updatedAt = now;
+    if (gate === "internal") {
+      return {
+        ...current,
+        updatedAt,
+        updatedBy: approver,
+        internalApproval: { approvedAt: now, approvedBy: approver },
+      };
+    }
+    return {
+      ...current,
+      updatedAt,
+      updatedBy: approver,
+      customerApproval: {
+        approvedAt: now,
+        approvedBy: approver,
+        customerIpHash: null,
+        userAgent: null,
+      },
+    };
   }
 
   const record = await getQuotation(id);

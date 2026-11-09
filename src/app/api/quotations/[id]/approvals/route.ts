@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { performance } from "node:perf_hooks";
 import { getSessionUser } from "@/lib/api-auth";
 import {
   approveQuotationGate,
@@ -13,7 +14,7 @@ import {
   canManageQuotationCustomerRequest,
 } from "@/lib/quotation-access";
 import { UnresolvedQuotationOwnerError } from "@/lib/quotation-store";
-import { syncFilmOrdersFromQuotations } from "@/lib/film-orders";
+import { syncFilmOrderFromQuotationRecord } from "@/lib/film-orders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,7 @@ const approvalGates: QuotationApprovalGate[] = [
 ];
 
 export async function POST(request: Request, context: Context): Promise<NextResponse> {
+  const requestStartedAt = performance.now();
   try {
     const user = await getSessionUser(request);
     if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
@@ -58,12 +60,23 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       return NextResponse.json({ error: "customer_approval_forbidden" }, { status: 403 });
     }
 
-    const approved = await approveQuotationGate(quotationId, gate, user.id);
+    const approvalStartedAt = performance.now();
+    const approved = await approveQuotationGate(quotationId, gate, user.id, { currentRecord: record });
+    const approvalMs = performance.now() - approvalStartedAt;
+    let createdFilmOrders = 0;
     // Durable internal approval—not customer evidence—is the intake transfer trigger.
-    const filmOrderSynced = gate === "internal"
-      ? (await syncFilmOrdersFromQuotations(user.email)) > 0
-      : false;
-    return NextResponse.json({ record: approved, gate, filmOrderSynced });
+    const syncStartedAt = performance.now();
+    if (gate === "internal") createdFilmOrders = await syncFilmOrderFromQuotationRecord(approved, user.email) ? 1 : 0;
+    const syncMs = performance.now() - syncStartedAt;
+    console.info("[quotation-approval] timing", {
+      quotationId,
+      gate,
+      approvalMs: Math.round(approvalMs),
+      syncMs: Math.round(syncMs),
+      totalMs: Math.round(performance.now() - requestStartedAt),
+      createdFilmOrders,
+    });
+    return NextResponse.json({ record: approved, gate, filmOrderSynced: createdFilmOrders > 0 });
   } catch (error) {
     console.error("[quotation-approval] failed", error);
     if (error instanceof SampleBulkConfirmationRequiredError) {
