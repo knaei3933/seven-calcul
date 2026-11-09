@@ -1101,7 +1101,7 @@ export async function approveQuotationGate(
   id: number,
   gate: QuotationApprovalGate,
   actorId: number,
-  options?: { currentRecord?: QuotationRecord },
+  options?: { currentRecord?: QuotationRecord; master?: boolean },
 ): Promise<QuotationRecord> {
   if (!Number.isInteger(id) || id <= 0) throw new QuotationApprovalTransitionError();
   const db = await getDatabase();
@@ -1113,12 +1113,14 @@ export async function approveQuotationGate(
     [actorId],
   );
   const actorEmail = actor && Number(actor.is_active) === 1 ? actor.email : null;
-  if (gate === "internal") {
-    if (!canInternalApproveQuotation(actorEmail, current.ownerDomain)) {
+  if (!options?.master) {
+    if (gate === "internal") {
+      if (!canInternalApproveQuotation(actorEmail, current.ownerDomain)) {
+        throw new QuotationApprovalForbiddenError();
+      }
+    } else if (!canManageQuotationCustomerRequest(actorEmail, current.ownerDomain)) {
       throw new QuotationApprovalForbiddenError();
     }
-  } else if (!canManageQuotationCustomerRequest(actorEmail, current.ownerDomain)) {
-    throw new QuotationApprovalForbiddenError();
   }
   const now = new Date().toISOString();
 
