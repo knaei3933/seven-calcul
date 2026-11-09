@@ -82,13 +82,13 @@ afterAll(async () => {
 });
 
 function quotationIssuanceRequest(payload: unknown, token: string): Request {
-  const formData = new FormData();
-  formData.set("payload", JSON.stringify(payload));
-  formData.set("pdf", new Blob([new TextEncoder().encode("%PDF-canonical")], { type: "application/pdf" }), "quotation.pdf");
   return new Request("http://localhost/api/quotations", {
     method: "POST",
-    body: formData,
-    headers: { cookie: `pouch_session=${token}` },
+    body: JSON.stringify(payload),
+    headers: {
+      "content-type": "application/json",
+      cookie: `pouch_session=${token}`,
+    },
   });
 }
 
@@ -456,7 +456,7 @@ describe("gravure master foundation", () => {
       publicProjection: { ...publicProjection, publicProjectionHash: userPayload.returnedProjection.publicProjectionHash },
     });
     const quotation = {
-      quotationNumber: "S7-SNAPSHOT-1",
+      quotationNumber: "",
       status: "draft",
       issueDate: "2026-10-11",
       validUntil: "2026-11-11",
@@ -513,7 +513,7 @@ describe("gravure master foundation", () => {
     // canonical projection, proving both role projection contracts coexist.
     const kanaiQuotation: Record<string, unknown> = {
       ...quotation,
-      quotationNumber: "S7-SNAPSHOT-KANAI-1",
+      quotationNumber: "",
       resultHash: adminPayload.result.audit.resultJsonSha256,
     };
     kanaiQuotation.payload = {

@@ -1,3 +1,4 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
 }));
 
+
 const databaseDirectory = await mkdtemp(join(tmpdir(), "g006-owner-boundary-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
 process.env.MAIL_DRY_RUN = "true";
@@ -27,7 +29,8 @@ const {
   backfillPortalQuotationOwnersForTest,
 } = await import("@/lib/portal/quote-calculation-store");
 const { createUser, authenticate, createSession } = await import("@/lib/auth-store");
-const { getDatabaseForTest, saveQuotation } = await import("@/lib/quotation-store");
+const { getDatabaseForTest, saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const {
   syncFilmOrdersFromQuotations,
   listFilmOrderSummaries,

@@ -1,5 +1,5 @@
 import type { SqlClient } from "./db";
-import { getSqlClient } from "./db";
+import { getSqlClient, isUniqueViolation } from "./db";
 import { createHash } from "node:crypto";
 import {
   quotationOwnerDomainOf,
@@ -13,7 +13,7 @@ import { verifyCustomerApprovalToken } from "./quotation-approval-token";
 import { QUOTATION_RESTORE_KEY } from "./quotation-shared";
 import { D } from "./decimal";
 import { ensureAdministratorSeed, type UserRole } from "./auth-store";
-import { buildQuotationPdfFileName } from "./film-quotation";
+import { buildFilmQuotationFromRecord, buildQuotationPdfFileName } from "./film-quotation";
 import {
   canInternalApproveQuotation,
   canMutateQuotation,
@@ -21,6 +21,7 @@ import {
   canPerformOwnerWorkflowAction,
 } from "./quotation-access";
 import type { QuotationRecord, QuotationRecordInput, ChecklistAudience } from "./quotation-shared";
+import type { CanonicalQuotationPdf, CanonicalQuotationPdfProvenance } from "./standard-quote-pdf";
 import {
   buildChecklistItems,
   buildLegacyChecklistItems,
@@ -31,6 +32,14 @@ import {
   type ChecklistRecord,
 } from "./calculation-checklist";
 import { canViewInternalChecklist } from "./checklist-access";
+import {
+  allocateQuotationNumberInTransaction,
+  jstQuotationMonth,
+  NEW_QUOTATION_OWNER_DOMAIN,
+  quotationOwnerPrefixMatches,
+  QuotationNumberAllocationConflictError,
+  StaleLegacyQuotationNumberError,
+} from "./quotation-creation-policy";
 
 export { QUOTATION_RESTORE_KEY, quotationStatuses };
 export type { QuotationOwnerDomain, QuotationRecord, QuotationRecordInput, QuotationStatus };
@@ -142,14 +151,32 @@ export class QuotationPdfIntegrityError extends Error {
   }
 }
 
+export type CanonicalQuotationPdfFactoryContext = {
+  input: QuotationRecordInput;
+  ownerDomain: "kanei" | "seven";
+  quotationNumber: string;
+};
+
+export type CanonicalQuotationPdfFactory = (
+  context: CanonicalQuotationPdfFactoryContext,
+) => Promise<CanonicalQuotationPdf>;
+
+export type IssuedQuotationPdfOptions = {
+  canonicalPdfFactory?: CanonicalQuotationPdfFactory;
+};
+
+export type CanonicalQuotationPdfStorageOptions = {
+  provenance?: CanonicalQuotationPdfProvenance;
+};
+
 export const MAX_QUOTATION_PDF_BYTES = 10 * 1024 * 1024;
 
 function sha256Pdf(pdfData: Buffer): string {
   return createHash("sha256").update(pdfData).digest("hex");
 }
 
-function validateCanonicalPdf(pdfData: Buffer, fileName: string): void {
-  if (pdfData.length === 0 || !pdfData.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+function validateCanonicalPdf(pdfData: Buffer | null, fileName: string): void {
+  if (!pdfData || pdfData.length === 0 || !pdfData.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
     throw new InvalidQuotationPdfError("PDFが不正です。A4形式のPDF（10MB以内）を添付してください。");
   }
   if (pdfData.length > MAX_QUOTATION_PDF_BYTES) {
@@ -491,7 +518,7 @@ export function validateQuotationInput(value: unknown): QuotationRecordInput | n
     "quantity", "fillingCostPerPiece", "filmCostPerPiece", "filmMeterPrice", "filmOrderLengthM",
     "targetMargin", "taxRatePercent", "pricePerPiece", "subtotal", "tax", "grandTotal",
   ] as const;
-  if (!text(input.quotationNumber).trim() || !text(input.issueDate).trim()) return null;
+  if (text(input.issueDate).trim() === "") return null;
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(text(input.validUntil))) return null;
   if (numericFields.some((field) => !isNonNegativeNumber(input[field]))) return null;
   const status = quotationStatuses.find((item) => item === input.status);
@@ -637,73 +664,82 @@ export async function saveQuotation(
   actorRole: UserRole = "user",
 ): Promise<QuotationRecord> {
   const db = await getDatabase();
-  const now = new Date().toISOString();
-  const payloadJson = JSON.stringify(value.payload);
-  const actor = await activeActorFor(db, actorId);
-  if (!actor.isActive) throw new UnresolvedQuotationOwnerError();
-  const existing = await selectRecordByNumber(db, value.quotationNumber);
-  let ownerDomain: QuotationOwnerDomain;
-  if (existing) {
-    const durableOwner = quotationOwnerDomainFromStorage(existing.owner_domain);
-    if (durableOwner === "unresolved") throw new UnresolvedQuotationOwnerError();
-    ownerDomain = durableOwner;
-    if (!canMutateQuotation(actor, mapRow(existing))) throw new QuotationActionForbiddenError();
-  } else {
-    // Every new quotation is Seven-owned. The active actor is only the preparer.
-    ownerDomain = "seven";
-    // Stale drafts may carry a legacy KT number that was never persisted; issue a
-    // fresh Seven number rather than exposing the old prefix mismatch to users.
-    if (!value.quotationNumber.startsWith("S7-")) {
-      value.quotationNumber = await getNextQuotationNumber("seven");
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await db.transaction(async (tx): Promise<QuotationRecord> => {
+        const now = new Date().toISOString();
+        const actor = await activeActorFor(tx, actorId);
+        if (!actor.isActive) throw new UnresolvedQuotationOwnerError();
+        const existing = await selectRecordByNumber(tx, value.quotationNumber);
+        let ownerDomain: Exclude<QuotationOwnerDomain, "unresolved">;
+        if (existing) {
+          const durableOwner = quotationOwnerDomainFromStorage(existing.owner_domain);
+          if (durableOwner === "unresolved") throw new UnresolvedQuotationOwnerError();
+          ownerDomain = durableOwner;
+          if (!canMutateQuotation(actor, mapRow(existing))) throw new QuotationActionForbiddenError();
+        } else {
+          if (/^S7-/i.test(value.quotationNumber)) throw new StaleLegacyQuotationNumberError();
+          ownerDomain = NEW_QUOTATION_OWNER_DOMAIN;
+          value.quotationNumber = await allocateQuotationNumberInTransaction(tx, ownerDomain);
+        }
+        if (!quotationOwnerPrefixMatches(ownerDomain, value.quotationNumber)) {
+          throw new QuotationOwnerPrefixMismatchError();
+        }
+        const payloadJson = JSON.stringify({ ...value.payload, ownerDomain });
+        await tx.run(`
+          INSERT INTO quotations (
+            owner_domain,quotation_number,status,issue_date,valid_until,customer_name,customer_contact,product_name,size_summary,
+            quantity,filling_cost_per_piece,film_cost_per_piece,film_meter_price,film_order_length_m,target_margin,
+            tax_rate_percent,price_per_piece,subtotal,tax,grand_total,delivery_date,payment_terms,notes,
+            calculation_version,result_hash,payload_json,created_at,updated_at,created_by,updated_by
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(quotation_number) DO UPDATE SET
+            status=excluded.status, issue_date=excluded.issue_date, valid_until=excluded.valid_until,
+            customer_name=excluded.customer_name, customer_contact=excluded.customer_contact,
+            product_name=excluded.product_name, size_summary=excluded.size_summary, quantity=excluded.quantity,
+            filling_cost_per_piece=excluded.filling_cost_per_piece, film_cost_per_piece=excluded.film_cost_per_piece,
+            film_meter_price=excluded.film_meter_price, film_order_length_m=excluded.film_order_length_m,
+            target_margin=excluded.target_margin, tax_rate_percent=excluded.tax_rate_percent,
+            price_per_piece=excluded.price_per_piece, subtotal=excluded.subtotal, tax=excluded.tax,
+            grand_total=excluded.grand_total, delivery_date=excluded.delivery_date, payment_terms=excluded.payment_terms,
+            notes=excluded.notes, calculation_version=excluded.calculation_version, result_hash=excluded.result_hash,
+            payload_json=excluded.payload_json, updated_at=excluded.updated_at, updated_by=excluded.updated_by
+            WHERE quotations.owner_domain = excluded.owner_domain
+              OR (quotations.owner_domain = 'unresolved' AND quotations.created_by = excluded.updated_by)
+        `, [
+          ownerDomain, value.quotationNumber, value.status, value.issueDate, value.validUntil, value.customerName, value.customerContact,
+          value.productName, value.sizeSummary, value.quantity, value.fillingCostPerPiece, value.filmCostPerPiece,
+          value.filmMeterPrice, value.filmOrderLengthM, value.targetMargin, value.taxRatePercent, value.pricePerPiece,
+          value.subtotal, value.tax, value.grandTotal, value.deliveryDate, value.paymentTerms, value.notes,
+          value.calculationVersion, value.resultHash, payloadJson, now, now, actorId, actorId,
+        ]);
+        const saved = await selectRecordByNumber(tx, value.quotationNumber);
+        if (!saved) throw new Error("quotation_save_failed");
+        return mapRow(saved);
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      if (attempt === 3) throw new QuotationNumberAllocationConflictError();
+      await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt));
     }
   }
-  await db.run(`
-    INSERT INTO quotations (
-      owner_domain,quotation_number,status,issue_date,valid_until,customer_name,customer_contact,product_name,size_summary,
-      quantity,filling_cost_per_piece,film_cost_per_piece,film_meter_price,film_order_length_m,target_margin,
-      tax_rate_percent,price_per_piece,subtotal,tax,grand_total,delivery_date,payment_terms,notes,
-      calculation_version,result_hash,payload_json,created_at,updated_at,created_by,updated_by
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(quotation_number) DO UPDATE SET
-      status=excluded.status, issue_date=excluded.issue_date, valid_until=excluded.valid_until,
-      customer_name=excluded.customer_name, customer_contact=excluded.customer_contact,
-      product_name=excluded.product_name, size_summary=excluded.size_summary, quantity=excluded.quantity,
-      filling_cost_per_piece=excluded.filling_cost_per_piece, film_cost_per_piece=excluded.film_cost_per_piece,
-      film_meter_price=excluded.film_meter_price, film_order_length_m=excluded.film_order_length_m,
-      target_margin=excluded.target_margin, tax_rate_percent=excluded.tax_rate_percent,
-      price_per_piece=excluded.price_per_piece, subtotal=excluded.subtotal, tax=excluded.tax,
-      grand_total=excluded.grand_total, delivery_date=excluded.delivery_date, payment_terms=excluded.payment_terms,
-      notes=excluded.notes, calculation_version=excluded.calculation_version, result_hash=excluded.result_hash,
-      payload_json=excluded.payload_json, updated_at=excluded.updated_at, updated_by=excluded.updated_by
-      WHERE quotations.owner_domain = excluded.owner_domain
-        OR (quotations.owner_domain = 'unresolved' AND quotations.created_by = excluded.updated_by)
-  `, [
-    ownerDomain, value.quotationNumber, value.status, value.issueDate, value.validUntil, value.customerName, value.customerContact,
-    value.productName, value.sizeSummary, value.quantity, value.fillingCostPerPiece, value.filmCostPerPiece,
-    value.filmMeterPrice, value.filmOrderLengthM, value.targetMargin, value.taxRatePercent, value.pricePerPiece,
-    value.subtotal, value.tax, value.grandTotal, value.deliveryDate, value.paymentTerms, value.notes,
-    value.calculationVersion, value.resultHash, payloadJson, now, now, actorId, actorId,
-  ]);
-  const saved = await selectRecordByNumber(db, value.quotationNumber);
-  if (!saved) throw new Error("quotation_save_failed");
-  const record = mapRow(saved);
-  return record;
+  throw new QuotationNumberAllocationConflictError();
 }
 
 export interface IssuedQuotationResult {
   record: QuotationRecord;
   created: boolean;
   pdfSha256: string;
+  pdfByteLength: number;
 }
 
 export async function getNextQuotationNumber(
-  ownerDomain: "seven" | "kanei" = "seven",
+  ownerDomain: "seven" | "kanei",
   now = new Date(),
 ): Promise<string> {
-  const jstDateString = now.toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" });
-  const [year, month] = jstDateString.split("-");
   const companyPrefix = ownerDomain === "kanei" ? "KT" : "S7";
-  const prefix = `${companyPrefix}-${year}${month}-`;
+  const prefix = `${companyPrefix}-${jstQuotationMonth(now)}-`;
   const db = await getDatabase();
   const rows = await db.all<{ quotation_number: string }>(
     "SELECT quotation_number FROM quotations WHERE quotation_number LIKE ?",
@@ -723,157 +759,215 @@ export async function saveIssuedQuotation(
   value: QuotationRecordInput,
   actorId: number,
   actorRole: UserRole,
-  pdfData: Buffer,
+  pdfData: Buffer | null,
   fileName: string,
   checklistSnapshot: CalculationChecklistSnapshot | null,
+  options: IssuedQuotationPdfOptions = {},
 ): Promise<IssuedQuotationResult> {
-  validateCanonicalPdf(pdfData, fileName);
+  if (!options.canonicalPdfFactory) {
+    validateCanonicalPdf(pdfData, fileName);
+  }
   const db = await getDatabase();
-  const pdfSha256 = sha256Pdf(pdfData);
-  return db.transaction(async (tx) => {
-    if (tx.dialect === "postgres") {
-      await tx.run("SELECT pg_advisory_xact_lock(hashtext(?))", [value.quotationNumber]);
-    }
-    const existingRow = await selectRecordByNumber(tx, value.quotationNumber);
-    const existing = existingRow
-      ? {
-        id: Number(existingRow.id),
-        created_by: Number(existingRow.created_by),
-        has_pdf: existingRow.pdf_data != null,
-      }
-      : undefined;
-    const created = !existing;
-    const now = new Date().toISOString();
-    const actor = await activeActorFor(tx, actorId);
-    let ownerDomain: Exclude<QuotationOwnerDomain, "unresolved">;
-    if (existingRow) {
-      // Authorization is re-checked inside the number lock using the row's durable
-      // owner. actorRole is accepted for API compatibility but carries no authority.
-      void actorRole;
-      if (!canMutateQuotation(actor, mapRow(existingRow))) throw new QuotationActionForbiddenError();
-      const durableOwner = quotationOwnerDomainFromStorage(existingRow.owner_domain);
-      if (durableOwner === "unresolved") throw new UnresolvedQuotationOwnerError();
-      ownerDomain = durableOwner;
-    } else {
-      void actorRole;
-      if (!actor.isActive) throw new UnresolvedQuotationOwnerError();
-      // New issuance is universally Seven-owned; the active actor is only the preparer.
-      ownerDomain = "seven";
-      // Stale drafts may still carry a legacy KT number that was never persisted.
-      // Issue them under a fresh Seven number instead of rejecting the save.
-      if (!value.quotationNumber.startsWith("S7-")) {
-        value.quotationNumber = await getNextQuotationNumber("seven");
-      }
-    }
-    // Issuance is a binding operation: the company prefix must agree with the
-    // durable owner. Arbitrary legacy numbers are never rewritten by updates.
-    assertQuotationOwnerPrefix(ownerDomain, value.quotationNumber);
-    const payloadJson = JSON.stringify({
-      ...value.payload,
-      // The durable row owner is authoritative; never trust a client-supplied owner stamp.
-      ownerDomain,
-    });
-    if (existing && existing.has_pdf) {
-      throw new QuotationCanonicalPdfExistsError();
-    }
 
-    let recordId: number;
-    if (existing) {
-      const result = await tx.run(`
-        UPDATE quotations SET
-          status=?, issue_date=?, valid_until=?, customer_name=?, customer_contact=?, product_name=?,
-          size_summary=?, quantity=?, filling_cost_per_piece=?, film_cost_per_piece=?, film_meter_price=?,
-          film_order_length_m=?, target_margin=?, tax_rate_percent=?, price_per_piece=?, subtotal=?, tax=?,
-          grand_total=?, delivery_date=?, payment_terms=?, notes=?, calculation_version=?, result_hash=?,
-          payload_json=?, updated_at=?, updated_by=?
-        WHERE id=? AND pdf_data IS NULL
-      `, [
-        value.status, value.issueDate, value.validUntil, value.customerName, value.customerContact,
-        value.productName, value.sizeSummary, value.quantity, value.fillingCostPerPiece, value.filmCostPerPiece,
-        value.filmMeterPrice, value.filmOrderLengthM, value.targetMargin, value.taxRatePercent,
-        value.pricePerPiece, value.subtotal, value.tax, value.grandTotal, value.deliveryDate, value.paymentTerms,
-        value.notes, value.calculationVersion, value.resultHash, payloadJson, now, actorId, existing.id,
-      ]);
-      if (result.changes !== 1) throw new QuotationCanonicalPdfExistsError();
-      recordId = existing.id;
-    } else {
-      const insertSql = `
-        INSERT INTO quotations (
-          owner_domain,quotation_number,status,issue_date,valid_until,customer_name,customer_contact,product_name,size_summary,
-          quantity,filling_cost_per_piece,film_cost_per_piece,film_meter_price,film_order_length_m,target_margin,
-          tax_rate_percent,price_per_piece,subtotal,tax,grand_total,delivery_date,payment_terms,notes,
-          calculation_version,result_hash,payload_json,created_at,updated_at,created_by,updated_by
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)${tx.dialect === "postgres" ? " RETURNING id" : ""}
-      `;
-      const insertionValues = [
-        ownerDomain,
-        value.quotationNumber,
-        value.status,
-        value.issueDate,
-        value.validUntil,
-        value.customerName,
-        value.customerContact,
-        value.productName,
-        value.sizeSummary,
-        value.quantity,
-        value.fillingCostPerPiece,
-        value.filmCostPerPiece,
-        value.filmMeterPrice,
-        value.filmOrderLengthM,
-        value.targetMargin,
-        value.taxRatePercent,
-        value.pricePerPiece,
-        value.subtotal,
-        value.tax,
-        value.grandTotal,
-        value.deliveryDate,
-        value.paymentTerms,
-        value.notes,
-        value.calculationVersion,
-        value.resultHash,
-        payloadJson,
-        now,
-        now,
-        actorId,
-        actorId,
-      ];
-      if (tx.dialect === "postgres") {
-        const inserted = await tx.get<{ id: number }>(insertSql, insertionValues);
-        if (!inserted?.id) throw new Error("quotation_save_failed");
-        recordId = inserted.id;
-      } else {
-        const result = await tx.run(insertSql, insertionValues);
-        if (result.lastInsertRowid == null) throw new Error("quotation_save_failed");
-        recordId = result.lastInsertRowid;
-      }
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await db.transaction(async (tx): Promise<IssuedQuotationResult> => {
+        const actor = await activeActorFor(tx, actorId);
+        if (!actor.isActive || quotationOwnerDomainOf(actor.email) === "unresolved") {
+          throw new UnresolvedQuotationOwnerError();
+        }
+        // A persisted number is updated under its exact-number lock. New records
+        // never take a client/stale-number lock: they use the shared owner/month lock.
+        if (value.quotationNumber) {
+          const preLock = await selectRecordByNumber(tx, value.quotationNumber);
+          if (!preLock && /^S7-/i.test(value.quotationNumber)) {
+            throw new StaleLegacyQuotationNumberError();
+          }
+          if (tx.dialect === "postgres") {
+            await tx.run("SELECT pg_advisory_xact_lock(hashtext(?))", [value.quotationNumber]);
+          }
+        }
+
+        const existingRow = await selectRecordByNumber(tx, value.quotationNumber);
+        const existing = existingRow
+          ? {
+            id: Number(existingRow.id),
+            created_by: Number(existingRow.created_by),
+            has_pdf: existingRow.pdf_data != null,
+          }
+          : undefined;
+        const created = !existing;
+        const now = new Date().toISOString();
+        let ownerDomain: Exclude<QuotationOwnerDomain, "unresolved">;
+        if (existingRow) {
+          // Authorization is re-checked inside the number lock using the row's durable
+          // owner. actorRole is accepted for API compatibility but carries no authority.
+          void actorRole;
+          if (!canMutateQuotation(actor, mapRow(existingRow))) throw new QuotationActionForbiddenError();
+          const durableOwner = quotationOwnerDomainFromStorage(existingRow.owner_domain);
+          if (durableOwner === "unresolved") throw new UnresolvedQuotationOwnerError();
+          ownerDomain = durableOwner;
+        } else {
+          void actorRole;
+          if (!actor.isActive) throw new UnresolvedQuotationOwnerError();
+          ownerDomain = NEW_QUOTATION_OWNER_DOMAIN;
+          value.quotationNumber = await allocateQuotationNumberInTransaction(tx, ownerDomain);
+          // Server assignment happens after canonical input validation but before
+          // persistence, so downstream film metadata carries the durable number.
+          const filmQuotation = buildFilmQuotationFromRecord({
+            quotationNumber: value.quotationNumber,
+            customerName: value.customerName,
+            issueDate: value.issueDate,
+            validUntil: value.validUntil,
+            productName: value.productName,
+            quantity: value.quantity,
+            payload: value.payload,
+          });
+          if (filmQuotation) value.payload = { ...value.payload, filmQuotation };
+        }
+
+        // Issuance is a binding operation: the company prefix must agree with the
+        // durable owner. Arbitrary legacy numbers are never rewritten by updates.
+        if (!quotationOwnerPrefixMatches(ownerDomain, value.quotationNumber)) {
+          throw new QuotationOwnerPrefixMismatchError();
+        }
+        if (existing && existing.has_pdf) {
+          throw new QuotationCanonicalPdfExistsError();
+        }
+
+        // The durable owner/new-record boundary, not payload owner metadata,
+        // selects canonical authority. Seven keeps its supplied-PDF flow.
+        let canonicalPdfData = pdfData;
+        if (options.canonicalPdfFactory && (!existing || ownerDomain === "kanei")) {
+          const canonical = await options.canonicalPdfFactory({
+            input: value,
+            ownerDomain,
+            quotationNumber: value.quotationNumber,
+          });
+          canonicalPdfData = canonical.bytes;
+          validateCanonicalPdf(canonicalPdfData, fileName);
+          value.payload = {
+            ...value.payload,
+            canonicalPdfProvenance: canonical.provenance,
+          };
+        }
+        if (!canonicalPdfData) throw new InvalidQuotationPdfError("PDFが不正です。A4形式のPDF（10MB以内）を添付してください。");
+        const pdfSha256 = sha256Pdf(canonicalPdfData);
+        const payloadJson = JSON.stringify({
+          ...value.payload,
+          // The durable row owner is authoritative; never trust a client-supplied owner stamp.
+          ownerDomain,
+        });
+
+        let recordId: number;
+        if (existing) {
+          const result = await tx.run(`
+            UPDATE quotations SET
+              status=?, issue_date=?, valid_until=?, customer_name=?, customer_contact=?, product_name=?,
+              size_summary=?, quantity=?, filling_cost_per_piece=?, film_cost_per_piece=?, film_meter_price=?,
+              film_order_length_m=?, target_margin=?, price_per_piece=?, subtotal=?, tax=?,
+              grand_total=?, delivery_date=?, payment_terms=?, notes=?, calculation_version=?, result_hash=?,
+              payload_json=?, updated_at=?, updated_by=?
+            WHERE id=? AND pdf_data IS NULL
+          `, [
+            value.status, value.issueDate, value.validUntil, value.customerName, value.customerContact,
+            value.productName, value.sizeSummary, value.quantity, value.fillingCostPerPiece, value.filmCostPerPiece,
+            value.filmMeterPrice, value.filmOrderLengthM, value.targetMargin, value.pricePerPiece,
+            value.subtotal, value.tax, value.grandTotal, value.deliveryDate, value.paymentTerms, value.notes,
+            value.calculationVersion, value.resultHash, payloadJson, now, actorId, existing.id,
+          ]);
+          if (result.changes !== 1) throw new QuotationCanonicalPdfExistsError();
+          recordId = existing.id;
+        } else {
+          const insertSql = `
+            INSERT INTO quotations (
+              owner_domain,quotation_number,status,issue_date,valid_until,customer_name,customer_contact,product_name,size_summary,
+              quantity,filling_cost_per_piece,film_cost_per_piece,film_meter_price,film_order_length_m,target_margin,
+              tax_rate_percent,price_per_piece,subtotal,tax,grand_total,delivery_date,payment_terms,notes,
+              calculation_version,result_hash,payload_json,created_at,updated_at,created_by,updated_by
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)${tx.dialect === "postgres" ? " RETURNING id" : ""}
+          `;
+          const insertionValues = [
+            ownerDomain,
+            value.quotationNumber,
+            value.status,
+            value.issueDate,
+            value.validUntil,
+            value.customerName,
+            value.customerContact,
+            value.productName,
+            value.sizeSummary,
+            value.quantity,
+            value.fillingCostPerPiece,
+            value.filmCostPerPiece,
+            value.filmMeterPrice,
+            value.filmOrderLengthM,
+            value.targetMargin,
+            value.taxRatePercent,
+            value.pricePerPiece,
+            value.subtotal,
+            value.tax,
+            value.grandTotal,
+            value.deliveryDate,
+            value.paymentTerms,
+            value.notes,
+            value.calculationVersion,
+            value.resultHash,
+            payloadJson,
+            now,
+            now,
+            actorId,
+            actorId,
+          ];
+          if (tx.dialect === "postgres") {
+            const inserted = await tx.get<{ id: number }>(insertSql, insertionValues);
+            if (!inserted?.id) throw new Error("quotation_save_failed");
+            recordId = inserted.id;
+          } else {
+            const result = await tx.run(insertSql, insertionValues);
+            if (result.lastInsertRowid == null) throw new Error("quotation_save_failed");
+            recordId = result.lastInsertRowid;
+          }
+        }
+
+        if (checklistSnapshot) {
+          const provisionalRecord: QuotationRecord = {
+            ...value,
+            id: recordId,
+            ownerDomain,
+            createdAt: now,
+            updatedAt: now,
+            createdBy: { id: actorId, email: "", name: "" },
+            updatedBy: null,
+            internalApproval: null,
+            customerApproval: null,
+          };
+          await createChecklistsInTransaction(tx, provisionalRecord, checklistSnapshot);
+        }
+
+        const canonicalResult = await tx.run(`
+          UPDATE quotations
+          SET pdf_data=?, pdf_file_name=?, pdf_uploaded_at=?, pdf_sha256=?
+          WHERE id=? AND pdf_data IS NULL
+        `, [canonicalPdfData, fileName, now, pdfSha256, recordId]);
+        if (canonicalResult.changes !== 1) throw new QuotationCanonicalPdfExistsError();
+
+        const saved = await selectRecordById(tx, recordId);
+        if (!saved) throw new Error("quotation_save_failed");
+        return {
+          record: mapRow(saved),
+          created,
+          pdfSha256,
+          pdfByteLength: canonicalPdfData.byteLength,
+        };
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      if (attempt === 3) throw new QuotationNumberAllocationConflictError();
+      await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt));
     }
-
-    if (checklistSnapshot) {
-      const provisionalRecord: QuotationRecord = {
-        ...value,
-        id: recordId,
-        ownerDomain,
-        createdAt: now,
-        updatedAt: now,
-        createdBy: { id: actorId, email: "", name: "" },
-        updatedBy: null,
-        internalApproval: null,
-        customerApproval: null,
-      };
-      await createChecklistsInTransaction(tx, provisionalRecord, checklistSnapshot);
-    }
-
-    const canonicalResult = await tx.run(`
-      UPDATE quotations
-      SET pdf_data=?, pdf_file_name=?, pdf_uploaded_at=?, pdf_sha256=?
-      WHERE id=? AND pdf_data IS NULL
-    `, [pdfData, fileName, now, pdfSha256, recordId]);
-    if (canonicalResult.changes !== 1) throw new QuotationCanonicalPdfExistsError();
-
-    const saved = await selectRecordById(tx, recordId);
-    if (!saved) throw new Error("quotation_save_failed");
-    return { record: mapRow(saved), created, pdfSha256 };
-  });
+  }
+  throw new QuotationNumberAllocationConflictError();
 }
 
 export async function getDatabaseForTest(): Promise<SqlClient> {
@@ -1515,18 +1609,34 @@ export async function saveQuotationPdf(
   pdfData: Buffer,
   fileName: string,
   actorId?: number,
+  options: CanonicalQuotationPdfStorageOptions = {},
 ): Promise<boolean> {
   if (!Number.isInteger(quotationId) || quotationId <= 0) return false;
-  const current = await getQuotation(quotationId);
-  const db = await getDatabase();
-  if (current && actorId !== undefined) await assertQuotationMutation(db, current, actorId);
   validateCanonicalPdf(pdfData, fileName);
-  const pdfSha256 = sha256Pdf(pdfData);
-  const result = await db.run(
-    "UPDATE quotations SET pdf_data = ?, pdf_file_name = ?, pdf_uploaded_at = ?, pdf_sha256 = ? WHERE id = ? AND pdf_data IS NULL",
-    [pdfData, fileName, new Date().toISOString(), pdfSha256, quotationId],
-  );
-  return result.changes > 0;
+  const db = await getDatabase();
+  return db.transaction(async (tx): Promise<boolean> => {
+    const row = await tx.get<{ payload_json: string; pdf_data: Uint8Array | null }>(
+      "SELECT payload_json, pdf_data FROM quotations WHERE id = ?",
+      [quotationId],
+    );
+    if (!row || row.pdf_data != null) return false;
+    if (actorId !== undefined) {
+      const persisted = await selectRecordById(tx, quotationId);
+      if (!persisted) return false;
+      await assertQuotationMutation(tx, mapRow(persisted), actorId);
+    }
+    const payloadJson = options.provenance
+      ? JSON.stringify({
+        ...JSON.parse(row.payload_json) as Record<string, unknown>,
+        canonicalPdfProvenance: options.provenance,
+      })
+      : row.payload_json;
+    const result = await tx.run(
+      "UPDATE quotations SET pdf_data = ?, pdf_file_name = ?, pdf_uploaded_at = ?, pdf_sha256 = ?, payload_json = ? WHERE id = ? AND pdf_data IS NULL",
+      [pdfData, fileName, new Date().toISOString(), sha256Pdf(pdfData), payloadJson, quotationId],
+    );
+    return result.changes > 0;
+  });
 }
 
 export async function getQuotationPdf(quotationId: number): Promise<{ data: Buffer; fileName: string } | null> {

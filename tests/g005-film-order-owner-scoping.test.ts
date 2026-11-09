@@ -1,8 +1,10 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "g005-film-owner-scoping-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.sqlite");
@@ -23,7 +25,8 @@ const {
   syncFilmOrdersFromQuotations,
   updateEtaFromToken,
 } = await import("@/lib/film-orders");
-const { getDatabaseForTest, saveQuotation } = await import("@/lib/quotation-store");
+const { getDatabaseForTest, saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 
 const KANEI = "kanei-owner@kanei-trade.co.jp";
 const SEVEN = "seven-owner@727.co.jp";
@@ -236,11 +239,11 @@ describe("G005 owner-scoped film workflow", () => {
       offlineReason: "専用トークン承認のオフライン記録",
       origin: "http://localhost:3000",
     }, KANEI);
-    const finalApprover = SEVEN;
+    const finalApprover = buyer;
     const approved = await runFilmOrderAction(order.id, "approve", { origin: "http://localhost:3000" }, finalApprover);
     expect(approved.order.status).toBe("final_approved");
     expect(approved.order.customerProof.supplierApprovalBy).toBe(KANEI);
-    expect(approved.order.customerProof.buyerApprovalBy).toBe(SEVEN);
+    expect(approved.order.customerProof.buyerApprovalBy).toBe(buyer);
 
     await runFilmOrderAction(order.id, "register-ship-to", {
       shipToCompanyName: "G005 Logistics",

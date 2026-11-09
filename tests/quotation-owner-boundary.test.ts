@@ -19,6 +19,9 @@ const {
   saveIssuedQuotation,
   saveQuotation,
 } = await import("@/lib/quotation-store");
+const {
+  StaleLegacyQuotationNumberError,
+} = await import("@/lib/quotation-creation-policy");
 const { canMutateQuotation, canPerformOwnerWorkflowAction } = await import("@/lib/quotation-access");
 
 const kaneiCreator = await createUser({
@@ -93,9 +96,25 @@ afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
 });
 
+async function createLegacySevenRecord(
+  quotationNumber: string,
+  creatorId: number,
+  status: QuotationRecordInput["status"] = "draft",
+) {
+  const assigned = await saveQuotation(input("", status), creatorId);
+  const db = await getDatabaseForTest();
+  await db.run(
+    "UPDATE quotations SET owner_domain = 'seven', quotation_number = ? WHERE id = ?",
+    [quotationNumber, assigned.id],
+  );
+  const persisted = await getQuotation(assigned.id);
+  if (!persisted) throw new Error("legacy seven fixture missing");
+  return persisted;
+}
+
 describe("quotation durable owner boundaries", () => {
   it("denies a creator whose current email/domain no longer matches the durable owner", async () => {
-    const created = await saveQuotation(input("S7-DOMAIN-CHANGE", "sent"), movedSevenCreator.id);
+    const created = await saveQuotation(input("", "sent"), movedSevenCreator.id);
     const db = await getDatabaseForTest();
     await db.run("UPDATE users SET email = ? WHERE id = ?", ["moved@example.test", movedSevenCreator.id]);
     const actor = { id: movedSevenCreator.id, email: "moved@example.test" };
@@ -107,9 +126,16 @@ describe("quotation durable owner boundaries", () => {
   it("requires an active matching owner even for issuance", async () => {
     const db = await getDatabaseForTest();
     await db.run("UPDATE users SET is_active = 0 WHERE id = ?", [inactiveSevenCreator.id]);
+    const activeQuoteOwner = await createUser({
+      email: "active.company.owner@727.co.jp",
+      name: "Active Company Owner",
+      password: "active-company-owner-password",
+      role: "user",
+    });
     const pdf = Buffer.from("%PDF-inactive-owner", "utf8");
+    const persistedSeven = await createLegacySevenRecord("S7-INACTIVE-ISSUANCE", activeQuoteOwner.id);
     await expect(saveIssuedQuotation(
-      input("S7-INACTIVE-ISSUANCE", "sent"),
+      input(persistedSeven.quotationNumber, "sent"),
       inactiveSevenCreator.id,
       "user",
       pdf,
@@ -117,14 +143,8 @@ describe("quotation durable owner boundaries", () => {
       null,
     )).rejects.toBeInstanceOf(UnresolvedQuotationOwnerError);
 
-    const activeQuoteOwner = await createUser({
-      email: "active.company.owner@727.co.jp",
-      name: "Active Company Owner",
-      password: "active-company-owner-password",
-      role: "user",
-    });
     const inactiveActorQuote = await saveQuotation(
-      input("S7-INACTIVE-ACTOR", "sent"),
+      input("", "sent"),
       activeQuoteOwner.id,
     );
     expect(canPerformOwnerWorkflowAction({
@@ -134,35 +154,31 @@ describe("quotation durable owner boundaries", () => {
     }, inactiveActorQuote)).toBe(false);
   });
 
-  it("binds stale legacy numbers to Seven issuance", async () => {
+  it("assigns every new record to Kanei and rejects stale legacy numbers", async () => {
     const kaneiPrepared = await saveQuotation(input("KT-KANEI-PREPARED"), kaneiCreator.id);
-    expect(kaneiPrepared.ownerDomain).toBe("seven");
+    expect(kaneiPrepared.ownerDomain).toBe("kanei");
     const sevenPreparedFromKt = await saveQuotation(input("KT-SEVEN-MISMATCH"), sevenCreator.id);
-    expect(sevenPreparedFromKt.quotationNumber).toMatch(/^S7-/);
-    expect(sevenPreparedFromKt.ownerDomain).toBe("seven");
+    expect(sevenPreparedFromKt.quotationNumber).toMatch(/^KT-\d{6}-\d{3}$/);
+    expect(sevenPreparedFromKt.ownerDomain).toBe("kanei");
 
     const pdf = Buffer.from("%PDF-prefix-binding", "utf8");
     const normalizedIssued = await saveIssuedQuotation(
       input("KT-SEVEN-ISSUE-MISMATCH", "sent"), sevenCreator.id, "user", pdf, "seven.pdf", null,
     );
     expect(normalizedIssued.created).toBe(true);
-    expect(normalizedIssued.record.quotationNumber).toMatch(/^S7-/);
-    expect(normalizedIssued.record.ownerDomain).toBe("seven");
+    expect(normalizedIssued.record.quotationNumber).toMatch(/^KT-\d{6}-\d{3}$/);
+    expect(normalizedIssued.record.ownerDomain).toBe("kanei");
 
-    const kaneiPreparedIssued = await saveIssuedQuotation(
+    await expect(saveIssuedQuotation(
       input("S7-KANEI-PREPARED", "sent"), kaneiCreator.id, "user", pdf, "kanei.pdf", null,
-    );
-    const seven = await saveIssuedQuotation(
+    )).rejects.toBeInstanceOf(StaleLegacyQuotationNumberError);
+    await expect(saveIssuedQuotation(
       input("S7-PREFIX-BOUND", "sent"), sevenCreator.id, "user", pdf, "seven.pdf", null,
-    );
-    expect(kaneiPreparedIssued.record.ownerDomain).toBe("seven");
-    expect(seven.record.ownerDomain).toBe("seven");
-    expect(kaneiPreparedIssued.created).toBe(true);
-    expect(seven.created).toBe(true);
+    )).rejects.toBeInstanceOf(StaleLegacyQuotationNumberError);
   });
 
   it("uses the durable Seven owner, not creator identity or cross-company admin", async () => {
-    const owned = await saveQuotation(input("S7-DURABLE-OWNER", "sent"), sevenCreator.id);
+    const owned = await createLegacySevenRecord("S7-DURABLE-OWNER", sevenCreator.id, "sent");
     const db = await getDatabaseForTest();
     await db.run("UPDATE quotations SET created_by = ? WHERE id = ?", [kaneiCreator.id, owned.id]);
     const durableRecord = await getQuotation(owned.id);
@@ -194,7 +210,7 @@ describe("quotation durable owner boundaries", () => {
       [owned.id],
     );
     expect(unchanged).toEqual({
-      payload_json: JSON.stringify({ revision: 1 }),
+      payload_json: expect.stringContaining('"revision":1'),
       status: "sent",
       has_pdf: 0,
     });
@@ -218,24 +234,24 @@ describe("quotation durable owner boundaries", () => {
       password: "legacy-owner-password",
       role: "user",
     });
-    const generated = await saveQuotation(input("S7-LEGACY-BOUNDARY-ORIGIN"), owner.id);
+    const generated = await saveQuotation(input(""), owner.id);
     const db = await getDatabaseForTest();
     await db.run(
       "UPDATE quotations SET quotation_number = ? WHERE id = ?",
-      ["LEGACY-BOUNDARY-001", generated.id],
+      ["KT-LEGACY-BOUNDARY-001", generated.id],
     );
     const legacy = await getQuotation(generated.id);
     const updated = await saveQuotation({
-      ...input("LEGACY-BOUNDARY-001"),
+      ...input("KT-LEGACY-BOUNDARY-001"),
       status: "sent",
       payload: { revision: 2 },
     }, owner.id, "user");
-    expect(legacy).toMatchObject({ id: generated.id, quotationNumber: "LEGACY-BOUNDARY-001" });
+    expect(legacy).toMatchObject({ id: generated.id, quotationNumber: "KT-LEGACY-BOUNDARY-001" });
     expect(updated).toMatchObject({
       id: legacy!.id,
-      quotationNumber: "LEGACY-BOUNDARY-001",
+      quotationNumber: "KT-LEGACY-BOUNDARY-001",
       status: "sent",
-      ownerDomain: "seven",
+      ownerDomain: "kanei",
     });
   });
 });

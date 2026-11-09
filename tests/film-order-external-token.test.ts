@@ -1,3 +1,4 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 // @vitest-environment node
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -5,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "film-external-token-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -14,7 +16,8 @@ process.env.ADMIN_NAME = "External Token Admin";
 process.env.FILM_EXTERNAL_TOKEN_SECRET = "film-external-token-test-secret-32-bytes!";
 process.env.MAIL_DRY_RUN = "true";
 
-const { saveQuotation } = await import("@/lib/quotation-store");
+const { saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { createUser } = await import("@/lib/auth-store");
 const {
   assertSupplierProofUploadPolicy,
@@ -331,7 +334,11 @@ describe("customer design upload gate", () => {
     }, "kanei@kanei-trade.co.jp");
     expect(proof.order.status).toBe("proof_registered");
     expect(proof.order.customerProof.status).toBe("pending");
+    // The new Kanei-owned branch uses the durable Kanei buyer; Seven is
+    // cross-company and cannot even reach the workflow-state guard.
     await expect(runFilmOrderAction(designOrderId, "approve", {}, "seven@727.co.jp"))
+      .rejects.toThrow("film_order_actor_forbidden");
+    await expect(runFilmOrderAction(designOrderId, "approve", {}, "kanei@kanei-trade.co.jp"))
       .rejects.toThrow("customer_proof_release_required");
 
     const review = await runFilmOrderAction(designOrderId, "send-customer-proof-review", {
@@ -359,7 +366,7 @@ describe("customer design upload gate", () => {
     }, "kanei@kanei-trade.co.jp");
     expect(sellerApproved.order.customerProof.supplierApprovalStatus).toBe("approved");
     expect(sellerApproved.order.customerProof.supplierApprovalBy).toBe("kanei@kanei-trade.co.jp");
-    const finalApproved = await runFilmOrderAction(designOrderId, "approve", { fileName: "final.pdf", fileUrl: "https://drive.google.com/file/d/finalproof/view" }, "seven@727.co.jp");
+    const finalApproved = await runFilmOrderAction(designOrderId, "approve", { fileName: "final.pdf", fileUrl: "https://drive.google.com/file/d/finalproof/view" }, "kanei@kanei-trade.co.jp");
     expect(finalApproved.order.status).toBe("final_approved");
   });
 });

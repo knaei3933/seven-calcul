@@ -1,8 +1,10 @@
+import { withLegacySevenQuotationSave } from "../helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "film-order-api-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -17,7 +19,8 @@ const { POST: actionRoute } = await import("@/app/api/film-orders/[id]/route");
 const { GET: mailOutboxRoute } = await import("@/app/api/film-orders/[id]/mail-outbox/route");
 const { POST: login } = await import("@/app/api/auth/login/route");
 const { createUser } = await import("@/lib/auth-store");
-const { saveQuotation } = await import("@/lib/quotation-store");
+const { saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { saveCustomer } = await import("@/lib/customer-store");
 
 afterAll(async () => {

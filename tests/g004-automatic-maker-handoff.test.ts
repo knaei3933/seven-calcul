@@ -1,9 +1,11 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 // @vitest-environment node
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "g004-maker-handoff-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -36,7 +38,8 @@ const { POST: internalComplete } = await import("@/app/api/data-intake/[quotatio
 const { GET: makerDownload } = await import("@/app/api/film-orders/design-download/[token]/route");
 const { POST: tokenDesignUpload } = await import("@/app/api/film-orders/design-upload/[token]/route");
 const { createSession, createUser, closeDatabaseForTest } = await import("@/lib/auth-store");
-const { getDatabaseForTest, saveQuotation } = await import("@/lib/quotation-store");
+const { getDatabaseForTest, saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const {
   filmExternalTokenHashForTest,
   getFilmOrder,

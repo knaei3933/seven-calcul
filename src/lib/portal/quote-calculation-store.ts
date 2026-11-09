@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { getSqlClient, isUniqueViolation, type SqlClient } from "@/lib/db";
+import {
+  allocateQuotationNumberInTransaction,
+  QuotationNumberAllocationConflictError,
+} from "@/lib/quotation-creation-policy";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
 
 export type PortalQuoteOwnerDomain = "kanei";
@@ -195,22 +199,6 @@ function insertPortalQuotationSql(): string {
   `;
 }
 
-function allocateQuotationNumber(
-  usedNumbers: Array<{ quotation_number: string }>,
-  issueDate: string,
-): string {
-  const month = new Date(issueDate).toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" })
-    .slice(0, 7).replace("-", "");
-  const prefix = `KT-${month}-`;
-  const usedSuffixes = new Set(usedNumbers.map((row) => {
-    const match = /^KT-\d{6}-(\d+)$/.exec(row.quotation_number);
-    return match ? Number(match[1]) : 0;
-  }).filter((suffix) => suffix > 0));
-  let suffix = 1;
-  while (usedSuffixes.has(suffix)) suffix += 1;
-  return `${prefix}${String(suffix).padStart(3, "0")}`;
-}
-
 export async function createPortalQuoteWithMapping(input: {
   quotation: Omit<QuotationRecordInput, "quotationNumber">;
   actorId: number;
@@ -219,10 +207,11 @@ export async function createPortalQuoteWithMapping(input: {
   customerCode: string;
   idempotencyKey: string;
   requestFingerprint: string;
+  allocationTime?: Date;
   buildResponse: (identifiers: { publicId: string; quotationNumber: string }) => Record<string, unknown>;
 }): Promise<PortalQuoteMapping> {
   const db = await getDatabase();
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
       return await db.transaction(async (tx): Promise<PortalQuoteMapping> => {
         const existingRow = await tx.get<MappingRow>(
@@ -241,14 +230,11 @@ export async function createPortalQuoteWithMapping(input: {
           return existing;
         }
 
-        const issueMonth = new Date(input.quotation.issueDate).toLocaleDateString("en-CA", {
-          timeZone: "Asia/Tokyo",
-        }).slice(0, 7).replace("-", "");
-        const usedNumbers = await tx.all<{ quotation_number: string }>(
-          "SELECT quotation_number FROM quotations WHERE quotation_number LIKE ?",
-          [`KT-${issueMonth}-%`],
+        const quotationNumber = await allocateQuotationNumberInTransaction(
+          tx,
+          input.ownerDomain,
+          input.allocationTime,
         );
-        const quotationNumber = allocateQuotationNumber(usedNumbers, input.quotation.issueDate);
         const now = new Date().toISOString();
         const payloadJson = JSON.stringify(input.quotation.payload);
         const values = [
@@ -344,7 +330,8 @@ export async function createPortalQuoteWithMapping(input: {
         }
         return existing;
       }
+      await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt));
     }
   }
-  throw new Error("portal_quote_number_allocation_failed");
+  throw new QuotationNumberAllocationConflictError();
 }

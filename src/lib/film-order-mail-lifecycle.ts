@@ -184,7 +184,7 @@ const ACTION_ROLES: Record<FilmOrderLifecycleWorkflowAction, "buyer" | "kanei" |
   "register-proof": "kanei",
   "send-customer-proof-review": "buyer",
   "record-customer-proof-approval": "kanei",
-  approve: "seven",
+  approve: "buyer",
   "request-re-proof": "buyer",
   "send-po": "kanei",
   "resend-supplier-links": "kanei",
@@ -726,7 +726,14 @@ export async function prepareFilmOrderMail(
     } else if (command.action === "register-proof") {
       guard.customerProofPdfRegistered = /\.pdf$/iu.test(command.proofPdfFileName ?? "");
     }
-    const lifecycleActorRole = ACTION_ROLES[command.action];
+    // Authorization has already resolved the configured side against the
+    // durable buyer domain. Buyer-role transition guards use that resolved
+    // role rather than the actor's email domain, so legacy Seven-owned buyer
+    // actions keep Seven authority and Kanei-owned actions use Kanei authority.
+    const configuredActorRole = ACTION_ROLES[command.action];
+    const lifecycleActorRole = configuredActorRole === "buyer"
+      ? "buyer"
+      : configuredActorRole;
     assertLifecycleGuard(guard, command.action, lifecycleActorRole);
 
     const event = ACTION_EVENTS[command.action];

@@ -165,12 +165,12 @@ function draftFor(result: CostResult, request: CalculationInput): QuotationDraft
 const selectedDraft = draftFor(selectedResult, selectedRequest);
 
 function quotationBody(
-  quotationNumber: string,
+  _quotationNumber: string,
   draft: QuotationDraft = selectedDraft,
   result: CostResult = selectedResult,
 ) {
   return {
-    quotationNumber,
+    quotationNumber: "",
     status: "draft",
     issueDate: "2026-09-15",
     validUntil: "2026-10-15",
@@ -213,13 +213,15 @@ function quotationBody(
 }
 
 function issuanceRequest(body: unknown): Request {
-  const formData = new FormData();
-  formData.set("payload", JSON.stringify(body));
-  formData.set("pdf", new Blob([new TextEncoder().encode("%PDF-atomic")], { type: "application/pdf" }), "quotation.pdf");
+  // New Kanei records are server-rendered; calculation provenance tests exercise
+  // the JSON payload boundary without supplying client PDF authority.
   return new Request("http://localhost/api/quotations", {
     method: "POST",
-    body: formData,
-    headers: { cookie: `pouch_session=${authorSession.token}` },
+    body: JSON.stringify(body),
+    headers: {
+      "content-type": "application/json",
+      cookie: `pouch_session=${authorSession.token}`,
+    },
   });
 }
 

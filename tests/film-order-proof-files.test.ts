@@ -1,8 +1,10 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "film-order-proof-files-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -11,7 +13,8 @@ process.env.ADMIN_EMAIL = "seven@727.co.jp";
 process.env.ADMIN_PASSWORD = "proof-files-password";
 process.env.ADMIN_NAME = "Proof Files Test";
 
-const { saveQuotation } = await import("@/lib/quotation-store");
+const { saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { ensureAdministratorSeed } = await import("@/lib/auth-store");
 const { getFilmOrder, listFilmOrders, registerProofFromUploadToken, runFilmOrderAction, syncFilmOrdersFromQuotations } = await import("@/lib/film-orders");
 

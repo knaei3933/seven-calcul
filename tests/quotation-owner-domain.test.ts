@@ -280,23 +280,23 @@ describe("quotation owner derivation and legacy backfill", () => {
   it("persists resolved owners at issuance and blocks unresolved issuance", async () => {
     const pdf = Buffer.from("%PDF-owner-issuance", "utf8");
     const preparedByKanei = await saveIssuedQuotation(
-      issuedInput("S7-OWNER-NEW-001"), kaneiCreator!.id, "user", pdf, "kanei.pdf", null,
+      issuedInput(""), kaneiCreator!.id, "user", pdf, "kanei.pdf", null,
     );
     const sevenIssued = await saveIssuedQuotation(
-      issuedInput("S7-OWNER-NEW-002"), sevenCreator!.id, "user", pdf, "seven.pdf", null,
+      issuedInput(""), sevenCreator!.id, "user", pdf, "seven.pdf", null,
     );
-    const unclassifiedIssued = await saveIssuedQuotation(
+    await expect(saveIssuedQuotation(
       issuedInput("S7-OWNER-NEW-003"), unclassifiedCreator!.id, "user", pdf, "unresolved.pdf", null,
-    );
+    )).rejects.toBeInstanceOf(UnresolvedQuotationOwnerError);
     expect(preparedByKanei.created).toBe(true);
-    expect(preparedByKanei.record.ownerDomain).toBe("seven");
-    expect(sevenIssued.record.ownerDomain).toBe("seven");
+    expect(preparedByKanei.record.ownerDomain).toBe("kanei");
+    expect(sevenIssued.record.ownerDomain).toBe("kanei");
     const db = await getDatabaseForTest();
     const unresolvedRows = await db.all<{ quotation_number: string }>(
       "SELECT quotation_number FROM quotations WHERE quotation_number LIKE 'UN-OWNER-NEW-%'",
     );
     expect(unresolvedRows).toEqual([]);
-    expect((await listQuotations({ q: "OWNER-NEW" })).every((record) => record.ownerDomain === "seven")).toBe(true);
+    expect((await listQuotations({ q: "OWNER-NEW" })).every((record) => record.ownerDomain === "kanei")).toBe(true);
   });
 
   it("keeps owner stable when a later admin updates the record", async () => {

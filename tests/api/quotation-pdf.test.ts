@@ -16,7 +16,7 @@ const { POST: savePdfRoute } = await import("@/app/api/quotations/[id]/pdf/route
 const { GET: getPdfRoute } = await import("@/app/api/quotations/[id]/pdf/route");
 const { POST: issueQuotationRoute } = await import("@/app/api/quotations/route");
 const { createSession, createUser } = await import("@/lib/auth-store");
-const { saveQuotation } = await import("@/lib/quotation-store");
+const { getDatabaseForTest, getQuotation, saveQuotation } = await import("@/lib/quotation-store");
 
 const baseInput: QuotationRecordInput = {
   quotationNumber: "S7-PDF-STORE-001",
@@ -82,7 +82,13 @@ beforeAll(async () => {
   });
   ownerToken = (await createSession(owner.id)).token;
   otherToken = (await createSession(other.id)).token;
-  quotation = await saveQuotation(baseInput, owner.id, "user");
+  quotation = await saveQuotation({ ...baseInput, quotationNumber: "" }, owner.id, "user");
+  const quotationDb = await getDatabaseForTest();
+  await quotationDb.run(
+    "UPDATE quotations SET owner_domain = 'seven', quotation_number = ? WHERE id = ?",
+    [baseInput.quotationNumber, quotation.id],
+  );
+  quotation = (await getQuotation(quotation.id))!;
 });
 
 afterAll(async () => {
@@ -199,60 +205,57 @@ describe("quotation PDF API", () => {
     await expect(response.json()).resolves.toMatchObject({ error: "invalid_pdf" });
   });
 
-  it("requires authenticated multipart issuance and commits PDF in one API request", async () => {
+  it("requires authenticated new-record issuance and rejects client PDF authority", async () => {
     const unauthenticated = await issueQuotationRoute(new Request("http://localhost/api/quotations", { method: "POST" }));
     expect(unauthenticated.status).toBe(401);
-    const unresolvedForm = new FormData();
-    unresolvedForm.set("payload", JSON.stringify({ ...baseInput, quotationNumber: "S7-PDF-STORE-UNRESOLVED" }));
-    unresolvedForm.set("pdf", new Blob([Buffer.concat([Buffer.from("%PDF-"), Buffer.from([0x55])])], { type: "application/pdf" }));
-    const unresolvedOwner = await issueQuotationRoute(request("/api/quotations", {
+
+    const clientPdf = new Blob([Buffer.concat([Buffer.from("%PDF-"), Buffer.from([0x55])])], { type: "application/pdf" });
+    const clientForm = new FormData();
+    clientForm.set("payload", JSON.stringify({ ...baseInput, quotationNumber: "" }));
+    clientForm.set("pdf", clientPdf, "client.pdf");
+    const clientRejected = await issueQuotationRoute(request("/api/quotations", {
       method: "POST",
-      body: unresolvedForm,
-    }, otherToken));
-    expect(unresolvedOwner.status).toBe(201);
-    const unresolvedPayload = await unresolvedOwner.json();
-    expect(unresolvedPayload.created).toBe(true);
-    expect(unresolvedPayload.record.ownerDomain).toBe("seven");
-    const jsonOnly = await issueQuotationRoute(request("/api/quotations", {
+      body: clientForm,
+    }, ownerToken));
+    expect(clientRejected.status).toBe(400);
+    await expect(clientRejected.json()).resolves.toMatchObject({ error: "client_pdf_not_accepted" });
+
+    const issued = await issueQuotationRoute(request("/api/quotations", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(baseInput),
+      body: JSON.stringify({ ...baseInput, quotationNumber: "" }),
     }, ownerToken));
-    expect(jsonOnly.status).toBe(400);
-    await expect(jsonOnly.json()).resolves.toMatchObject({ error: "canonical_pdf_required" });
-
-    const bytes = Buffer.concat([Buffer.from("%PDF-"), Buffer.from([0x41, 0x42])]);
-    const formData = new FormData();
-    formData.set("payload", JSON.stringify({ ...baseInput, quotationNumber: "S7-PDF-STORE-002" }));
-    formData.set("pdf", new Blob([bytes], { type: "application/pdf" }), "S7-PDF-STORE-002.pdf");
-    const issued = await issueQuotationRoute(
-      request("/api/quotations", { method: "POST", body: formData }, ownerToken),
-    );
     expect(issued.status).toBe(201);
     const issuedPayload = await issued.json();
     expect(issuedPayload.created).toBe(true);
+    expect(issuedPayload.record.ownerDomain).toBe("kanei");
+    expect(issuedPayload.record.quotationNumber).toMatch(/^KT-\d{6}-\d{3}$/u);
     expect(issuedPayload.pdf.saved).toBe(true);
-    expect(issuedPayload.pdf.size).toBe(bytes.byteLength);
+    expect(issuedPayload.pdf.size).toBeGreaterThan(100);
 
-    const correctionForm = new FormData();
-    correctionForm.set("payload", JSON.stringify({
-      ...baseInput,
-      quotationNumber: "S7-PDF-STORE-002",
-      customerName: "Corrected",
-    }));
-    correctionForm.set("pdf", new Blob([Buffer.concat([Buffer.from("%PDF-"), Buffer.from([0x99])])], { type: "application/pdf" }));
-    const rejectedCorrection = await issueQuotationRoute(
-      request("/api/quotations", { method: "POST", body: correctionForm }, ownerToken),
+    const stored = await getPdfRoute(
+      request(`/api/quotations/${issuedPayload.record.id}/pdf`, {}, ownerToken),
+      context(issuedPayload.record.id),
     );
-    expect(rejectedCorrection.status).toBe(409);
-    await expect(rejectedCorrection.json()).resolves.toMatchObject({
+    expect(stored.status).toBe(200);
+    const storedBytes = Buffer.from(await stored.arrayBuffer());
+    expect(storedBytes.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(storedBytes.length).toBe(issuedPayload.pdf.size);
+    expect(storedBytes.length).toBeLessThan(10 * 1024 * 1024);
+
+    const canonicalExists = await issueQuotationRoute(request("/api/quotations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...baseInput,
+        quotationNumber: issuedPayload.record.quotationNumber,
+        customerName: "Corrected",
+      }),
+    }, ownerToken));
+    expect(canonicalExists.status).toBe(409);
+    await expect(canonicalExists.json()).resolves.toMatchObject({
       error: "canonical_pdf_already_exists",
       message: expect.stringContaining("別の見積番号"),
     });
-    const stored = await getPdfRoute(
-      request("/api/quotations/2/pdf", {}, ownerToken),
-      context(issuedPayload.record.id),
-    );
-    await expect(stored.arrayBuffer()).resolves.toEqual(bytes.buffer);
   });
 });

@@ -1,3 +1,4 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -119,7 +120,8 @@ describe.skipIf(!databaseUrl)("PostgreSQL-backed stores", () => {
     })).rejects.toThrow("duplicate_email");
     expect(await authenticate("owner@727.co.jp", "owner-password-123")).toMatchObject({ id: owner.id });
 
-    const { saveQuotation, getQuotation, listQuotations, QuotationActionForbiddenError } = await import("@/lib/quotation-store");
+const { saveQuotation: directSaveQuotation, getQuotation, listQuotations, QuotationActionForbiddenError } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
     const saved = await saveQuotation(baseInput, owner.id, "user");
     expect(saved.quotationNumber).toBe(baseInput.quotationNumber);
     expect(saved.payload).toEqual({ revision: 1 });

@@ -79,8 +79,8 @@ function atomicIssuanceResponse(record: Record<string, unknown>): Response {
 }
 
 function issuancePayload(init?: RequestInit): { payload: Record<string, unknown> } & Record<string, unknown> {
-  expect(init?.body).toBeInstanceOf(FormData);
-  return JSON.parse(String((init?.body as FormData).get("payload")));
+  expect(typeof init?.body).toBe("string");
+  return JSON.parse(String(init?.body));
 }
 
 function latestIssuanceInit(fetchMock: { mock: { calls: Array<[RequestInfo | URL, RequestInit?]> } }): RequestInit | undefined {

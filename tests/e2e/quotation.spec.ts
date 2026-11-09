@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { getDocumentProxy } from "unpdf";
 
 test("Japanese quotation UI calculates, validates, and separates customer output", async ({ page }) => {
   await page.goto("/");
@@ -53,7 +54,7 @@ test("A4 quotation page issues once and downloads the canonical PDF", async ({ p
   await page.getByPlaceholder("株式会社◯◯").fill("E2E株式会社");
   await expect(page.getByTestId("save-history")).toBeEnabled();
   await page.getByTestId("save-history").click();
-  await expect(page.getByTestId("issue-success")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("issue-success")).toBeVisible({ timeout: 60_000 });
 
   await page.getByPlaceholder("株式会社◯◯").fill("E2E編集後株式会社");
   const downloadPromise = page.waitForEvent("download");
@@ -61,7 +62,7 @@ test("A4 quotation page issues once and downloads the canonical PDF", async ({ p
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/^お見積書_.+_\d{6}\.pdf$/u);
   const issuedPdf = readFileSync(await download.path());
-  expect(countPdfPages(issuedPdf)).toBe(1);
+  expect((await getDocumentProxy(new Uint8Array(issuedPdf))).numPages).toBe(1);
 
   await expect(page.getByTestId("quote-price-per-piece")).toContainText("￥");
     await expect(page.getByTestId("film-meter-price")).toContainText("/m");

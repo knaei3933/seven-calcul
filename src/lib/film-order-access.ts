@@ -70,7 +70,7 @@ const ACTION_SIDE: Record<string, FilmOrderActionSide> = {
   "register-receiving": "buyer",
   "register-receiving-extra": "buyer",
   "resend-receiving-notice": "buyer",
-  approve: "seven",
+  approve: "buyer",
   "request-re-proof": "buyer",
   // Customer/filling responsibility follows the durable buyer. Kanei remains the
   // buyer for Kanei-origin work; Seven owns these actions for Seven-origin work.

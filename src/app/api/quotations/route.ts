@@ -26,6 +26,10 @@ import {
   canReadQuotation,
 } from "@/lib/quotation-access";
 import { getQuotationByNumber } from "@/lib/quotation-store";
+import {
+  QuotationNumberAllocationConflictError,
+  StaleLegacyQuotationNumberError,
+} from "@/lib/quotation-creation-policy";
 import { buildFilmQuotationFromRecord, buildQuotationPdfFileName } from "@/lib/film-quotation";
 import {
   GravureDurableDatabaseRequiredError,
@@ -34,6 +38,11 @@ import {
   isGravureSnapshotIssuanceEnabled,
   verifyGravureSnapshotIssuance,
 } from "@/lib/gravure-price-store";
+import {
+  buildCanonicalQuotationPdfModel,
+  renderCanonicalQuotationPdf,
+} from "@/lib/standard-quote-pdf";
+import type { CanonicalQuotationPdfFactory } from "@/lib/quotation-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -389,6 +398,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (existing && !canMutateQuotation(user, existing)) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
+    // The API boundary uses only the durable existing record. A client owner
+    // stamp or uploaded PDF can never select canonical-PDF authority.
+    const legacySevenIssuance = existing?.ownerDomain === "seven";
+    const serverCanonicalIssuance = !legacySevenIssuance;
+    if (legacySevenIssuance && !pdfData) {
+      return NextResponse.json({
+        error: "canonical_pdf_required",
+        message: "既存のセブン化學見積書の発行にはA4 PDF（10MB以内）を含めて送信してください。",
+      }, { status: 400 });
+    }
     if (isGravureIssuance(input)) {
       if (!isGravureSnapshotIssuanceEnabled()) {
         return NextResponse.json({ error: "gravure_snapshot_issuance_disabled" }, { status: 503 });
@@ -433,6 +452,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!customerEmailPattern.test(customerEmail)) {
       return NextResponse.json({ error: "invalid_customer_email" }, { status: 400 });
     }
+    // Preserve provenance/configuration error semantics before rejecting the
+    // transport that attempted to smuggle client PDF authority into a new record.
+    if (!legacySevenIssuance && pdfData) {
+      return NextResponse.json({
+        error: "client_pdf_not_accepted",
+        message: "新しい見積書のPDFはサーバーで生成されます。PDFを送信しないでください。",
+      }, { status: 400 });
+    }
     // 발행 시 金井貿易→セブン化學 필름 견적서를 자동 생성해 payload에 포함
     const filmQuotation = buildFilmQuotationFromRecord({
       quotationNumber: input.quotationNumber,
@@ -447,7 +474,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       input.payload = { ...input.payload, filmQuotation };
     }
     const snapshot = readCalculationChecklistSnapshot(input.payload.calculationChecklistSnapshot);
-    if (!pdfData) {
+    if (!pdfData && !serverCanonicalIssuance) {
       return NextResponse.json({
         error: "canonical_pdf_required",
         message: "発行にはA4 PDF（10MB以内）を含めて送信してください。",
@@ -465,13 +492,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       pdfData,
       fileName,
       snapshot,
+      serverCanonicalIssuance ? { canonicalPdfFactory: renderCanonicalQuotationPdfFactory } : {},
     );
     return NextResponse.json({
       record: issued.record,
       created: issued.created,
-      pdf: { saved: true, sha256: issued.pdfSha256, size: pdfData.byteLength },
+      pdf: { saved: true, sha256: issued.pdfSha256, size: issued.pdfByteLength },
     }, { status: 201 });
   } catch (error) {
+    console.error("[quotation-save] failed", error);
     if (error instanceof UnresolvedQuotationOwnerError) {
       return NextResponse.json({
         error: "unresolved_quote_owner",
@@ -480,6 +509,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
     if (error instanceof QuotationOwnerPrefixMismatchError) {
       return NextResponse.json({ error: "quotation_owner_prefix_mismatch" }, { status: 400 });
+    }
+    if (error instanceof StaleLegacyQuotationNumberError) {
+      return NextResponse.json({
+        error: "stale_legacy_quotation_number",
+        message: "未保存のS7番号は新しい見積りでは使用できません。Kaneiポリシーで番号を再生成してください。",
+      }, { status: 409 });
+    }
+    if (error instanceof QuotationNumberAllocationConflictError) {
+      return NextResponse.json({
+        error: "number_allocation_conflict",
+        message: "見積番号を発行できませんでした。しばらくしてから再度お試しください。",
+      }, { status: 409 });
     }
     if (error instanceof QuotationOwnershipConflictError) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
@@ -499,3 +540,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "quotation_save_failed" }, { status: 500 });
   }
 }
+
+const renderCanonicalQuotationPdfFactory: CanonicalQuotationPdfFactory = async ({
+  input,
+  ownerDomain,
+  quotationNumber,
+}) => renderCanonicalQuotationPdf(
+  buildCanonicalQuotationPdfModel(input, quotationNumber, ownerDomain),
+  ownerDomain,
+);

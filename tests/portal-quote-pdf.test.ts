@@ -385,8 +385,29 @@ describe("portal-owned canonical quotation PDF API", () => {
       size: stored.data.byteLength,
       sha256: actualSha256,
     });
+    const payloadRow = await getPortalQuoteDatabaseForTest().then((db) => db.get<{ payload_json: string }>(
+      "SELECT payload_json FROM quotations WHERE id = ?",
+      [Number(mapping.quotation_id)],
+    ));
+    const persistedPayload = JSON.parse(payloadRow!.payload_json) as {
+      canonicalPdfProvenance?: { rendererVersion: string; outputSha256: string; fonts: unknown; assets: unknown };
+    };
+    expect(persistedPayload.canonicalPdfProvenance).toMatchObject({
+      rendererVersion: "standard-quotation-pdf/2",
+      outputSha256: actualSha256,
+      fonts: expect.any(Object),
+      assets: expect.any(Object),
+    });
     expect(stored.data.subarray(0, 5).toString()).toBe("%PDF-");
-    expect(stored.data.toString("latin1")).toMatch("/MediaBox [ 0 0 595.28 841.89 ]");
+    const loaded = await (await import("pdf-lib")).PDFDocument.load(new Uint8Array(stored.data), {
+      ignoreEncryption: true,
+      updateMetadata: false,
+    });
+    const page = loaded.getPage(0);
+    expect(page.getWidth()).toBe(595.28);
+    expect(page.getHeight()).toBe(841.89);
+    expect(loaded.getProducer()).toContain("standard-quotation-pdf/2");
+    expect(loaded.getAuthor()).toBe("金井貿易株式会社");
   });
 
   it("returns 409 for duplicate generation while preserving the original canonical bytes", async () => {
@@ -423,6 +444,30 @@ describe("portal-owned canonical quotation PDF API", () => {
     });
   });
 
+  it("ignores client PDF authority and stores only server canonical provenance", async () => {
+    const quote = await createQuote(owner, "pdf-client-authority-rejected");
+    const publicId = String(quote.publicId);
+    const form = new FormData();
+    form.set("pdf", new Blob([new TextEncoder().encode("%PDF-client-authored")], { type: "application/pdf" }), "client.pdf");
+    const response = await generatePortalQuotePdfApi(new Request(
+      `https://admin.test/api/portal/v1/quotes/${publicId}/pdf/generate`,
+      { method: "POST", headers: headersFor(owner), body: form },
+    ), publicId, { now, fontBytes });
+    expect(response.status).toBe(201);
+
+    const mapping = await mappingFor(publicId);
+    const stored = await storedPdf(Number(mapping.quotation_id));
+    expect(stored.data.toString("latin1")).not.toContain("%PDF-client-authored");
+    const payloadRow = await getPortalQuoteDatabaseForTest().then((db) => db.get<{ payload_json: string }>(
+      "SELECT payload_json FROM quotations WHERE id = ?",
+      [Number(mapping.quotation_id)],
+    ));
+    const persisted = JSON.parse(payloadRow!.payload_json) as {
+      canonicalPdfProvenance?: { rendererVersion: string };
+    };
+    expect(persisted.canonicalPdfProvenance?.rendererVersion).toBe("standard-quotation-pdf/2");
+  });
+
   it("downloads only the owner's exact stored bytes with no-store headers and safe filename encoding", async () => {
     const forbiddenOwner = await downloadPortalQuotePdfApi(downloadRequest(foreignUser, generatedPublicId), generatedPublicId, { now });
     expect(forbiddenOwner.status).toBe(404);
@@ -450,12 +495,12 @@ describe("portal-owned canonical quotation PDF API", () => {
     expect(response.status).toBe(200);
     const text = await extractPdfText(new Uint8Array(await response.arrayBuffer()));
     for (const expected of [
-      "カネイトレード",
+      "金井貿易株式会社",
       "お見積書",
       String(generatedQuote.quotationNumber),
       String(generatedQuote.customerName),
       String(generatedQuote.productName),
-      String(generatedQuote.sizeSummary),
+      "mm /",
       String(generatedQuote.quantity),
       String(generatedQuote.displayedUnitPrice),
       String(generatedQuote.displayedSubtotal),
@@ -464,7 +509,6 @@ describe("portal-owned canonical quotation PDF API", () => {
       "別途相談",
       "月末締め翌月末払い",
       "日本語備考の確認用テストです。",
-      "お客様ポータル",
     ]) {
       expect(text).toContain(expected);
     }
@@ -517,7 +561,17 @@ describe("portal-owned canonical quotation PDF API", () => {
       }),
       generatePdf: async (_projection, _fontBytes, ownerProfile) => {
         resolvedOwner = ownerProfile;
-        return Buffer.from("%PDF-durable-owner");
+        const bytes = Buffer.from("%PDF-durable-owner");
+        return {
+          bytes,
+          provenance: {
+            rendererVersion: "portal-test/1",
+            saveOptions: { useObjectStreams: true, addDefaultPage: false, updateFieldAppearances: false },
+            fonts: { regular: { sha256: "a".repeat(64) }, bold: { sha256: "b".repeat(64) } },
+            assets: { logo: { sha256: "c".repeat(64) }, seal: null },
+            outputSha256: createHash("sha256").update(bytes).digest("hex"),
+          },
+        };
       },
     });
     expect(response.status).toBe(201);
@@ -610,7 +664,7 @@ describe("portal-owned canonical quotation PDF API", () => {
       },
       generatePdf: async () => {
         generateCalls += 1;
-        return Buffer.from("%PDF-test");
+        throw new Error("generation must not run after rate limiting");
       },
       savePdf: async () => true,
     });

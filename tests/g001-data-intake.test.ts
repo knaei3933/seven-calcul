@@ -1,9 +1,11 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 // @vitest-environment node
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "g001-data-intake-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -15,7 +17,8 @@ process.env.ADMIN_NAME = "Seven Data Intake";
 const { GET: dataIntakeRoute } = await import("@/app/api/data-intake/route");
 const { POST: approvalRoute } = await import("@/app/api/quotations/[id]/approvals/route");
 const { createSession, createUser, closeDatabaseForTest } = await import("@/lib/auth-store");
-const { getDatabaseForTest, saveQuotation } = await import("@/lib/quotation-store");
+const { getDatabaseForTest, saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { syncFilmOrdersFromQuotations } = await import("@/lib/film-orders");
 const { listFilmOrderIntakeEntries } = await import("@/lib/film-order-intake");
 

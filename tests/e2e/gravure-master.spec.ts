@@ -364,12 +364,7 @@ test("ordinary redacted issuance succeeds and master changes do not invalidate t
 
   const response = await seven.post("/api/quotations", {
     multipart: {
-      payload: JSON.stringify(quoteBody(baseline, `S7-E2E-OLD-${Date.now()}`)),
-      pdf: {
-        name: "quotation.pdf",
-        mimeType: "application/pdf",
-        buffer: Buffer.from("%PDF-1.4\n%canonical-e2e"),
-      },
+      payload: JSON.stringify(quoteBody(baseline, `KT-E2E-OLD-${Date.now()}`)),
     },
   });
   expect(response.status()).toBe(201);
@@ -389,7 +384,7 @@ test("tampered snapshot id, hash, or merged projection fails issuance", async ({
     ["merge", (body: ReturnType<typeof quoteBody>) => { body.payload.pricingSnapshot.publicProjection.candidates[0].filmTotalYen = "1"; }],
   ] as const;
   for (const [name, mutate] of cases) {
-    const body = quoteBody(baseline, `S7-E2E-BAD-${name}-${suffix}`);
+    const body = quoteBody(baseline, `KT-E2E-BAD-${name}-${suffix}`);
     mutate(body);
     const response = await seven.post("/api/quotations", {
       multipart: {

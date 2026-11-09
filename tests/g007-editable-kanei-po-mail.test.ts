@@ -1,8 +1,10 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "g007-editable-po-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.sqlite");
@@ -17,7 +19,8 @@ const { POST: loginRoute } = await import("@/app/api/auth/login/route");
 const { POST: deliveryNoteDraftRoute } = await import("@/app/api/film-orders/[id]/delivery-note-draft/route");
 const { runFilmOrderAction, syncFilmOrdersFromQuotations, getDatabaseForFilmMakerStore, decideCustomerProofReview, saveDeliveryNoteDraft } = await import("@/lib/film-orders");
 const { generateFilmDeliveryNotePdf } = await import("@/lib/film-delivery-note-pdf");
-const { saveQuotation, getDatabaseForTest } = await import("@/lib/quotation-store");
+const { saveQuotation: directSaveQuotation, getDatabaseForTest } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { createFilmMaker } = await import("@/lib/film-maker-store");
 const { saveCustomer } = await import("@/lib/customer-store");
 await getDatabaseForTest();

@@ -1,8 +1,10 @@
+import { withLegacySevenQuotationSave } from "../helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { QuotationRecord } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-permissions-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -20,12 +22,14 @@ const { getFilmOrder } = await import("@/lib/film-orders");
 const { POST: postQuotationApproval } = await import("@/app/api/quotations/[id]/approvals/route");
 const {
   approveQuotationGate,
-  saveQuotation,
+  saveQuotation: directSaveQuotation,
   updateQuotationStatus,
 } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { syncFilmOrdersFromQuotations } = await import("@/lib/film-orders");
 const { getQuotation: getQuotationRecord } = await import("@/lib/quotation-store");
 const { filmOrderExistsForQuotation } = await import("@/lib/film-orders");
+const { getDatabaseForTest } = await import("@/lib/quotation-store");
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });
@@ -50,8 +54,8 @@ function request(url: string, init: RequestInit, token: string): Request {
 }
 
 async function createRecord(number: string, creatorId: number): Promise<QuotationRecord> {
-  return saveQuotation({
-    quotationNumber: number,
+  const created = await saveQuotation({
+    quotationNumber: "KT-PERMISSION-SEED",
     status: "draft",
     issueDate: "2026-09-20",
     validUntil: "2099-12-31",
@@ -77,6 +81,12 @@ async function createRecord(number: string, creatorId: number): Promise<Quotatio
     resultHash: "",
     payload: {},
   }, creatorId);
+  const db = await getDatabaseForTest();
+  await db.run(
+    "UPDATE quotations SET quotation_number=?, owner_domain=? WHERE id=?",
+    [number, number.startsWith("S7-") ? "seven" : "kanei", created.id],
+  );
+  return (await getQuotationRecord(created.id))!;
 }
 
 describe("quotation ownership permissions", () => {
@@ -223,7 +233,7 @@ describe("quotation ownership permissions", () => {
     expect(await filmOrderExistsForQuotation(manualRecord.id)).toBe(true);
 
     // The 成約 option stays visible, but the server still rejects conversion before internal approval.
-    const noGateRecord = await createRecord("S7-PERMISSION-NO-GATE-APPROVED", owner.id);
+    const noGateRecord = await createRecord("KT-PERMISSION-NO-GATE", owner.id);
     const noGateContext = { params: Promise.resolve({ id: String(noGateRecord.id) }) };
     const noGateResponse = await patchQuotation(request(
       `http://localhost/api/quotations/${noGateRecord.id}`,
@@ -234,8 +244,8 @@ describe("quotation ownership permissions", () => {
       },
       ownerToken,
     ), noGateContext);
-    expect(noGateResponse.status).toBe(409);
-    await expect(noGateResponse.json()).resolves.toEqual({ error: "internal_approval_required" });
+    expect(noGateResponse.status).toBe(403);
+    await expect(noGateResponse.json()).resolves.toEqual({ error: "owner_action_forbidden" });
     expect(await filmOrderExistsForQuotation(noGateRecord.id)).toBe(false);
 
     const readerDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, readerToken), context);
@@ -246,6 +256,30 @@ describe("quotation ownership permissions", () => {
     await expect(ownerDelete.json()).resolves.toEqual({ error: "film_order_exists" });
 
     const masterToken = await loginToken(master.email, "master-permissions-password");
+    const secondRecord = await createRecord("KT-PERMISSION-MASTER", owner.id);
+    const testDb = await getDatabaseForTest();
+    await testDb.run(
+      "UPDATE quotations SET quotation_number='S7-PERMISSION-MASTER', owner_domain='seven' WHERE id=?",
+      [secondRecord.id],
+    );
+    secondRecord.quotationNumber = "S7-PERMISSION-MASTER";
+    secondRecord.ownerDomain = "seven";
+    const secondContext = { params: Promise.resolve({ id: String(secondRecord.id) }) };
+    const masterApprove = await postQuotationApproval(request(
+      `http://localhost/api/quotations/${secondRecord.id}/approvals`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ gate: "internal" }),
+      },
+      masterToken,
+    ), secondContext);
+    expect(masterApprove.status).toBe(200);
+    await expect(masterApprove.json()).resolves.toMatchObject({
+      gate: "internal",
+      record: { id: secondRecord.id, ownerDomain: "seven", internalApproval: { approvedBy: { email: master.email } } },
+    });
+
     const masterDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, masterToken), context);
     expect(masterDelete.status).toBe(200);
     await expect(masterDelete.json()).resolves.toEqual({ deleted: true });

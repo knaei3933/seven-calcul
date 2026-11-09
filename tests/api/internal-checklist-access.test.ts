@@ -1,8 +1,10 @@
+import { withLegacySevenQuotationSave } from "../helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "internal-checklist-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -14,7 +16,8 @@ const { POST: login } = await import("@/app/api/auth/login/route");
 const { GET: getChecklists, PATCH: patchChecklist, POST: rebuildChecklists } = await import(
   "@/app/api/quotations/[id]/checklists/route"
 );
-const { saveQuotation } = await import("@/lib/quotation-store");
+const { saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { createChecklistsForQuotation } = await import("@/lib/quotation-store");
 const { createUser } = await import("@/lib/auth-store");
 const { createSession } = await import("@/lib/auth-store");

@@ -1,8 +1,10 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "film-order-store-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -32,7 +34,8 @@ vi.mock("@/lib/google-drive", () => ({
   getConfirmedDriveUpload: driveMocks.getConfirmedUpload,
 }));
 
-const { getDatabaseForTest, saveQuotation } = await import("@/lib/quotation-store");
+const { getDatabaseForTest, saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { saveCustomer, listDeliveryDestinations } = await import("@/lib/customer-store");
 const { canPerformFilmOrderAction } = await import("@/lib/film-order-access");
 const { createFilmMaker, deactivateFilmMaker, selectFilmMakerForOrder } = await import("@/lib/film-maker-store");

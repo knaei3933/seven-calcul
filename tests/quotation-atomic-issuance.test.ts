@@ -50,7 +50,7 @@ const checklistSnapshot = buildCalculationChecklistSnapshot(calculation, {
 
 function quotationInput(): QuotationRecordInput {
   return {
-    quotationNumber: "S7-ATOMIC-001",
+    quotationNumber: "",
     status: "draft",
     issueDate: "2026-10-15",
     validUntil: "2026-11-15",
@@ -113,7 +113,20 @@ describe("atomic quotation issuance", () => {
   });
 
   it("serializes same-number creation and rejects the loser without an orphan record", async () => {
-    const secondNumber = `${quotationInput().quotationNumber}-R2`;
+    const base = await saveIssuedQuotation(
+      quotationInput(),
+      actor.id,
+      "user",
+      pdf,
+      "base.pdf",
+      checklistSnapshot,
+    );
+    const secondNumber = `${base.record.quotationNumber}-R2`;
+    const setupDb = await getDatabaseForTest();
+    await setupDb.run(
+      "UPDATE quotations SET quotation_number = ?, pdf_data = NULL, pdf_file_name = NULL, pdf_uploaded_at = NULL, pdf_sha256 = NULL WHERE id = ?",
+      [secondNumber, base.record.id],
+    );
     const [first, second] = await Promise.allSettled([
       saveIssuedQuotation(
         { ...quotationInput(), quotationNumber: secondNumber },
@@ -132,9 +145,11 @@ describe("atomic quotation issuance", () => {
         checklistSnapshot,
       ),
     ]);
-    expect(first.status).toBe("fulfilled");
-    expect(second.status).toBe("rejected");
-    if (second.status === "rejected") expect(second.reason).toBeInstanceOf(QuotationCanonicalPdfExistsError);
+    const fulfilled = [first, second].find((result) => result.status === "fulfilled");
+    const rejected = [first, second].find((result) => result.status === "rejected");
+    expect(fulfilled?.status).toBe("fulfilled");
+    expect(rejected?.status).toBe("rejected");
+    if (rejected?.status === "rejected") expect(rejected.reason).toBeInstanceOf(QuotationCanonicalPdfExistsError);
     const db = await getDatabaseForTest();
     const rows = await db.all(
       "SELECT id, customer_name, pdf_sha256 FROM quotations WHERE quotation_number = ?",
@@ -146,7 +161,7 @@ describe("atomic quotation issuance", () => {
 
   it("rejects a failed reissue and leaves metadata, digest, and canonical bytes unchanged", async () => {
     const issued = await saveIssuedQuotation(
-      { ...quotationInput(), quotationNumber: "S7-ATOMIC-002" },
+      { ...quotationInput(), quotationNumber: "" },
       actor.id,
       "user",
       pdf,
@@ -155,7 +170,7 @@ describe("atomic quotation issuance", () => {
     );
     const before = await persistedIssuance(issued.record.id);
     await expect(saveIssuedQuotation(
-      { ...quotationInput(), quotationNumber: "S7-ATOMIC-002", customerName: "Corrected" },
+      { ...quotationInput(), quotationNumber: issued.record.quotationNumber, customerName: "Corrected" },
       actor.id,
       "user",
       changedPdf,
@@ -167,7 +182,7 @@ describe("atomic quotation issuance", () => {
 
   it("verifies the stored SHA-256 digest on retrieval", async () => {
     const issued = await saveIssuedQuotation(
-      { ...quotationInput(), quotationNumber: "S7-ATOMIC-DIGEST" },
+      { ...quotationInput(), quotationNumber: "" },
       actor.id,
       "user",
       pdf,
@@ -190,20 +205,20 @@ describe("atomic quotation issuance", () => {
     `);
     try {
       await expect(saveIssuedQuotation(
-        { ...quotationInput(), quotationNumber: "S7-ATOMIC-003" },
+        { ...quotationInput(), quotationNumber: "" },
         actor.id,
         "user",
         pdf,
         "S7-ATOMIC-003.pdf",
         checklistSnapshot,
       )).rejects.toThrow("forced_checklist_failure");
-      const quotations = await db.all("SELECT id FROM quotations WHERE quotation_number = 'S7-ATOMIC-003'");
+      const quotations = await db.all("SELECT id FROM quotations WHERE customer_name = 'Atomic Customer' AND pdf_data IS NULL");
       const checklists = await db.all(`
         SELECT quotation_checklists.quotation_id
         FROM quotation_checklists
         LEFT JOIN quotations ON quotations.id = quotation_checklists.quotation_id
         WHERE quotations.id IS NULL
-           OR quotations.quotation_number = 'S7-ATOMIC-003'
+           OR (quotations.customer_name = 'Atomic Customer' AND quotations.pdf_data IS NULL)
       `);
       expect(quotations).toEqual([]);
       expect(checklists).toEqual([]);

@@ -1,8 +1,10 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "g009-film-procurement-personas-"));
 const previousEnv = {
@@ -49,7 +51,8 @@ const {
 } = await import("@/lib/film-orders");
 const { saveMailSettings } = await import("@/lib/mail-settings");
 const { filmOrderStageOf } = await import("@/lib/film-order-stage");
-const { saveQuotation } = await import("@/lib/quotation-store");
+const { saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 
 const SMTP_INBOX = "smtp-inbox@example.test";
 const KANEI = "kanei@kanei-trade.co.jp";

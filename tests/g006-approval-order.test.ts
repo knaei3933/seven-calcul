@@ -1,8 +1,10 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "g006-approval-order-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.sqlite");
@@ -14,7 +16,8 @@ process.env.SEVEN_CHEMICAL_CONTACT_EMAIL = "seven-order@727.co.jp";
 
 const { createUser, closeDatabaseForTest } = await import("@/lib/auth-store");
 const { runFilmOrderAction, syncFilmOrdersFromQuotations, getDatabaseForFilmMakerStore, decideCustomerProofReview } = await import("@/lib/film-orders");
-const { saveQuotation, getDatabaseForTest } = await import("@/lib/quotation-store");
+const { saveQuotation: directSaveQuotation, getDatabaseForTest } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { createFilmMaker } = await import("@/lib/film-maker-store");
 await getDatabaseForTest();
 

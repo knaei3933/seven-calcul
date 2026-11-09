@@ -1,9 +1,11 @@
+import { withLegacySevenQuotationSave } from "../helpers/legacy-quotation-fixture";
 // @vitest-environment node
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-email-update-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -17,10 +19,11 @@ const {
   approveQuotationGate,
   getQuotation,
   getQuotationPdf,
-  saveQuotation,
+  saveQuotation: directSaveQuotation,
   saveQuotationPdf,
   updateQuotationStatus,
 } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 
 const baseInput: QuotationRecordInput = {
   quotationNumber: "S7-EMAIL-UPDATE-001",

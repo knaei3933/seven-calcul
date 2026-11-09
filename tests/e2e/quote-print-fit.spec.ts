@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { QUOTATION_DRAFT_KEY } from "../../src/lib/quotation-draft";
+import { getDocumentProxy } from "unpdf";
 
 const longText = "LongProductName検証".repeat(6);
 
@@ -9,7 +10,7 @@ test.describe("quote PDF single-page fit", () => {
     await page.goto("/quote");
     await expect(page.locator("#quote-preview")).toBeVisible();
     const pdf = await page.pdf({ format: "A4", printBackground: true });
-    const pages = countPdfPages(pdf);
+    const pages = (await getDocumentProxy(new Uint8Array(pdf))).numPages;
     console.log("[default] pdf pages:", pages);
     expect(pages).toBe(1);
   });
@@ -52,7 +53,7 @@ test.describe("quote PDF single-page fit", () => {
     expect(screenDispatchedScale).toBeLessThan(1);
 
     const pdf = await page.pdf({ format: "A4", printBackground: true });
-    const pages = countPdfPages(pdf);
+    const pages = (await getDocumentProxy(new Uint8Array(pdf))).numPages;
     console.log("[long] pdf pages:", pages);
     expect(pages).toBe(1);
 
@@ -96,12 +97,6 @@ test.describe("quote PDF single-page fit", () => {
     await page.getByTestId("print-pdf").click();
     const download = await downloadPromise;
     const issuedPdf = readFileSync(await download.path());
-    expect(countPdfPages(issuedPdf)).toBe(1);
+    expect((await getDocumentProxy(new Uint8Array(issuedPdf))).numPages).toBe(1);
   });
 });
-
-function countPdfPages(pdf: Buffer): number {
-  const text = pdf.toString("latin1");
-  const matches = text.match(/\/Type\s*\/Page(?![s/])/g);
-  return matches ? matches.length : 0;
-}

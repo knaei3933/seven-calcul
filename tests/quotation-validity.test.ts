@@ -1,8 +1,10 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-validity-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -10,7 +12,8 @@ process.env.ADMIN_EMAIL = "admin@quotation-validity.test";
 process.env.ADMIN_PASSWORD = "admin-validity-password";
 process.env.ADMIN_NAME = "Validity Admin";
 
-const { expireDueQuotations, getQuotation, isQuotationValidityExpired, listQuotations, saveQuotation, validateQuotationInput } = await import("@/lib/quotation-store");
+const { expireDueQuotations, getQuotation, isQuotationValidityExpired, listQuotations, saveQuotation: directSaveQuotation, validateQuotationInput } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { createUser } = await import("@/lib/auth-store");
 
 const actor = await createUser({

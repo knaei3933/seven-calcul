@@ -1,3 +1,4 @@
+import { withLegacySevenQuotationSave } from "../helpers/legacy-quotation-fixture";
 // @vitest-environment node
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,6 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
 import { buildQuotationPdfFileName } from "@/lib/film-quotation";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-send-pdf-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -30,9 +32,10 @@ const {
   getDatabaseForTest,
   getQuotation,
   getQuotationPdf,
-  saveQuotation,
+  saveQuotation: directSaveQuotation,
   saveQuotationPdf,
 } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { filmOrderExistsForQuotation } = await import("@/lib/film-orders");
 
 const baseInput: QuotationRecordInput = {

@@ -1,7 +1,9 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "customer-ownership-reconcile-"));
 process.env.POUCH_CUSTOMER_DB = join(databaseDirectory, "customers.db");
@@ -12,7 +14,8 @@ process.env.ADMIN_NAME = "System Admin";
 
 const { listCustomers, reconcileLegacyCustomerOwnershipForTest, saveCustomer } = await import("@/lib/customer-store");
 const { createUser } = await import("@/lib/auth-store");
-const { saveQuotation } = await import("@/lib/quotation-store");
+const { saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 
 afterAll(async () => {
   await rm(databaseDirectory, { recursive: true, force: true });

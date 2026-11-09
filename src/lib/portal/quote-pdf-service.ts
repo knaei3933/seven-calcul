@@ -11,9 +11,10 @@ import {
 import { projectPortalQuote, type PortalQuoteProjection } from "@/lib/portal/quote-projection";
 import { buildQuotationPdfFileName } from "@/lib/film-quotation";
 import {
-  generatePortalQuotePdf,
+  generatePortalQuotePdfWithProvenance,
   PortalQuotePdfGenerationError,
 } from "@/lib/portal/quote-pdf-generator";
+import { CanonicalQuotationPdfAssetError } from "@/lib/standard-quote-pdf";
 import { PortalServiceAuthenticationError, requirePortalServiceToken } from "@/lib/portal/service-auth";
 import { quotationOwnerProfile, type QuoteOwnerProfile } from "@/lib/quote-owner-profiles";
 import { quotationOwnerDomainFromStorage } from "@/lib/quotation-shared";
@@ -85,7 +86,7 @@ export interface PortalPdfApiDependencies {
   authenticateSession?: typeof authenticatePortalSession;
   incrementRateLimit?: typeof incrementPortalRateLimit;
   resolveQuote?: typeof resolveOwnPortalQuoteForPdf;
-  generatePdf?: typeof generatePortalQuotePdf;
+  generatePdf?: typeof generatePortalQuotePdfWithProvenance;
   savePdf?: typeof saveQuotationPdf;
   getPdf?: typeof getQuotationPdf;
   fontBytes?: Uint8Array | ArrayBuffer;
@@ -295,6 +296,15 @@ function pdfErrorResponse(error: unknown): NextResponse {
       message: "この見積書のPDFは確定済みのため上書きできません。",
     }, { status: 409 });
   }
+  if (error instanceof CanonicalQuotationPdfAssetError) {
+    return NextResponse.json({
+      error: "canonical_pdf_asset_mismatch",
+      role: error.role,
+      path: error.path,
+      expectedSha256: error.expectedSha256,
+      ...(error.actualSha256 ? { actualSha256: error.actualSha256 } : {}),
+    }, { status: 503 });
+  }
   void error;
   return NextResponse.json({
     error: "internal_error",
@@ -325,20 +335,30 @@ export async function generatePortalQuotePdfApi(
         message: "お見積りが見つかりません。",
       }, { status: 404 });
     }
-    const generatePdf = dependencies.generatePdf ?? generatePortalQuotePdf;
+    const generatePdf = dependencies.generatePdf ?? generatePortalQuotePdfWithProvenance;
     const fontBytes = dependencies.fontBytes ?? await readBrandFont();
     const generated = await generatePdf(quote.projection, fontBytes, quote.ownerProfile);
+    const generatedSha256 = createHash("sha256").update(generated.bytes).digest("hex");
+    if (generatedSha256 !== generated.provenance.outputSha256) {
+      throw new PortalQuotePdfGenerationError();
+    }
     const savePdf = dependencies.savePdf ?? saveQuotationPdf;
-    const saved = await savePdf(quote.internalQuotationId, generated, buildQuotationPdfFileName({
+    const saved = await savePdf(
+      quote.internalQuotationId,
+      generated.bytes,
+      buildQuotationPdfFileName({
       issueDate: quote.projection.issueDate,
       productName: quote.projection.productName,
       customerName: quote.projection.customerName,
-    }));
+      }),
+      undefined,
+      { provenance: generated.provenance },
+    );
     if (!saved) throw new PortalPdfConflictError();
     return NextResponse.json({
       saved: true,
-      size: generated.byteLength,
-      sha256: createHash("sha256").update(generated).digest("hex"),
+      size: generated.bytes.byteLength,
+      sha256: generated.provenance.outputSha256,
     }, { status: 201 });
   } catch (error) {
     if (error instanceof PortalQuotePdfGenerationError) return pdfErrorResponse(error);

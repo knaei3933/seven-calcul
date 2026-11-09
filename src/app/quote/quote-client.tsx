@@ -131,84 +131,6 @@ type QuoteForm = {
 
 class QuotationPdfError extends Error {}
 
-async function generateQuotationPdf(element: HTMLElement): Promise<Blob> {
-  const html2pdf = (await import("html2pdf.js")).default;
-  // html2canvas can capture a cloned SVG before its intrinsic box is ready.
-  await Promise.all(Array.from(element.querySelectorAll("img"), (image) => (
-    image.complete
-      ? Promise.resolve()
-      : typeof image.decode === "function"
-        ? image.decode().catch(() => undefined)
-        : Promise.resolve()
-  )));
-  if ("fonts" in document) await document.fonts.ready;
-  return await html2pdf().from(element).set({
-    margin: [0, 0, 0, 0],
-    // The jsPDF name is only a browser-side default; persistence always uses
-    // the canonical quotation-number filename accepted by the PDF API.
-    filename: "quotation.pdf",
-    image: { type: "jpeg", quality: 0.98 },
-    html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-    jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-  }).outputPdf("blob") as Blob;
-}
-
-function createQuotePdfCapture(sheet: HTMLElement | null): {
-  element: HTMLElement;
-  restore: () => void;
-} {
-  if (!sheet) {
-    throw new QuotationPdfError("見積書のA4 PDFを作成できませんでした。もう一度お試しください。");
-  }
-
-  // html2canvas does not consistently map CSS zoom to element geometry. Keep
-  // the capture source at exact A4 dimensions and scale only its contents with
-  // a transform so text positions remain layout-stable.
-  const host = document.createElement("div");
-  host.id = "quote-pdf-capture-host";
-  host.setAttribute("aria-hidden", "true");
-  document.body.dataset.quotePdfCapture = "1";
-  document.body.append(host);
-  const clone = sheet.cloneNode(true) as HTMLElement;
-  clone.removeAttribute("id");
-  clone.style.width = "210mm";
-  // jsPDF rounds physical pixels upward; keeping the source at the fit budget
-  // prevents a 1px raster overflow from creating a blank second A4 page.
-  clone.style.height = "288mm";
-  clone.style.minHeight = "288mm";
-  clone.style.overflow = "hidden";
-  host.replaceChildren(clone);
-
-  const cloneFit = clone.querySelector<HTMLElement>(".quote-a4-fit");
-  const cloneStyle = getComputedStyle(clone);
-  const reserved = (["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"] as const)
-    .reduce((total, key) => total + (Number.parseFloat(cloneStyle[key]) || 0), 0);
-  const budgetPx = 296 * (96 / 25.4) - reserved;
-  const measuredPx = cloneFit ? Math.max(cloneFit.scrollHeight, cloneFit.offsetHeight) : 0;
-  const scale = measuredPx > budgetPx && budgetPx > 0 ? budgetPx / measuredPx : 1;
-
-  if (cloneFit) {
-    cloneFit.style.setProperty("--quote-a4-fit-scale", scale.toFixed(5));
-    cloneFit.style.transform = `scale(${scale.toFixed(5)})`;
-    cloneFit.style.transformOrigin = "top left";
-    // Uniform downscaling would otherwise leave blank space on the right.
-    // Lay the content out in the enlarged pre-transform box, then scale it
-    // back so the visible result still occupies the full A4 width.
-    if (scale < 1) {
-      cloneFit.style.width = `${100 / scale}%`;
-      cloneFit.style.height = `${100 / scale}%`;
-    }
-  }
-
-  return {
-    element: clone,
-    restore: () => {
-      host.replaceChildren();
-      host.remove();
-      delete document.body.dataset.quotePdfCapture;
-    },
-  };
-}
 
 async function getStoredQuotationPdf(
   recordId: number,
@@ -779,7 +701,7 @@ export default function PrintableQuotationPage({
     setForm((old) => ({
       ...old,
       // E2E issuance helpers need independent immutable quotation identities.
-      quotationNumber: `${quotationOwnerPrefix}${Date.now().toString(36).toUpperCase()}`,
+      quotationNumber: "",
       customerCode: `TEST-${suffix}`,
       customerName: `テスト顧客株式会社 ${suffix}`,
       customerPostalCode: `10${suffix.slice(0, 2)}-0001`,
@@ -1111,18 +1033,6 @@ export default function PrintableQuotationPage({
         totalProfit: profitUnit.times(totals.quantity).toString(),
         recordedAt: new Date().toISOString(),
       };
-      const previewElement = document.getElementById("quote-preview");
-      if (!previewElement) {
-        throw new QuotationPdfError("見積書のA4 PDFを作成できませんでした。もう一度お試しください。");
-      }
-      const quotePdfCapture = createQuotePdfCapture(
-        previewElement.matches(".a4-sheet") ? previewElement : previewElement.querySelector<HTMLElement>(".a4-sheet"),
-      );
-      const pdfBlob = await generateQuotationPdf(quotePdfCapture.element).finally(quotePdfCapture.restore).catch((error: unknown) => {
-        console.error("[quotation-pdf] PDF generation failed", error);
-        throw new QuotationPdfError("見積書のA4 PDFを作成できませんでした。もう一度お試しください。");
-      });
-
       const issuancePayload = {
           ...form,
           revisionOf: form.revisionOf || undefined,
@@ -1173,16 +1083,10 @@ export default function PrintableQuotationPage({
             profitAudit,
           },
       };
-      const formData = new FormData();
-      formData.append("payload", JSON.stringify(issuancePayload));
-      formData.append("pdf", pdfBlob, buildQuotationPdfFileName({
-        issueDate: form.issueDate,
-        productName: form.skuNames.filter((name) => name.trim()).join(" / ") || form.productName,
-        customerName: form.customerName,
-      }));
       const response = await fetch("/api/quotations", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(issuancePayload),
       });
       const payload = await response.json() as {
         error?: string;
@@ -1217,7 +1121,7 @@ export default function PrintableQuotationPage({
       setSavedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
       const filmQuoteNum = savedRecord.payload?.filmQuotation?.quotationNumber;
       setIssueSuccessMessage(
-        `見積書を発行しました（${form.quotationNumber || quotationNumber}）` +
+        `見積書を発行しました（${quotationNumber}）` +
         (filmQuoteNum ? `。フィルム見積書 ${filmQuoteNum} も自動発行されました。` : "。") +
         " 履歴からPDF出力・メール作成ができます。"
       );

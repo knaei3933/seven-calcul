@@ -1,13 +1,16 @@
+import { withLegacySevenQuotationSave } from "./helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
 
+
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-sample-bulk-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
 const { ensureAdministratorSeed } = await import("@/lib/auth-store");
-const { saveQuotation } = await import("@/lib/quotation-store");
+const { saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const {
   approveQuotationGate,
   getQuotation,

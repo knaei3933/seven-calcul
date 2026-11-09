@@ -68,45 +68,45 @@ test("data-intake UI completes PO mail and delivery-note PDF after dual approval
   await sevenPage.getByPlaceholder("株式会社◯◯").fill(customer);
   await sevenPage.getByTestId("save-history").click();
   const issueSuccess = await sevenPage.getByTestId("issue-success").textContent({ timeout: 30_000 });
-  const quoteNumber = issueSuccess?.match(/S7-[A-Z0-9-]+/u)?.[0];
+  const quoteNumber = issueSuccess?.match(/[SK]T?-[A-Z0-9-]+/u)?.[0];
   expect(quoteNumber).toBeTruthy();
 
   // UI: internal approval transfers the quote into data-intake.
-  await sevenPage.goto("/history");
-  await sevenPage.getByTestId("history-search").fill(customer);
-  const historyRow = sevenPage.getByTestId("history-table").getByRole("row").filter({ hasText: customer }).first();
+  await kanaiPage.goto("/history");
+  await kanaiPage.getByTestId("history-search").fill(customer);
+  const historyRow = kanaiPage.getByTestId("history-table").getByRole("row").filter({ hasText: customer }).first();
   await historyRow.waitFor({ timeout: 30_000 });
   await historyRow.getByRole("button", { name: "詳細" }).click();
-  const internalApprovalResponse = sevenPage.waitForResponse(
+  const internalApprovalResponse = kanaiPage.waitForResponse(
     (response) => response.url().includes("/api/quotations/") && response.url().endsWith("/approvals"),
     { timeout: 60_000 },
   );
-  await sevenPage.getByTestId("history-internal-approve").click();
+  await kanaiPage.getByTestId("history-internal-approve").click();
   const internalApproval = await internalApprovalResponse;
   expect(internalApproval.ok()).toBeTruthy();
-  await expect(sevenPage.getByText(`${quoteNumber} を内部承認しました。`)).toBeVisible({ timeout: 30_000 });
+  await expect(kanaiPage.getByText(`${quoteNumber} を内部承認しました。`)).toBeVisible({ timeout: 30_000 });
 
   // UI: data-intake exposes the upload panel for the quote owner.
-  await sevenPage.goto("/data-intake");
-  await sevenPage.getByTestId("intake-search").fill(customer);
-  await sevenPage.getByTestId("intake-apply").click();
-  const intakeRow = sevenPage.getByTestId("intake-row").filter({ hasText: customer }).first();
+  await kanaiPage.goto("/data-intake");
+  await kanaiPage.getByTestId("intake-search").fill(customer);
+  await kanaiPage.getByTestId("intake-apply").click();
+  const intakeRow = kanaiPage.getByTestId("intake-row").filter({ hasText: customer }).first();
   await intakeRow.waitFor({ timeout: 30_000 });
-  const customerRequestResponse = sevenPage.waitForResponse(
+  const customerRequestResponse = kanaiPage.waitForResponse(
     (response) => response.request().method() === "POST" && response.url().includes("/api/film-orders/") && response.request().postData()?.includes("request-customer-design-upload") === true,
     { timeout: 60_000 },
   );
   await intakeRow.getByTestId("intake-action-customer_request").click();
-  await sevenPage.getByTestId("intake-customer-request-note").fill("Completion UI: upload AI data");
-  await sevenPage.getByTestId("intake-customer-request-submit").click();
+  await kanaiPage.getByTestId("intake-customer-request-note").fill("Completion UI: upload AI data");
+  await kanaiPage.getByTestId("intake-customer-request-submit").click();
   const customerRequest = await customerRequestResponse;
   expect(customerRequest.ok()).toBeTruthy();
   await expect(intakeRow.getByTestId("intake-action-intake_upload")).toBeEnabled({ timeout: 60_000 });
   await intakeRow.getByTestId("intake-action-intake_upload").click();
-  await expect(sevenPage.getByTestId("intake-upload-submit")).toBeVisible();
+  await expect(kanaiPage.getByTestId("intake-upload-submit")).toBeVisible();
 
   // Setup the maker/proof workflow through authorized APIs; external Google Drive objects are intentionally not used here.
-  const list = await api(sevenPage, `/api/data-intake?search=${encodeURIComponent(customer)}`);
+  const list = await api(kanaiPage, `/api/data-intake?search=${encodeURIComponent(customer)}`);
   const entry = list.payload?.entries?.find((item: { customerName: string }) => item.customerName === customer);
   expect(entry?.filmOrder?.id).toBeTruthy();
   const orderId = entry.filmOrder.id;
@@ -122,13 +122,13 @@ test("data-intake UI completes PO mail and delivery-note PDF after dual approval
   expect(maker.status).toBe(201);
   const makerId = maker.payload.maker.id;
 
-  let response = await api(sevenPage, `/api/film-orders/${orderId}`, { method: "POST", data: JSON.stringify({ action: "mark-ordered", origin: "http://127.0.0.1:3101" }) });
+  let response = await api(kanaiPage, `/api/film-orders/${orderId}`, { method: "POST", data: JSON.stringify({ action: "mark-ordered", origin: "http://127.0.0.1:3101" }) });
   expect(response.ok).toBeTruthy();
   response = await api(kanaiPage, `/api/film-orders/${orderId}`, { method: "POST", data: JSON.stringify({ action: "select-film-maker", makerId, origin: "http://127.0.0.1:3101" }) });
   expect(response.ok).toBeTruthy();
-  response = await api(sevenPage, `/api/film-orders/${orderId}`, { method: "POST", data: JSON.stringify({ action: "set-customer-design-not-required", reason: "completion UI audit", origin: "http://127.0.0.1:3101" }) });
+  response = await api(kanaiPage, `/api/film-orders/${orderId}`, { method: "POST", data: JSON.stringify({ action: "set-customer-design-not-required", reason: "completion UI audit", origin: "http://127.0.0.1:3101" }) });
   expect(response.ok).toBeTruthy();
-  response = await api(sevenPage, `/api/film-orders/${orderId}`, {
+  response = await api(kanaiPage, `/api/film-orders/${orderId}`, {
     method: "POST",
     data: JSON.stringify({
       action: "register-receiving", aiFileName: "completion-ui.ai", aiFileUrl: "http://127.0.0.1:3101/completion-ui.ai",
@@ -146,7 +146,7 @@ test("data-intake UI completes PO mail and delivery-note PDF after dual approval
     }),
   });
   expect(response.ok).toBeTruthy();
-  response = await api(sevenPage, `/api/film-orders/${orderId}`, {
+  response = await api(kanaiPage, `/api/film-orders/${orderId}`, {
     method: "POST",
     data: JSON.stringify({ action: "send-customer-proof-review", mailMode: "confirm", origin: "http://127.0.0.1:3101" }),
   });
@@ -169,27 +169,26 @@ test("data-intake UI completes PO mail and delivery-note PDF after dual approval
   await kanaiPage.getByTestId("intake-approval-submit").click();
   const kaneiApproval = await kaneiApprovalResponse;
   expect(kaneiApproval.ok()).toBeTruthy();
-  await expect(kaneiRow).toContainText("承認済み", { timeout: 60_000 });
 
-  // UI: Seven gives final approval.
-  await sevenPage.goto("/data-intake");
-  await sevenPage.getByTestId("intake-search").fill(customer);
-  await sevenPage.getByTestId("intake-apply").click();
-  const sevenRow = sevenPage.getByTestId("intake-row").filter({ hasText: customer }).first();
-  await sevenRow.waitFor({ timeout: 30_000 });
-  await sevenRow.getByTestId("intake-action-owner_approval").click();
-  await sevenPage.getByLabel("最終承認データ名（任意）").fill("completion-final.pdf");
-  const ownerApprovalResponse = sevenPage.waitForResponse(
+  // UI: durable owner (Kanei) gives final approval.
+  await kanaiPage.goto("/data-intake");
+  await kanaiPage.getByTestId("intake-search").fill(customer);
+  await kanaiPage.getByTestId("intake-apply").click();
+  const ownerRow = kanaiPage.getByTestId("intake-row").filter({ hasText: customer }).first();
+  await ownerRow.waitFor({ timeout: 30_000 });
+  await ownerRow.getByTestId("intake-action-owner_approval").click();
+  await kanaiPage.getByLabel("最終承認データ名（任意）").fill("completion-final.pdf");
+  const ownerApprovalResponse = kanaiPage.waitForResponse(
     (response) => response.url().endsWith(`/api/film-orders/${orderId}`) && response.request().method() === "POST",
     { timeout: 60_000 },
   );
-  await sevenPage.getByTestId("intake-approval-submit").click();
+  await kanaiPage.getByTestId("intake-approval-submit").click();
   const ownerApproval = await ownerApprovalResponse;
   expect(ownerApproval.ok()).toBeTruthy();
-  await expect(sevenRow).toContainText("承認済み", { timeout: 60_000 });
+  await expect(ownerRow).toContainText("承認済み", { timeout: 60_000 });
 
   // API: register and confirm a delivery destination so PO becomes available.
-  response = await api(sevenPage, `/api/film-orders/${orderId}`, {
+  response = await api(kanaiPage, `/api/film-orders/${orderId}`, {
     method: "POST",
     data: JSON.stringify({
       action: "register-ship-to",
@@ -199,7 +198,7 @@ test("data-intake UI completes PO mail and delivery-note PDF after dual approval
     }),
   });
   if (!response.ok) throw new Error(`register-ship-to failed: ${JSON.stringify(response.payload)}`);
-  response = await api(sevenPage, `/api/film-orders/${orderId}`, { method: "POST", data: JSON.stringify({ action: "confirm-ship-to" }) });
+  response = await api(kanaiPage, `/api/film-orders/${orderId}`, { method: "POST", data: JSON.stringify({ action: "confirm-ship-to" }) });
   expect(response.ok).toBeTruthy();
 
   // UI: Kanei opens editable PO mail and sends it.

@@ -30,7 +30,7 @@ describe("quotation persistence with a manually edited selling price", () => {
     expect(first).toMatch(/^S7-202610-\d{3}$/);
 
     await saveQuotation({
-      quotationNumber: first,
+      quotationNumber: "",
       status: "draft",
       issueDate: "2026-10-19",
       validUntil: "2026-11-19",
@@ -56,6 +56,11 @@ describe("quotation persistence with a manually edited selling price", () => {
       resultHash: "sequence-test-hash",
       payload: {},
     }, actor.id, "user");
+    const { getDatabaseForTest } = await import("@/lib/quotation-store");
+    await (await getDatabaseForTest()).run(
+      "UPDATE quotations SET quotation_number = ? WHERE customer_name = ?",
+      [first, "連番テスト株式会社"],
+    );
 
     const second = await getNextQuotationNumber("seven", new Date("2026-10-19T00:00:00Z"));
     expect(Number(second.slice(-3))).toBe(Number(first.slice(-3)) + 1);
@@ -72,7 +77,7 @@ describe("quotation persistence with a manually edited selling price", () => {
 
   it("stores simulator cost, displayed price, and reverse-calculated profit", async () => {
     const input: QuotationRecordInput = {
-      quotationNumber: "S7-TEST-EDIT-001",
+      quotationNumber: "",
       status: "draft",
       issueDate: "2026-09-05",
       validUntil: "2026-10-05",
@@ -151,7 +156,7 @@ describe("quotation persistence with a manually edited selling price", () => {
       quantity: "10000", printingMethod: "digital",
     });
     const snapshot = buildCalculationChecklistSnapshot(result, {
-      quotationNumber: "S7-CHECKLIST-001",
+      quotationNumber: "",
       customerName: "チェック株式会社",
       printingMethod: "digital",
       sourceHash: "checklist-hash",
@@ -165,7 +170,7 @@ describe("quotation persistence with a manually edited selling price", () => {
       }],
     });
     const quotationInput: QuotationRecordInput = {
-      quotationNumber: "S7-CHECKLIST-001",
+      quotationNumber: "",
       status: "draft",
       issueDate: "2026-09-08",
       validUntil: "2026-10-08",
@@ -246,7 +251,7 @@ describe("quotation persistence with a manually edited selling price", () => {
         quantity: "10000", printingMethod: "digital",
       }),
       {
-        quotationNumber: "S7-SNAPSHOT-REFRESH",
+        quotationNumber: "",
         printingMethod: "digital",
         sourceHash: "same-source-hash",
         resultHash: "same-result-hash",
@@ -255,7 +260,7 @@ describe("quotation persistence with a manually edited selling price", () => {
       },
     );
     const input: QuotationRecordInput = {
-      quotationNumber: "S7-SNAPSHOT-REFRESH",
+      quotationNumber: "",
       status: "draft",
       issueDate: "2026-09-12",
       validUntil: "2026-10-12",
@@ -345,7 +350,7 @@ describe("quotation persistence with a manually edited selling price", () => {
 
   it("deletes a quotation together with its checklists", async () => {
     const input: QuotationRecordInput = {
-      quotationNumber: "S7-TEST-DELETE-90",
+      quotationNumber: "",
       status: "draft",
       issueDate: "2026-10-07",
       validUntil: "2026-11-07",
@@ -560,7 +565,7 @@ describe("quotation persistence with a manually edited selling price", () => {
 
   it("rebuilds persistent checklists for quotations saved before checklist snapshots", async () => {
     const quotationInput: QuotationRecordInput = {
-      quotationNumber: "S7-LEGACY-CHECKLIST-001",
+      quotationNumber: "",
       status: "draft",
       issueDate: "2026-09-01",
       validUntil: "2026-10-01",

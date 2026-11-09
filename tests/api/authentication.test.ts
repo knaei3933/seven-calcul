@@ -1,7 +1,9 @@
+import { withLegacySevenQuotationSave } from "../helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "auth-api-test-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -17,7 +19,8 @@ const { PATCH: updateUserRoute } = await import("@/app/api/users/[id]/route");
 const { GET: listQuotations } = await import("@/app/api/quotations/route");
 const { GET: listCustomers } = await import("@/app/api/customers/route");
 const { GET: getChecklists } = await import("@/app/api/quotations/[id]/checklists/route");
-const { saveQuotation } = await import("@/lib/quotation-store");
+const { saveQuotation: directSaveQuotation } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 const { createUser } = await import("@/lib/auth-store");
 
 afterAll(async () => {

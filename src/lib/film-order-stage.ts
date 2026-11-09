@@ -206,7 +206,7 @@ const ACTOR_ROLE_ACTIONS: Partial<Record<FilmWorkflowAction, readonly FilmOrderA
   "register-proof": ["kanei", "maker"],
   "send-customer-proof-review": ["buyer"],
   "record-customer-proof-approval": ["kanei"],
-  "approve": ["seven"],
+  "approve": ["buyer"],
   "request-re-proof": ["buyer"],
   "send-po": ["kanei"],
   "update-eta": ["maker"],

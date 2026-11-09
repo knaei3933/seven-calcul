@@ -66,13 +66,13 @@ describe("quotation owner schema cold start", () => {
   it("creates a constrained durable owner column and derives issuance owner", async () => {
     const pdf = Buffer.from("%PDF-cold-owner", "utf8");
     const preparedByKanei = await saveIssuedQuotation(
-      input("S7-COLD-OWNER-001"), kaneiCreator.id, "user", pdf, "kanei.pdf", null,
+      input(""), kaneiCreator.id, "user", pdf, "kanei.pdf", null,
     );
     const seven = await saveIssuedQuotation(
-      input("S7-COLD-OWNER-002"), sevenCreator.id, "user", pdf, "seven.pdf", null,
+      input(""), sevenCreator.id, "user", pdf, "seven.pdf", null,
     );
-    expect(preparedByKanei.record.ownerDomain).toBe("seven");
-    expect(seven.record.ownerDomain).toBe("seven");
+    expect(preparedByKanei.record.ownerDomain).toBe("kanei");
+    expect(seven.record.ownerDomain).toBe("kanei");
 
     const db = await getDatabaseForTest();
     const columns = await db.all<{ name: string; type: string; dflt_value: string | null; notnull: number }>(

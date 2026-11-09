@@ -1,8 +1,10 @@
+import { withLegacySevenQuotationSave } from "../helpers/legacy-quotation-fixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { QuotationRecordInput } from "@/lib/quotation-shared";
+
 
 const databaseDirectory = await mkdtemp(join(tmpdir(), "quotation-upsert-integrity-"));
 process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
@@ -15,8 +17,9 @@ const {
   getDatabaseForTest,
   getQuotation,
   QuotationActionForbiddenError,
-  saveQuotation,
+  saveQuotation: directSaveQuotation,
 } = await import("@/lib/quotation-store");
+const saveQuotation = withLegacySevenQuotationSave(directSaveQuotation);
 
 afterAll(async () => {
   const { closeDatabaseForTest } = await import("@/lib/auth-store");
@@ -73,7 +76,7 @@ describe("quotation upsert ownership and referential integrity", () => {
     const unchanged = await getQuotation(original.id);
     expect(unchanged?.status).toBe("draft");
     expect(unchanged?.quantity).toBe("10000");
-    expect(unchanged?.payload).toEqual({ revision: 1 });
+    expect(unchanged?.payload).toEqual({ revision: 1, ownerDomain: "seven" });
     expect(unchanged?.createdBy.id).toBe(owner.id);
     expect(unchanged?.updatedBy?.id).toBe(owner.id);
 
