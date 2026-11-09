@@ -3716,6 +3716,32 @@ export async function runFilmOrderAction(
   return { order: result };
 }
 
+export async function deleteFilmOrdersForQuotation(quotationId: number): Promise<boolean> {
+  if (!Number.isInteger(quotationId) || quotationId <= 0) return false;
+  const db = await getDatabase();
+  const orderIds = (await db.all<{ id: number }>(
+    "SELECT id FROM film_orders WHERE quotation_id = ?",
+    [quotationId],
+  )).map((row) => Number(row.id));
+  if (orderIds.length === 0) return false;
+  const placeholders = orderIds.map(() => "?").join(",");
+  const outboxIds = (await db.all<{ id: number }>(
+    `SELECT id FROM film_order_mail_outbox WHERE order_id IN (${placeholders})`,
+    orderIds,
+  )).map((row) => Number(row.id));
+  if (outboxIds.length > 0) {
+    const outboxPlaceholders = outboxIds.map(() => "?").join(",");
+    await db.run(`DELETE FROM film_order_mail_attempts WHERE outbox_id IN (${outboxPlaceholders})`, outboxIds);
+  }
+  await db.run(`DELETE FROM film_order_mail_outbox WHERE order_id IN (${placeholders})`, orderIds);
+  await db.run(`DELETE FROM film_order_external_tokens WHERE film_order_id IN (${placeholders})`, orderIds);
+  await db.run(`DELETE FROM film_order_files WHERE order_id IN (${placeholders})`, orderIds);
+  await db.run(`DELETE FROM film_order_events WHERE order_id IN (${placeholders})`, orderIds);
+  await db.run(`DELETE FROM film_order_ship_to_destinations WHERE order_id IN (${placeholders})`, orderIds);
+  await db.run(`DELETE FROM film_orders WHERE quotation_id = ?`, [quotationId]);
+  return true;
+}
+
 export async function filmOrderExistsForQuotation(quotationId: number): Promise<boolean> {
   const db = await getDatabase();
   const row = await db.get<{ id: number }>("SELECT id FROM film_orders WHERE quotation_id = ?", [quotationId]);

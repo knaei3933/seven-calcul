@@ -9,11 +9,16 @@ import {
 } from "@/lib/quotation-store";
 import { getSessionUser } from "@/lib/api-auth";
 import {
-  canMutateQuotation,
+  canDeleteQuotation,
   canPerformOwnerWorkflowAction,
   canReadQuotation,
+  isMasterQuotationAdmin,
 } from "@/lib/quotation-access";
-import { filmOrderExistsForQuotation, syncFilmOrdersFromQuotations } from "@/lib/film-orders";
+import {
+  deleteFilmOrdersForQuotation,
+  filmOrderExistsForQuotation,
+  syncFilmOrdersFromQuotations,
+} from "@/lib/film-orders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -107,13 +112,15 @@ export async function DELETE(request: Request, context: Context): Promise<NextRe
     if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
     const existing = await getQuotation(Number(id));
     if (!existing) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
-    if (!canMutateQuotation(user, existing)) {
+    const masterDelete = isMasterQuotationAdmin(user);
+    if (!canDeleteQuotation(user, existing)) {
       return NextResponse.json({ error: "quotation_forbidden" }, { status: 403 });
     }
-    if (await filmOrderExistsForQuotation(Number(id))) {
+    if (!masterDelete && await filmOrderExistsForQuotation(Number(id))) {
       return NextResponse.json({ error: "film_order_exists" }, { status: 409 });
     }
-    const deleted = await deleteQuotation(Number(id), user.id);
+    if (masterDelete) await deleteFilmOrdersForQuotation(Number(id));
+    const deleted = await deleteQuotation(Number(id), masterDelete ? undefined : user.id);
     if (!deleted) return NextResponse.json({ error: "quotation_not_found" }, { status: 404 });
     return NextResponse.json({ deleted: true });
   } catch {

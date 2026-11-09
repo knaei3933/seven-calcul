@@ -21,7 +21,7 @@ import {
 import type { AuthenticatedUser } from "@/lib/auth-store";
 import { quotationOwnerProfile } from "@/lib/quote-owner-profiles";
 import {
-  canMutateQuotation,
+  canDeleteQuotation,
   canPerformOwnerWorkflowAction,
   quotationOwnerActionReason,
 } from "@/lib/quotation-access";
@@ -330,7 +330,7 @@ export default function HistoryClient({ currentUser }: { currentUser: Authentica
     }
   };
 
-  const canManage = (record: QuotationRecord) => canMutateQuotation(currentUser, record);
+  const canManage = (record: QuotationRecord) => canDeleteQuotation(currentUser, record);
 
   return (
     <main className="history-page">

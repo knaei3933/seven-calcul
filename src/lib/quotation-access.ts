@@ -8,6 +8,16 @@ export type QuotationActor = {
   role?: string | null;
 };
 
+const MASTER_ADMIN_EMAILS = (process.env.MASTER_ADMIN_EMAILS ?? "kim@kanei-trade.co.jp")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+
+export function isMasterQuotationAdmin(actor: QuotationActor): boolean {
+  if (actor.role !== "admin" || actor.isActive === false) return false;
+  return MASTER_ADMIN_EMAILS.includes(String(actor.email ?? "").trim().toLowerCase());
+}
+
 export function canActForQuoteOwner(
   email: string | null | undefined,
   ownerDomain: QuotationOwnerDomain,
@@ -73,10 +83,18 @@ export function canPerformOwnerWorkflowAction(
   return canOwnerCompanyActorAct(actor, record);
 }
 
+export function canDeleteQuotation(
+  actor: QuotationActor,
+  record: Pick<QuotationRecord, "id" | "ownerDomain" | "createdBy">,
+): boolean {
+  return isMasterQuotationAdmin(actor) || canMutateQuotation(actor, record);
+}
+
 export function quotationOwnerActionReason(
   actor: QuotationActor,
   record: Pick<QuotationRecord, "id" | "ownerDomain" | "createdBy">,
 ): string {
+  if (canDeleteQuotation(actor, record)) return "";
   if (canMutateQuotation(actor, record)) return "";
   if (record.ownerDomain === "unresolved") {
     return "所有会社が未解決のため、この操作は実行できません。";

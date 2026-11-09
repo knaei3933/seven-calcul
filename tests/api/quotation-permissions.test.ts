@@ -9,12 +9,14 @@ process.env.POUCH_QUOTATION_DB = join(databaseDirectory, "quotations.db");
 process.env.ADMIN_EMAIL = "admin@permissions.test";
 process.env.ADMIN_PASSWORD = "admin-permissions-password";
 process.env.ADMIN_NAME = "Permissions Admin";
+process.env.MASTER_ADMIN_EMAILS = "master@permissions.test";
 
 const { POST: login } = await import("@/app/api/auth/login/route");
 const { GET: getQuotationRoute } = await import("@/app/api/quotations/[id]/route");
 const { PATCH: patchQuotation } = await import("@/app/api/quotations/[id]/route");
 const { DELETE: deleteQuotation } = await import("@/app/api/quotations/[id]/route");
 const { createUser } = await import("@/lib/auth-store");
+const { getFilmOrder } = await import("@/lib/film-orders");
 const { POST: postQuotationApproval } = await import("@/app/api/quotations/[id]/approvals/route");
 const {
   approveQuotationGate,
@@ -79,6 +81,12 @@ async function createRecord(number: string, creatorId: number): Promise<Quotatio
 
 describe("quotation ownership permissions", () => {
   it("scopes reads and mutations to creator/owner while preserving admin-only reads", { timeout: 30_000 }, async () => {
+    const master = await createUser({
+      email: "master@permissions.test",
+      name: "Master Admin",
+      password: "master-permissions-password",
+      role: "admin",
+    });
     const owner = await createUser({
       email: "gotou@727.co.jp",
       name: "Owner",
@@ -233,8 +241,15 @@ describe("quotation ownership permissions", () => {
     const readerDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, readerToken), context);
     expect(readerDelete.status).toBe(403);
     const ownerDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, ownerToken), context);
-    // 成約済みでフィルム発注管理に反映された見積はワークフロー保護のため削除できない。
+    // 成約済みでフィルム発注管理に反映された見積は通常担当者では削除できない。
     expect(ownerDelete.status).toBe(409);
     await expect(ownerDelete.json()).resolves.toEqual({ error: "film_order_exists" });
+
+    const masterToken = await loginToken(master.email, "master-permissions-password");
+    const masterDelete = await deleteQuotation(request("http://localhost/api/quotations/1", { method: "DELETE" }, masterToken), context);
+    expect(masterDelete.status).toBe(200);
+    await expect(masterDelete.json()).resolves.toEqual({ deleted: true });
+    expect(await filmOrderExistsForQuotation(record.id)).toBe(false);
+    expect(await getFilmOrder(1)).toBeNull();
   });
 });
