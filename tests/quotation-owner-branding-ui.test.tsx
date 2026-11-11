@@ -50,7 +50,7 @@ describe("owner-aware quotation issuer branding", () => {
     expect(screen.getByTestId("quote-owner-logo")).toHaveAttribute("src", sevenProfile.logoUrl);
   });
 
-  it("preserves stored issuer overrides instead of resetting them to owner defaults", async () => {
+  it("enforces the owner document identity over stale issuer overrides", async () => {
     sessionStorage.setItem("pouch-active-quotation-revision-v1", JSON.stringify({
       form: {
         issuerName: "手入力発行者株式会社",
@@ -59,9 +59,10 @@ describe("owner-aware quotation issuer branding", () => {
       sourceVersion: "",
     }));
     render(<QuotePage ownerDomain="kanei" ownerProfile={kaneiProfile} />);
-    await waitFor(() => expect(screen.getByText("手入力発行者株式会社")).toBeInTheDocument());
-    expect(screen.getByText("USER OVERRIDE CO., LTD.")).toBeInTheDocument();
-    expect(screen.queryByText(kaneiProfile.legalName)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(kaneiProfile.legalName)).toBeInTheDocument());
+    expect(screen.getByText(kaneiProfile.englishName)).toBeInTheDocument();
+    expect(screen.queryByText("手入力発行者株式会社")).not.toBeInTheDocument();
+    expect(screen.queryByText("USER OVERRIDE CO., LTD.")).not.toBeInTheDocument();
   });
 
   it("blocks branding and issuance when the quote owner is unresolved", () => {

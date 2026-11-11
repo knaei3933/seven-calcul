@@ -396,8 +396,7 @@ const SEVEN_BULK_SAMPLE_NOTE = "初回製作時は、バルクサンプルを株
 function quoteFormDefaults(profile: QuoteOwnerProfile | null | undefined): QuoteForm {
   const owner = profile ?? DEFAULT_OWNER_PROFILE;
   const hasResolvedOwner = Boolean(profile);
-  return {
-    ...defaultQuote,
+  const ownerDocumentDefaults = {
     issuerName: hasResolvedOwner ? owner.legalName : "",
     issuerEnglishName: hasResolvedOwner ? owner.englishName : "",
     issuerPostalCode: hasResolvedOwner ? owner.postalCode : "",
@@ -405,15 +404,37 @@ function quoteFormDefaults(profile: QuoteOwnerProfile | null | undefined): Quote
     issuerTelephone: hasResolvedOwner ? owner.telephone : "",
     issuerFax: hasResolvedOwner ? owner.fax : "",
     issuerWebsite: hasResolvedOwner ? owner.website : "",
-      // The sample recipient is Seven's internal filling responsibility, not a
-      // neutral business term. Kanei-origin quotes must not claim it by default.
-      notes: profile?.ownerDomain === "seven"
-        ? defaultQuote.notes
-        : defaultQuote.notes
-          .split("\n")
-          .filter((note) => note !== SEVEN_BULK_SAMPLE_NOTE)
-          .join("\n"),
+    notes: hasResolvedOwner && owner.ownerDomain !== "seven"
+      ? defaultQuote.notes
+        .split("\n")
+        .filter((note) => note !== SEVEN_BULK_SAMPLE_NOTE)
+        .join("\n")
+      : defaultQuote.notes,
   };
+  return {
+    ...defaultQuote,
+    ...ownerDocumentDefaults,
+  };
+}
+
+function enforceQuoteOwnerDocumentDefaults(
+  form: QuoteForm,
+  profile: QuoteOwnerProfile | null | undefined,
+): QuoteForm {
+  const ownerDefaults = quoteFormDefaults(profile);
+  return profile
+    ? {
+      ...form,
+      issuerName: ownerDefaults.issuerName,
+      issuerEnglishName: ownerDefaults.issuerEnglishName,
+      issuerPostalCode: ownerDefaults.issuerPostalCode,
+      issuerAddress: ownerDefaults.issuerAddress,
+      issuerTelephone: ownerDefaults.issuerTelephone,
+      issuerFax: ownerDefaults.issuerFax,
+      issuerWebsite: ownerDefaults.issuerWebsite,
+      notes: ownerDefaults.notes,
+    }
+    : form;
 }
 
 function isFiniteNumber(value: string) {
@@ -860,7 +881,10 @@ export default function PrintableQuotationPage({
           selectedCandidateShortage?: unknown;
           checklistUrl?: unknown;
         };
-        const restoredForm = { ...quoteFormDefaults(ownerProfile), ...(active.form ?? {}) };
+        const restoredForm = enforceQuoteOwnerDocumentDefaults({
+          ...quoteFormDefaults(ownerProfile),
+          ...(active.form ?? {}),
+        }, ownerProfile);
         if (!Array.isArray(restoredForm.skuNames) || restoredForm.skuNames.length === 0) restoredForm.skuNames = [""];
         if (typeof restoredForm.revisionOf !== "string") restoredForm.revisionOf = "";
         restoredForm.paymentTerms = normalizeQuotePaymentTerms(restoredForm.paymentTerms);
@@ -2203,23 +2227,17 @@ export default function PrintableQuotationPage({
                   <span className="logo-mark large" aria-hidden="true">?</span>
                 )}
                 <div>
-                  <strong><EditableText value={form.issuerName} label="発行者名" onCommit={(next) => update("issuerName", next.trim())} /></strong>
-                  <small><EditableText value={form.issuerEnglishName} label="発行者英字名" onCommit={(next) => update("issuerEnglishName", next.trim())} /></small>
+                  <strong>{form.issuerName}</strong>
+                  <small>{form.issuerEnglishName}</small>
                 </div>
               </div>
               <address>
-                <EditableText value={`${form.issuerPostalCode} ${form.issuerAddress}`} label="発行者住所" onCommit={(next) => {
-                  const match = next.trim().match(/^(\S+)\s+(.+)$/);
-                  applyPatch({ issuerPostalCode: match?.[1] ?? next.trim(), issuerAddress: match?.[2] ?? "" });
-                }} /><br />
+                <span>{`${form.issuerPostalCode} ${form.issuerAddress}`}</span><br />
                 <span className="issuer-contact-line" data-testid="issuer-telephone-fax">
-                  <EditableText value={`${form.issuerTelephone} / ${form.issuerFax}`} label="電話番号とファックス" onCommit={(next) => {
-                    const [telephone, fax] = next.split("/").map((item) => item.trim());
-                    applyPatch({ issuerTelephone: telephone ?? "", issuerFax: fax ?? "" });
-                  }} />
+                  <span>{`${form.issuerTelephone} / ${form.issuerFax}`}</span>
                 </span>
                 <span className="issuer-contact-line" data-testid="issuer-website">
-                  <EditableText value={form.issuerWebsite} label="ホームページ" onCommit={(next) => update("issuerWebsite", next.trim())} />
+                  <span>{form.issuerWebsite}</span>
                 </span>
               </address>
               <dl className="issuer-contact-list" data-testid="issuer-party-contact-list">

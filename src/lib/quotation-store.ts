@@ -657,11 +657,10 @@ export async function saveQuotation(
     ownerDomain = durableOwner;
     if (!canMutateQuotation(actor, mapRow(existing))) throw new QuotationActionForbiddenError();
   } else {
-    // The preparer's verified company domain owns the quotation. The number
-    // must advertise that durable owner; never let a stale draft prefix win.
-    ownerDomain = quotationOwnerDomainOf(actor.email);
-    if (ownerDomain === "unresolved") throw new UnresolvedQuotationOwnerError();
-    const requiredPrefix = ownerDomain === "kanei" ? "KT-" : "S7-";
+    // All filling quotations are Seven-owned, regardless of the preparer.
+    // Kanei preparer identity remains in footer contact, not durable ownership.
+    ownerDomain = "seven";
+    const requiredPrefix = "S7-";
     if (!value.quotationNumber.startsWith(requiredPrefix)) {
       value.quotationNumber = await getNextQuotationNumber(ownerDomain);
     }
@@ -766,11 +765,10 @@ export async function saveIssuedQuotation(
     } else {
       void actorRole;
       if (!actor.isActive) throw new UnresolvedQuotationOwnerError();
-      const resolvedOwner = quotationOwnerDomainOf(actor.email);
-      if (resolvedOwner === "unresolved") throw new UnresolvedQuotationOwnerError();
-      ownerDomain = resolvedOwner;
-      // A stale draft prefix must never contradict the durable actor company.
-      const requiredPrefix = ownerDomain === "kanei" ? "KT-" : "S7-";
+      ownerDomain = "seven";
+      // A stale Kanei number must never turn a Seven filling quotation into
+      // a Kanei document. Allocate the canonical Seven number instead.
+      const requiredPrefix = "S7-";
       if (!value.quotationNumber.startsWith(requiredPrefix)) {
         value.quotationNumber = await getNextQuotationNumber(ownerDomain);
       }

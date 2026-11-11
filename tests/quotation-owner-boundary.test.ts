@@ -134,9 +134,9 @@ describe("quotation durable owner boundaries", () => {
     }, inactiveActorQuote)).toBe(false);
   });
 
-  it("binds stale legacy numbers to the preparer's durable owner", async () => {
+  it("binds stale legacy numbers to Seven ownership", async () => {
     const kaneiPrepared = await saveQuotation(input("KT-KANEI-PREPARED"), kaneiCreator.id);
-    expect(kaneiPrepared.ownerDomain).toBe("kanei");
+    expect(kaneiPrepared.ownerDomain).toBe("seven");
     const sevenPreparedFromKt = await saveQuotation(input("KT-SEVEN-MISMATCH"), sevenCreator.id);
     expect(sevenPreparedFromKt.quotationNumber).toMatch(/^S7-/);
     expect(sevenPreparedFromKt.ownerDomain).toBe("seven");
@@ -155,8 +155,8 @@ describe("quotation durable owner boundaries", () => {
     const seven = await saveIssuedQuotation(
       input("S7-PREFIX-BOUND", "sent"), sevenCreator.id, "user", pdf, "seven.pdf", null,
     );
-    expect(kaneiPreparedIssued.record.ownerDomain).toBe("kanei");
-    expect(kaneiPreparedIssued.record.quotationNumber).toMatch(/^KT-/);
+    expect(kaneiPreparedIssued.record.ownerDomain).toBe("seven");
+    expect(kaneiPreparedIssued.record.quotationNumber).toMatch(/^S7-/);
     expect(seven.record.ownerDomain).toBe("seven");
     expect(kaneiPreparedIssued.created).toBe(true);
     expect(seven.created).toBe(true);

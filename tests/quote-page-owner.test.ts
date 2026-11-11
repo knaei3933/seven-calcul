@@ -28,25 +28,49 @@ function user(email: string, role: "admin" | "user" = "user"): PublicUser {
 }
 
 describe("quote page owner routing", () => {
-  it("uses Seven and S7 for Seven Chemical users", async () => {
+  it("uses Seven ownership and the Seven user's mail", async () => {
     userFixture.mockResolvedValueOnce(user("gotou@727.co.jp"));
-    const element = await QuoteServerPage() as { props: { ownerDomain: ResolvedQuoteOwnerDomain; initialQuotationNumber: string } };
+    const element = await QuoteServerPage() as { props: {
+      ownerDomain: ResolvedQuoteOwnerDomain;
+      initialQuotationNumber: string;
+      issuerContact: { companyName: string; contactName: string; email: string };
+    } };
     expect(nextNumber).toHaveBeenCalledWith("seven");
     expect(element.props).toMatchObject({ ownerDomain: "seven", initialQuotationNumber: "S7-TEST-001" });
+    expect(element.props.issuerContact).toMatchObject({
+      companyName: "株式会社セブン化学",
+      contactName: "gotou@727.co.jp",
+      email: "gotou@727.co.jp",
+    });
   });
 
-  it("uses Kanei and KT for Kanei Trade users", async () => {
+  it("keeps Seven ownership but switches Kanei contact mail to shapepouch", async () => {
     userFixture.mockResolvedValueOnce(user("info@kanei-trade.co.jp"));
-    const element = await QuoteServerPage() as { props: { ownerDomain: ResolvedQuoteOwnerDomain; initialQuotationNumber: string } };
-    expect(nextNumber).toHaveBeenCalledWith("kanei");
-    expect(element.props).toMatchObject({ ownerDomain: "kanei", initialQuotationNumber: "KT-TEST-001" });
+    const element = await QuoteServerPage() as { props: {
+      ownerDomain: ResolvedQuoteOwnerDomain;
+      initialQuotationNumber: string;
+      issuerContact: { companyName: string; contactName: string; email: string };
+    } };
+    expect(nextNumber).toHaveBeenCalledWith("seven");
+    expect(element.props).toMatchObject({ ownerDomain: "seven", initialQuotationNumber: "S7-TEST-001" });
+    expect(element.props.issuerContact).toMatchObject({
+      companyName: "株式会社セブン化学",
+      contactName: "info@kanei-trade.co.jp",
+      email: "shapepouch@package-lab.com",
+    });
   });
 
-  it("fails closed for an unresolved company domain", async () => {
+  it("uses Seven ownership even for an unresolved authenticated domain", async () => {
     const callsBefore = nextNumber.mock.calls.length;
     userFixture.mockResolvedValueOnce(user("info@example.test"));
-    await expect(QuoteServerPage()).rejects.toThrow("NEXT_REDIRECT:/history");
-    expect(nextNumber).toHaveBeenCalledTimes(callsBefore);
-    expect(redirect).toHaveBeenCalledWith("/history");
+    const element = await QuoteServerPage() as { props: {
+      ownerDomain: ResolvedQuoteOwnerDomain;
+      initialQuotationNumber: string;
+      issuerContact: { companyName: string; contactName: string; email: string };
+    } };
+    expect(nextNumber).toHaveBeenCalledTimes(callsBefore + 1);
+    expect(element.props).toMatchObject({ ownerDomain: "seven", initialQuotationNumber: "S7-TEST-001" });
+    expect(element.props.issuerContact.email).toBe("info@example.test");
+    expect(redirect).not.toHaveBeenCalled();
   });
 });
