@@ -210,4 +210,43 @@ describe("automatic quotation pricing", () => {
     expect(Number(quote.display.pricePerPiece) - Number(quote.display.pouchPricePerPiece))
       .toBeCloseTo(Number(copperPerPiece.plus(customPerPiece)), 8);
   });
+
+  it("includes independent setup and custom lines in the simulator summary price", () => {
+    const result = calculatePouchCost({
+      spec: {
+        sizeKey: "round-50x60" as const,
+        customWidthMm: "50",
+        customLengthMm: "60",
+        fillMlPerChamber: "3",
+        connectedChambers: 1 as const,
+        fillingMethod: "hopper" as const,
+        fillingLanes: 4,
+        isCustom: true,
+        colorCount: 4,
+        bulkUnitPrice: "1",
+        skuCount: 1,
+        setupCost: "100",
+        setupQuantity: "1000",
+      },
+      quantity: "10000",
+      printingMethod: "digital",
+    });
+    const quote = calculateAutomaticQuotation(result, "0.4")!;
+
+    expect(result.setupCost).toBe("100000");
+    expect(result.setupQuantity).toBe("1000");
+    expect(quote.setupAmount.toString()).toBe("166667");
+    expect(quote.display.setupUnit).toBe("166.667");
+    expect(quote.display.setupAmount).toBe("166667");
+
+    const lineSum = D(quote.display.fillingAmount)
+      .plus(quote.display.bulkAmount)
+      .plus(quote.display.setupAmount)
+      .plus(quote.display.filmAmount)
+      .plus(quote.display.copperAmount)
+      .plus(quote.display.customAmount);
+    expect(quote.subtotal.eq(lineSum)).toBe(true);
+    expect(quote.pricePerPiece.eq(quote.subtotal.div(quote.quantity))).toBe(true);
+    expect(quote.display.pricePerPiece).toBe(quote.pricePerPiece.toString());
+  });
 });

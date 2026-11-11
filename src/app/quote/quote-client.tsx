@@ -1386,7 +1386,12 @@ export default function PrintableQuotationPage({
     // 充填・加工の残額配分対象には、別ラインのバルク売上を含めない。
     // カスタムは独立固定金額ラインのため、充填・フィルムの目標配分から除外する。
     const allocationPricePerPiece = fillingSellingUnit.plus(copperSellingUnit).plus(filmSellingUnit);
-    const pricePerPiece = allocationPricePerPiece.plus(setupSalePerPiece).plus(bulkSellingTotal.div(quantity));
+    // 独立ライン（バルク／セットアップ／カスタム）も総費用込単価に含める。
+    // 充填・フィルムの残額配分対象からは除外する。
+    const pricePerPiece = allocationPricePerPiece
+      .plus(setupSalePerPiece)
+      .plus(bulkSellingTotal.div(quantity))
+      .plus(customSalePerPiece);
     const subtotalBeforeAdjustment = pricePerPiece.times(quantity);
     const subtotal = subtotalBeforeAdjustment.floor();
     const roundingAdjustment = subtotal.minus(subtotalBeforeAdjustment);
@@ -1429,7 +1434,13 @@ export default function PrintableQuotationPage({
     const bulkAmount = parseDecimal(form.bulkAmountDisplay) ?? totals.bulkSellingTotal;
     const setupUnit = parseDecimal(form.setupUnitDisplay) ?? totals.setupSellingUnit;
     const setupAmount = parseDecimal(form.setupAmountDisplay) ?? totals.setupSaleTotal;
-    const targetTotal = Decimal.max(totalPriceInput.times(totals.quantity).minus(bulkAmount).minus(setupAmount), 0);
+    const targetTotal = Decimal.max(
+      totalPriceInput.times(totals.quantity)
+        .minus(bulkAmount)
+        .minus(setupAmount)
+        .minus(totals.customSaleTotal),
+      0,
+    );
     const parsedCopperColorCount = parseDecimal(form.copperColorCount);
     const copperColorCount = parsedCopperColorCount && parsedCopperColorCount.gte(0)
       ? parsedCopperColorCount

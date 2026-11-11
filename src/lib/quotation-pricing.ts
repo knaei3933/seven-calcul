@@ -45,6 +45,11 @@ export type AutomaticQuotationTotals = {
   customQuantity: Decimal;
   customSaleTotal: Decimal;
   customSalePerPiece: Decimal;
+  setupCost: Decimal;
+  setupQuantity: Decimal;
+  setupUnit: Decimal;
+  setupAmount: Decimal;
+  setupSalePerPiece: Decimal;
   totalCostPerPiece: Decimal;
   copperColorCount: Decimal;
   fillingSellingUnit: Decimal;
@@ -78,6 +83,8 @@ export type AutomaticQuotationTotals = {
     customUnit: string;
     customAmount: string;
     customQuantity: string;
+    setupUnit: string;
+    setupAmount: string;
     filmUnit: string;
     filmPouchUnit: string;
     filmAmount: string;
@@ -163,6 +170,14 @@ export function calculateAutomaticQuotation(
   const customSaleTotal = hasCustomLot ? CUSTOM_QUOTE_TOTAL_YEN : D(0);
   const customUnit = customQuantity.gt(0) ? customSaleTotal.div(customQuantity) : D(0);
   const customSalePerPiece = customSaleTotal.div(quantity);
+  const setupQuantity = D(result.setupQuantity ?? "1");
+  const setupCost = D(result.setupCostUnit ?? "0");
+  const setupSaleTotal = setupCost
+    .times(setupQuantity)
+    .div(D(1).minus(margin))
+    .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  const setupUnit = setupQuantity.gt(0) ? setupSaleTotal.div(setupQuantity) : D(0);
+  const setupSalePerPiece = quantity.gt(0) ? setupSaleTotal.div(quantity) : D(0);
 
   const copperQuote = calculateCopperQuotation({
     copperPlateCostYen: result.copperPlateCost,
@@ -172,7 +187,7 @@ export function calculateAutomaticQuotation(
   const copperSellingUnit = copperQuote?.copperSellingUnit ?? D(0);
   const copperColorUnit = copperQuote?.copperColorUnit ?? D(0);
   const copperAmount = copperQuote?.copperAmount ?? D(0);
-  // カスタムは独立固定金額ラインのため、充填・フィルムの目標配分から除外する。
+  // カスタム／セットアップは独立固定金額ラインのため、充填・フィルムの目標配分から除外する。
   const allocationPricePerPiece = fillingSellingUnit
     .plus(copperSellingUnit)
     .plus(filmSellingUnit);
@@ -222,8 +237,9 @@ export function calculateAutomaticQuotation(
   const filmAmount = filmMeterUnit.times(filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
   const fillingAmount = fillingUnit.times(quantity);
   const customAmount = customUnit.times(customQuantity);
+  const setupAmount = setupSaleTotal;
   const filmPouchUnit = quantity.gt(0) ? filmAmount.div(quantity) : D(0);
-  const lineTotal = fillingAmount.plus(bulkAmount).plus(filmAmount).plus(copperAmount).plus(customAmount);
+  const lineTotal = fillingAmount.plus(bulkAmount).plus(setupAmount).plus(filmAmount).plus(copperAmount).plus(customAmount);
   const pouchPricePerPiece = quantity.gt(0)
     ? lineTotal.minus(copperAmount).minus(customAmount).div(quantity)
     : D(0);
@@ -242,6 +258,11 @@ export function calculateAutomaticQuotation(
     customQuantity,
     customSaleTotal,
     customSalePerPiece,
+    setupCost,
+    setupQuantity,
+    setupUnit,
+    setupAmount,
+    setupSalePerPiece,
     totalCostPerPiece,
     copperColorCount,
     fillingSellingUnit,
@@ -279,6 +300,8 @@ export function calculateAutomaticQuotation(
       customUnit: customUnit.toString(),
       customAmount: customAmount.toString(),
       customQuantity: customQuantity.toString(),
+      setupUnit: setupUnit.toString(),
+      setupAmount: setupAmount.toString(),
       filmUnit: filmMeterUnit.toString(),
       filmPouchUnit: filmPouchUnit.toString(),
       filmAmount: filmAmount.toString(),
