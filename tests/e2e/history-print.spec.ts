@@ -17,13 +17,12 @@ test("history detail uses the stored canonical quotation PDF", async ({ page }) 
   await expect(page.getByTestId("issue-success")).toBeVisible({ timeout: 30_000 });
   await page.getByRole("link", { name: "見積履歴" }).click();
   await page.getByTestId("history-table").locator("tr", { hasText: productName }).getByRole("button", { name: "詳細" }).click();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("detail-download-current").click();
   const storedPdf = page.getByTestId("stored-quotation-pdf");
   await expect(storedPdf).toBeVisible({ timeout: 30_000 });
   await expect(storedPdf).toHaveAttribute("src", /^blob:/);
   await expect(page.getByRole("article", { name: "見積書A4" })).toHaveCount(0);
-
-  const downloadPromise = page.waitForEvent("download");
-  await page.getByTestId("detail-download-current").click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/\.pdf$/u);
 });

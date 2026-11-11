@@ -71,7 +71,8 @@ describe("quotation owner schema cold start", () => {
     const seven = await saveIssuedQuotation(
       input("S7-COLD-OWNER-002"), sevenCreator.id, "user", pdf, "seven.pdf", null,
     );
-    expect(preparedByKanei.record.ownerDomain).toBe("seven");
+    expect(preparedByKanei.record.ownerDomain).toBe("kanei");
+    expect(preparedByKanei.record.quotationNumber).toMatch(/^KT-/);
     expect(seven.record.ownerDomain).toBe("seven");
 
     const db = await getDatabaseForTest();

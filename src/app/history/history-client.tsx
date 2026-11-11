@@ -584,10 +584,11 @@ function QuotationDetailModal({
   onSampleBulkUpdated: (record: QuotationRecord) => void;
 }) {
   const [storedPdf, setStoredPdf] = useState<{ url: string; blob: Blob; fileName: string } | null>(null);
-  const [storedPdfStatus, setStoredPdfStatus] = useState<"loading" | "available" | "unavailable">("loading");
+  const [storedPdfStatus, setStoredPdfStatus] = useState<"idle" | "loading" | "available" | "unavailable">("idle");
   const [storedPdfError, setStoredPdfError] = useState("");
   const [storedPdfPopupBlocked, setStoredPdfPopupBlocked] = useState(false);
   const storedPdfBusyRef = useRef(false);
+  const storedPdfUrlRef = useRef<string | null>(null);
   const [emailDraft, setEmailDraft] = useState<QuotationEmailDraftState | null>(null);
   const [emailDraftStatus, setEmailDraftStatus] = useState<"idle" | "loading" | "error">("idle");
   const emailRecipientIsValid = Boolean(emailDraft?.to.trim()
@@ -816,32 +817,6 @@ function QuotationDetailModal({
 
   useEffect(() => {
     if (!record.id) return;
-    let active = true;
-    let objectUrl: string | null = null;
-    const loadStoredPdf = async () => {
-      try {
-        const pdf = await fetchStoredQuotationPdf(record.id, buildQuotationPdfFileName({
-          issueDate: record.issueDate,
-          productName: record.productName,
-          customerName: record.customerName,
-        }));
-        if (!active) return;
-        objectUrl = URL.createObjectURL(pdf.blob);
-        setStoredPdf({
-          blob: pdf.blob,
-          fileName: pdf.fileName,
-          url: objectUrl,
-        });
-        setStoredPdfStatus("available");
-      } catch (error) {
-        if (!active) return;
-        setStoredPdfStatus("unavailable");
-        setStoredPdfError(error instanceof StoredQuotationPdfUnavailableError
-          ? error.message
-          : "見積書PDFを取得できませんでした。");
-      }
-    };
-    void loadStoredPdf();
     const fitForPrint = () => {
       for (const content of fitContentRefs.current) {
         if (!content) continue;
@@ -868,24 +843,34 @@ function QuotationDetailModal({
     window.addEventListener("afterprint", resetFit);
     printMedia?.addEventListener("change", handleMediaChange);
     return () => {
-      active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
       window.removeEventListener("beforeprint", fitForPrint);
       window.removeEventListener("afterprint", resetFit);
       printMedia?.removeEventListener("change", handleMediaChange);
     };
   }, [record.customerName, record.id, record.issueDate, record.productName, record.quotationNumber]);
 
-  const loadStoredQuotationPdf = async (): Promise<{ blob: Blob; fileName: string } | null> => {
+  useEffect(() => () => {
+    if (storedPdfUrlRef.current) URL.revokeObjectURL(storedPdfUrlRef.current);
+  }, []);
+
+  const ensureStoredQuotationPdf = async (): Promise<{ blob: Blob; fileName: string } | null> => {
+    if (storedPdf) return storedPdf;
     if (storedPdfBusyRef.current) return null;
     storedPdfBusyRef.current = true;
+    setStoredPdfStatus("loading");
     setStoredPdfError("");
     try {
-      return await fetchStoredQuotationPdf(record.id, buildQuotationPdfFileName({
+      const pdf = await fetchStoredQuotationPdf(record.id, buildQuotationPdfFileName({
         issueDate: record.issueDate,
         productName: record.productName,
         customerName: record.customerName,
       }));
+      const objectUrl = URL.createObjectURL(pdf.blob);
+      const loaded: { blob: Blob; fileName: string; url: string } = { ...pdf, url: objectUrl };
+      storedPdfUrlRef.current = objectUrl;
+      setStoredPdf(loaded);
+      setStoredPdfStatus("available");
+      return loaded;
     } catch (error) {
       setStoredPdfStatus("unavailable");
       setStoredPdfError(error instanceof StoredQuotationPdfUnavailableError
@@ -898,7 +883,7 @@ function QuotationDetailModal({
   };
 
   const downloadStoredPdf = async () => {
-    const pdf = await loadStoredQuotationPdf();
+    const pdf = await ensureStoredQuotationPdf();
     if (!pdf) return;
     const fileName = buildQuotationPdfFileName({
       issueDate: record.issueDate,
@@ -917,13 +902,16 @@ function QuotationDetailModal({
 
   // Opening the already-fetched blob in a dedicated PDF viewer avoids
   // window.print() falling back to a page snapshot or another history tab.
-  const printStoredPdf = () => {
-    if (!storedPdf) return;
+  const printStoredPdf = async () => {
+    const pdf = await ensureStoredQuotationPdf();
+    if (!pdf) return;
+    const pdfUrl = storedPdf?.url ?? storedPdfUrlRef.current;
+    if (!pdfUrl) return;
     setStoredPdfPopupBlocked(false);
     // Some browsers return null for successful opens when window features are
     // supplied. Keep a normal tab and detach opener instead, so a null result
     // remains a trustworthy popup-block signal.
-    const viewer = window.open(storedPdf.url, "_blank");
+    const viewer = window.open(pdfUrl, "_blank");
     if (!viewer) {
       setStoredPdfError("ポップアップがブロックされました。PDFをダウンロードして印刷してください。");
       setStoredPdfPopupBlocked(true);
@@ -1011,7 +999,13 @@ function QuotationDetailModal({
                   className={storedPdfStatus === "available" ? "pdf-status-chip available" : "pdf-status-chip"}
                   data-testid="history-pdf-status"
                 >
-                  {storedPdfStatus === "loading" ? "PDF準備中" : storedPdfStatus === "available" ? "PDF利用可能" : "PDFなし"}
+                  {storedPdfStatus === "idle"
+                    ? "PDF未取得"
+                    : storedPdfStatus === "loading"
+                      ? "PDF準備中"
+                      : storedPdfStatus === "available"
+                        ? "PDF利用可能"
+                        : "PDFなし"}
                 </span>
               ) : null}
             </div>
@@ -1060,22 +1054,23 @@ function QuotationDetailModal({
               <button
                 className="button small"
                 type="button"
-                onClick={downloadStoredPdf}
+                onClick={() => void downloadStoredPdf()}
                 data-testid="detail-download-current"
-                disabled={storedPdfStatus !== "available"}
-              >PDFダウンロード</button>
+                disabled={storedPdfStatus === "loading"}
+              >{storedPdfStatus === "available" ? "PDFダウンロード" : "PDFを取得してダウンロード"}</button>
             ) : null}
             <button
               className="button small"
               type="button"
               onClick={() => {
-                if (detailTab === "document") printStoredPdf();
+                if (detailTab === "document") void printStoredPdf();
                 else void printCurrentDocument();
               }}
               data-testid="detail-print-current"
-              disabled={detailTab === "document" && storedPdfStatus !== "available"}
+              disabled={detailTab === "document" && storedPdfStatus === "loading"}
             >
-              {detailTab === "document" ? "PDFを開いて印刷"
+              {detailTab === "document"
+                ? storedPdfStatus === "available" ? "PDFを開いて印刷" : "PDFを取得して印刷"
                 : detailTab === "film" ? "フィルム見積書PDF"
                   : "詳細データPDF"}
             </button>
@@ -1342,7 +1337,11 @@ function QuotationDetailModal({
             />
           ) : (
             <p className="empty" role="alert" data-testid="stored-quotation-pdf-error">
-              {storedPdfStatus === "loading" ? "PDFを読み込んでいます..." : storedPdfError}
+              {storedPdfStatus === "idle"
+                ? "PDFは未取得です。ダウンロード・印刷ボタンを押したときに読み込みます。"
+                : storedPdfStatus === "loading"
+                  ? "PDFを読み込んでいます..."
+                  : storedPdfError}
             </p>
           )
           ) : null}

@@ -209,10 +209,8 @@ describe("quotation PDF API", () => {
       method: "POST",
       body: unresolvedForm,
     }, otherToken));
-    expect(unresolvedOwner.status).toBe(201);
-    const unresolvedPayload = await unresolvedOwner.json();
-    expect(unresolvedPayload.created).toBe(true);
-    expect(unresolvedPayload.record.ownerDomain).toBe("seven");
+    expect(unresolvedOwner.status).toBe(409);
+    await expect(unresolvedOwner.json()).resolves.toMatchObject({ error: "unresolved_quote_owner" });
     const jsonOnly = await issueQuotationRoute(request("/api/quotations", {
       method: "POST",
       headers: { "content-type": "application/json" },

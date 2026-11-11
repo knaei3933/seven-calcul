@@ -536,6 +536,9 @@ describe("quotation history ownership UI", () => {
 
     await screen.findByText("S7-HISTORY-ADMIN");
     await user.click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    expect(screen.queryByTestId("stored-quotation-pdf")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/quotations/1/pdf", { cache: "default" });
+    await user.click(screen.getByTestId("detail-download-current"));
     const iframe = await screen.findByTestId("stored-quotation-pdf");
     const displayUrl = iframe.getAttribute("src") ?? "";
     expect(displayUrl).toMatch(/^blob:stored-pdf-1$/);
@@ -544,11 +547,13 @@ describe("quotation history ownership UI", () => {
     expect(screen.queryByRole("article", { name: "見積書A4" })).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("detail-download-current"));
-    await waitFor(() => expect(createObjectUrl).toHaveBeenCalledTimes(2));
-    const downloadUrl = createObjectUrl.mock.results[1]?.value ?? "";
+    await waitFor(() => expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/pdf")),
+    ).toHaveLength(1));
+    const downloadUrl = createObjectUrl.mock.results[0]?.value ?? "";
     expect(objectsByBlobUrl.get(downloadUrl)).toBe(pdfBlob);
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/pdf"))).toHaveLength(2);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/pdf"))).toHaveLength(1);
 
     await user.click(screen.getByTestId("detail-print-current"));
     expect(openSpy).toHaveBeenCalledWith(displayUrl, "_blank");
@@ -591,6 +596,7 @@ describe("quotation history ownership UI", () => {
 
     await screen.findByText("S7-HISTORY-ADMIN");
     await user.click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    await user.click(screen.getByTestId("detail-print-current"));
     await screen.findByTestId("stored-quotation-pdf");
     await user.click(screen.getByTestId("detail-print-current"));
     await waitFor(() => expect(screen.getByTestId("stored-quotation-pdf-error")).toHaveTextContent(
@@ -626,13 +632,17 @@ describe("quotation history ownership UI", () => {
 
     await screen.findByText("S7-HISTORY-ADMIN");
     await user.click(screen.getAllByRole("button", { name: "詳細" })[0]);
+    expect(screen.getByTestId("stored-quotation-pdf-error")).toHaveTextContent(
+      "PDFは未取得です。ダウンロード・印刷ボタンを押したときに読み込みます。",
+    );
+    await user.click(screen.getByTestId("detail-download-current"));
     expect(await screen.findByTestId("stored-quotation-pdf-error")).toHaveTextContent(
       "見積書PDFが見つかりません。",
     );
     expect(screen.queryByTestId("stored-quotation-pdf")).not.toBeInTheDocument();
     expect(screen.queryByRole("article", { name: "見積書A4" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("detail-download-current")).toBeDisabled();
-    expect(screen.getByTestId("detail-print-current")).toBeDisabled();
+    expect(screen.getByTestId("detail-download-current")).toBeEnabled();
+    expect(screen.getByTestId("detail-print-current")).toBeEnabled();
 
     printSpy.mockRestore();
     openSpy.mockRestore();
