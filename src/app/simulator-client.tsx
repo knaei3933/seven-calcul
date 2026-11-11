@@ -1882,6 +1882,7 @@ export default function QuotationPage({
     ? D(resultShown.costPerPieceComponents.fixedLot)
       .plus(resultShown.costPerPieceComponents.custom)
       .plus(resultShown.costPerPieceComponents.copperPlate)
+      .plus(resultShown.costPerPieceComponents.setup)
       .toString()
     : "0";
   const pouchUnitCostPerPiece = resultShown
@@ -2626,46 +2627,65 @@ export default function QuotationPage({
                       : `（製造可能 ${formatNumber(resultShown.film.actualQuantity)} 枚・余剰 ≈ ${formatNumber(String(Math.max(0, Number(resultShown.film.actualQuantity) - Number(resultShown.quantity))))} 枚）`}
 	                  </span>
 	                </p>
-		                <div className="result-metric-grid" data-testid="price-profit-summary">
-		                  <div className="result-metric-card">
-		                    <span>発注数量</span>
-		                    <strong>{formatNumber(resultShown.quantity, 0)} 枚</strong>
-		                  </div>
-		                  <div className="result-metric-card">
-		                    <span>総原価単価</span>
-		                    <strong>{formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</strong>
-		                  </div>
-		                  <div className="result-metric-card">
-		                    <span>パウチ販売単価（金型・銅版除く）</span>
-		                    <strong>{quotationPreview ? formatCurrency(quotationPreview.display.pouchPricePerPiece, 2) : "-"} /枚</strong>
-		                  </div>
-		                  <div className="result-metric-card metric-accent">
-		                    <span>総費用込販売単価</span>
-		                    <strong>{quotationPreview ? formatCurrency(quotationPreview.display.pricePerPiece, 2) : "-"} /枚</strong>
-		                  </div>
-		                  <div className="result-metric-card">
-		                    <span>1枚あたり利益（税抜）</span>
-		                    <strong>{quotationPreview ? formatCurrency(quotationPreview.pricePerPiece.minus(resultShown.totalCostPerPiece).toString(), 2) : "-"} /枚</strong>
-		                  </div>
-		                  <div className="result-metric-card">
-		                    <span>総利益（税抜）</span>
-		                    <strong>{quotationPreview ? formatCurrency(quotationPreview.pricePerPiece.minus(resultShown.totalCostPerPiece).times(resultShown.quantity).toString(), 0) : "-"}</strong>
-		                  </div>
+		                <div className="result-summary-layout" data-testid="price-profit-summary">
+		                  <section className="result-summary-panel" data-testid="unit-cost-summary" aria-labelledby="result-cost-title">
+		                    <div className="result-summary-head">
+		                      <span id="result-cost-title">原価 / COST</span>
+		                      <strong>{formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</strong>
+		                      <small>総原価 {formatCurrency(displayAmount(resultShown.costTotal))} ÷ {formatNumber(resultShown.quantity, 0)}枚</small>
+		                    </div>
+		                    <div className="result-metric-grid">
+		                      <div className="result-metric-card">
+		                        <span>パウチ変動費</span>
+		                        <strong>{formatCurrency(displayAmount(pouchUnitCostPerPiece), 2)} /枚</strong>
+		                        <small>
+		                          フィルム {formatCurrency(displayAmount(resultShown.costPerPieceComponents.film), 2)}
+		                          ＋バルク {formatCurrency(displayAmount(resultShown.costPerPieceComponents.bulk), 2)}
+		                          ＋加工 {formatCurrency(displayAmount(resultShown.costPerPieceComponents.variableProcessing), 2)}
+		                        </small>
+		                      </div>
+		                      <div className="result-metric-card">
+		                        <span>初期費用単価</span>
+		                        <strong>{formatCurrency(displayAmount(initialUnitCostPerPiece), 2)} /枚</strong>
+		                        <small>
+		                          段取り {formatCurrency(displayAmount(resultShown.costPerPieceComponents.fixedLot), 2)}
+		                          ＋金型 {formatCurrency(displayAmount(resultShown.costPerPieceComponents.custom), 2)}
+		                          ＋銅版 {formatCurrency(displayAmount(resultShown.costPerPieceComponents.copperPlate), 2)}
+		                          ＋セットアップ {formatCurrency(displayAmount(resultShown.costPerPieceComponents.setup), 2)}
+		                        </small>
+		                      </div>
+		                    </div>
+		                  </section>
+		                  <section className="result-summary-panel" data-testid="sales-summary" aria-labelledby="result-sales-title">
+		                    <div className="result-summary-head sales">
+		                      <span id="result-sales-title">販売・利益 / SALES</span>
+		                      <strong>{quotationPreview ? formatCurrency(quotationPreview.display.pricePerPiece, 2) : "-"} /枚</strong>
+		                      <small>{quotationPreview ? `見積小計 ${formatCurrency(quotationPreview.display.subtotal)} ÷ ${formatNumber(resultShown.quantity, 0)}枚` : "見積プレビュー未作成"}</small>
+		                    </div>
+		                    <div className="result-metric-grid">
+		                      <div className="result-metric-card">
+		                        <span>パウチ販売単価（金型・銅版は含まない）</span>
+		                        <strong>{quotationPreview ? formatCurrency(quotationPreview.display.pouchPricePerPiece, 2) : "-"} /枚</strong>
+		                        <small>{quotationPreview ? `（見積小計 ${formatCurrency(quotationPreview.display.subtotal)} − 金型 ${formatCurrency(quotationPreview.display.customAmount)} − 銅版 ${formatCurrency(quotationPreview.display.copperAmount)}）÷ ${formatNumber(resultShown.quantity, 0)}枚` : "充填加工＋バルク＋フィルム＋セットアップ"}</small>
+		                      </div>
+		                      <div className="result-metric-card metric-accent">
+		                        <span>総費用込販売単価（全ライン含む）</span>
+		                        <strong>{quotationPreview ? formatCurrency(quotationPreview.display.pricePerPiece, 2) : "-"} /枚</strong>
+		                        <small>充填加工＋バルク＋フィルム＋セットアップ＋金型＋銅版</small>
+		                      </div>
+		                      <div className="result-metric-card">
+		                        <span>1枚あたり利益（税抜）</span>
+		                        <strong>{quotationPreview ? formatCurrency(quotationPreview.pricePerPiece.minus(resultShown.totalCostPerPiece).toString(), 2) : "-"} /枚</strong>
+		                        <small>{quotationPreview ? `¥${quotationPreview.display.pricePerPiece} − ¥${resultShown.totalCostPerPiece}` : "総費用込販売単価 − 総原価単価"}</small>
+		                      </div>
+		                      <div className="result-metric-card">
+		                        <span>総利益（税抜）</span>
+		                        <strong>{quotationPreview ? formatCurrency(quotationPreview.pricePerPiece.minus(resultShown.totalCostPerPiece).times(resultShown.quantity).toString(), 0) : "-"}</strong>
+		                        <small>{quotationPreview ? `1枚利益 × ${formatNumber(resultShown.quantity, 0)}枚` : "1枚あたり利益 × 発注枚数"}</small>
+		                      </div>
+		                    </div>
+		                  </section>
 		                </div>
-	                <div className="unit-cost-grid" data-testid="unit-cost-summary">
-	                  <div>
-	                    <span>総単価（初期費用込）</span>
-	                    <strong>{formatCurrency(displayAmount(resultShown.totalCostPerPiece), 2)} /枚</strong>
-	                  </div>
-	                  <div>
-	                    <span>パウチ単価（変動費）</span>
-	                    <strong>{formatCurrency(displayAmount(pouchUnitCostPerPiece), 2)} /枚</strong>
-	                  </div>
-	                  <div>
-	                    <span>初期費用単価</span>
-	                    <strong>{formatCurrency(displayAmount(initialUnitCostPerPiece), 2)} /枚</strong>
-	                  </div>
-	                </div>
 	                <HoverInfo
 	                  label="調達パターン"
 	                  testId="delivery-pattern-note"

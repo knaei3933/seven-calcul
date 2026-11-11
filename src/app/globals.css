@@ -4329,12 +4329,84 @@ body[data-quote-print-measure="1"] .sheet-footer { margin-top: 3mm; }
   border-color: #bfdbfe;
   background: #eff6ff;
 }
+.result-summary-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.result-summary-panel {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+.result-summary-panel[data-testid="unit-cost-summary"] {
+  border-color: #cbd5e1;
+  background: linear-gradient(180deg, #f8fafc 0%, white 42%);
+}
+.result-summary-panel[data-testid="sales-summary"] {
+  border-color: #bfdbfe;
+  background: linear-gradient(180deg, #eff6ff 0%, white 42%);
+}
+.result-summary-head {
+  display: grid;
+  gap: 5px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--line);
+}
+.result-summary-head span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+.result-summary-head strong {
+  font-size: 21px;
+  line-height: 1.1;
+}
+.result-summary-head.sales strong {
+  color: #1d4ed8;
+}
+.result-summary-head small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.result-summary-panel .result-metric-grid {
+  margin: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.result-summary-panel .result-metric-card {
+  background: white;
+}
+.result-summary-panel .result-metric-card:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+.result-summary-panel .result-metric-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
 
 @media (max-width: 900px) {
   .price-highlight {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .result-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .result-summary-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .result-summary-panel .result-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

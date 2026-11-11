@@ -451,9 +451,10 @@ describe("quotation UI", () => {
     expect(screen.getByRole("button", { name: /Y \/ 国内調達（グラビア印刷）/ })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /パウチ 35×80mm/ }).length).toBeGreaterThan(0);
     expect(screen.queryByTestId("selection-status")).not.toBeInTheDocument();
-    expect(screen.getByTestId("unit-cost-summary")).toHaveTextContent("総単価（初期費用込）");
-    expect(screen.getByTestId("unit-cost-summary")).toHaveTextContent("パウチ単価（変動費）");
+    expect(screen.getByTestId("unit-cost-summary")).toHaveTextContent("原価 / COST");
+    expect(screen.getByTestId("unit-cost-summary")).toHaveTextContent("パウチ変動費");
     expect(screen.getByTestId("unit-cost-summary")).toHaveTextContent("初期費用単価");
+    expect(screen.getByTestId("unit-cost-summary")).toHaveTextContent("セットアップ");
     expect(within(screen.getByTestId("input-basis-card")).getByText(/原反 /)).toBeInTheDocument();
     expect(within(screen.getByTestId("input-basis-card")).getByText("選択中")).toBeInTheDocument();
     expect(screen.getByText(/4色/)).toBeInTheDocument();
