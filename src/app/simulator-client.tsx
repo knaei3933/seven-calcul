@@ -171,6 +171,9 @@ function returnedProjectionFrom(payload: CalculationPayload): ReturnedPublicProj
 }
 
 function candidateSelectionErrorMessage(code: string): string {
+  if (code === "candidate_price_changed") {
+    return "Y調達マスターの単価が更新されているため、表示中の候補は古い金額です。「候補を再取得」で最新候補を出し直してください。（エラー: candidate_price_changed）";
+  }
   return `候補を反映できませんでした。状態は変わっていません。もう一度候補を選択してください。このダイアログの「閉じる」で状態を確認することもできます。（エラー: ${code}）`;
 }
 
@@ -1562,6 +1565,15 @@ export default function QuotationPage({
         || !returnedSelectedSkuQuantitiesMatch
       ) {
         throw new Error("candidate_response_invalid");
+      }
+      // Y/K master rows can change between the initial recommendation response
+      // and a later selection click. Never silently reprice the user's choice.
+      if (
+        !D(returnedSelectedCandidate.filmTotalYen).eq(D(candidate.filmTotalYen))
+        || !D(returnedSelectedCandidate.includedUnitPricePerM).eq(D(candidate.includedUnitPricePerM))
+        || !D(returnedSelectedCandidate.filmCostPerPieceYen).eq(D(candidate.filmCostPerPieceYen))
+      ) {
+        throw new Error("candidate_price_changed");
       }
       if (
         returnedSelectedCandidate.printingMethod !== candidate.printingMethod
