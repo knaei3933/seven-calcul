@@ -23,6 +23,9 @@ export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
 
   const settingsItems = [
     user?.role === "admin" ? { href: "/admin/users", label: "ユーザー管理" } : null,
+    user && canViewFilmOrders(user.email, user.role)
+      ? { href: "/film-orders", label: "フィルム発注" }
+      : null,
     user?.role === "admin" && isKaneiTradeUser(user.email)
       ? { href: "/admin/film-prices", label: "フィルム単価" }
       : null,
@@ -67,21 +70,6 @@ export function GlobalHeaderClient({ user }: { user: PublicUser | null }) {
             {item.label}
           </Link>
         ))}
-        {user?.role === "admin" ? (
-          <Link href="/admin/users" aria-current={pathname === "/admin/users" ? "page" : undefined}>
-            ユーザー管理
-          </Link>
-        ) : null}
-        {user?.role === "admin" && isKaneiTradeUser(user.email) ? (
-          <Link href="/admin/film-prices" aria-current={pathname === "/admin/film-prices" ? "page" : undefined}>
-            フィルム単価
-          </Link>
-        ) : null}
-        {canViewFilmOrders(user?.email) ? (
-          <Link href="/film-orders" aria-current={pathname === "/film-orders" ? "page" : undefined}>
-            フィルム発注
-          </Link>
-        ) : null}
       </nav>
 
       <div className="global-user-area">

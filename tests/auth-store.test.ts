@@ -15,6 +15,7 @@ const {
   createSession,
   createUser,
   deleteSession,
+  deleteUser,
   getSessionUserFromToken,
   listUsers,
   readSessionCookie,
@@ -118,6 +119,61 @@ describe("SQLite auth store", () => {
     expect(admin).not.toBeNull();
     await expect(updateUser(admin!.id, { isActive: false })).rejects.toThrow("last_active_admin");
     await expect(updateUser(admin!.id, { role: "user" })).rejects.toThrow("last_active_admin");
+  });
+
+  it("deletes an unused account and invalidates its sessions", async () => {
+    const { getDatabaseForTest } = await import("@/lib/quotation-store");
+    await getDatabaseForTest();
+    const user = await createUser({
+      email: "delete@test.example",
+      name: "Deleted User",
+      password: "deleted-user-password",
+      role: "user",
+    });
+    const issued = await createSession(user.id);
+    await expect(getSessionUserFromToken(issued.token)).resolves.toMatchObject({ id: user.id });
+    await deleteUser(user.id);
+    await expect(getSessionUserFromToken(issued.token)).resolves.toBeNull();
+    await expect(authenticate(user.email, "deleted-user-password")).resolves.toBeNull();
+    await expect(deleteUser(user.id)).rejects.toThrow("user_not_found");
+  });
+
+  it("preserves quoted history by refusing to delete a referenced actor", async () => {
+    const user = await createUser({
+      email: "referenced@test.example",
+      name: "Referenced User",
+      password: "referenced-user-password",
+      role: "user",
+    });
+    const { saveQuotation } = await import("@/lib/quotation-store");
+    await saveQuotation({
+      quotationNumber: "S7-DELETE-REFERENCE",
+      status: "draft",
+      issueDate: "2026-11-11",
+      validUntil: "2099-12-31",
+      customerName: "Reference Customer",
+      customerContact: "",
+      productName: "Reference Pouch",
+      sizeSummary: "50x90",
+      quantity: "1000",
+      fillingCostPerPiece: "1",
+      filmCostPerPiece: "1",
+      filmMeterPrice: "100",
+      filmOrderLengthM: "500",
+      targetMargin: "0.3",
+      taxRatePercent: "0",
+      pricePerPiece: "10",
+      subtotal: "10000",
+      tax: "0",
+      grandTotal: "10000",
+      deliveryDate: "",
+      paymentTerms: "",
+      notes: "",
+      calculationVersion: "delete-test",
+      resultHash: "",
+      payload: {},
+    }, user.id);
+    await expect(deleteUser(user.id)).rejects.toThrow("user_has_records");
   });
 
   it("serializes concurrent reductions so two admins cannot both lose authority", async () => {

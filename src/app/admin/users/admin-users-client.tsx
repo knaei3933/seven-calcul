@@ -104,6 +104,28 @@ export default function AdminUsersClient({ currentUser }: { currentUser: PublicU
     await patchUser(user, { password }, "パスワードを直ちに変更しました。");
   };
 
+  const deleteUser = async (user: PublicUser) => {
+    if (!window.confirm(`${user.email} を削除します。この操作は取り消せません。`)) return;
+    setError("");
+    setStatus("");
+    const response = await fetch(`/api/users/${user.id}`, { method: "DELETE" });
+    const payload = response.status === 204 ? {} : await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setError(
+        payload.error === "last_active_admin"
+          ? "少なくとも1人の有効な管理者が必要です。"
+          : payload.error === "user_has_records"
+            ? "このユーザーには見積記録があるため削除できません。"
+            : payload.error === "forbidden"
+              ? "このユーザーは管理対象ドメイン外です。"
+              : "ユーザーを削除できませんでした。",
+      );
+      return;
+    }
+    setStatus("ユーザーを削除しました。");
+    await load();
+  };
+
   return (
     <main className="admin-users-page">
       <section className="panel" aria-labelledby="admin-users-title">
@@ -176,6 +198,11 @@ export default function AdminUsersClient({ currentUser }: { currentUser: PublicU
                               type="button"
                               onClick={() => void patchUser(user, { isActive: !user.isActive }, user.isActive ? "アカウントを無効化しました。" : "アカウントを有効化しました。")}
                             >{user.isActive ? "無効化" : "有効化"}</button>
+                            <button
+                              className="button secondary small"
+                              type="button"
+                              onClick={() => void deleteUser(user)}
+                            >削除</button>
                           </>
                         ) : (
                           <span className="help">管理対象外</span>

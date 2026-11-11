@@ -418,6 +418,30 @@ export async function updateUser(
   return mapUser(updated);
 }
 
+export async function deleteUser(id: number): Promise<void> {
+  if (ENV_AUTH_MODE) throw new Error("user_management_unavailable");
+  const db = await getDatabase();
+  await db.transaction(async (tx) => {
+    const current = await tx.get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
+    if (!current) throw new Error("user_not_found");
+    if (current.role === "admin" && Number(current.is_active) === 1) {
+      const otherActiveAdmins = await activeAdminCount(tx, id);
+      if (otherActiveAdmins === 0) throw new Error("last_active_admin");
+    }
+    const references = await tx.get<{ quotation_count: number }>(`
+      SELECT (
+        (SELECT COUNT(*) FROM quotations WHERE created_by = ?)
+        + (SELECT COUNT(*) FROM quotations WHERE updated_by = ?)
+        + (SELECT COUNT(*) FROM quotations WHERE internal_approved_by = ?)
+        + (SELECT COUNT(*) FROM quotations WHERE customer_approved_by = ?)
+      ) AS quotation_count
+    `, [id, id, id, id]);
+    if (Number(references?.quotation_count ?? 0) > 0) throw new Error("user_has_records");
+    await tx.run("DELETE FROM sessions WHERE user_id = ?", [id]);
+    await tx.run("DELETE FROM users WHERE id = ?", [id]);
+  });
+}
+
 export async function authenticate(email: string, password: string): Promise<PublicUser | null> {
   if (ENV_AUTH_MODE) {
     const normalized = normalizeEmail(email);

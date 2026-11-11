@@ -13,7 +13,7 @@ const { POST: login } = await import("@/app/api/auth/login/route");
 const { POST: logout } = await import("@/app/api/auth/logout/route");
 const { GET: session } = await import("@/app/api/auth/session/route");
 const { GET: listUsers, POST: createUserRoute } = await import("@/app/api/users/route");
-const { PATCH: updateUserRoute } = await import("@/app/api/users/[id]/route");
+const { DELETE: deleteUserRoute, PATCH: updateUserRoute } = await import("@/app/api/users/[id]/route");
 const { GET: listQuotations } = await import("@/app/api/quotations/route");
 const { GET: listCustomers } = await import("@/app/api/customers/route");
 const { GET: getChecklists } = await import("@/app/api/quotations/[id]/checklists/route");
@@ -218,5 +218,17 @@ describe("authentication and authorization APIs", () => {
       }),
     }, sevenToken));
     expect(allowedCreate.status).toBe(201);
+
+    const serviceTarget = await createUser({
+      email: "service-target@system.invalid",
+      name: "Shared Service Target",
+      password: "service-target-password",
+      role: "user",
+    });
+    const serviceDelete = await deleteUserRoute(
+      request(`http://localhost/api/users/${serviceTarget.id}`, { method: "DELETE" }, sevenToken),
+      { params: Promise.resolve({ id: String(serviceTarget.id) }) },
+    );
+    expect(serviceDelete.status).toBe(204);
   });
 });

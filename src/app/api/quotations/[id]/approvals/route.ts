@@ -11,6 +11,7 @@ import {
 import {
   canInternalApproveQuotation,
   canManageQuotationCustomerRequest,
+  isMasterQuotationAdmin,
 } from "@/lib/quotation-access";
 import { UnresolvedQuotationOwnerError } from "@/lib/quotation-store";
 import { syncFilmOrdersFromQuotations } from "@/lib/film-orders";
@@ -45,20 +46,23 @@ export async function POST(request: Request, context: Context): Promise<NextResp
       return NextResponse.json({ error: "unresolved_quote_owner" }, { status: 409 });
     }
 
-    if (
-      gate === "internal"
-      && !canInternalApproveQuotation(user.email, record.ownerDomain)
-    ) {
-      return NextResponse.json({ error: "internal_approval_forbidden" }, { status: 403 });
-    }
-    if (
-      gate !== "internal"
-      && !canManageQuotationCustomerRequest(user.email, record.ownerDomain)
-    ) {
-      return NextResponse.json({ error: "customer_approval_forbidden" }, { status: 403 });
+    const masterWorkflow = isMasterQuotationAdmin(user);
+    if (!masterWorkflow) {
+      if (
+        gate === "internal"
+        && !canInternalApproveQuotation(user.email, record.ownerDomain)
+      ) {
+        return NextResponse.json({ error: "internal_approval_forbidden" }, { status: 403 });
+      }
+      if (
+        gate !== "internal"
+        && !canManageQuotationCustomerRequest(user.email, record.ownerDomain)
+      ) {
+        return NextResponse.json({ error: "customer_approval_forbidden" }, { status: 403 });
+      }
     }
 
-    const approved = await approveQuotationGate(quotationId, gate, user.id);
+    const approved = await approveQuotationGate(quotationId, gate, user.id, { master: masterWorkflow });
     // Durable internal approval—not customer evidence—is the intake transfer trigger.
     const filmOrderSynced = gate === "internal"
       ? (await syncFilmOrdersFromQuotations(user.email)) > 0
