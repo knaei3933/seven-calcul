@@ -1897,6 +1897,15 @@ export default function QuotationPage({
     () => resultShown && marginValid ? calculateAutomaticQuotation(resultShown, effectiveMargin) : null,
     [effectiveMargin, marginValid, resultShown],
   );
+  const quotationPreviewsByMargin = useMemo(() => {
+    const previews = new Map<string, NonNullable<ReturnType<typeof calculateAutomaticQuotation>>>();
+    if (!resultShown) return previews;
+    for (const sellingPrice of resultShown.sellingPrices) {
+      const preview = calculateAutomaticQuotation(resultShown, sellingPrice.margin);
+      if (preview) previews.set(sellingPrice.margin, preview);
+    }
+    return previews;
+  }, [resultShown]);
   // 選択したD/K/Y候補をそのまま見積ドラフトへ引き継ぐ。未選択時は入力値基準。
   const quotationDraftResult = resultShown;
   const selectedRecommendation = serverResult?.selectedCandidateId
@@ -2889,7 +2898,18 @@ export default function QuotationPage({
                       : "合計供給最低値未満のため、最低発注長になるよう自動配分しました。"}
                   </p>
                 ) : null}
-                <table className="table"><caption className="help">利益率別 販売単価・売上・利益</caption><thead><tr><th scope="col">利益率</th><th scope="col">販売単価</th><th scope="col">売上計</th><th scope="col">利益額</th></tr></thead><tbody>{resultShown.sellingPrices.map((p) => <tr key={p.margin} className={Number(p.margin) === Number(effectiveMargin) ? "selected-margin" : undefined}><td>{formatNumber(Number(p.margin) * 100, 0)}%{Number(p.margin) === Number(effectiveMargin) ? "（適用中）" : ""}</td><td>{formatCurrency(displayAmount(p.pricePerPiece))}</td><td>{formatCurrency(displayAmount(p.totalSales))}</td><td>{formatCurrency(displayAmount(p.profit))}</td></tr>)}</tbody></table>
+                <table className="table"><caption className="help">利益率別 販売単価・売上・利益（見積ライン基準）</caption><thead><tr><th scope="col">利益率</th><th scope="col">販売単価</th><th scope="col">売上計</th><th scope="col">利益額</th></tr></thead><tbody>{resultShown.sellingPrices.map((p) => {
+                  const quote = quotationPreviewsByMargin.get(p.margin);
+                  if (!quote) return null;
+                  return (
+                    <tr key={p.margin} className={Number(p.margin) === Number(effectiveMargin) ? "selected-margin" : undefined}>
+                      <td>{formatNumber(Number(p.margin) * 100, 0)}%{Number(p.margin) === Number(effectiveMargin) ? "（適用中）" : ""}</td>
+                      <td>{formatCurrency(displayAmount(quote.display.pricePerPiece))}</td>
+                      <td>{formatCurrency(displayAmount(quote.subtotal.toString()))}</td>
+                      <td>{formatCurrency(displayAmount(quote.subtotal.minus(resultShown.costTotal).toString()))}</td>
+                    </tr>
+                  );
+                })}</tbody></table>
                 <details className="formula-panel" data-testid="calculation-formula">
                   <summary>計算のしくみを表示</summary>
                   <div className="formula-group">
