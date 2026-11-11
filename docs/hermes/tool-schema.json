@@ -1,0 +1,336 @@
+{
+  "schemaVersion": "1.0.0",
+  "title": "Hermes Agent Tool Schema — Pouch Cost Simulator / Kanei Quotation Lifecycle",
+  "sourceOfTruth": {
+    "repositoryRule": "This repository is the implementation SSOT. The NAS receives copies only; NAS copies never edit app behavior.",
+    "implementedBy": [
+      "src/app/api/agent/v1/status/route.ts",
+      "src/app/api/agent/v1/calculate/route.ts",
+      "src/app/api/agent/v1/quotes/route.ts",
+      "src/app/api/agent/v1/quotes/[id]/route.ts",
+      "src/app/api/agent/v1/quotes/[id]/email-draft/route.ts",
+      "src/app/api/agent/v1/quotes/[id]/customer-approval-state/route.ts",
+      "src/app/api/agent/v1/quotes/[id]/internal-approval-request/route.ts",
+      "src/lib/agent-auth-store.ts",
+      "src/lib/agent-projections.ts",
+      "src/lib/agent-quote-service.ts",
+      "src/lib/agent-quote-read-service.ts",
+      "src/lib/agent-approval-service.ts",
+      "src/lib/agent-approval-policy.ts"
+    ],
+    "specification": ".omx/plans/prd-ai-cost-simulator-integration.md"
+  },
+  "server": {
+    "baseUrl": "{{HERMES_APP_BASE_URL}}",
+    "baseUrlPolicy": "HTTPS origin of the deployed Next.js app. Configure per environment; never HTTP, never a NAS-hosted app instance.",
+    "runtime": "nodejs",
+    "cacheControl": "no-store on every response"
+  },
+  "authentication": {
+    "scheme": "http_bearer",
+    "header": "Authorization",
+    "format": "Bearer <token>",
+    "credentialReference": "HERMES_AGENT_BEARER_TOKEN",
+    "tokenStorageRule": "Token value is injected from Hermes-side secret storage at call time. Never paste, log, copy, or persist token values into repository files, NAS artifacts, or tool transcripts.",
+    "acceptedSurfaces": ["/api/agent/v1/*"],
+    "rejectedSurfaces": [
+      "Portal v1 APIs",
+      "User/session APIs",
+      "Admin APIs",
+      "Any route outside /api/agent/v1"
+    ],
+    "sessionPolicy": "No cookie/session authentication in production. The agent credential is the only production identity.",
+    "principal": {
+      "email": "ai@kanei-trade.co.jp",
+      "constraints": [
+        "Active, non-admin user bound to the credential",
+        "Credential stores only a SHA-256 token hash server-side",
+        "Token is 48 random bytes (base64url), expiry-bound, revocable, rotatable, rate-limited, audited"
+      ]
+    }
+  },
+  "scopeCatalog": {
+    "calculate:run": "Run server calculation and receive server-authored internalActor/customerSafe projections.",
+    "quote:issue": "Request server-side canonical issuance of a new Kanei-owned quotation.",
+    "quote:read": "Read redacted Kanei-owned quotation summaries.",
+    "email_draft:read": "Read Kanei email drafts without dispatch.",
+    "approval_state:read": "Read internal/customer approval evidence state for Kanei-owned quotations.",
+    "internal_approval:request": "Request policy-gated internal approval. Privileged; stripped at credential creation unless explicitly enabled via includeInternalApproval."
+  },
+  "rateLimit": {
+    "default": "120 requests per 60 seconds per credential",
+    "envOverrides": ["AGENT_API_RATE_LIMIT", "AGENT_API_RATE_WINDOW_SECONDS"],
+    "exceededError": { "status": 429, "reason": "agent_rate_limited" }
+  },
+  "commonErrors": {
+    "401": [
+      "unauthorized_agent",
+      "missing_or_malformed_bearer",
+      "credential_not_found",
+      "credential_revoked",
+      "credential_expired"
+    ],
+    "403": ["agent_scope_denied", "forbidden_scope"],
+    "429": ["agent_rate_limited"],
+    "500": ["agent_operation_failed", "invalid_agent_rate_limit_configuration"]
+  },
+  "tools": [
+    {
+      "name": "credential_status",
+      "purpose": "Verify the credential is active and list its granted scopes before running workflow tools.",
+      "endpoint": { "method": "GET", "path": "/api/agent/v1/status" },
+      "requiredScope": null,
+      "request": { "body": null },
+      "response": {
+        "status": {
+          "credential": {
+            "id": "string (credentialId, not the token)",
+            "principal": "ai@kanei-trade.co.jp",
+            "name": "string",
+            "scopes": "string[] subset of scopeCatalog"
+          }
+        }
+      },
+      "sideEffects": "None. Audited as credential.status."
+    },
+    {
+      "name": "calculate",
+      "purpose": "Run the shared server calculation core and receive separate internalActor and customerSafe projections. Never reimplement pricing locally.",
+      "endpoint": { "method": "POST", "path": "/api/agent/v1/calculate" },
+      "requiredScope": "calculate:run",
+      "request": {
+        "contentType": "application/json",
+        "requiredFields": ["spec", "quantity", "printingMethod"],
+        "forbiddenInputFields": [
+          "gravureYRows",
+          "ySupplierRows",
+          "pricingSnapshot",
+          "publicProjectionHash",
+          "pricingSnapshotSha256",
+          "fullAugmentedCalculationRequest"
+        ],
+        "forbiddenInputPolicy": "Any forbidden field present anywhere in the request body is rejected with 400 client_pricing_authority_rejected before calculation."
+      },
+      "response": {
+        "status": 200,
+        "shape": {
+          "internalActor": "AgentCalculationProjection (see redaction-matrix.md; internal use only)",
+          "customerSafe": "AgentCustomerSafeProjection (see redaction-matrix.md)"
+        },
+        "authorityValues": ["digital_film_store", "durable_gravure_snapshot"]
+      },
+      "errors": {
+        "400": ["invalid_request", "client_pricing_authority_rejected", "calculation_failed", "pricing_snapshot_invalid", "plus QuotationValidationError codes"],
+        "409": ["stale_calculation"],
+        "503": ["gravure_master_unavailable", "gravure_snapshot_issuance_disabled"]
+      },
+      "sideEffects": "Gravure (Y/K) requests persist a durable pricing snapshot server-side; the response returns only redacted snapshot metadata."
+    },
+    {
+      "name": "issue_kanei_quote",
+      "purpose": "Request server-side issuance of a new Kanei-owned quotation with KT-YYYYMM-NNN numbering and a deterministic canonical PDF. The server re-derives and verifies all calculation and customer-facing amounts.",
+      "endpoint": { "method": "POST", "path": "/api/agent/v1/quotes" },
+      "requiredScope": "quote:issue",
+      "request": {
+        "headers": {
+          "Idempotency-Key": "Required. Pattern ^[A-Za-z0-9][A-Za-z0-9_.:-]{15,127}$; bound to credential + request fingerprint."
+        },
+        "contentType": "application/json",
+        "shape": {
+          "calculationRequest": "CalculationInput from the calculate tool (client pricing-authority fields rejected)",
+          "calculationEvidence": { "calculationVersion": "string", "resultHash": "string from internalActor.calculation" },
+          "calculationChecklist": "server snapshot from the calculate flow (injection keys rejected)",
+          "selectedCandidateId": "server candidate ID",
+          "issue": "customer-facing issue fields (server-validated; pricing/margin fields rejected)"
+        },
+        "forbiddenRequestKeys": [
+          "pricePerPiece", "subtotal", "tax", "grandTotal", "filmCost", "filmCostPerPiece",
+          "filmMeterPrice", "filmOrderLengthM", "cost", "costs", "costTotal", "margin",
+          "targetMargin", "targetMargins", "selectedCandidateTargetMargins", "commission",
+          "commissionRate", "pricingSnapshot", "resultHash", "profit", "supplier"
+        ],
+        "forbiddenChecklistKeys": [
+          "supplier", "supplierName", "pricingSnapshot", "commission", "commissionRate",
+          "payload", "payloadJson", "calculationFilmTotal", "profitAudit", "internalAudit"
+        ]
+      },
+      "response": {
+        "status": [201, 200],
+        "shape": {
+          "outcome": ["issued", "duplicate"],
+          "idempotency": { "replay": "boolean" },
+          "quotation": { "id": "number", "number": "KT-YYYYMM-NNN", "ownerDomain": "kanei", "financials": "customer-facing amounts" },
+          "calculation": { "version": "string", "resultHash": "string" },
+          "selectedCandidate": "server candidate metadata",
+          "pdf": { "fileName": "string", "sha256": "hex", "byteLength": "number", "rendererVersion": "string" },
+          "nextStates": { "emailDraftAvailable": true, "humanMailDispatchPending": true, "customerTokenPending": true },
+          "warnings": "string[]"
+        }
+      },
+      "errors": {
+        "400": ["idempotency_key_required", "invalid_request", "invalid_calculation_request", "invalid_calculation_evidence", "invalid_calculation_checklist", "invalid_selected_candidate", "client_pricing_authority_rejected", "invalid_issue", "invalid_issue_field:<name>", "calculation_provenance_invalid", "quotation_pricing_invalid"],
+        "409": ["stale_calculation", "selected_candidate_invalid", "idempotency_conflict", "issuance_in_progress"],
+        "503": ["gravure_snapshot_issuance_disabled"]
+      },
+      "sideEffects": "Creates quotation + canonical PDF atomically; never dispatches mail; never issues customer tokens."
+    },
+    {
+      "name": "read_kanei_quote",
+      "purpose": "Read a redacted summary of an authorized Kanei-owned quotation.",
+      "endpoint": { "method": "GET", "path": "/api/agent/v1/quotes/{id}" },
+      "pathParams": { "id": "Positive integer quotation ID" },
+      "requiredScope": "quote:read",
+      "request": { "body": null },
+      "response": {
+        "status": 200,
+        "shape": {
+          "quotation": {
+            "id": "number",
+            "number": "string",
+            "ownerDomain": "kanei",
+            "status": "quotation status",
+            "dates": "issueDate/validUntil/deliveryDate/createdAt/updatedAt",
+            "customer": { "name": "string" },
+            "product": { "name": "string" },
+            "spec": "string",
+            "quantity": "string",
+            "pdf": { "available": "boolean", "fileName": "string", "sha256": "hex|null", "byteLength": "number|null" },
+            "approvals": "internal + customer approval state summary"
+          }
+        }
+      },
+      "errors": {
+        "400": ["invalid_quotation_id"],
+        "403": ["quote_owner_action_forbidden"],
+        "404": ["quotation_not_found"],
+        "409": ["pdf_integrity_failed"]
+      },
+      "sideEffects": "None. Read-only."
+    },
+    {
+      "name": "read_kanei_email_draft",
+      "purpose": "Read the owner-domain email draft for an authorized Kanei-owned quotation. Retrieval never sends mail.",
+      "endpoint": { "method": "GET", "path": "/api/agent/v1/quotes/{id}/email-draft" },
+      "pathParams": { "id": "Positive integer quotation ID" },
+      "requiredScope": "email_draft:read",
+      "request": { "body": null },
+      "response": {
+        "status": 200,
+        "shape": {
+          "subject": "string",
+          "body": "string",
+          "recipient": "validated customer email",
+          "pdf": "metadata only (fileName, sha256, byteLength); no PDF bytes",
+          "designAttachments": "metadata only (fileName, sizeBytes, revision, contentType)",
+          "approvalMaterial": {
+            "policy": "internal_actor_only",
+            "approvalUrl": "signed URL string|null (internalActor only)",
+            "approvalUrlEmbeddedInBody": "boolean",
+            "approvalTokenFieldPolicy": "not_returned"
+          }
+        }
+      },
+      "errors": {
+        "400": ["invalid_quotation_id"],
+        "403": ["quote_owner_action_forbidden"],
+        "404": ["quotation_not_found"],
+        "409": ["customer_email_unavailable", "pdf_integrity_failed"]
+      },
+      "sideEffects": "None. Mail dispatch stays with the human operator."
+    },
+    {
+      "name": "read_customer_approval_state",
+      "purpose": "Read durable, evidence-derived approval state for an authorized Kanei-owned quotation. Chat or email text is never accepted as customer approval.",
+      "endpoint": { "method": "GET", "path": "/api/agent/v1/quotes/{id}/customer-approval-state" },
+      "pathParams": { "id": "Positive integer quotation ID" },
+      "requiredScope": "approval_state:read",
+      "request": { "body": null },
+      "response": {
+        "status": 200,
+        "shape": {
+          "quotationId": "number",
+          "quotationNumber": "string",
+          "ownerDomain": "kanei",
+          "internalApproval": { "approved": "boolean", "approvedAt": "ISO string|null" },
+          "customerApproval": {
+            "state": ["customer_approved", "owner_domain_approved", "awaiting_customer_approval", "approval_expired", "approval_blocked", "approval_evidence_unresolved"],
+            "approvedAt": "ISO string|null",
+            "source": ["customer_token", "owner_domain", null]
+          }
+        },
+        "evidenceRule": "customer_approved requires source=customer_token written by the verified customer-token route. owner_domain evidence is reported separately and never conflated with token evidence."
+      },
+      "errors": {
+        "400": ["invalid_quotation_id"],
+        "403": ["quote_owner_action_forbidden"],
+        "404": ["quotation_not_found"],
+        "409": ["pdf_integrity_failed"]
+      },
+      "sideEffects": "None. Read-only."
+    },
+    {
+      "name": "request_internal_approval",
+      "purpose": "Request autonomous internal approval for a Kanei-owned draft quotation. Fails closed unless the separately enabled policy evaluator and credential scope both allow it.",
+      "endpoint": { "method": "POST", "path": "/api/agent/v1/quotes/{id}/internal-approval-request" },
+      "pathParams": { "id": "Positive integer quotation ID" },
+      "requiredScope": "internal_approval:request",
+      "scopeBinding": "Route-level auth runs first; the scope check and full policy evaluator run inside requestInternalApproval. Credentials without this scope receive 403 forbidden_scope.",
+      "request": { "body": null },
+      "response": {
+        "status": 200,
+        "shape": {
+          "outcome": "approved",
+          "quotationId": "number",
+          "quotationNumber": "string",
+          "ownerDomain": "kanei",
+          "calculation": { "version": "string", "resultHash": "string" },
+          "pdfSha256": "hex",
+          "filmOrderSynced": "boolean"
+        }
+      },
+      "errors": {
+        "400": ["invalid_quotation_id"],
+        "401": ["unauthorized"],
+        "403": ["forbidden_scope", "owner_domain_blocked"],
+        "404": ["quotation_not_found"],
+        "409": ["approval_disabled", "invalid_approval_transition", "stale_calculation", "canonical_pdf_required", "pdf_integrity_failed", "quote_expired", "validation_blocked", "sample_bulk_confirmation_required", "policy_limit_exceeded"],
+        "500": ["approval_failed"]
+      },
+      "sideEffects": "On allow: invokes the existing approveQuotationGate and film-order synchronization. Every allow and block is durably audited."
+    },
+    {
+      "name": "escalate",
+      "purpose": "Hand off to the responsible human (mail dispatch, customer-token completion, policy exception, blocked approval, or security event). This is a client-side workflow step with no server endpoint.",
+      "endpoint": null,
+      "requiredScope": null,
+      "request": { "body": null },
+      "behavior": [
+        "Produce a short handoff note: quotationId/number when present, tool that blocked, machine-readable error reason, and the next human action.",
+        "Never include bearer tokens, approval token bytes, session cookies, or full customer email bodies in the handoff.",
+        "Stop the autonomous workflow for this quotation after escalating a policy block or security event."
+      ],
+      "sideEffects": "None server-side."
+    }
+  ],
+  "forbiddenOperations": {
+    "policy": "No tool definitions, endpoints, scopes, or improvised calls may exist for any of the following. The bearer credential is not accepted outside /api/agent/v1.",
+    "list": [
+      "mail send / dispatch",
+      "quotation history update or delete",
+      "master-data mutation",
+      "shell or local filesystem access on the app host",
+      "PDF authoring or upload",
+      "approval of legacy Seven-owned (S7-*) records",
+      "generic customerApproval mutation",
+      "portal v1 or user/session API access",
+      "calculation reimplementation from projections",
+      "retroactive migration of Seven-owned records",
+      "running an app instance on the NAS as a replacement for the deployed app"
+    ]
+  },
+  "ownershipPolicy": {
+    "newRecords": { "ownerDomain": "kanei", "numberPattern": "KT-YYYYMM-NNN", "numberingAuthority": "server-side shared allocator" },
+    "legacyRecords": { "ownerDomain": "seven", "numberPattern": "S7-*", "agentAccess": "blocked (403 quote_owner_action_forbidden / owner_domain_blocked)" },
+    "retroactiveMigration": "none"
+  }
+}

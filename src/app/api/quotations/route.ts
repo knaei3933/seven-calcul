@@ -220,7 +220,7 @@ function hasValidPurchaseOrder(
   });
 }
 
-function hasValidSimulatorProvenance(input: QuotationRecordInput | null): boolean {
+export function hasValidSimulatorProvenance(input: QuotationRecordInput | null): boolean {
   if (!input) return false;
   const requiresProvenance = Boolean(input.resultHash.trim()) || hasCalculationArtifacts(input);
   if (!requiresProvenance) return true;

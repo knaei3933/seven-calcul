@@ -5,6 +5,7 @@ import {
   quotationOwnerDomainOf,
   quotationOwnerDomainFromStorage,
   quotationStatuses,
+  type CustomerApprovalSource,
   type QuotationOwnerDomain,
   type QuotationSampleBulkConfirmation,
   type QuotationStatus,
@@ -87,6 +88,7 @@ interface DatabaseRow {
   internal_approver_email: string | null;
   customer_approved_at: string | null;
   customer_approved_by: number | null;
+  customer_approval_source: string | null;
   customer_approver_name: string | null;
   customer_approver_email: string | null;
   customer_approval_ip_hash: string | null;
@@ -197,6 +199,7 @@ async function getDatabase(): Promise<SqlClient> {
     await migrateOwnershipColumns(db, administratorId);
     await migratePdfColumns(db);
     await migrateApprovalColumns(db);
+    await backfillCustomerApprovalSources(db);
     await backfillPdfDigests(db);
     // 社名表記を「金井貿易株式会社」へ統一する（旧default・既存DB値を含む）。
     await db.exec(CHECKLIST_COMPANY_NAME_NORMALIZATION);
@@ -209,6 +212,12 @@ async function getDatabase(): Promise<SqlClient> {
 export async function rerunQuotationOwnerDomainMigrationForTest(): Promise<void> {
   const db = await getDatabase();
   await migrateQuotationOwnerDomain(db);
+}
+
+/** Test-only re-entry point for proving approval provenance backfill idempotency. */
+export async function rerunQuotationApprovalSourceMigrationForTest(): Promise<void> {
+  const db = await getDatabase();
+  await backfillCustomerApprovalSources(db);
 }
 
 const CHECKLIST_COMPANY_NAME_NORMALIZATION = `
@@ -270,6 +279,7 @@ const SQLITE_SCHEMA = `
       internal_approved_by INTEGER REFERENCES users(id),
       customer_approved_at TEXT,
       customer_approved_by INTEGER REFERENCES users(id),
+      customer_approval_source TEXT CHECK(customer_approval_source IN ('customer_token','owner_domain')),
       customer_approval_ip_hash TEXT,
       customer_approval_user_agent TEXT,
       created_by INTEGER NOT NULL REFERENCES users(id),
@@ -331,6 +341,7 @@ const POSTGRES_SCHEMA = `
       internal_approved_by INTEGER REFERENCES users(id),
       customer_approved_at TEXT,
       customer_approved_by INTEGER REFERENCES users(id),
+      customer_approval_source TEXT CHECK(customer_approval_source IN ('customer_token','owner_domain')),
       customer_approval_ip_hash TEXT,
       customer_approval_user_agent TEXT,
       created_by INTEGER NOT NULL REFERENCES users(id),
@@ -452,6 +463,9 @@ async function migrateApprovalColumns(db: SqlClient): Promise<void> {
     if (!columnNames.has("customer_approved_by")) {
       await db.exec("ALTER TABLE quotations ADD COLUMN customer_approved_by INTEGER REFERENCES users(id)");
     }
+    if (!columnNames.has("customer_approval_source")) {
+      await db.exec("ALTER TABLE quotations ADD COLUMN customer_approval_source TEXT");
+    }
     if (!columnNames.has("customer_approval_ip_hash")) {
       await db.exec("ALTER TABLE quotations ADD COLUMN customer_approval_ip_hash TEXT");
     }
@@ -465,8 +479,37 @@ async function migrateApprovalColumns(db: SqlClient): Promise<void> {
   await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS internal_approved_by INTEGER REFERENCES users(id)");
   await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS customer_approved_at TEXT");
   await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS customer_approved_by INTEGER REFERENCES users(id)");
+  await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS customer_approval_source TEXT");
   await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS customer_approval_ip_hash TEXT");
   await db.exec("ALTER TABLE quotations ADD COLUMN IF NOT EXISTS customer_approval_user_agent TEXT");
+}
+
+async function backfillCustomerApprovalSources(db: SqlClient): Promise<void> {
+  // One-time legacy boundary: token rows were the only approvals written with
+  // no customer approver, while generic owner rows recorded a human actor.
+  // Runtime approval readers never infer evidence from NULL after this migration.
+  await db.transaction(async (tx) => {
+    await tx.run(`
+      UPDATE quotations
+      SET customer_approval_source = 'customer_token'
+      WHERE customer_approved_at IS NOT NULL AND customer_approved_by IS NULL
+        AND customer_approval_source IS NULL
+    `);
+    await tx.run(`
+      UPDATE quotations
+      SET customer_approval_source = 'owner_domain'
+      WHERE customer_approved_at IS NOT NULL AND customer_approved_by IS NOT NULL
+        AND customer_approval_source IS NULL
+    `);
+  });
+  await db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_quotations_customer_approval_source
+      ON quotations(customer_approval_source)
+  `);
+}
+
+function customerApprovalSourceFromStorage(value: string | null): CustomerApprovalSource | null {
+  return value === "customer_token" || value === "owner_domain" ? value : null;
 }
 
 async function backfillPdfDigests(db: SqlClient): Promise<void> {
@@ -654,6 +697,7 @@ function mapRow(row: DatabaseRow): QuotationRecord {
       },
       customerIpHash: row.customer_approval_ip_hash,
       userAgent: row.customer_approval_user_agent,
+      source: customerApprovalSourceFromStorage(row.customer_approval_source),
     } : null,
   };
 }
@@ -1002,6 +1046,7 @@ export async function listQuotations({
     "delivery_date", "payment_terms", "notes", "calculation_version", "result_hash",
     "payload_json", "created_at", "updated_at", "created_by", "updated_by",
     "internal_approved_at", "internal_approved_by", "customer_approved_at", "customer_approved_by",
+    "customer_approval_source",
     "customer_approval_ip_hash", "customer_approval_user_agent",
   ].map((column) => `quotations.${column}`).join(", ");
   const baseSelect = `
@@ -1250,6 +1295,7 @@ export async function approveQuotationGate(
     const result = await db.run(`
       UPDATE quotations
       SET customer_approved_at = ?, customer_approved_by = ?,
+          customer_approval_source = 'owner_domain',
           updated_by = ?, updated_at = ?
       WHERE id = ? AND status = 'sent'
         AND internal_approved_at IS NOT NULL AND customer_approved_at IS NULL
@@ -1277,6 +1323,7 @@ export async function approveQuotationGate(
         approvedBy: approver,
         customerIpHash: null,
         userAgent: null,
+        source: "owner_domain",
       },
     };
   }
@@ -1329,7 +1376,8 @@ export async function approveQuotationByCustomerToken(
   const now = new Date().toISOString();
   const result = await db.run(`
     UPDATE quotations
-    SET customer_approved_at = ?, customer_approved_by = NULL, updated_at = ?,
+    SET customer_approved_at = ?, customer_approved_by = NULL,
+      customer_approval_source = 'customer_token', updated_at = ?,
       customer_approval_ip_hash = ?, customer_approval_user_agent = ?
     WHERE id = ? AND status IN ('sent', 'approved')
       AND internal_approved_at IS NOT NULL AND customer_approved_at IS NULL

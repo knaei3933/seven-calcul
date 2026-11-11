@@ -27,7 +27,10 @@ export interface QuotationApprovalSnapshot {
   approvedBy: UserSummary | null;
   customerIpHash?: string | null;
   userAgent?: string | null;
+  source?: CustomerApprovalSource | null;
 }
+
+export type CustomerApprovalSource = "customer_token" | "owner_domain";
 
 export interface QuotationRecordInput {
   quotationNumber: string;
