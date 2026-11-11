@@ -548,7 +548,7 @@ describe("quotation UI", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "元の数量へ戻る" })).toBeEnabled());
     await user.click(screen.getByTestId("candidate-recompare"));
-    await waitFor(() => expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Y \/ 国内調達/ })).toBeVisible());
     await user.click(within(screen.getByTestId("recommendation-modal")).getByRole("button", { name: /Y \/ 国内調達/ }));
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));
     expect(screen.getByLabelText("利益率 30%")).toBeChecked();
@@ -1064,8 +1064,8 @@ describe("quotation UI", () => {
 
     const callsBeforeRecompare = fetch.mock.calls.length;
     await user.click(screen.getByTestId("candidate-recompare"));
-    expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument();
-    expect(fetch.mock.calls).toHaveLength(callsBeforeRecompare);
+    await waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(callsBeforeRecompare));
+    await waitFor(() => expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument());
   });
 
   it("merges a minimum digital order with the equivalent input basis", async () => {
@@ -1331,8 +1331,8 @@ describe("quotation UI", () => {
     await user.click(within(modal).getByTestId("recommendation-modal-close"));
     const callsBeforeRecompare = fetch.mock.calls.length;
     await user.click(screen.getByTestId("candidate-recompare"));
-    expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument();
-    expect(fetch.mock.calls).toHaveLength(callsBeforeRecompare);
+    await waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(callsBeforeRecompare));
+    await waitFor(() => expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument());
     const reopened = screen.getByTestId("recommendation-modal");
     await user.click(within(reopened).getByRole("button", { name: /Y \/ 国内調達/ }));
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（グラビア印刷）"));

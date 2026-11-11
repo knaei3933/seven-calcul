@@ -734,6 +734,10 @@ function RecommendationModal({
     };
   }, [selecting, selectionError]);
 
+  useEffect(() => {
+    if (selecting) selectionStatusRef.current?.focus({ preventScroll: true });
+  }, [selecting]);
+
   const trapTabFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Tab") return;
     const focusable = Array.from(
@@ -1707,6 +1711,100 @@ export default function QuotationPage({
         fillMl: sku.fillMl,
         colorCount: sku.colorCount,
       })));
+    }
+  };
+
+  const refreshCandidates = async () => {
+    if (!serverResult || pending || selecting) return;
+    const requestOrder = ++requestOrderRef.current;
+    setPending(true);
+    setSelecting(true);
+    setSelectionError(null);
+    let refreshError: string | null = null;
+    try {
+      const basisRequest = serverResult.originalCalculationRequest ?? serverResult.calculationRequest;
+      if (!basisRequest) throw new Error("candidate_refresh_invalid");
+      const request: CalculationInput = {
+        ...basisRequest,
+        parameters: requestParameters,
+        recommendationMode: true,
+        selectedCandidateId: "",
+        selectedCandidateTargetMargins: basisRequest.selectedCandidateTargetMargins ?? [],
+      };
+      const { response, payload } = await postCalculationWithTimeout(request);
+      if (!response.ok) throw new Error(payload.error ?? "candidate_refresh_failed");
+      if (requestOrder !== requestOrderRef.current) return;
+      if (
+        !isCostResult(payload.originalResult)
+        || !Array.isArray(payload.candidates)
+        || payload.candidates.length === 0
+        || !payload.candidates.every(isPrintCandidate)
+      ) {
+        refreshError = "candidate_refresh_response_invalid";
+        throw new Error("candidate_refresh_response_invalid");
+      }
+      const originalResult: CostResult = payload.originalResult;
+      const candidates: PrintCandidate[] = payload.candidates;
+      const pricingSnapshot = issuancePricingSnapshotFromPayload(payload);
+      setCalculationError(null);
+      setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+
+      // A selected result belongs to the user's prior decision. Refreshing the
+      // list must not silently replace it; only an explicit candidate click can.
+      if (serverResult.selectedCandidateId) {
+        setRecommendationModalOpen(true);
+        setServerResult((old) => old ? {
+          ...old,
+          candidates,
+          originalResult,
+          pricingSnapshot: pricingSnapshot ?? old.pricingSnapshot,
+        } : old);
+        return;
+      }
+
+      const basisInputJson = JSON.stringify(request);
+      const { spec: basisSpec, quantity: _basisQuantity, ...basisNonQuantityRest } = request;
+      const { skuQuantities: _basisSkuQuantities, ...basisNonQuantitySpec } = basisSpec;
+      const basisNonQuantityJson = JSON.stringify({
+        spec: basisNonQuantitySpec,
+        ...basisNonQuantityRest,
+      });
+      setRecommendationModalOpen(candidates.length > 0);
+      setServerResult({
+        result: originalResult,
+        originalResult,
+        candidates,
+        inputJson: serverResult.inputJson,
+        requestNonQuantityJson: serverResult.requestNonQuantityJson,
+        selectedCandidateId: "",
+        originalQuantity: serverResult.originalQuantity ?? originalResult.quantity,
+        originalSkuQuantities: serverResult.originalSkuQuantities ?? originalResult.film.skuCosts.map((sku) => sku.quantity),
+        originalInputJson: serverResult.originalInputJson ?? basisInputJson,
+        originalRequestNonQuantityJson: serverResult.originalRequestNonQuantityJson ?? basisNonQuantityJson,
+        originalPrintingMethod: serverResult.originalPrintingMethod ?? INPUT_PRINTING_METHOD,
+        originalTargetMargin: serverResult.originalTargetMargin ?? effectiveMargin,
+        originalTargetMarginMode: serverResult.originalTargetMarginMode ?? targetMarginModeFor(form.targetMargin),
+        calculationRequest: request,
+        originalCalculationRequest: basisRequest,
+        pricingSnapshot: pricingSnapshot ?? serverResult.pricingSnapshot,
+      });
+    } catch (error) {
+      if (!refreshError && error instanceof Error) refreshError = error.message;
+      if (requestOrder === requestOrderRef.current) {
+        const mappedError = calculationErrorFor(error, "candidate_refresh_failed");
+        setSelectionError({
+          code: mappedError.code,
+          message: refreshError
+            ? `最新の候補を取得できませんでした。（エラー: ${refreshError}）`
+            : "最新の候補を取得できませんでした。ネットワークを確認し、もう一度お試しください。",
+        });
+        window.dispatchDebugError?.(mappedError.code);
+      }
+    } finally {
+      if (requestOrder === requestOrderRef.current) {
+        setPending(false);
+        setSelecting(false);
+      }
     }
   };
 
@@ -2767,10 +2865,10 @@ export default function QuotationPage({
                           className="button secondary small"
                           type="button"
                           data-testid="candidate-recompare"
-                          onClick={() => setRecommendationModalOpen(true)}
+                          onClick={() => void refreshCandidates()}
                           disabled={pending || selecting}
                         >
-                          候補を比較
+	                          候補を再取得
                         </button>
                         {serverResult.selectedCandidateId ? (
                           <button className="button secondary small" type="button" onClick={clearCandidate} disabled={pending}>元の数量へ戻る</button>
