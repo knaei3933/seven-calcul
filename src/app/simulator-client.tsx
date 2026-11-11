@@ -2664,9 +2664,9 @@ export default function QuotationPage({
 		                    </div>
 		                    <div className="result-metric-grid">
 		                      <div className="result-metric-card">
-		                        <span>パウチ販売単価（金型・銅版は含まない）</span>
+		                        <span>パウチ販売単価（バルク・セットアップ・金型・銅版は含まない）</span>
 		                        <strong>{quotationPreview ? formatCurrency(quotationPreview.display.pouchPricePerPiece, 2) : "-"} /枚</strong>
-		                        <small>{quotationPreview ? `（見積小計 ${formatCurrency(quotationPreview.display.subtotal)} − 金型 ${formatCurrency(quotationPreview.display.customAmount)} − 銅版 ${formatCurrency(quotationPreview.display.copperAmount)}）÷ ${formatNumber(resultShown.quantity, 0)}枚` : "充填加工＋バルク＋フィルム＋セットアップ"}</small>
+		                        <small>{quotationPreview ? `（充填加工 ${formatCurrency(quotationPreview.display.fillingAmount)} + フィルム ${formatCurrency(quotationPreview.display.filmAmount)}）÷ ${formatNumber(resultShown.quantity, 0)}枚` : "充填加工＋フィルムのみ"}</small>
 		                      </div>
 		                      <div className="result-metric-card metric-accent">
 		                        <span>総費用込販売単価（全ライン含む）</span>
@@ -3037,7 +3037,7 @@ export default function QuotationPage({
                     {quotationPreview ? (
                       <>
                         <div>
-                          <div>パウチ単価（金型・銅版除く）：{formatCurrency(quotationPreview.display.pouchPricePerPiece, 2)}</div>
+                          <div>パウチ単価（バルク・セットアップ・金型・銅版除く）：{formatCurrency(quotationPreview.display.pouchPricePerPiece, 2)}</div>
                           <div>総費用込単価：{formatCurrency(quotationPreview.display.pricePerPiece, 2)}</div>
                           <span className="help">（参考費用 {formatCurrency(quotationPreview.totalCostPerPiece.toString(), 2)} /枚）</span>
                         </div>

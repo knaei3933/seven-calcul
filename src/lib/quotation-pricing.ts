@@ -240,8 +240,9 @@ export function calculateAutomaticQuotation(
   const setupAmount = setupSaleTotal;
   const filmPouchUnit = quantity.gt(0) ? filmAmount.div(quantity) : D(0);
   const lineTotal = fillingAmount.plus(bulkAmount).plus(setupAmount).plus(filmAmount).plus(copperAmount).plus(customAmount);
+  // パウチ本体単価は充填・加工＋フィルムのみ。独立ライン（バルク／セットアップ／金型／銅版）は含めない。
   const pouchPricePerPiece = quantity.gt(0)
-    ? lineTotal.minus(copperAmount).minus(customAmount).div(quantity)
+    ? fillingAmount.plus(filmAmount).div(quantity)
     : D(0);
   const displayedTax = lineTotal.times(taxRate).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
   const displayedGrandTotal = lineTotal.plus(displayedTax);

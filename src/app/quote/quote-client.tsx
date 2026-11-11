@@ -1499,7 +1499,8 @@ export default function PrintableQuotationPage({
     const setupAmountFinal = setupAmount;
     const filmPouchUnit = totals.quantity.gt(0) ? filmAmount.div(totals.quantity) : D(0);
     const lineTotal = fillingAmount.plus(bulkAmountFinal).plus(setupAmountFinal).plus(filmAmount).plus(copperAmount).plus(customAmount);
-    const pouchLineTotal = lineTotal.minus(copperAmount).minus(customAmount);
+    // パウチ本体単価は充填・加工＋フィルムのみ。バルク／セットアップ／金型／銅版は独立ライン。
+    const pouchLineTotal = fillingAmount.plus(filmAmount);
     const pouchPricePerPiece = totals.quantity.gt(0)
       ? pouchLineTotal.div(totals.quantity)
       : D(0);
@@ -2300,7 +2301,7 @@ export default function PrintableQuotationPage({
               <section className="price-highlight">
                 <div className="price-card price-card-muted">
                   <span className="price-label">パウチ単価</span>
-                  <span className="price-condition">（金型・銅版除く／税抜）</span>
+                  <span className="price-condition">（バルク・セットアップ・金型・銅版除く／税抜）</span>
                   <strong data-testid="quote-pouch-price-per-piece">
                     <span className="price-value money">{moneyDisplay(shownTotals.pouchPricePerPiece, undefined, 2)}</span>
                     <small className="price-unit"> /枚</small>

@@ -248,5 +248,15 @@ describe("automatic quotation pricing", () => {
     expect(quote.subtotal.eq(lineSum)).toBe(true);
     expect(quote.pricePerPiece.eq(quote.subtotal.div(quote.quantity))).toBe(true);
     expect(quote.display.pricePerPiece).toBe(quote.pricePerPiece.toString());
+
+    // パウチ本体単価は充填・加工＋フィルムのみ。バルクとセットアップは独立ライン。
+    const pouchPrice = D(quote.display.fillingAmount).plus(quote.display.filmAmount).div(quote.quantity);
+    expect(quote.display.pouchPricePerPiece).toBe(pouchPrice.toString());
+    const excludedPerPiece = D(quote.display.bulkAmount)
+      .plus(quote.display.setupAmount)
+      .plus(quote.display.copperAmount)
+      .plus(quote.display.customAmount)
+      .div(quote.quantity);
+    expect(D(quote.display.pricePerPiece).minus(quote.display.pouchPricePerPiece).eq(excludedPerPiece)).toBe(true);
   });
 });
