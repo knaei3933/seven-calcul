@@ -541,6 +541,7 @@ describe("quotation UI", () => {
 
 	    await waitFor(() => expect(screen.getByTestId("candidate-recompare")).toBeEnabled());
     await user.click(screen.getByTestId("candidate-recompare"));
+    await waitFor(() => expect(screen.getByTestId("recommendation-modal")).toBeInTheDocument());
     await user.click(screen.getAllByRole("button", { name: /D \/ デジタル/ })[0]);
     await waitFor(() => expect(screen.getByTestId("active-candidate-note")).toHaveTextContent("選択候補（デジタル印刷）"));
     expect(screen.getByLabelText("利益率 40%")).toBeChecked();

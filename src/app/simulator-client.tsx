@@ -1517,7 +1517,7 @@ export default function QuotationPage({
         && Array.isArray(payload.candidates);
       if (returnedProjection && !hasFullReturnedResult) {
         if (requestOrder !== requestOrderRef.current) return;
-        setRecommendationModalOpen(false);
+        setRecommendationModalOpen(true);
         setRedactedCompareOpen(false);
         setRedactedCalculation({
           projection: returnedProjection,
@@ -1750,15 +1750,112 @@ export default function QuotationPage({
       setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
 
       // A selected result belongs to the user's prior decision. Refreshing the
-      // list must not silently replace it; only an explicit candidate click can.
+      // list must also refresh that decision when the same candidate is repriced.
       if (serverResult.selectedCandidateId) {
+        const refreshedSelectedCandidate = candidates.find((candidate) => candidate.id === serverResult.selectedCandidateId) ?? null;
+        if (!refreshedSelectedCandidate) {
+          setRecommendationModalOpen(true);
+          setServerResult((old) => old ? {
+            ...old,
+            candidates,
+            originalResult,
+            pricingSnapshot: pricingSnapshot ?? old.pricingSnapshot,
+          } : old);
+          return;
+        }
+
+        const originalPrintingMethod = serverResult.originalPrintingMethod ?? INPUT_PRINTING_METHOD;
+        const candidateUsesOriginalBasis = refreshedSelectedCandidate.printingMethod === originalPrintingMethod;
+        const candidateTargetMargin = candidateUsesOriginalBasis
+          ? serverResult.originalTargetMargin ?? effectiveMargin
+          : MARGIN_OPTIONS[refreshedSelectedCandidate.printingMethod][0];
+        const candidateTargetMarginMode = candidateUsesOriginalBasis
+          ? serverResult.originalTargetMarginMode ?? targetMarginModeFor(form.targetMargin)
+          : "standard";
+        const candidateTargetMargins = targetMarginsForPrintingMethod(
+          refreshedSelectedCandidate.printingMethod,
+          candidateTargetMargin,
+        );
+        const selectionRequest: CalculationInput = {
+          ...(serverResult.originalCalculationRequest ?? serverResult.calculationRequest ?? basisRequest),
+          printingMethod: refreshedSelectedCandidate.printingMethod,
+          targetMargins: candidateTargetMargins,
+          recommendationMode: true,
+          selectedCandidateId: refreshedSelectedCandidate.id,
+          selectedCandidateTargetMargins: candidateTargetMargins,
+        };
+        const selectionResponse = await postCalculationWithTimeout(selectionRequest);
+        if (!selectionResponse.response.ok) {
+          throw new Error(selectionResponse.payload.error ?? "candidate_refresh_failed");
+        }
+        if (requestOrder !== requestOrderRef.current) return;
+        if (
+          !isCostResult(selectionResponse.payload.result)
+          || !isCostResult(selectionResponse.payload.originalResult)
+          || !Array.isArray(selectionResponse.payload.candidates)
+          || !selectionResponse.payload.candidates.every(isPrintCandidate)
+        ) {
+          throw new Error("candidate_refresh_response_invalid");
+        }
+        const selectedResult: CostResult = selectionResponse.payload.result;
+        const refreshedOriginalResult: CostResult = selectionResponse.payload.originalResult;
+        const refreshedCandidates: PrintCandidate[] = selectionResponse.payload.candidates;
+        const selectionPricingSnapshot = issuancePricingSnapshotFromPayload(selectionResponse.payload);
+        const {
+          spec: selectionSpec,
+          quantity: _selectionQuantity,
+          recommendationMode: _selectionRecommendationMode,
+          selectedCandidateId: _selectionCandidateId,
+          selectedCandidateTargetMargins: _selectionCandidateTargetMargins,
+          ...selectionNonQuantityRest
+        } = selectionRequest;
+        const { skuQuantities: _selectionSkuQuantities, ...selectionNonQuantitySpec } = selectionSpec;
+        const selectionNonQuantityJson = JSON.stringify({
+          spec: selectionNonQuantitySpec,
+          ...selectionNonQuantityRest,
+        });
+        setCalculationError(null);
         setRecommendationModalOpen(true);
-        setServerResult((old) => old ? {
+        console.log("[refreshCandidates] auto reapplied", {
+          candidate: refreshedSelectedCandidate.id,
+          state: selectedResult.selectedCandidateId,
+        });
+        setShortagePlansOpen(false);
+        setServerResult({
+          result: selectedResult,
+          originalResult: refreshedOriginalResult,
+          candidates: refreshedCandidates,
+          inputJson: JSON.stringify(serverResult.originalCalculationRequest ?? basisRequest),
+          requestNonQuantityJson: selectionNonQuantityJson,
+          selectedCandidateId: refreshedSelectedCandidate.id,
+          originalQuantity: serverResult.originalQuantity ?? refreshedOriginalResult.quantity,
+          originalSkuQuantities: serverResult.originalSkuQuantities ?? refreshedOriginalResult.film.skuCosts.map((sku) => sku.quantity),
+          originalInputJson: serverResult.originalInputJson ?? serverResult.inputJson,
+          originalRequestNonQuantityJson: serverResult.originalRequestNonQuantityJson ?? serverResult.requestNonQuantityJson,
+          originalPrintingMethod,
+          originalTargetMargin: serverResult.originalTargetMargin ?? effectiveMargin,
+          originalTargetMarginMode: serverResult.originalTargetMarginMode ?? targetMarginModeFor(form.targetMargin),
+          calculationRequest: selectionRequest,
+          originalCalculationRequest: serverResult.originalCalculationRequest ?? serverResult.calculationRequest ?? basisRequest,
+          pricingSnapshot: selectionPricingSnapshot ?? serverResult.pricingSnapshot,
+        });
+        setForm((old) => ({
           ...old,
-          candidates,
-          originalResult,
-          pricingSnapshot: pricingSnapshot ?? old.pricingSnapshot,
-        } : old);
+          quantity: refreshedSelectedCandidate.adjustedQuantity,
+          targetMargin: candidateTargetMarginMode === "custom" ? "custom" : candidateTargetMargin,
+          customMargin: candidateTargetMarginMode === "custom" ? candidateTargetMargin : old.customMargin,
+          skus: old.skus.map((sku, index) => ({
+            ...sku,
+            quantity: refreshedSelectedCandidate.adjustedSkuQuantities[index] ?? refreshedSelectedCandidate.adjustedQuantity,
+          })),
+        }));
+        writeChecklistSnapshot(selectedResult, refreshedSelectedCandidate.adjustedSkuQuantities.map((quantity, index) => ({
+          name: form.skus[index]?.name ?? `充填物${index + 1}`,
+          quantity,
+          fillMl: form.skus[index]?.fillMl ?? "0",
+          colorCount: form.skus[index]?.colorCount ?? "0",
+        })));
+        setCalculatedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
         return;
       }
 
