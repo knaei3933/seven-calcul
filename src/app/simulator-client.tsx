@@ -1556,35 +1556,23 @@ export default function QuotationPage({
       }
       const candidates: PrintCandidate[] = payload.candidates;
       const pricingSnapshot = issuancePricingSnapshotFromPayload(payload);
-      const expectedAdjustedQuantity = sum(candidate.adjustedSkuQuantities.map((quantity) => D(quantity)));
-      const returnedSelectedCandidate = candidates.find((returnedCandidate) => returnedCandidate.id === candidate.id) ?? null;
-      const returnedSelectedSkuQuantitiesMatch = Boolean(returnedSelectedCandidate
-        && returnedSelectedCandidate.adjustedSkuQuantities.length === candidate.adjustedSkuQuantities.length
-        && candidate.adjustedSkuQuantities.every((quantity, index) => (
-          D(returnedSelectedCandidate.adjustedSkuQuantities[index]).eq(D(quantity))
-        )));
+      const authoritativeCandidate = candidates.find((returnedCandidate) => returnedCandidate.id === candidate.id) ?? null;
       if (
-        !returnedSelectedCandidate
-        || returnedSelectedCandidate.route !== candidate.route
-        || !returnedSelectedSkuQuantitiesMatch
+        !authoritativeCandidate
+        || authoritativeCandidate.route !== candidate.route
       ) {
         throw new Error("candidate_response_invalid");
       }
-      // Y/K master rows can change between the initial recommendation response
-      // and a later selection click. Never silently reprice the user's choice.
+      // Candidate IDs identify user intent. The returned card is rebuilt from
+      // the current Y/K master; always use the authoritative refreshed card so
+      // a stale modal cannot keep an obsolete price on screen.
+      candidate = authoritativeCandidate;
+      const expectedAdjustedQuantity = sum(candidate.adjustedSkuQuantities.map((quantity) => D(quantity)));
       if (
-        !D(returnedSelectedCandidate.filmTotalYen).eq(D(candidate.filmTotalYen))
-        || !D(returnedSelectedCandidate.includedUnitPricePerM).eq(D(candidate.includedUnitPricePerM))
-        || !D(returnedSelectedCandidate.filmCostPerPieceYen).eq(D(candidate.filmCostPerPieceYen))
-      ) {
-        throw new Error("candidate_price_changed");
-      }
-      if (
-        returnedSelectedCandidate.printingMethod !== candidate.printingMethod
-        || !D(returnedSelectedCandidate.adjustedQuantity).eq(expectedAdjustedQuantity)
+        !D(candidate.adjustedQuantity).eq(expectedAdjustedQuantity)
         || activeResult.selectedCandidateId !== candidate.id
         || activeResult.printingMethod !== candidate.printingMethod
-        || !D(activeResult.quantity).eq(D(returnedSelectedCandidate.adjustedQuantity))
+        || !D(activeResult.quantity).eq(D(candidate.adjustedQuantity))
       ) {
         throw new Error("candidate_result_mismatch");
       }

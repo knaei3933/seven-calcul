@@ -94,7 +94,10 @@ describe("quotation UI", () => {
     return { user, fetch, originalCalculation };
   }
 
-  async function rejectTamperedSelectedCandidate(tamperSelected: (selected: PrintCandidate) => PrintCandidate) {
+  async function rejectTamperedSelectedCandidate(
+    tamperSelected: (selected: PrintCandidate) => PrintCandidate,
+    expectedError = "candidate_response_invalid",
+  ) {
     const { user, fetch, originalCalculation } = await openCandidateModal();
     const modal = screen.getByTestId("recommendation-modal");
     const stateBefore = screen.getByTestId("selected-candidate-summary").textContent;
@@ -121,7 +124,7 @@ describe("quotation UI", () => {
 
     await user.click(candidate);
     const alert = await screen.findByTestId("candidate-selection-error");
-    expect(alert).toHaveTextContent("candidate_response_invalid");
+    expect(alert).toHaveTextContent(expectedError);
     expect(screen.getByTestId("recommendation-modal")).toBe(modal);
     expect(screen.getByTestId("selected-candidate-summary").textContent).toBe(stateBefore);
     expect(screen.queryByTestId("active-candidate-note")).not.toBeInTheDocument();
@@ -1293,10 +1296,13 @@ describe("quotation UI", () => {
   });
 
   it("rejects a returned selected candidate with a mismatched SKU allocation and preserves prior state", async () => {
-    await rejectTamperedSelectedCandidate((selected) => ({
-      ...selected,
-      adjustedSkuQuantities: selected.adjustedSkuQuantities.map((quantity, index) => (index === 0 ? "1" : quantity)),
-    }));
+    await rejectTamperedSelectedCandidate(
+      (selected) => ({
+        ...selected,
+        adjustedSkuQuantities: selected.adjustedSkuQuantities.map((quantity, index) => (index === 0 ? "1" : quantity)),
+      }),
+      "candidate_result_mismatch",
+    );
   });
 
   it.each([
