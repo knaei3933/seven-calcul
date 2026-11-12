@@ -1458,8 +1458,8 @@ export default function PrintableQuotationPage({
     let fillingUnit: Decimal;
     let filmMeterUnit: Decimal;
     if (isGravure) {
-      // グラビアの客提示フィルムm単価は基本100〜240円の帯に制限する。
-      // ただしマスター原価が240円/mを超える場合は原価未満にしない。
+      // グラビアの客提示フィルムm単価は基本100〜200円の帯に制限する。
+      // ただしマスター原価が200円/mを超える場合は原価未満にしない。
       const storedFilmCostPerMeter = parseDecimal(calculationChecklistSnapshot?.film?.unitPrice) ?? D(0);
       const gravureFilmMeterCeiling = Decimal.max(
         GRAVURE_FILM_METER_PRICE_MAX,
