@@ -7,10 +7,10 @@ import { D, Decimal } from "@/lib/decimal";
 import type { PouchSpec } from "@/lib/types";
 
 describe("automatic quotation pricing", () => {
-  it("clamps gravure film meter unit into the 100-170 yen band", () => {
+  it("clamps gravure film meter unit into the 100-240 yen band", () => {
     expect(clampGravureFilmMeterUnit(D("50")).toString()).toBe("100");
     expect(clampGravureFilmMeterUnit(D("150")).toString()).toBe("150");
-    expect(clampGravureFilmMeterUnit(D("300")).toString()).toBe("170");
+    expect(clampGravureFilmMeterUnit(D("300")).toString()).toBe("240");
   });
 
   it("raises the gravure presentation floor above film master cost", () => {
@@ -46,9 +46,9 @@ describe("automatic quotation pricing", () => {
     expect(quote).not.toBeNull();
     expect(quote!.filmCostPerPiece.eq(D(selected.costPerPieceComponents.film))).toBe(true);
     expect(quote!.filmOrderLength.eq(D(candidate!.orderLengthM))).toBe(true);
-    expect(quote!.display.filmUnit).toBe("170");
-    expect(quote!.display.filmAmount).toBe("289000");
-    expect(quote!.display.filmPouchUnit).toBe("5.78");
+    expect(quote!.display.filmUnit).toBe("226.9");
+    expect(quote!.display.filmAmount).toBe("385730");
+    expect(quote!.display.filmPouchUnit).toBe("7.7146");
     expect(quote!.copperCostPerPiece.eq(D(selected.copperPlateCostPerPiece))).toBe(true);
     expect(quote!.copperAmount.eq(D(selected.copperPlateCost).times(COPPER_SELLING_MARKUP))).toBe(true);
   });

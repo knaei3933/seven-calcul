@@ -4,10 +4,10 @@ import { D, Decimal } from "./decimal";
 
 const FILM_METER_PRICE_MIN = D(380);
 const FILM_METER_PRICE_MAX = D(480);
-// グラビアの客提示フィルムm単価は基本100〜170円の帯に制限する。
-// ただしマスター原価が170円/mを超える場合は原価未満の提示を禁止する。
+// グラビアの客提示フィルムm単価は基本100〜240円の帯に制限する。
+// ただしマスター原価が240円/mを超える場合は原価未満の提示を禁止する。
 export const GRAVURE_FILM_METER_PRICE_MIN = D(100);
-export const GRAVURE_FILM_METER_PRICE_MAX = D(170);
+export const GRAVURE_FILM_METER_PRICE_MAX = D(240);
 // カスタム費用は原価に関係なく見積書へ固定金額で出力する。
 export const CUSTOM_QUOTE_TOTAL_YEN = D(300000);
 export const COPPER_TARGET_MARGIN_RATE = D("0.10");
