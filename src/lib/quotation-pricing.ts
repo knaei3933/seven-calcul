@@ -4,8 +4,8 @@ import { D, Decimal } from "./decimal";
 
 const FILM_METER_PRICE_MIN = D(380);
 const FILM_METER_PRICE_MAX = D(480);
-// グラビアの客提示フィルムm単価は100〜170円の帯に制限し、
-// 帯によって生じる差額は充填・加工単価で補う。
+// グラビアの客提示フィルムm単価は基本100〜170円の帯に制限する。
+// ただしマスター原価が170円/mを超える場合は原価未満の提示を禁止する。
 export const GRAVURE_FILM_METER_PRICE_MIN = D(100);
 export const GRAVURE_FILM_METER_PRICE_MAX = D(170);
 // カスタム費用は原価に関係なく見積書へ固定金額で出力する。
@@ -26,8 +26,10 @@ function clampFilmMeterUnit(value: Decimal) {
   return Decimal.min(FILM_METER_PRICE_MAX, Decimal.max(FILM_METER_PRICE_MIN, value));
 }
 
-export function clampGravureFilmMeterUnit(value: Decimal) {
-  return Decimal.min(GRAVURE_FILM_METER_PRICE_MAX, Decimal.max(GRAVURE_FILM_METER_PRICE_MIN, value));
+export function clampGravureFilmMeterUnit(value: Decimal, costPerMeter?: Decimal | string | number) {
+  const costFloor = D(costPerMeter ?? 0);
+  const banded = Decimal.min(GRAVURE_FILM_METER_PRICE_MAX, Decimal.max(GRAVURE_FILM_METER_PRICE_MIN, value));
+  return Decimal.max(costFloor, banded);
 }
 
 export type AutomaticQuotationTotals = {
@@ -208,6 +210,12 @@ export function calculateAutomaticQuotation(
   const bulkUnit = bulkUsage.gt(0) ? roundUnit(bulkSellingUnit) : D(0);
   const bulkAmount = bulkSellingTotal;
   if (isGravure) {
+    // The old fixed ceiling predates the Nov-2026 Y master repricing. A film
+    // quotation line must never be shown below its own master cost.
+    const gravureFilmCostPerMeter = D(result.film.unitPrice).gt(0)
+      ? D(result.film.unitPrice)
+      : filmOrderLength.gt(0) ? D(result.film.filmTotal).div(filmOrderLength) : D(0);
+    const gravureFilmMeterCeiling = Decimal.max(GRAVURE_FILM_METER_PRICE_MAX, gravureFilmCostPerMeter);
     const provisionalFillingUnit = pricingFillingCostPerPiece.div(D(1).minus(margin));
     const provisionalFilmAmount = Decimal.max(
       targetTotal.minus(provisionalFillingUnit.times(quantity)).minus(copperAmount),
@@ -216,9 +224,9 @@ export function calculateAutomaticQuotation(
     const residualMeterUnit = filmOrderLength.gt(0)
       ? provisionalFilmAmount.div(filmOrderLength)
       : D(0);
-    filmMeterUnit = clampGravureFilmMeterUnit(residualMeterUnit).toDecimalPlaces(1, Decimal.ROUND_UP);
+    filmMeterUnit = clampGravureFilmMeterUnit(residualMeterUnit, gravureFilmCostPerMeter).toDecimalPlaces(1, Decimal.ROUND_UP);
     const bandedFilmAmount = filmMeterUnit.times(filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-    // フィルムm単価を100〜170円の帯へ制限したことで生じた差額は充填・加工で補う。
+    // フィルムm単価を帯へ制限したことで生じた差額は充填・加工で補う。
     fillingUnit = quantity.gt(0)
       ? roundUnit(Decimal.max(targetTotal.minus(bandedFilmAmount).minus(copperAmount), 0).div(quantity))
       : D(0);

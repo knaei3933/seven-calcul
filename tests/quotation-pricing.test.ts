@@ -13,6 +13,12 @@ describe("automatic quotation pricing", () => {
     expect(clampGravureFilmMeterUnit(D("300")).toString()).toBe("170");
   });
 
+  it("raises the gravure presentation floor above film master cost", () => {
+    const costPerMeter = D("187.5");
+    expect(clampGravureFilmMeterUnit(D("170"), costPerMeter).toString()).toBe("187.5");
+    expect(D(clampGravureFilmMeterUnit(D("200"), costPerMeter)).gte(costPerMeter)).toBe(true);
+  });
+
   it("carries a selected gravure candidate's film basis into quotation lines", () => {
     const input = {
       spec: {

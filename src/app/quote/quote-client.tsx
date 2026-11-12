@@ -15,7 +15,7 @@ import {
   SIMULATOR_STALE_STATUS_KEY,
 } from "@/lib/quotation-shared";
 import { sizeMaster } from "@/lib/constants";
-import { BULK_SELLING_MARKUP, calculateCopperQuotation, clampGravureFilmMeterUnit, COPPER_QUOTE_UNIT_MAX_YEN, COPPER_SELLING_MARKUP, COPPER_TARGET_MARGIN_RATE, CUSTOM_QUOTE_TOTAL_YEN } from "@/lib/quotation-pricing";
+import { BULK_SELLING_MARKUP, calculateCopperQuotation, clampGravureFilmMeterUnit, COPPER_QUOTE_UNIT_MAX_YEN, COPPER_SELLING_MARKUP, COPPER_TARGET_MARGIN_RATE, CUSTOM_QUOTE_TOTAL_YEN, GRAVURE_FILM_METER_PRICE_MAX } from "@/lib/quotation-pricing";
 import { shortIssuerContactName } from "@/lib/issuer-contact";
 import { fileNameFromContentDisposition } from "@/lib/content-disposition";
 import {
@@ -1458,8 +1458,13 @@ export default function PrintableQuotationPage({
     let fillingUnit: Decimal;
     let filmMeterUnit: Decimal;
     if (isGravure) {
-      // グラビアの客提示フィルムm単価は100〜170円の帯に制限する。
-      // 帯によって生じた差額は充填・加工単価で補う。
+      // グラビアの客提示フィルムm単価は基本100〜170円の帯に制限する。
+      // ただしマスター原価が170円/mを超える場合は原価未満にしない。
+      const storedFilmCostPerMeter = parseDecimal(calculationChecklistSnapshot?.film?.unitPrice) ?? D(0);
+      const gravureFilmMeterCeiling = Decimal.max(
+        GRAVURE_FILM_METER_PRICE_MAX,
+        storedFilmCostPerMeter,
+      );
       const provisionalFillingUnit = (parsedPricingFillingCost ?? parsedFillingCost ?? D(0))
         .div(D(1).minus(parsedTargetMargin ?? D(0)));
       const provisionalFillingAmount = provisionalFillingUnit.times(totals.quantity);
@@ -1472,8 +1477,8 @@ export default function PrintableQuotationPage({
         : D(0);
       const requestedGravureFilmMeterUnit = parseDecimal(form.filmUnitDisplay);
       filmMeterUnit = requestedGravureFilmMeterUnit
-        ? clampGravureFilmMeterUnit(requestedGravureFilmMeterUnit)
-        : clampGravureFilmMeterUnit(residualMeterUnit).toDecimalPlaces(1, Decimal.ROUND_UP);
+        ? clampGravureFilmMeterUnit(requestedGravureFilmMeterUnit, gravureFilmMeterCeiling)
+        : clampGravureFilmMeterUnit(residualMeterUnit, gravureFilmMeterCeiling).toDecimalPlaces(1, Decimal.ROUND_UP);
       const bandedFilmAmount = filmMeterUnit.times(totals.filmOrderLength).toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
       fillingUnit = parseDecimal(form.fillingUnitDisplay)
         ?? (totals.quantity.gt(0)
