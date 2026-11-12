@@ -165,6 +165,9 @@ export function canPerformFilmOrderActorAction(
   if (tokenRoles) return tokenRoles.includes(actor);
   const side = ACTION_SIDE[action];
   if (!side) return false;
+  // 校正最終承認は両社とも実行できる内部ダブルチェックにする。
+  // buyer以外の操作（発注数量変更など）は従来どおり buyer_domain で制限する。
+  if (action === "approve") return actor === "seven" || actor === "kanei";
   const roles: readonly FilmOrderExecutionActorRole[] = side === "buyer"
     ? [buyer]
     : side === "kanei"
