@@ -173,6 +173,33 @@ describe("quotation page stale draft", () => {
     expect(sheet.getAllByText(/責任技術者：福井/).length).toBeGreaterThan(0);
   });
 
+  it("uses a three-month delivery date for gravure quotes", async () => {
+    sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
+      productSummary: "グラビア製品",
+      sizeSummary: "40×145mm / 1連",
+      quantity: "40000",
+      targetMargin: "0.3",
+      printingMethod: "gravure",
+      deliveryDate: "データ校了後約２か月",
+      fillingCostPerPiece: "5",
+      bulkCostPerPiece: "0",
+      filmCostPerPiece: "8",
+      filmMeterPrice: "187.5",
+      filmOrderLengthM: "1700",
+      totalCostPerPiece: "20",
+      calculationVersion: "gravure-test",
+      resultHash: "gravure-test-hash",
+      calculationFilmTotal: "320000",
+    }));
+    render(<QuotePage />);
+
+    await waitFor(() => expect(screen.getByTestId("quote-spec")).toBeVisible());
+    expect(screen.getByTestId("film-printing-method")).toHaveTextContent("グラビア印刷");
+    const preview = within(document.getElementById("quote-preview")!);
+    expect(preview.getByText("データ校了後約３か月")).toBeVisible();
+    expect(preview.queryByText("データ校了後約２か月")).not.toBeInTheDocument();
+  });
+
   it("shows the simulator pouch design in plain Japanese next to the size", async () => {
     sessionStorage.setItem("pouch-quotation-draft-v1", JSON.stringify({
       productSummary: "レディエイドルプリカント",

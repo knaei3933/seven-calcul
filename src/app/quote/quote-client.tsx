@@ -280,6 +280,10 @@ function pouchDesignLabel(calculationRequestJson: string): string {
 const normalizeQuotePaymentTerms = (value: string): string =>
   value.trim() === "先払い" ? "従来通り" : value;
 
+const DIGITAL_DELIVERY_DATE = "データ校了後約２か月";
+const GRAVURE_DELIVERY_DATE = "データ校了後約３か月";
+
+
 const defaultQuote: QuoteForm = {
   quotationNumber: "",
   revisionOf: "",
@@ -366,7 +370,7 @@ const defaultQuote: QuoteForm = {
   calculationFilmTotal: "0",
   targetMargin: "0.4",
   taxRatePercent: "10",
-  deliveryDate: "データ校了後約２か月",
+  deliveryDate: DIGITAL_DELIVERY_DATE,
   paymentTerms: "従来通り",
   shippingTerms: "御社1か所納品",
   notes: [
@@ -392,7 +396,6 @@ const CUSTOMER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const DEFAULT_OWNER_PROFILE = quotationOwnerProfile("seven")!;
 const SEVEN_BULK_SAMPLE_NOTE = "初回製作時は、バルクサンプルを株式会社セブン化学 責任技術者：福井　健二 宛にご送付ください。";
-
 function quoteFormDefaults(profile: QuoteOwnerProfile | null | undefined): QuoteForm {
   const owner = profile ?? DEFAULT_OWNER_PROFILE;
   const hasResolvedOwner = Boolean(profile);
@@ -1149,6 +1152,7 @@ export default function PrintableQuotationPage({
 
       const issuancePayload = {
           ...form,
+          deliveryDate: deliveryDateForQuote,
           revisionOf: form.revisionOf || undefined,
           status: "draft",
           productName: form.skuNames.filter((name) => name.trim()).join(" / ") || form.productName,
@@ -1351,6 +1355,11 @@ export default function PrintableQuotationPage({
   const issueReady = valid && missingIssueFields.length === 0 && !unresolvedQuoteOwner;
   const linkedQuoteActionsDisabled = !valid || unresolvedQuoteOwner || saving || quoteDraftStale;
   const issueButtonDisabled = !issueReady || saving || quoteDraftStale;
+  const isGravureQuote = form.printingMethod === "gravure"
+    || /"printingMode"?|"printingMethod"\s*:\s*"gravure"/.test(form.calculationRequestJson);
+  const deliveryDateForQuote = isGravureQuote
+    ? GRAVURE_DELIVERY_DATE
+    : form.deliveryDate || DIGITAL_DELIVERY_DATE;
 
   const totals = (() => {
     if (!valid || !parsedQuantity || !parsedTargetMargin || !parsedTaxRatePercent || !parsedFillingCost || !parsedFilmCost || !parsedCopperCost || !parsedCustomLotCost || !parsedCustomQuantity || !parsedFilmMeterPrice || !parsedFilmOrderLength) return null;
@@ -2218,7 +2227,7 @@ export default function PrintableQuotationPage({
               <p><EditableText value={`${form.customerContact ? `${form.customerContact} 御中` : "御中"}`} label="得意先担当者" onCommit={(next) => update("customerContact", next.replace(/御中$/, "").trim())} /></p>
               <p className="party-meta">顧客コード: {form.customerCode || "-"} ／ メール: {form.customerEmail || "-"}</p>
               <dl className="condition-list">
-                <div><dt>納期</dt><dd><EditableText value={form.deliveryDate || "-"} label="納期" onCommit={(next) => update("deliveryDate", next.trim())} /></dd></div>
+                <div><dt>納期</dt><dd><EditableText value={deliveryDateForQuote} label="納期" onCommit={(next) => update("deliveryDate", next.trim())} /></dd></div>
                 <div><dt>支払条件</dt><dd><EditableText value={form.paymentTerms || "-"} label="お支払い条件" onCommit={(next) => update("paymentTerms", next.trim())} /></dd></div>
                 <div><dt>有効期限</dt><dd><EditableText value={form.validUntil || "-"} label="見積有効期限" onCommit={(next) => update("validUntil", next.trim())} /></dd></div>
                 <div><dt>運送条件</dt><dd><EditableText value={form.shippingTerms || "-"} label="運送条件" onCommit={(next) => update("shippingTerms", next.trim())} /></dd></div>
