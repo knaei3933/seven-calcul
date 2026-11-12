@@ -921,7 +921,7 @@ describe("quotation UI", () => {
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "not_calculated"));
     expect(screen.getByTestId("server-result")).toHaveTextContent("サーバー再計算待ち");
     expect(sessionStorage.getItem(QUOTATION_DRAFT_KEY)).toBeNull();
-    expect(sessionStorage.getItem("pouch-simulator-stale-status-v1")).toBe("legacy-selected-state");
+    expect(sessionStorage.getItem("pouch-simulator-stale-status-v1")).toBeNull();
     await waitFor(() => {
       const savedState = JSON.parse(sessionStorage.getItem("pouch-simulator-state-v1")!);
       expect(savedState.serverResult).toBeNull();
@@ -954,7 +954,7 @@ describe("quotation UI", () => {
     render(<QuotationPage />);
     await waitFor(() => expect(screen.getByTestId("server-result")).toHaveAttribute("data-state", "not_calculated"));
     expect(sessionStorage.getItem(QUOTATION_DRAFT_KEY)).toBeNull();
-    expect(sessionStorage.getItem("pouch-simulator-stale-status-v1")).toBe("calculation-provenance-invalid");
+    expect(sessionStorage.getItem("pouch-simulator-stale-status-v1")).toBeNull();
     await waitFor(() => {
       const savedState = JSON.parse(sessionStorage.getItem("pouch-simulator-state-v1")!);
       expect(savedState.serverResult).toBeNull();

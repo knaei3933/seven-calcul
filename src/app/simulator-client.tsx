@@ -1130,68 +1130,12 @@ export default function QuotationPage({
           if (typeof saved.filmUnitPricesTouched === "boolean") {
             setFilmUnitPricesTouched(saved.filmUnitPricesTouched);
           }
-          const savedServerResult = saved.serverResult?.result && typeof saved.serverResult.inputJson === "string"
-            ? saved.serverResult
-            : null;
-          let restoredServerResult = false;
-          if (saved.form && savedServerResult && !savedServerResult.selectedCandidateId) {
-            const originalPrintingMethod = INPUT_PRINTING_METHOD;
-            if (saved.form.printingMethod !== originalPrintingMethod) {
-              const savedFormMargin = saved.form.targetMargin === "custom"
-                ? saved.form.customMargin
-                : saved.form.targetMargin;
-              const restoredMargin = savedServerResult.originalTargetMargin
-                ?? (typeof savedFormMargin === "string" && isNumericInput(savedFormMargin) ? savedFormMargin : undefined);
-              const restoredMode = savedServerResult.originalTargetMarginMode
-                ?? (saved.form.targetMargin === "custom" ? "custom" : "standard");
-              setForm((old) => ({
-                ...old,
-                printingMethod: originalPrintingMethod,
-                targetMargin: restoredMode === "custom"
-                  ? "custom"
-                  : restoredMargin ?? MARGIN_OPTIONS[originalPrintingMethod][0],
-                customMargin: restoredMode === "custom"
-                  ? restoredMargin ?? old.customMargin
-                  : old.customMargin,
-              }));
-            }
-          }
-
-          if (savedServerResult) {
-            const hasOriginalCandidateBasis = savedServerResult.originalQuantity !== undefined
-              && savedServerResult.originalSkuQuantities !== undefined
-              && savedServerResult.originalInputJson !== undefined
-              && savedServerResult.originalRequestNonQuantityJson !== undefined
-              && savedServerResult.originalPrintingMethod !== undefined
-              && savedServerResult.originalTargetMargin !== undefined
-              && savedServerResult.originalTargetMarginMode !== undefined;
-            const hasValidCalculationRequests = isCalculationRequest(savedServerResult.calculationRequest)
-              && savedServerResult.calculationRequest.selectedCandidateId === savedServerResult.selectedCandidateId
-              && (!savedServerResult.selectedCandidateId
-                || (isCalculationRequest(savedServerResult.originalCalculationRequest)
-                  && savedServerResult.originalCalculationRequest.selectedCandidateId === ""));
-            const originalRequest = savedServerResult.originalCalculationRequest;
-            const hasDigitalInputBasis = isCalculationRequest(originalRequest)
-              ? originalRequest.printingMethod === INPUT_PRINTING_METHOD
-              : savedServerResult.originalPrintingMethod === INPUT_PRINTING_METHOD
-                && savedServerResult.originalResult.printingMethod === INPUT_PRINTING_METHOD;
-            if (!hasValidCalculationRequests
-              || !hasDigitalInputBasis
-              || (savedServerResult.selectedCandidateId && !hasOriginalCandidateBasis)) {
-              sessionStorage.removeItem(QUOTATION_DRAFT_KEY);
-              sessionStorage.setItem(
-                SIMULATOR_STALE_STATUS_KEY,
-                hasValidCalculationRequests ? "legacy-selected-state" : "calculation-provenance-invalid",
-              );
-            } else {
-              setServerResult(savedServerResult);
-              restoredServerResult = true;
-            }
-          }
-          if (restoredServerResult && typeof saved.calculatedAt === "string") {
-            setCalculatedAt(saved.calculatedAt);
-          }
-            }
+          // 入力条件のみ復元する。候補はY/Kマスター更新で無効化できるため、
+          // 古いサーバー計算結果を復元すると過去単価の推薦カードが表示される。
+          // 候補は必ず「サーバーで再計算する」で現行マスターから作り直す。
+          sessionStorage.removeItem(QUOTATION_DRAFT_KEY);
+          sessionStorage.removeItem(SIMULATOR_STALE_STATUS_KEY);
+        }
       } catch {
         // 저장 상태가 손상된 경우 기본값을 유지한다.
       } finally {
