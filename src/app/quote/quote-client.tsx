@@ -31,6 +31,7 @@ const ACTIVE_REVISION_KEY = "pouch-active-quotation-revision-v1";
 import type { PurchaseOrderSnapshot } from "@/lib/purchase-order";
 import type { CalculationChecklistSnapshot } from "@/lib/calculation-checklist";
 import type { CalculationInput } from "@/lib/calculation";
+import { generateStandardQuotationPdf, type StandardQuotePdfModel } from "@/lib/standard-quote-pdf";
 
 type QuoteForm = {
   quotationNumber: string;
@@ -131,83 +132,27 @@ type QuoteForm = {
 
 class QuotationPdfError extends Error {}
 
-async function generateQuotationPdf(element: HTMLElement): Promise<Blob> {
-  const html2pdf = (await import("html2pdf.js")).default;
-  // html2canvas can capture a cloned SVG before its intrinsic box is ready.
-  await Promise.all(Array.from(element.querySelectorAll("img"), (image) => (
-    image.complete
-      ? Promise.resolve()
-      : typeof image.decode === "function"
-        ? image.decode().catch(() => undefined)
-        : Promise.resolve()
-  )));
-  if ("fonts" in document) await document.fonts.ready;
-  return await html2pdf().from(element).set({
-    margin: [0, 0, 0, 0],
-    // The jsPDF name is only a browser-side default; persistence always uses
-    // the canonical quotation-number filename accepted by the PDF API.
-    filename: "quotation.pdf",
-    image: { type: "jpeg", quality: 0.98 },
-    html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-    jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-  }).outputPdf("blob") as Blob;
+async function fetchBinary(url: string): Promise<ArrayBuffer | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return await response.arrayBuffer();
+  } catch {
+    return null;
+  }
 }
 
-function createQuotePdfCapture(sheet: HTMLElement | null): {
-  element: HTMLElement;
-  restore: () => void;
-} {
-  if (!sheet) {
-    throw new QuotationPdfError("見積書のA4 PDFを作成できませんでした。もう一度お試しください。");
-  }
-
-  // html2canvas does not consistently map CSS zoom to element geometry. Keep
-  // the capture source at exact A4 dimensions and scale only its contents with
-  // a transform so text positions remain layout-stable.
-  const host = document.createElement("div");
-  host.id = "quote-pdf-capture-host";
-  host.setAttribute("aria-hidden", "true");
-  document.body.dataset.quotePdfCapture = "1";
-  document.body.append(host);
-  const clone = sheet.cloneNode(true) as HTMLElement;
-  clone.removeAttribute("id");
-  clone.style.width = "210mm";
-  // jsPDF rounds physical pixels upward; keeping the source at the fit budget
-  // prevents a 1px raster overflow from creating a blank second A4 page.
-  clone.style.height = "288mm";
-  clone.style.minHeight = "288mm";
-  clone.style.overflow = "hidden";
-  host.replaceChildren(clone);
-
-  const cloneFit = clone.querySelector<HTMLElement>(".quote-a4-fit");
-  const cloneStyle = getComputedStyle(clone);
-  const reserved = (["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"] as const)
-    .reduce((total, key) => total + (Number.parseFloat(cloneStyle[key]) || 0), 0);
-  const budgetPx = 296 * (96 / 25.4) - reserved;
-  const measuredPx = cloneFit ? Math.max(cloneFit.scrollHeight, cloneFit.offsetHeight) : 0;
-  const scale = measuredPx > budgetPx && budgetPx > 0 ? budgetPx / measuredPx : 1;
-
-  if (cloneFit) {
-    cloneFit.style.setProperty("--quote-a4-fit-scale", scale.toFixed(5));
-    cloneFit.style.transform = `scale(${scale.toFixed(5)})`;
-    cloneFit.style.transformOrigin = "top left";
-    // Uniform downscaling would otherwise leave blank space on the right.
-    // Lay the content out in the enlarged pre-transform box, then scale it
-    // back so the visible result still occupies the full A4 width.
-    if (scale < 1) {
-      cloneFit.style.width = `${100 / scale}%`;
-      cloneFit.style.height = `${100 / scale}%`;
-    }
-  }
-
-  return {
-    element: clone,
-    restore: () => {
-      host.replaceChildren();
-      host.remove();
-      delete document.body.dataset.quotePdfCapture;
-    },
-  };
+async function generateVectorQuotationPdf(
+  model: StandardQuotePdfModel,
+  logoUrl?: string,
+): Promise<Blob> {
+  const [regular, bold, logo] = await Promise.all([
+    fetchBinary("/api/fonts/standard-quotation"),
+    fetchBinary("/api/fonts/standard-quotation?weight=bold"),
+    logoUrl ? fetchBinary(logoUrl) : Promise.resolve(null),
+  ]);
+  if (!regular || !bold) throw new QuotationPdfError("見積書用フォントを読み込めませんでした。もう一度お試しください。");
+  return generateStandardQuotationPdf(model, regular, bold, logo);
 }
 
 async function getStoredQuotationPdf(
@@ -1138,14 +1083,125 @@ export default function PrintableQuotationPage({
         totalProfit: profitUnit.times(totals.quantity).toString(),
         recordedAt: new Date().toISOString(),
       };
-      const previewElement = document.getElementById("quote-preview");
-      if (!previewElement) {
-        throw new QuotationPdfError("見積書のA4 PDFを作成できませんでした。もう一度お試しください。");
+      const fillingSpec = calculationChecklistSnapshot
+        ? (calculationChecklistSnapshot.chambers && calculationChecklistSnapshot.chambers.length > 1
+          ? `${calculationChecklistSnapshot.chambers.map((chamber) => `${chamber.position}室:${chamber.liquidName} ${formatNumber(chamber.fillMl)}ml`).join("／")} ＝ ${formatNumber(calculationChecklistSnapshot.totalFillMlPerPouch)}ml/枚（${calculationChecklistSnapshot.fillingMethod === "pressure" ? "加圧充填" : "ホッパ充填"}）`
+          : `${formatNumber(calculationChecklistSnapshot.fillMlPerChamber)}ml/室 × ${calculationChecklistSnapshot.connectedChambers}室 ＝ ${formatNumber(calculationChecklistSnapshot.totalFillMlPerPouch)}ml/枚（${calculationChecklistSnapshot.fillingMethod === "pressure" ? "加圧充填" : "ホッパ充填"}）`)
+        : "-";
+      const bulkUsage = D(calculationChecklistSnapshot?.bulkUsageMl ?? "0").gt(0)
+        ? `${formatNumber(calculationChecklistSnapshot?.bulkUsageMl ?? 0)}g（貴社ご支給ください）`
+        : null;
+      const skuSummary = calculationChecklistSnapshot?.skus?.length
+        ? calculationChecklistSnapshot.skus.map((sku, index) => `${form.skuNames[index]?.trim() || sku.name} ／ ${formatNumber(sku.quantity)}枚`).join("／")
+        : "-";
+      const quoteRows: StandardQuotePdfModel["rows"] = [];
+      if (D(shownTotals.bulkAmount).gt(0)) {
+        quoteRows.push({
+          name: form.bulkItemName,
+          description: form.bulkItemDescription,
+          unit: `${moneyDisplay(shownTotals.bulkUnit, form.bulkUnitDisplay, 2)} /g`,
+          quantity: `${formatNumber(calculationChecklistSnapshot?.bulkUsageMl ?? 0)} g`,
+          amount: moneyDisplay(shownTotals.bulkAmount, form.bulkAmountDisplay),
+        });
       }
-      const quotePdfCapture = createQuotePdfCapture(
-        previewElement.matches(".a4-sheet") ? previewElement : previewElement.querySelector<HTMLElement>(".a4-sheet"),
-      );
-      const pdfBlob = await generateQuotationPdf(quotePdfCapture.element).finally(quotePdfCapture.restore).catch((error: unknown) => {
+      quoteRows.push({
+        name: form.fillingItemName,
+        description: form.fillingItemDescription,
+        unit: moneyDisplay(shownTotals.fillingUnit, form.fillingUnitDisplay, 2),
+        quantity: `${formatNumber(form.quantity)} 枚`,
+        amount: moneyDisplay(shownTotals.fillingAmount, form.fillingAmountDisplay),
+      });
+      quoteRows.push({
+        name: form.filmItemName,
+        description: `印刷方式：${form.printingMethod === "gravure" ? "グラビア印刷" : "デジタル印刷"}${calculationChecklistSnapshot?.sascheCandidate ? `／採用条件：${formatNumber(calculationChecklistSnapshot.sascheCandidate.laneCount, 0)}丁・${formatNumber(calculationChecklistSnapshot.sascheCandidate.printTierM, 0)}m印刷・幅${formatNumber(calculationChecklistSnapshot.sascheCandidate.matchedWidthMm, 0)}mm` : ""}`,
+        unit: `${moneyDisplay(shownTotals.filmUnit, form.filmUnitDisplay, 2)} /m`,
+        quantity: `${formatNumber(form.filmOrderLengthM)} m`,
+        amount: moneyDisplay(shownTotals.filmAmount, form.filmAmountDisplay),
+      });
+      if (D(shownTotals.copperAmount).gt(0)) {
+        quoteRows.push({
+          name: form.copperItemName,
+          description: form.copperItemDescription,
+          unit: `${moneyDisplay(shownTotals.copperColorUnit, form.copperUnitDisplay, 0)} /色`,
+          quantity: `${formatNumber(form.copperColorCount)} 色`,
+          amount: moneyDisplay(shownTotals.copperAmount, form.copperAmountDisplay),
+        });
+      }
+      if (D(shownTotals.setupAmount).gt(0)) {
+        quoteRows.push({
+          name: form.setupItemName,
+          description: form.setupItemDescription,
+          unit: `${moneyDisplay(shownTotals.setupUnit, form.setupUnitDisplay, 2)} /個`,
+          quantity: `${formatNumber(form.setupQuantity)} 個`,
+          amount: moneyDisplay(shownTotals.setupAmount, form.setupAmountDisplay),
+        });
+      }
+      if (D(shownTotals.customAmount).gt(0)) {
+        quoteRows.push({
+          name: form.customItemName,
+          description: form.customItemDescription,
+          unit: `${moneyDisplay(shownTotals.customUnit, undefined, 2)} /個`,
+          quantity: `${formatNumber(form.customQuantity)} 個`,
+          amount: moneyDisplay(shownTotals.customAmount, undefined, 2),
+        });
+      }
+      if (shownTotals.adjustment !== "-") {
+        quoteRows.push({
+          name: form.roundingItemName,
+          description: form.roundingItemDescription,
+          unit: "-",
+          quantity: "-",
+          amount: moneyDisplay(shownTotals.adjustment, form.adjustmentDisplay),
+        });
+      }
+      const quotationPdfModel: StandardQuotePdfModel = {
+        issuerName: form.issuerName,
+        issuerEnglishName: form.issuerEnglishName,
+        issuerPostalCode: form.issuerPostalCode,
+        issuerAddress: form.issuerAddress,
+        issuerTelephone: form.issuerTelephone,
+        issuerWebsite: form.issuerWebsite,
+        documentEnglish: form.documentEnglish,
+        documentHeading: form.documentHeading,
+        quotationNumber: form.quotationNumber,
+        issueDate: form.issueDate,
+        customerPostalCode: form.customerPostalCode,
+        customerAddress: form.customerAddress,
+        customerName: form.customerName,
+        customerContact: form.customerContact,
+        customerCode: form.customerCode,
+        customerEmail: form.customerEmail,
+        greeting: form.greeting,
+        productName: form.productName,
+        sizeSummary: form.sizeSummary,
+        quantity: formatNumber(form.quantity),
+        fillingSpec,
+        bulkUsage,
+        filmComposition: form.filmComposition || "PET12+AL7+PET12+LLDPE50μ",
+        skuSummary,
+        priceUnitLabel: "パウチ単価（金型・銅版除く／税抜）",
+        priceUnit: moneyDisplay(shownTotals.pouchPricePerPiece, undefined, 2),
+        taxIncludedLabel: "総費用込単価（金型・銅版含む／税抜）",
+        taxIncluded: moneyDisplay(shownTotals.pricePerPiece, form.pricePerPieceDisplay, 2),
+        rows: quoteRows,
+        subtotalLabel: form.subtotalLabel,
+        subtotal: moneyDisplay(shownTotals.subtotal, form.subtotalDisplay),
+        taxLabel: form.taxLabel || `消費税（${formatNumber(Number(form.taxRatePercent), 0)}%）`,
+        tax: moneyDisplay(shownTotals.tax, form.taxDisplay),
+        grandTotalLabel: form.grandTotalLabel,
+        grandTotal: moneyDisplay(shownTotals.grandTotal, form.grandTotalDisplay),
+        deliveryDate: deliveryDateForQuote,
+        paymentTerms: form.paymentTerms,
+        validUntil: form.validUntil,
+        notes: form.notes,
+        footerNote: form.footerNote,
+        footerCompanyName: form.issuerName,
+        footerEmail: issuerContact.email,
+        footerTelephone: issuerContact.telephone,
+        approverName: issuerContact.contactName,
+        sealText: form.sealText,
+      };
+      const pdfBlob = await generateVectorQuotationPdf(quotationPdfModel, ownerProfile?.logoUrl).catch((error: unknown) => {
         console.error("[quotation-pdf] PDF generation failed", error);
         throw new QuotationPdfError("見積書のA4 PDFを作成できませんでした。もう一度お試しください。");
       });

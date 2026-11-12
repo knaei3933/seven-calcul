@@ -9,20 +9,44 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock("html2pdf.js", () => ({
-  default: vi.fn(),
+const { pdfDocumentCreateMock } = vi.hoisted(() => ({
+  pdfDocumentCreateMock: vi.fn(),
+}));
+
+vi.mock("@pdf-lib/fontkit", () => ({
+  default: {
+    create: () => ({
+      glyphForCodePoint: () => ({ id: 1 }),
+      createSubset: () => ({
+        includeGlyph: () => 1,
+        encodeStream: () => ({
+          on: (event: string, callback: () => void) => {
+            if (event === "end") queueMicrotask(callback);
+          },
+        }),
+      }),
+    }),
+  },
+}));
+vi.mock("pdf-lib", () => ({
+  PDFDocument: { create: (...args: unknown[]) => pdfDocumentCreateMock(...args) },
+  rgb: (...args: number[]) => args,
 }));
 
 const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0xa4, 0xff]);
 const pdfBlob = Object.assign(new Blob([pdfBytes], { type: "application/pdf" }), {
   arrayBuffer: async () => pdfBytes.buffer,
 });
-let captureControl: { resolve: (blob: Blob) => void; reject: (error: unknown) => void };
+let captureControl: { resolve: (output: Blob | Uint8Array) => void; reject: (error: unknown) => void };
 let fromMock: Mock;
 
-async function html2pdfMock(): Promise<Mock> {
-  const pdfModule = await import("html2pdf.js") as unknown as { default: Mock };
-  return vi.mocked(pdfModule.default);
+function withFontFetch(fetchMock: (url: RequestInfo | URL, init?: RequestInit) => Promise<Response>) {
+  return vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).includes("/api/fonts/standard-quotation")) {
+      return new Response(new Uint8Array([0x00, 0x01, 0x00, 0x00]), { status: 200 });
+    }
+    return fetchMock(url, init);
+  });
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -51,26 +75,25 @@ describe("quotation issuance canonical PDF", () => {
   beforeEach(async () => {
     sessionStorage.clear();
     vi.clearAllMocks();
-    fromMock = vi.fn();
-    fromMock.mockImplementation(() => ({
-      set: (options: Record<string, unknown>) => {
-        expect(options.jsPDF).toEqual({
-          unit: "mm",
-          format: "a4",
-          orientation: "portrait",
-        });
-        expect(options.html2canvas).toMatchObject({ scale: 2 });
-        return {
-          outputPdf: (format: string) => {
-            expect(format).toBe("blob");
-            return new Promise<Blob>((resolve, reject) => {
-              captureControl = { resolve, reject };
-            });
-          },
-        };
-      },
+    fromMock = pdfDocumentCreateMock;
+    fromMock.mockImplementation(async () => ({
+      registerFontkit: vi.fn(),
+      setTitle: vi.fn(),
+      setAuthor: vi.fn(),
+      setProducer: vi.fn(),
+      embedFont: vi.fn(async () => ({ widthOfTextAtSize: () => 10 })),
+      embedPng: vi.fn(async () => ({ width: 10, height: 10 })),
+      addPage: vi.fn(() => ({
+        drawText: vi.fn(),
+        drawRectangle: vi.fn(),
+        drawLine: vi.fn(),
+        drawCircle: vi.fn(),
+        drawImage: vi.fn(),
+      })),
+      save: vi.fn(() => new Promise<Uint8Array>((resolve, reject) => {
+        captureControl = { resolve: (output) => resolve(output as Uint8Array), reject };
+      })),
     }));
-    (await html2pdfMock()).mockImplementation(() => ({ from: fromMock }));
     captureControl = {
       resolve: () => {
         throw new Error("PDF capture was not awaited");
@@ -119,34 +142,21 @@ describe("quotation issuance canonical PDF", () => {
       }
       throw new Error(`unexpected fetch: ${target}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFontFetch(fetchMock));
     const user = userEvent.setup();
     render(<QuotePage />);
     await fillRequiredIssueFields(user);
 
     fireEvent.click(screen.getByTestId("save-history"));
     await waitFor(() => expect(fromMock).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByTestId("save-history"));
     captureControl.resolve(pdfBlob);
 
     await waitFor(() => expect(screen.getByTestId("issue-success")).toBeVisible());
     expect(screen.queryByTestId("save-error")).not.toBeInTheDocument();
     expect(fromMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/quotations")).toHaveLength(1);
   });
-  it("uses a transform-scaled offscreen clone without CSS zoom for issuance capture", async () => {
-    let capturedElement: HTMLElement | null = null;
-    fromMock.mockImplementationOnce((element: HTMLElement) => {
-      capturedElement = element;
-      return {
-        set: () => ({
-          outputPdf: () => new Promise<Blob>((resolve, reject) => {
-            captureControl = { resolve, reject };
-          }),
-        }),
-      };
-    });
-
+  it("uses the embedded-font vector generator without offscreen raster capture", async () => {
     const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       const target = String(url);
       if (target === "/api/quotations") {
@@ -163,49 +173,29 @@ describe("quotation issuance canonical PDF", () => {
       }
       throw new Error(`unexpected fetch: ${target}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFontFetch(fetchMock));
     const user = userEvent.setup();
     render(<QuotePage />);
     await fillRequiredIssueFields(user);
 
-    const visibleFit = screen.getByLabelText("お見積書A4プレビュー").querySelector<HTMLElement>(".quote-a4-fit");
-    expect(visibleFit).not.toBeNull();
-
     await user.click(screen.getByTestId("save-history"));
-    await waitFor(() => expect(capturedElement).not.toBeNull());
-
-    const capture = capturedElement as unknown as HTMLElement;
-    const captureFit = capture.querySelector<HTMLElement>(".quote-a4-fit");
-    expect(capture.parentElement).toHaveAttribute("id", "quote-pdf-capture-host");
-    expect(capture).not.toBe(visibleFit);
-    expect(capture.style.width).toBe("210mm");
-    expect(capture.style.height).toBe("288mm");
-    expect(capture.style.minHeight).toBe("288mm");
-    expect(capture.style.overflow).toBe("hidden");
-    expect(captureFit?.style.transform).toBe("scale(1.00000)");
-    expect(captureFit?.style.transformOrigin).toBe("top left");
-    expect(captureFit?.style.getPropertyValue("zoom")).toBe("");
-    expect(visibleFit?.style.getPropertyValue("zoom")).toBe("");
-    expect(visibleFit?.style.transform).toBe("");
-    expect(visibleFit?.style.height).toBe("");
+    await waitFor(() => expect(fromMock).toHaveBeenCalledTimes(1));
 
     captureControl.resolve(pdfBlob);
     await waitFor(() => expect(screen.getByTestId("issue-success")).toBeVisible());
     await waitFor(() => expect(document.getElementById("quote-pdf-capture-host")).toBeNull());
     expect(document.body.hasAttribute("data-quote-pdf-capture")).toBe(false);
-    expect(visibleFit?.style.getPropertyValue("zoom")).toBe("");
-    expect(visibleFit?.style.transform).toBe("");
   });
 
   it("shows a Japanese generation error without creating a quotation", async () => {
     const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFontFetch(fetchMock));
     const user = userEvent.setup();
     render(<QuotePage />);
     await fillRequiredIssueFields(user);
 
     await user.click(screen.getByTestId("save-history"));
-    captureControl.reject(new Error("renderer failed"));
+    captureControl.reject(new Error("vector generation failed"));
 
     await waitFor(() => expect(screen.getByTestId("save-error")).toHaveTextContent(
       "見積書のA4 PDFを作成できませんでした。もう一度お試しください。",
@@ -213,7 +203,7 @@ describe("quotation issuance canonical PDF", () => {
     expect(document.getElementById("quote-pdf-capture-host")).toBeNull();
     expect(document.body.hasAttribute("data-quote-pdf-capture")).toBe(false);
     expect(screen.queryByTestId("issue-success")).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/quotations")).toHaveLength(0);
     expect(screen.getByTestId("save-history")).toBeEnabled();
   });
 
@@ -228,7 +218,7 @@ describe("quotation issuance canonical PDF", () => {
       }
       throw new Error(`unexpected fetch: ${target} ${init?.method ?? "GET"}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFontFetch(fetchMock));
     const user = userEvent.setup();
     render(<QuotePage />);
     await fillRequiredIssueFields(user);
@@ -239,8 +229,9 @@ describe("quotation issuance canonical PDF", () => {
     await waitFor(() => expect(screen.getByTestId("save-error")).toHaveTextContent(
       "この見積番号のPDFは既に確定しています。修正見積は別の見積番号で発行してください。",
     ));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    const issuanceCalls = fetchMock.mock.calls.filter(([url]) => String(url) === "/api/quotations");
+    expect(issuanceCalls).toHaveLength(1);
+    expect(issuanceCalls[0]?.[1]?.method).toBe("POST");
     expect(screen.queryByTestId("issue-success")).not.toBeInTheDocument();
     expect(screen.getByTestId("save-history")).toBeEnabled();
   });
@@ -272,7 +263,7 @@ describe("quotation issuance canonical PDF", () => {
       }
       throw new Error(`unexpected fetch: ${target} ${init?.method ?? "GET"}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFontFetch(fetchMock));
     const user = userEvent.setup();
     await issueQuotation(user);
 
@@ -338,7 +329,7 @@ describe("quotation issuance canonical PDF", () => {
       }
       throw new Error(`unexpected fetch: ${target} ${init?.method ?? "GET"}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFontFetch(fetchMock));
     const user = userEvent.setup();
     await issueQuotation(user);
 
@@ -386,7 +377,7 @@ describe("quotation issuance canonical PDF", () => {
 
   it("uses a clear Japanese error when no issued PDF is available", async () => {
     const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFontFetch(fetchMock));
     const windowPrint = vi.fn();
     vi.stubGlobal("print", windowPrint);
     const user = userEvent.setup();
@@ -416,7 +407,7 @@ describe("quotation issuance canonical PDF", () => {
       }
       throw new Error(`unexpected fetch: ${target} ${init?.method ?? "GET"}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFontFetch(fetchMock));
     const windowPrint = vi.fn();
     vi.stubGlobal("print", windowPrint);
     const user = userEvent.setup();

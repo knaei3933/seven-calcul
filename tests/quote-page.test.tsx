@@ -23,7 +23,21 @@ const fontFetch = vi.fn(async (input: RequestInfo | URL) => {
   return new Response(new Uint8Array([0x03, 0x04]), { status: 200 });
 });
 
-vi.mock("@pdf-lib/fontkit", () => ({ default: {} }));
+vi.mock("@pdf-lib/fontkit", () => ({
+  default: {
+    create: () => ({
+      glyphForCodePoint: () => ({ id: 1 }),
+      createSubset: () => ({
+        includeGlyph: () => 1,
+        encodeStream: () => ({
+          on: (event: string, callback: () => void) => {
+            if (event === "end") queueMicrotask(callback);
+          },
+        }),
+      }),
+    }),
+  },
+}));
 vi.mock("pdf-lib", () => ({
   PDFDocument: {
     create: vi.fn(async () => ({
