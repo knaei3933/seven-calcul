@@ -19,6 +19,7 @@ import {
   type SnapshotPublicMetadata,
 } from "@/lib/gravure-price-store";
 import { GravureValidationError } from "@/lib/gravure-price-store";
+import { defaultGravureYSupplierRows } from "@/lib/sasche-gravure";
 
 export const runtime = "nodejs";
 
@@ -42,6 +43,7 @@ function rejectClientPricingAuthority(input: Record<string, unknown>): void {
 
 export async function POST(request: Request): Promise<NextResponse> {
   let gravureRequest = false;
+  let recommendationMasterUnavailable = false;
   try {
     const user = await getSessionUser(request);
     if (!user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
@@ -50,11 +52,35 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
     gravureRequest = isGravureCalculation(input);
+    const recommendationRequest = input.recommendationMode === true;
+    if (recommendationRequest) rejectClientPricingAuthority(input);
     if (gravureRequest) {
       if (!isGravureSnapshotIssuanceEnabled()) throw new Error(GRAVURE_SNAPSHOT_ISSUANCE_DISABLED_ERROR);
       // Y/K are durable production data. Unlike legacy digital pricing, they
       // must never fall back to per-instance SQLite in production.
       assertDurableGravureDatabase();
+    }
+
+    if (recommendationRequest) {
+      // Initial digital recommendations still expose D/K/Y candidates. The Y
+      // cards must be built from the current durable master, not from the
+      // legacy fallback matrix. Otherwise the card price changes on selection.
+      try {
+        const recommendationAsOf = tokyoDate();
+        const recommendationMasters = await resolveGravureMasters(recommendationAsOf);
+        const { defaultGravureRollParameters: recommendationRollParameters } = await import("@/lib/gravure-roll");
+        input.gravureParameters = recommendationMasters.kSet?.derived ?? recommendationRollParameters();
+        input.gravureYRows = recommendationMasters.yRows;
+      } catch (error) {
+        // Local/test environments may intentionally use the legacy matrix.
+        // Production must never silently fall back because durable master data
+        // is the authority for Y/K candidates.
+        if (process.env.VERCEL === "1" || process.env.NODE_ENV === "production") throw error;
+        recommendationMasterUnavailable = true;
+        const { defaultGravureRollParameters: fallbackRollParameters } = await import("@/lib/gravure-roll");
+        input.gravureParameters = fallbackRollParameters();
+        input.gravureYRows = defaultGravureYSupplierRows();
+      }
     }
 
     // Digital remains the legacy UTC contract; explicit simulator values win.
@@ -67,6 +93,14 @@ export async function POST(request: Request): Promise<NextResponse> {
       input.parameters = parameters;
     }
 
+    if (recommendationMasterUnavailable) {
+      const result = calculatePouchCost(input as never);
+      const originalResult = input.selectedCandidateId
+        ? calculatePouchCost({ ...(input as object), selectedCandidateId: "" } as never)
+        : result;
+      return NextResponse.json({ result, originalResult, candidates: result.recommendationCandidates ?? [] });
+    }
+
     if (!gravureRequest) {
       const result = calculatePouchCost(input as never);
       const originalResult = input.selectedCandidateId
@@ -76,7 +110,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const asOf = tokyoDate();
-    rejectClientPricingAuthority(input);
     const resolved = await resolveGravureMasters(asOf);
     const parameters = (input.parameters ?? {}) as Record<string, unknown>;
     // Simulator K inputs are superseded by the one active source set. With no
